@@ -2475,7 +2475,7 @@ paths:
           description: Max threads, 1..50. Default 25.
           schema: { type: integer, minimum: 1, maximum: 50 }
       responses:
-        '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, sla, entries: [{ depth, source }] }], total }. `sla` is the per-channel time-to-first-response clock (on_track | at_risk | breached | responded | not_applicable | unknown_channel; null when the thread carries nothing to clock)." }
+        '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, sla, entries: [{ depth, source }] }], stitchedThreads: [{ stitchKey, channels, sources, provisional, entries: [{ sourceId, occurredAt, channel, depth, stitched, sourceThreadId, source }] }], total }. `sla` is the per-channel time-to-first-response clock (on_track | at_risk | breached | responded | not_applicable | unknown_channel; null when the thread carries nothing to clock). `stitchedThreads` is the additive cross-channel view (task #19): stitched timelines spanning >= 2 channels, entries interleaved chronologically at depth 0 with channel badges; empty while stitching is inert." }
         '401': { description: account_session_required }
         '422': { description: invalid_limit or unsupported_inbox_view }
   /api/inbox/digest:
@@ -2598,6 +2598,115 @@ paths:
         '404': { description: handoff_not_found }
         '409': { description: invalid_handoff_transition }
         '422': { description: invalid_handoff or invalid_handoff_status }
+  /api/inbox/stitch/status:
+    get:
+      summary: Cross-channel stitching status for the installation
+      description: >-
+        Account-session read. Reports whether the stitcher is enabled (only
+        when STITCHING_ENABLED=true with a valid 256-bit salt) and the
+        active hash epoch. No identifiers, raw or hashed, are returned.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, stitching: { enabled, epoch } }" }
+        '401': { description: account_session_required }
+  /api/inbox/stitch/suggestions:
+    get:
+      summary: Pending cross-channel identity suggestions (review queue)
+      description: >-
+        Account-session read. Probabilistic stitch candidates scored from
+        participant metadata (never message bodies), highest score first.
+        Participant briefs are resolved in-session from stored envelopes —
+        never persisted as review artifacts. Suggestions never auto-form a
+        link: forming one requires the owner's POST to
+        /api/inbox/stitch/confirm.
+      security:
+        - accountSession: []
+      parameters:
+        - name: limit
+          in: query
+          description: Max suggestions, 1..100. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, suggestions: [{ suggestionId, channelA, channelB, score, components: { name_sim, localpart_handle, handle_fuzzy, temporal, context }, createdAt, participantA, participantB }] }" }
+        '401': { description: account_session_required }
+  /api/inbox/stitch/confirm:
+    post:
+      summary: Owner confirms a stitch suggestion (forms a verified link)
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Merges both
+        suggestion keys' links under one stitch key as `verified`, journals
+        an immutable receipt, and resolves the suggestion. Verified links
+        beat contradicting exact links.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [suggestionId]
+              properties:
+                suggestionId: { type: string }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, suggestionId, stitchKey, mergedSources, receiptId }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_stitch_confirm }
+        '404': { description: stitch_suggestion_not_found }
+  /api/inbox/stitch/dismiss:
+    post:
+      summary: Owner dismisses a stitch suggestion (no link forms)
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Removes the
+        suggestion from the review queue; no links form and no receipt is
+        journaled.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [suggestionId]
+              properties:
+                suggestionId: { type: string }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, suggestionId, dismissed: true }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_stitch_dismiss }
+        '404': { description: stitch_suggestion_not_found }
+  /api/inbox/stitch/split:
+    post:
+      summary: Owner splits a stitched identity
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Deletes the
+        contested links, writes a revocation row (fixed-vocabulary reason
+        only: owner_request | wrong_person | duplicate_identity | opt_out)
+        plus an immutable receipt, and adds a deny-list entry so the exact
+        rule cannot silently re-stitch. Scope `link` removes one source's
+        links; scope `identity` removes every link under the key (per-contact
+        opt-out). Splits are permanent unless the owner re-verifies.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stitchKey, sourceId, channel, reason, scope]
+              properties:
+                stitchKey: { type: string, description: "Hashed stitch key, e.g. v1:<64 hex chars>" }
+                sourceId: { type: string, nullable: true, description: "Omit (null) with scope=identity" }
+                channel: { type: string, nullable: true }
+                reason: { type: string, enum: [owner_request, wrong_person, duplicate_identity, opt_out] }
+                scope: { type: string, enum: [link, identity] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, stitchKey, removedLinks, receiptId }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_stitch_split }
   /api/inbox/sources/{sourceId}/attachments:
     get:
       summary: List one inbox source's attachment descriptors

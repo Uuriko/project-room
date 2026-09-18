@@ -25,6 +25,7 @@ import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
+import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
@@ -306,8 +307,17 @@ export function validateCommand(command) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
+    // Cross-channel thread stitching (task #19): stitch is the frozen
+    // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
+    // null to leave the stitcher inert (the default: no stitch rows, no
+    // stitched views, import untouched). Inert null is the normal boot
+    // without STITCHING_ENABLED + a valid salt.
+    if (stitch !== null && !(typeof stitch === "object" && Buffer.isBuffer(stitch.salt) && stitch.salt.length === 32
+      && typeof stitch.epoch === "string" && /^v[0-9]+$/.test(stitch.epoch) && stitch.enabled === true)) {
+      throw new Error("stitch must be null or a stitchConfigFromEnv() triple");
+    }
     // Consecutive storage refusals; readiness (server/http.mjs) turns 503 at
     // the threshold and recovers on the next committed write.
     this.storageFailureThreshold = storageFailureThreshold;
@@ -328,7 +338,7 @@ export class RoomStore {
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.replyRequests = new ReplyRequests(this);
-    this.inbox = new Inbox(this);
+    this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
@@ -360,6 +370,10 @@ export class RoomStore {
         this.agentConnections.verify();
         this.verifyHelpHistory();
         this.inbox.verify();
+        // Stitch tables are additive at v34: a backup taken before them is
+        // still a valid file. Read-only never migrates, so verify them only
+        // when present.
+        this.inbox.stitcher.verifySchema({ allowAbsent: true });
         this.email.verify();
         // The webhook update journal (B20) is purely additive at v27, so a
         // backup taken before it is still a valid v27 file; read-only never
@@ -476,6 +490,10 @@ export class RoomStore {
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(directSendSchema);
+      // Cross-channel thread stitching (task #19): hash-only identity index.
+      // Purely additive, intentionally outside the writer fence like the
+      // journals above — older writers have no code path to these tables.
+      this.db.exec(inboxStitchSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.

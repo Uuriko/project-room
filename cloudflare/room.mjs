@@ -2,6 +2,7 @@ import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
+import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
@@ -32,7 +33,8 @@ export class ProjectRoom {
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
-    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
+    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
+      stitch: stitchConfigFromEnv(env) });
     bootstrapRoom(this.store, env);
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
