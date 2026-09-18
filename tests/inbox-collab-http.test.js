@@ -185,6 +185,9 @@ test("draft locks: agent acquire, collisions, detect, release", async t => {
   assert.deepEqual(await released.json(), { released: true, lockId: lock.lockId });
   const free = await post(f, `${base}/draft-locks/acquire`, agent2Token, { threadId: "thread-l" });
   assert.equal(free.status, 201);
+  // The freed thread is now held by the second agent.
+  const afterDetect = await (await get(f, `${base}/draft-locks?threadId=thread-l`, agentToken)).json();
+  assert.equal(afterDetect.holders[0].id, agent2IdOf(f));
   const unknown = await post(f, `${base}/draft-locks/release`, agentToken, { lockId: "nope" });
   assert.equal(unknown.status, 404);
   assert.equal(await codeOf(unknown), "lock_not_found");
@@ -348,6 +351,7 @@ test("restart persistence: every journal replays from SQLite", async t => {
     { threadId: "thread-restart", body: "persist me" })).json();
   const { lock } = await (await post(f, `${base}/draft-locks/acquire`, agentToken,
     { threadId: "thread-restart", ttlMs: 600000 })).json();
+  assert.ok(typeof lock.lockId === "string");
   const { proposal } = await (await post(f, `${base}/approvals`, agentToken,
     { threadId: "thread-restart", draft: { body: "draft" }, channel: "email" })).json();
   const { records } = await (await post(f, `${base}/routing/mentions`, f.humanKey,
