@@ -20,7 +20,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 53 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 54 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -90,10 +90,13 @@ test("online capture preserves all 53 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO stitch_receipts(receipt_id,account_id,action,stitch_key,payload_json,created_at)
     VALUES('recovery-receipt',?,'link',?, '{}',?)`).run(stitchAccount, stitchKey, f.now());
   // Seed one held quarantine record so the capture covers spam_quarantine.
-  f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
+  const recoveryHold = f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
     flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
+  // Seed one thread split so the capture covers quarantine_thread_splits.
+  f.store.quarantineSplits.split({ accountId: f.owner.session.account.id, quarantineId: recoveryHold.id,
+    sourceId: "recovery-source", priorThread: "recovery-thread", reviewer: f.owner.session.account.id, reason: "recovery fixture" });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 53);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 54); // +1: quarantine_thread_splits
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
