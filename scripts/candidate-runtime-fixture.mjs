@@ -62,6 +62,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
+  for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.

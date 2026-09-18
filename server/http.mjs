@@ -8,6 +8,7 @@ import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCreden
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -1767,8 +1768,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch ?? collabRoutingMentionsMatch
         ?? collabRoutingMatch ?? collabRoutingResolveMatch ?? collabRoutingPolicyMatch ?? collabHandoffsMatch
         ?? collabHandoffTransitionMatch;
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch)[1]);
+      // Work claims with leases, delivery modes and review policies (task
+      // RC-2026-09-18-041): every route template below is documented in
+      // docs/openapi.yaml — the route-docs gate extracts these literals from
+      // this file. The /sweep template is tested before the {id} template so
+      // the literal segment is never mistaken for a claim id.
+      const workClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims$/.exec(url.pathname);
+      const workClaimsSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/sweep$/.exec(url.pathname);
+      const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
+      const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
+      const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
+      const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
+      const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
+      const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
+        ?? workClaimUpdateMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
@@ -1815,6 +1830,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
           collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null, helpers: { json, reject, body } });
+      }
+      // Work claims (task RC-2026-09-18-041): room-scoped claim registry
+      // routes share the credential, fence and rate-limit checks above; the
+      // handler maps pure-module errors to stable 4xx codes.
+      if (workClaimMatch) {
+        const workClaimRoute = workClaimsSweepMatch ? "sweep"
+          : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
+          : workClaimItemMatch ? "read"
+          : workClaimClaimMatch ? "claim"
+          : workClaimUpdateMatch ? "update"
+          : workClaimReleaseMatch ? "release" : "reassign";
+        const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
+          ?? workClaimReleaseMatch ?? workClaimReassignMatch;
+        return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
+          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
       }
       if (route === "thread" && req.method === "GET") return json(res, 200, store.messageThread(selected.token, roomId, threadMessageId, fence));
       if (!route && req.method === "GET") {

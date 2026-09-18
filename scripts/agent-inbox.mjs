@@ -47,6 +47,31 @@ function parseRoomCreate(roomId, extra) {
   return { roomId, title: title.trim(), purpose: purpose.trim(), kind: kindGiven ? extra[2] : "personal", displayName };
 }
 
+// work-claim / work-complete / work-release flags (RC-2026-09-18-041).
+// --note consumes the remainder of the command line and must come last.
+// Returns the parsed flags, or null when the flags are invalid.
+function parseWorkActionFlags(action, extra) {
+  const flags = {};
+  for (let index = 0; index < extra.length; index++) {
+    const token = extra[index];
+    if (action === "work-claim" && token === "--lease-hours") {
+      const hours = Number(extra[index + 1]);
+      if (extra[index + 1] === undefined || !Number.isFinite(hours) || hours <= 0 || hours > 720 || flags.leaseHours !== undefined) return null;
+      flags.leaseHours = hours; index++;
+    } else if (action === "work-complete" && token === "--delivery-mode") {
+      const mode = extra[index + 1];
+      if (!["result", "merged", "production"].includes(mode) || flags.deliveryMode !== undefined) return null;
+      flags.deliveryMode = mode; index++;
+    } else if (token === "--note") {
+      const note = extra.slice(index + 1).join(" ").trim();
+      if (!note || note.length > 2000 || flags.note !== undefined) return null;
+      flags.note = note;
+      break;
+    } else return null;
+  }
+  return flags;
+}
+
 async function promptYesNo(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -181,6 +206,9 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID ['{"maxRuntimeMs":3600000,"maxAttempts":3}']
   node scripts/agent-inbox.mjs session WORK_ID STATUS
+  node scripts/agent-inbox.mjs work-claim WORK_ID [--lease-hours HOURS] [--note WORDS...]
+  node scripts/agent-inbox.mjs work-complete WORK_ID [--delivery-mode result|merged|production] [--note WORDS...]
+  node scripts/agent-inbox.mjs work-release WORK_ID [--note WORDS...]
 Assignment watching: node scripts/agent-inbox.mjs watch --help
 Reply requests: node scripts/agent-inbox.mjs reply --help
 
@@ -234,6 +262,9 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
     const redeemArgs = extra.filter(a => a !== "--yes" && a !== "--no"),
       redeemAutoYes = redeemArgs.length !== extra.length && extra.includes("--yes"),
       redeemAutoNo = extra.includes("--no");
+    // work-claim / work-complete / work-release flags (RC-2026-09-18-041).
+    const workActionOptions = ["work-claim", "work-complete", "work-release"].includes(action)
+      ? parseWorkActionFlags(action, extra) : null;
     // say accepts an optional --to MEMBER_ID first; the remaining words are
     // the message body. With --to the message is a targeted DM.
     const sayArgs = action === "say"
@@ -241,10 +272,10 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
-      || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
+      || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
       || (action === "advertise" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.every(cap => typeof cap === "string" && cap.trim() && cap.length <= 80) || [checkpoint, ...extra].length > 30))
       || (action === "say" && (sayArgs.toMemberId !== undefined && !validId(sayArgs.toMemberId)
         || sayArgs.words.length === 0 || sayArgs.words.some(word => typeof word !== "string" || !word.trim())
@@ -256,6 +287,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create"].includes(action) ? false
+        : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
@@ -339,6 +371,9 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
           return client.workSessionAction({ requestId: crypto.randomUUID(), workItemId: checkpoint,
             expectedRevision: card.revision, action: "set_status", status: extra[0] });
         })()
+      : action === "work-claim" ? await client.workClaim(checkpoint, workActionOptions)
+      : action === "work-complete" ? await client.workComplete(checkpoint, workActionOptions)
+      : action === "work-release" ? await client.workRelease(checkpoint, workActionOptions)
       : await client.changes(Number(checkpoint));
     if (action === "export") process.stdout.write(result.ndjson);
     // redeem-invite returns undefined on consent abort (exit code already
