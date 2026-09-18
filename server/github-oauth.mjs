@@ -91,7 +91,7 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
   };
   return {
     size: () => pending.size,
-    create({ sessionToken, sessionRevision }) {
+    create({ sessionToken, sessionRevision, link = false }) {
       if (!/^[A-Za-z0-9_-]{43}$/.test(sessionToken || "")
         || !Number.isSafeInteger(sessionRevision) || sessionRevision < 0) fail("github_session_required");
       sweep();
@@ -102,7 +102,9 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
       }
       const state = base64urlToken(random(32));
       const codeVerifier = createCodeVerifier(random);
-      pending.set(digest(state), { codeVerifier, sessionToken, sessionRevision, createdAt: now() });
+      // Slice 7: the settings "connect GitHub" flow carries a link intent so
+      // the callback attaches the subject to the authenticated account.
+      pending.set(digest(state), { codeVerifier, sessionToken, sessionRevision, link: link === true, createdAt: now() });
       return { state, codeVerifier };
     },
     consume(state) {
@@ -120,7 +122,8 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
       if (!entry) fail("github_state_invalid");
       pending.delete(foundKey); // single-use: any replay of the state fails
       if (entry.createdAt + ttlMs <= now()) fail("github_state_expired");
-      return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision };
+      return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision,
+        link: entry.link === true };
     }
   };
 }

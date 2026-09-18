@@ -24,6 +24,7 @@
           <div class="session-menu" id="session-menu">
             <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions"><span aria-hidden="true">⋮</span></button>
             <div id="session-menu-panel" class="session-menu-panel">
+              <button id="account-settings-button" class="button ghost" type="button" hidden>Sign-in &amp; security</button>
               <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
             </div>
           </div>
@@ -92,6 +93,10 @@
             </div>
           </form>
           <p class="form-hint">Creating a room needs membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
+        </details>
+        <details id="account-settings" class="account-settings">
+          <summary>Sign-in &amp; security</summary>
+          <div id="account-settings-body"></div>
         </details>
       </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>

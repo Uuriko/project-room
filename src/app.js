@@ -16,6 +16,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirm
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
+import { createAccountSettingsUI } from "./account-settings-ui.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -135,6 +136,7 @@ const client = new RoomClient({
     $("#account-rooms-panel").hidden = true;
     $(".connection-bar").hidden = false;
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
+    $("#account-settings-button").hidden = false;
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
@@ -205,6 +207,7 @@ const client = new RoomClient({
     $("#signout-button").disabled = pendingSignout;
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
+    $("#account-settings-button").hidden = true;
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
@@ -283,10 +286,23 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+// Sign-in & security settings (slice 7): mounted inside the account rooms
+// panel's <details>, opened from the session menu.
+const accountSettingsUI = createAccountSettingsUI({ accountClient });
+function openAccountSettings() {
+  setSessionMenuOpen(false);
+  if (!accountClient.session?.authenticated) return;
+  inboxUI.showRoomList();
+  const details = $("#account-settings");
+  details.open = true;
+  accountSettingsUI.mount($("#account-settings-body"));
+  details.scrollIntoView({ block: "nearest" });
+}
 function clearPrivateWorkspace(options) {
   inboxUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
+  $("#account-settings").open = false; $("#account-settings-body").replaceChildren();
 }
 function endAccountAccess() {
   const current = accountClient.session;
@@ -298,6 +314,7 @@ function endAccountAccess() {
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
   $("#auth-panel").hidden = true; $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
+  $("#account-settings-button").hidden = false;
   if (!state) {
     $("#identity-label").textContent = "Personal account";
     $("#identity-label").title = accountClient.session.account.id;
@@ -1887,6 +1904,7 @@ document.addEventListener("click", event => {
   if (sessionMenu.classList.contains("open") && !sessionMenu.contains(event.target)) setSessionMenuOpen(false);
 });
 
+$("#account-settings-button").addEventListener("click", openAccountSettings);
 $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;

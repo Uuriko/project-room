@@ -1352,6 +1352,148 @@ paths:
       responses:
         '200': { description: "{ configured, remaining (null when no set) }" }
         '401': { description: unauthenticated }
+  /api/auth/methods:
+    get:
+      summary: List the account's linked sign-in methods (slice 7)
+      description: >-
+        Authenticated read (account_session cookie): returns the account's
+        login methods as safe public descriptors
+        `{ id, type, provider, label, email, createdAt, lastUsedAt, disabled }`
+        — verifiers and credential material are never exposed — plus honest
+        provider configuration status
+        `{ providers: { github: { configured }, google: { configured }, passkey: { configured }, mail: { configured } } }`
+        so the settings UI can show "not configured" states instead of dead
+        buttons.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ methods, providers }" }
+        '401': { description: unauthenticated }
+  /api/auth/methods/disable:
+    post:
+      summary: Disable one linked sign-in method (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): disables the
+        named method (`{ id }`). The model refuses to disable the last active
+        method with 409 last_login_method, so an account always keeps a way
+        in. 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: "{ method (updated descriptor) }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '404': { description: login_method_not_found }
+        '409': { description: last_login_method }
+        '422': { description: invalid_method }
+        '429': { description: rate_limited }
+  /api/auth/methods/enable:
+    post:
+      summary: Re-enable one linked sign-in method (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): re-enables a
+        previously disabled method (`{ id }`). 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: "{ method (updated descriptor) }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '404': { description: login_method_not_found }
+        '422': { description: invalid_method }
+        '429': { description: rate_limited }
+  /api/auth/methods/remove:
+    post:
+      summary: Remove one linked sign-in method (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): deletes the
+        named method (`{ id }`) and, for passkeys, its stored credentials; a
+        removed recovery-code set burns its codes. The last active method
+        cannot be removed (409 last_login_method). 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: "{ removed: true, id, type }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '404': { description: login_method_not_found }
+        '409': { description: last_login_method }
+        '422': { description: invalid_method }
+        '429': { description: rate_limited }
+  /api/auth/password/set:
+    post:
+      summary: Set a first password on an account that lacks one (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): attaches an
+        email+password method to an account that signed up another way (OAuth,
+        magic link). 409s when a password method already exists (use
+        /api/auth/password/change to rotate it); the password is
+        policy-checked (10–256 characters) and stored as a scrypt verifier —
+        plaintext never reaches the store. Requires a verified email on the
+        account (422 no_verified_email otherwise). 20 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '201': { description: "{ status: ok, method: { id, type } }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '409': { description: password_already_set }
+        '422': { description: invalid_password_set, password_too_short/password_too_long, or no_verified_email }
+        '429': { description: rate_limited }
+  /api/auth/github/link/start:
+    get:
+      summary: Start GitHub OAuth to connect it to the signed-in account (slice 7)
+      description: >-
+        Authenticated (account_session cookie): binds the caller's account
+        session slot into a single-use PKCE state with a link intent and 302s
+        to GitHub. The slice-4 callback then attaches the GitHub subject to
+        the currently authenticated account (409 when the GitHub account is
+        already linked to a different account) instead of the sign-in
+        find-or-provision order. 503 github_not_configured when GitHub
+        sign-in is not set up. 10 per address per minute.
+      security:
+        - accountSession: []
+      responses:
+        '302': { description: "Redirect to the GitHub authorization URL" }
+        '401': { description: unauthenticated }
+        '503': { description: github_not_configured }
+        '429': { description: rate_limited }
   /api/auth/magic/request:
     post:
       summary: Issue a magic-link sign-in code
