@@ -58,6 +58,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
+  paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {
