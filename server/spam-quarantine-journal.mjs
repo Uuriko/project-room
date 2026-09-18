@@ -12,18 +12,26 @@
 // version bump, no writer-fence impact, because a pre-journal writer has no
 // code path to this table and the recovery audit's exact table list is the
 // integrity gate. All writes go through the store transaction.
+//
+// Gap #2 (PR #562): the journal records explicit account_id and source_id so
+// a hold is no longer ambiguous when identical provider message/channel/
+// connection ids recur across accounts. Rows written before the columns
+// existed keep NULL in both and still read/verify — see
+// migrateSpamQuarantineColumns.
 import { ServiceError } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // reasonBytes caps the stored signal list (a flagMessage() result carries at
 // most a handful of signals; the cap guards against pathological growth).
 export const spamQuarantineLimits = Object.freeze({ reasonBytes: 8192, noteChars: 2048, batch: 500,
-  messageIdChars: 512, channelChars: 128, connectionIdChars: 256, reviewerChars: 256 });
+  messageIdChars: 512, channelChars: 128, connectionIdChars: 256, reviewerChars: 256,
+  accountIdChars: 256, sourceIdChars: 256 });
 export const spamQuarantineStatuses = Object.freeze(["held", "released", "dismissed"]);
 export const spamQuarantineDecisions = Object.freeze(["release", "confirm_spam"]);
 export const spamQuarantineSchema = `
   CREATE TABLE IF NOT EXISTS spam_quarantine (
     id TEXT PRIMARY KEY, message_id TEXT NOT NULL, channel TEXT NOT NULL, connection_id TEXT,
+    account_id TEXT, source_id TEXT,
     reason TEXT NOT NULL CHECK(json_valid(reason)),
     score INTEGER NOT NULL CHECK(score >= 0 AND score <= 100),
     quarantined_at INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('held','released','dismissed')),
@@ -32,8 +40,21 @@ export const spamQuarantineSchema = `
   CREATE INDEX IF NOT EXISTS spam_quarantine_held ON spam_quarantine(status, quarantined_at);
 `;
 const view = row => ({ id: row.id, messageId: row.message_id, channel: row.channel, connectionId: row.connection_id,
+  accountId: row.account_id ?? null, sourceId: row.source_id ?? null,
   reason: JSON.parse(row.reason), score: row.score, quarantinedAt: row.quarantined_at, status: row.status,
   reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, note: row.note, updatedAt: row.updated_at });
+// Idempotent additive migration for the gap-#2 columns. ALTER TABLE backfills
+// NULL for rows written before the columns existed, so old holds keep
+// reading as { accountId: null, sourceId: null } — no data rewrite, no
+// version bump, no writer-fence impact. Called on the write path in
+// store.mjs right after the schema exec; read-only opens never migrate.
+export function migrateSpamQuarantineColumns(db) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='spam_quarantine'").get()) return;
+  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('spam_quarantine')").all().map(r => r.name));
+  for (const column of ["account_id", "source_id"]) {
+    if (!columns.has(column)) db.exec(`ALTER TABLE spam_quarantine ADD COLUMN ${column} TEXT`);
+  }
+}
 const textOf = (value, limit, field) => {
   if (typeof value !== "string" || value.length === 0 || value.length > limit) fail(422, "invalid_quarantine", `${field} must be a 1..${limit} character string`);
   return value;
@@ -53,24 +74,53 @@ const flagOf = flag => {
   return { reason, score: flag.score };
 };
 
+// Ordered column names of the first statement (the CREATE TABLE) in a
+// schema string, splitting only top-level commas so CHECK(json_valid(...))
+// and CHECK(score >= 0 AND score <= 100) survive the parse.
+const quarantineColumns = schema => {
+  const body = schema.trim().split(";")[0];
+  const inner = body.slice(body.indexOf("(") + 1, body.lastIndexOf(")"));
+  const parts = []; let depth = 0, current = "";
+  for (const char of inner) {
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if (char === "," && depth === 0) { parts.push(current); current = ""; continue; }
+    current += char;
+  }
+  parts.push(current);
+  return parts.map(part => part.trim().split(/\s+/)[0]).filter(Boolean);
+};
+
 export class SpamQuarantineJournal {
   constructor(store) { this.store = store; this.db = store.db; }
   // A read-only open of a file written before this journal finds none of
   // these objects and must not migrate, so allowAbsent accepts a wholly missing
   // schema; a partially present one still fails.
+  // The table may have converged through migrateSpamQuarantineColumns's ALTER
+  // TABLE, which appends the new columns after the existing ones — so the
+  // table check compares the live column name set via pragma
+  // (order-insensitive), not the stored CREATE TABLE text. The index has no
+  // migration path, so it keeps the exact-text check.
   verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-    const expected = spamQuarantineSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
-      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
-    if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
-    for (const { sql, actual } of expected) {
-      if (normalize(actual) !== normalize(sql)) throw new Error("Spam quarantine journal schema requires operator reconciliation");
-    }
+    const table = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='spam_quarantine'").get()?.sql;
+    const index = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='spam_quarantine_held'").get()?.sql;
+    if (allowAbsent && table === undefined && index === undefined) return false;
+    if (table === undefined || index === undefined) throw new Error("Spam quarantine journal schema requires operator reconciliation");
+    const actualColumns = this.db.prepare("SELECT name FROM pragma_table_info('spam_quarantine')").all().map(r => r.name);
+    const sorted = names => [...names].sort().join(",");
+    if (sorted(actualColumns) !== sorted(quarantineColumns(spamQuarantineSchema)))
+      throw new Error("Spam quarantine journal schema requires operator reconciliation");
+    const expectedIndex = "CREATE INDEX spam_quarantine_held ON spam_quarantine(status, quarantined_at)";
+    if (normalize(index) !== normalize(expectedIndex))
+      throw new Error("Spam quarantine journal schema requires operator reconciliation");
     return true;
   }
   // Offline integrity: every held row awaits review (no review fields), every
   // reviewed row names its reviewer and review time, the reason round-trips as
   // the flag's signal list, and reviewed rows are final (no status flips).
+  // account_id/source_id are NULL on rows written before the gap-#2 columns
+  // existed; when present they must be well-formed ids.
   verify() {
     return this.store.readTransaction(() => {
       const counts = { held: 0, released: 0, dismissed: 0 };
@@ -78,6 +128,11 @@ export class SpamQuarantineJournal {
         if (!/^qz-[1-9][0-9]*$/.test(row.id) || !spamQuarantineStatuses.includes(row.status)
           || !Number.isInteger(row.score) || row.score < 0 || row.score > 100
           || row.quarantined_at <= 0 || row.updated_at < row.quarantined_at) throw new Error("Spam quarantine journal requires operator reconciliation");
+        for (const [column, limit] of [["account_id", spamQuarantineLimits.accountIdChars], ["source_id", spamQuarantineLimits.sourceIdChars]]) {
+          const value = row[column];
+          if (value !== null && (typeof value !== "string" || value.length === 0 || value.length > limit))
+            throw new Error("Spam quarantine journal requires operator reconciliation");
+        }
         let reason; try { reason = JSON.parse(row.reason); } catch { throw new Error("Spam quarantine journal requires operator reconciliation"); }
         if (!Array.isArray(reason) || !reason.every(s => s && typeof s === "object" && typeof s.key === "string" && typeof s.weight === "number" && typeof s.detail === "string"))
           throw new Error("Spam quarantine journal requires operator reconciliation");
@@ -95,19 +150,24 @@ export class SpamQuarantineJournal {
   // File one quarantined message as held. flag is a flagMessage() result with
   // quarantine true; its signal list is the durable reason. Ids are qz-<n>
   // with the counter derived from existing rows, so they stay stable and
-  // unique across restarts.
-  quarantine({ messageId, channel, connectionId = null, flag, at = null }) {
+  // unique across restarts. accountId/sourceId scope the hold to the import
+  // that filed it (gap #2, PR #562); both are optional, so rows written
+  // before the columns existed read back as null.
+  quarantine({ messageId, channel, connectionId = null, accountId = null, sourceId = null, flag, at = null }) {
     textOf(messageId, spamQuarantineLimits.messageIdChars, "messageId");
     textOf(channel, spamQuarantineLimits.channelChars, "channel");
     if (connectionId !== null && connectionId !== undefined) textOf(connectionId, spamQuarantineLimits.connectionIdChars, "connectionId");
+    if (accountId !== null && accountId !== undefined) textOf(accountId, spamQuarantineLimits.accountIdChars, "accountId");
+    if (sourceId !== null && sourceId !== undefined) textOf(sourceId, spamQuarantineLimits.sourceIdChars, "sourceId");
     const { reason, score } = flagOf(flag);
     if (at !== null && (!Number.isFinite(at) || at < 0)) fail(422, "invalid_quarantine", "at must be a finite ms-epoch time");
     return this.store.transaction(() => {
       const now = at ?? this.store.now();
       const next = this.db.prepare("SELECT COALESCE(MAX(CAST(SUBSTR(id,4) AS INTEGER)),0) next FROM spam_quarantine").get().next + 1;
       const id = `qz-${next}`;
-      this.db.prepare("INSERT INTO spam_quarantine (id,message_id,channel,connection_id,reason,score,quarantined_at,status,reviewed_by,reviewed_at,note,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-        .run(id, messageId, channel, connectionId ?? null, JSON.stringify(reason), score, now, "held", null, null, null, now);
+      this.db.prepare("INSERT INTO spam_quarantine (id,message_id,channel,connection_id,account_id,source_id,reason,score,quarantined_at,status,reviewed_by,reviewed_at,note,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .run(id, messageId, channel, connectionId ?? null, accountId ?? null, sourceId ?? null,
+          JSON.stringify(reason), score, now, "held", null, null, null, now);
       return view(this.db.prepare("SELECT * FROM spam_quarantine WHERE id=?").get(id));
     });
   }

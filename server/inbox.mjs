@@ -379,9 +379,11 @@ export class Inbox {
     });
   }
   // One review-surface row: the journal verdict metadata plus the resolved
-  // imported source. The source match keys on the journal's connectionId
-  // when one is recorded — provider message ids repeat across connections,
-  // so message id + channel alone can collide.
+  // imported source. The source match prefers the journal's explicit
+  // accountId/sourceId when recorded (gap #2): provider message ids repeat
+  // across connections and accounts, so message id + channel alone can
+  // collide. Legacy rows without the explicit fields fall back to the
+  // connectionId-disambiguated provider-id scan.
   quarantineItem(auth, item) {
     const source = this.quarantineMatch(auth, item);
     // Flatten the source's display fields for the review UI: sender, subject,
@@ -394,6 +396,22 @@ export class Inbox {
     if (!item) return null;
     const accountId = auth.account.id;
     try {
+      // Explicit account scope (gap #2, PR #562): a hold filed for another
+      // account never resolves into this account's backlog. Legacy rows with
+      // accountId null keep the old resolution rules.
+      if (item.accountId && item.accountId !== accountId) return null;
+      // Explicit source link (gap #2, PR #562): when the import recorded the
+      // inbox source id, resolve it directly instead of scanning by provider
+      // message id. Legacy rows with sourceId null fall through to the scan.
+      if (item.sourceId) {
+        let sourceRow;
+        try { sourceRow = this.source(accountId, item.sourceId); } catch { return null; }
+        const summarized = this.sourceSummary(auth,
+          { id: sourceRow.id, revision: sourceRow.revision, updated_at: sourceRow.updated_at },
+          { connections: new Map(), include: true, readAt: new Map(), sentIds: new Set() });
+        return summarized ? { ...summarized, threadId: null }
+          : { id: sourceRow.id, revision: sourceRow.revision, updatedAt: sourceRow.updated_at, threadId: null };
+      }
       const rows = this.db.prepare("SELECT id,revision,updated_at FROM private_inbox_sources WHERE account_id=?").all(accountId);
       for (const row of rows) {
         let d;
@@ -1267,6 +1285,11 @@ export class Inbox {
                 messageId: request.data.envelope.message?.id,
                 channel: request.data.envelope.channel,
                 connectionId: request.data.envelope.connection?.id ?? null,
+                // Gap #2 (PR #562): the hold records the importing account
+                // and the inbox source it was filed from, so identical
+                // provider message/channel/connection ids across accounts are
+                // no longer ambiguous on the review surface.
+                accountId, sourceId,
                 flag: { score: receipt.spam.score, signals: receipt.spam.signals, quarantine: true },
                 at: now,
               });

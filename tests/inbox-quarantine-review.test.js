@@ -79,6 +79,31 @@ test("review is account-scoped: another account never sees or touches these hold
   throwsCode(() => f.store.inbox.quarantineRelease(session.token, session.sessionBinding, { quarantineId: hold1.id }), 404, "quarantine_not_found");
 });
 
+test("explicit accountId/sourceId scope the hold: cross-account holds never resolve (gap #2)", t => {
+  const { f, account, token, binding, conn, first } = quarantineFixture(t);
+  // The same provider message id filed for this account with the explicit
+  // source link, and once for another account: the explicit fields make the
+  // ambiguity from PR #562's gap #2 disappear.
+  const mine = f.store.spamQuarantine.quarantine({ messageId: first.providerId, channel: "telegram",
+    connectionId: conn.id, accountId: account.id, sourceId: first.sourceId, flag: flag(85, "gap2") });
+  const other = f.store.createAccount("quarantine-other", "other");
+  const theirs = f.store.spamQuarantine.quarantine({ messageId: first.providerId, channel: "telegram",
+    connectionId: conn.id, accountId: other.id, sourceId: "other-source", flag: flag(86, "gap2") });
+  const review = f.store.inbox.quarantineReview(token, binding, {});
+  const mineItem = review.items.find(i => i.id === mine.id);
+  assert.ok(mineItem, "the explicitly scoped hold is in this account's backlog");
+  assert.equal(mineItem.source.id, first.sourceId, "the explicit sourceId resolves straight to the importing source");
+  assert.equal(mineItem.accountId, account.id, "the read path exposes the scope fields");
+  assert.equal(mineItem.sourceId, first.sourceId);
+  assert.equal(review.items.find(i => i.id === theirs.id), undefined, "another account's hold never resolves here");
+  // The other account cannot review this hold either.
+  const otherKey = f.store.issueAccountAccessKey(other.id);
+  const slot = f.store.createAccountSessionSlot();
+  const session = { token: slot.token, ...f.store.loginAccountSession(slot.token, otherKey, 0) };
+  throwsCode(() => f.store.inbox.quarantineRelease(session.token, session.sessionBinding, { quarantineId: mine.id }), 404, "quarantine_not_found");
+  throwsCode(() => f.store.inbox.quarantineRelease(token, binding, { quarantineId: theirs.id }), 404, "quarantine_not_found");
+});
+
 test("the held row resolves to the source on the same connection", t => {
   const { f, token, binding, hold1, first, conn } = quarantineFixture(t);
   const review = f.store.inbox.quarantineReview(token, binding, {});
