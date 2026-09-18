@@ -60,6 +60,14 @@ const codeHash = code => code.length === CODE_PREFIX.length + LEGACY_CODE_LENGTH
   ? hash(code)
   : scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
 const NEVER_GRANT = ["manage_members", "decide", "invite_member"];
+
+// Human descriptions for the standing invite profiles, surfaced by
+// vocabulary() so a minting agent never has to guess what a profile grants.
+const PROFILE_DESCRIPTIONS = Object.freeze({
+  chat: "Read-only: the agent can observe the room but holds no work permissions.",
+  contribute: "Accept and complete assigned work.",
+  review: "Verify evidence on completed work.",
+});
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
 const MAX_TTL_MINUTES = 43200; // 30d
@@ -114,6 +122,24 @@ export class AgentInvites {
   // stored hash), shared with the access review.
   view(row, now = this.store.now()) { return view(row, now); }
 
+  // Machine-readable invite vocabulary for the minter (RC-2026-09-18-020).
+  // An agent owner reads this before minting so it never has to guess
+  // profile or permission names: profiles map server-side to fixed sets,
+  // raw permissions are the room PERMISSIONS vocabulary, and neverGrant
+  // names the bits an invite can never carry. (A dedicated
+  // GET /api/agent-invites/vocabulary endpoint is queued behind the
+  // server/http.mjs freeze; until then the 422s below teach the same
+  // vocabulary on every miss.)
+  vocabulary() {
+    return {
+      profiles: Object.fromEntries(Object.entries(agentAccessProfiles).map(
+        ([name, permissions]) => [name, { permissions: [...permissions], description: PROFILE_DESCRIPTIONS[name] }])),
+      permissions: [...PERMISSIONS],
+      agentSafePermissions: [...AGENT_INVITE_SAFE_PERMISSIONS],
+      neverGrant: [...NEVER_GRANT],
+    };
+  }
+
   // Owner, manage_members, or invite_member (agents may hold invite_member
   // without manage_members/decide): mint a one-time code. The raw code is
   // returned once; only its hash is stored. Callers may pass an explicit
@@ -127,7 +153,7 @@ export class AgentInvites {
     let profileName = null;
     if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
-        fail(422, "invalid_invite_scope", "profile must be one of: chat, contribute, review");
+        fail(422, "invalid_invite_scope", `profile must be one of: ${Object.keys(agentAccessProfiles).join(", ")}`);
       if (permissions !== undefined)
         fail(422, "invalid_invite_scope", "Choose a profile or explicit permissions, not both");
       profileName = profile;
@@ -135,7 +161,10 @@ export class AgentInvites {
     }
     if (!Array.isArray(permissions) || (profileName === null && !permissions.length) || new Set(permissions).size !== permissions.length
       || permissions.some(p => !PERMISSIONS.includes(p))) {
-      fail(422, "invalid_invite_scope", "permissions must be a non-empty list of unique room permissions");
+      // RC-2026-09-18-020: the error teaches the vocabulary — a minter that
+      // guesses "read"/"write" learns the real names instead of retrying blind.
+      fail(422, "invalid_invite_scope",
+        `permissions must be a non-empty list of unique room permissions (valid: ${PERMISSIONS.join(", ")}; or use a profile: ${Object.keys(agentAccessProfiles).join(", ")})`);
     }
     if (permissions.some(p => NEVER_GRANT.includes(p))) {
       fail(422, "invalid_invite_scope", "Agent invite codes cannot grant manage_members, decide, or invite_member");
