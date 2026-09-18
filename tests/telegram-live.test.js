@@ -210,7 +210,8 @@ test("the owner-authenticated import trigger works off loopback, enforces sessio
   let response = await hosted.get(path); let value = await response.json();
   assert.equal(response.status, 200); assert.equal(value.syncAvailable, false); assert.equal(value.webhook, false); assert.equal(value.webhookSetAt, null);
   assert.deepEqual(value.live, { contractVersion: 1, channel: "telegram", state: "configured", bindings: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_API_BASE"], missing: [], invalid: [],
-    webhook: "unset", webhookSetAt: null, lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null, importAvailable: true });
+    webhook: "unset", webhookSetAt: null, lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null, importAvailable: true,
+    rotation: { contractVersion: 1, state: "none", windowExpiresAt: null } });
   // Authority: no session 401, bearer 401, another account's session 404, missing CSRF 403, wrong origin 403.
   response = await fetch(hosted.origin + trigger, { method: "POST", body: JSON.stringify({ requestId: "t-1" }), headers: { "Content-Type": "application/json", Origin: hosted.origin, "X-Session-Binding": f.auth.sessionBinding } });
   assert.equal(response.status, 401);
