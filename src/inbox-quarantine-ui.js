@@ -77,7 +77,7 @@ export function installQuarantineReview({ api, ownerKey }) {
     if (item.subject) { const subject = document.createElement("p"); subject.className = "inbox-quarantine-subject"; subject.textContent = item.subject; card.append(subject); }
     if (item.excerpt) { const excerpt = document.createElement("p"); excerpt.className = "inbox-quarantine-excerpt"; excerpt.textContent = "“" + item.excerpt + "”"; card.append(excerpt); }
     const reasons = document.createElement("ul"); reasons.className = "inbox-quarantine-reasons";
-    for (const reason of item.reasons) {
+    for (const reason of item.reason) {
       const entry = document.createElement("li");
       entry.textContent = `${reason.detail} (+${reason.weight})`;
       entry.title = `Signal ${reason.key}`;

@@ -1096,21 +1096,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (url.pathname === "/api/inbox/quarantine/release" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const data = await body(req);
-          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
             reject(422, "invalid_quarantine_release", "Choose the held message to confirm.");
           return json(res, 200, store.inbox.quarantineRelease(token, binding, { quarantineId: data.quarantineId, note: data.note }));
         }
         if (url.pathname === "/api/inbox/quarantine/dismiss" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const data = await body(req);
-          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
             reject(422, "invalid_quarantine_dismiss", "Choose the held message to dismiss.");
           return json(res, 200, store.inbox.quarantineDismiss(token, binding, { quarantineId: data.quarantineId, note: data.note }));
         }
         if (url.pathname === "/api/inbox/quarantine/split" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const data = await body(req);
-          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
             reject(422, "invalid_quarantine_split", "Choose the held message to split.");
           return json(res, 200, store.inbox.quarantineSplit(token, binding, { quarantineId: data.quarantineId, note: data.note }));
         }

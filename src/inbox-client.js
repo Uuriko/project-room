@@ -235,6 +235,9 @@ export class InboxClient {
         && typeof s.key === "string" && typeof s.weight === "number" && typeof s.detail === "string")
       && Number.isInteger(item.score) && item.score >= 0 && item.score <= 100 && Number.isSafeInteger(item.quarantinedAt)
       && ["held", "released", "dismissed"].includes(item.status)
+      && (item.sender === null || typeof item.sender === "string")
+      && (item.subject === null || typeof item.subject === "string")
+      && (item.excerpt === null || typeof item.excerpt === "string")
       && (item.source === null || (item.source !== null && typeof item.source === "object" && typeof item.source.id === "string"));
   }
   quarantine({ status = "held", limit = null } = {}) {
@@ -246,15 +249,15 @@ export class InboxClient {
       && Array.isArray(v.items) && v.items.every(item => this.validQuarantineItem(item)));
   }
   quarantineRelease(quarantineId, note = null) {
-    return this.request("/quarantine/release", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+    return this.request("/quarantine/release", { method: "POST", data: { quarantineId, note } },
       v => v.decision === "release" && this.validQuarantineItem(v.item) && v.item.status === "released");
   }
   quarantineDismiss(quarantineId, note = null) {
-    return this.request("/quarantine/dismiss", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+    return this.request("/quarantine/dismiss", { method: "POST", data: { quarantineId, note } },
       v => v.decision === "dismiss" && this.validQuarantineItem(v.item) && v.item.status === "dismissed");
   }
   quarantineSplit(quarantineId, note = null) {
-    return this.request("/quarantine/split", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+    return this.request("/quarantine/split", { method: "POST", data: { quarantineId, note } },
       v => v.split !== null && typeof v.split === "object" && typeof v.split.quarantineId === "string"
         && typeof v.split.sourceId === "string" && this.validQuarantineItem(v.item) && v.item.status === "held");
   }

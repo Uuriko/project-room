@@ -384,7 +384,11 @@ export class Inbox {
   // so message id + channel alone can collide.
   quarantineItem(auth, item) {
     const source = this.quarantineMatch(auth, item);
-    return { ...item, source };
+    // Flatten the source's display fields for the review UI: sender, subject,
+    // and excerpt come from the imported message, not the journal row.
+    const { sender = null, subject = null } = source ?? {};
+    const excerpt = source?.excerpt ?? source?.preview ?? null;
+    return { ...item, source, sender, subject, excerpt };
   }
   quarantineMatch(auth, item) {
     if (!item) return null;
