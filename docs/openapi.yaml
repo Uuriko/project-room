@@ -2577,6 +2577,28 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, digest: { date, since, generatedAt, totalArrivals, channels: [{ channel, count, newThreads, senderGroups: [{ senderId, senderLabel, count, threads: [{ threadId, sourceIds, senderId, senderLabel, subject, excerpt, newCount, occurredAt, triage: { action, reasons }, sla, actions }] }] }], needsHuman, quarantined, breached, atRisk } }" }
         '401': { description: account_session_required }
         '422': { description: invalid_digest_since or invalid_limit or unsupported_inbox_view }
+  /api/inbox/sla/dashboard:
+    get:
+      summary: SLA dashboard — response-time percentiles, breach counts, open-conversation sweep
+      description: >-
+        Account-session read. The SLA dashboard (task 26) across Telegram and
+        email: per-channel p50/p95/p99 time-to-first-response over answered
+        threads, breach counts by channel and severity (high = past target,
+        critical = past 2x target), at-risk counts by channel, journaled
+        breach-alert counts by channel, and the end-of-day open-conversation
+        sweep — every thread still awaiting a reply with no open handoff
+        ("nothing closes unowned"), worst first. Percentiles measure answered
+        threads only; a thread still waiting has no first response yet and
+        feeds the breach counts instead. Ownership comes from the open handoff
+        journal; a thread with an open handoff is excluded from the sweep. The
+        clocks are the same per-channel targets the inbox list and the sweep
+        use (task 24). On-demand in-app read, never a push.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, dashboard: { generatedAt, threadCount, openCount, openByChannel, percentiles: { channel: { count, p50Ms, p95Ms, p99Ms } }, breaches: { total, byChannel, bySeverity: { high, critical } }, atRisk: { total, byChannel }, journaledAlerts: { total, byChannel }, statusByChannel, openSweep: [{ threadId, channel, status, severity, awaitingSince, elapsedMs, targetMs, label, deadlineAt, owner }] } }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_sla_dashboard }
   /api/inbox/handoffs:
     get:
       summary: List journaled agent handoffs
