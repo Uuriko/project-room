@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T21:57:42Z · board: Uuriko/project-room#266 · watermark: 5736663031 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T22:28:44Z · board: Uuriko/project-room#266 · watermark: 5736930529 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,6 +28,7 @@ RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.
 RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
+… +1 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -50,16 +51,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5736930529
+RC-2026 | none | 5736911078
+unknown | 6a0e9a047c6d1c78cf9f318310826dfe14a069e2 | 5736900960
+RC-2026 | none | 5736818501
+unknown | none | 5736744257
+RC-2026 | none | 5736706771
 RC-2026 | 9ddd9537c3b05e9247744db04caf78f24c868199 | 5736607484
 RC-2026 | none | 5736589665
 RC-2026 | none | 5736474664
 RC-2026 | none | 5736367501
-RC-2026 | none | 5736243187
-RC-2026 | none | 5736236081
-RC-2026 | none | 5736099519
-RC-2026 | none | 5735990874
-RC-2026 | fa745461884cf5534b2e181d89515a136bd1908e | 5735981733
-RC-2026 | none | 5735869745
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -76,5 +77,5 @@ comment-id | lane | task | at
 … +49 more
 
 ## signals
-board_comments=831 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=59 watermark=5736663031
+board_comments=849 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=59 watermark=5736930529
 
