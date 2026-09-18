@@ -73,7 +73,14 @@ export const unfencedAdditiveTables = Object.freeze([
   "stitch_links",
   "stitch_revocations",
   "stitch_suggestions",
-  "stitch_receipts"
+  "stitch_receipts",
+  // Lane D agent plug-in tables (RC-2026-09-18-010): agent_api_keys,
+  // agent_directory_cards, agent_webhook_subs. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to them, and
+  // the AgentPluginStore replays rows into the pure modules on open.
+  "agent_api_keys",
+  "agent_directory_cards",
+  "agent_webhook_subs"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
