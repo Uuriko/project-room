@@ -189,6 +189,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/auth/methods/remove` | account session cookie + `Origin` (30/address/min) | deletes one of the account's own methods (passkey credentials and recovery codes go with it); the last active method cannot be removed |
 | `POST /api/auth/password/set` | account session cookie + `Origin` (20/address/min) | attaches a first password method to an account that lacks one; 409 when one exists; requires a verified email on the account; password policy-checked and scrypt-hashed |
 | `GET /api/auth/github/link/start` | account session cookie (10/address/min) | starts GitHub OAuth with a link intent: the callback attaches the GitHub subject to the signed-in account (409 when linked elsewhere) instead of the sign-in find-or-provision order |
+| `GET /api/auth/google/link/start` | account session cookie (10/address/min) | starts Google OAuth with a link intent: the callback attaches the Google subject to the signed-in account (409 when linked elsewhere) instead of the sign-in find-or-provision order |
 
 ## Inbox connection routes (account session, not room credentials)
 
