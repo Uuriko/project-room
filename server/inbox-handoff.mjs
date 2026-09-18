@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { ACTIONS as TRIAGE_ACTIONS } from "./inbox-triage.mjs";
+import { caseOf, validateCase } from "./handoff-case.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const check = (condition, code, message) => { if (!condition) fail(422, code, message); };
@@ -121,10 +122,13 @@ export const channelConstraintsOf = channel => {
 };
 // Validate and freeze one handoff context packet. handoffId/createdAt are
 // assigned by the journal; every other field is caller-supplied and checked.
+// The optional `case` block (research slice R2: CASE handoff contract) is
+// validated by server/handoff-case.mjs when present — unknown epistemic
+// labels are rejected here at the journal layer, never in the HTTP layer.
 export function buildHandoffPacket(value) {
   check(value !== null && typeof value === "object" && !Array.isArray(value), CODE, "a handoff packet must be an object");
   const allowed = ["handoffId", "createdAt", "threadId", "channel", "sourceIds", "sender", "subject", "occurredAt",
-    "sla", "triage", "summary", "openQuestions", "pendingActions", "excerpt", "from", "to"];
+    "sla", "triage", "summary", "openQuestions", "pendingActions", "excerpt", "case", "from", "to"];
   check(Object.keys(value).every(k => allowed.includes(k)), CODE, `handoff packet carries only ${allowed.join(",")}`);
   const handoffId = agentId(value.handoffId, "handoffId"), createdAt = isoOf(value.createdAt, "createdAt");
   const threadId = text(value.threadId, 1024, "threadId"), channel = text(value.channel, 64, "channel");
@@ -143,6 +147,7 @@ export function buildHandoffPacket(value) {
     openQuestions: textList(value.openQuestions, 5, 500, "openQuestions"),
     pendingActions: textList(value.pendingActions, 10, 300, "pendingActions"),
     excerpt: optionalText(value.excerpt, 500, "excerpt"),
+    case: caseOf(value.case),
     from: agentId(value.from, "from"), to: agentId(value.to, "to"),
     constraints: channelConstraintsOf(channel) });
 }
@@ -184,7 +189,9 @@ export class InboxHandoffJournal {
     return true;
   }
   // Offline integrity: every row's packet names the handoff id and thread id
-  // it is keyed by, statuses stay in the enum, and every handoff starts open.
+  // it is keyed by, statuses stay in the enum, every handoff starts open,
+  // and stored CASE blocks re-validate (a block that can no longer validate
+  // flags the row instead of silently decaying).
   verify() {
     for (const row of this.db.prepare("SELECT * FROM inbox_handoffs").all()) {
       const packet = JSON.parse(row.packet), history = JSON.parse(row.history);
@@ -193,6 +200,10 @@ export class InboxHandoffJournal {
       if (!inboxHandoffStatuses.includes(row.status)) throw new Error(`Inbox handoff ${row.handoff_id} has an unknown status`);
       if (!Array.isArray(history) || history.length === 0 || history[0].status !== "open")
         throw new Error(`Inbox handoff ${row.handoff_id} has no open origin`);
+      if (packet.case !== null && packet.case !== undefined) {
+        try { validateCase(packet.case); }
+        catch { throw new Error(`Inbox handoff ${row.handoff_id} carries an invalid CASE block`); }
+      }
     }
   }
   // Journal a handoff: one open handoff per thread. A second create for the
