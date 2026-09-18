@@ -238,7 +238,15 @@ export class InboxClient {
       && (item.sender === null || typeof item.sender === "string")
       && (item.subject === null || typeof item.subject === "string")
       && (item.excerpt === null || typeof item.excerpt === "string")
-      && (item.source === null || (item.source !== null && typeof item.source === "object" && typeof item.source.id === "string"));
+      && (item.source === null || (item.source !== null && typeof item.source === "object" && typeof item.source.id === "string"))
+      // Shadow enforcement-hold context (server joins the source.import
+      // receipt's shadowQuarantine decision): null when no shadow decision
+      // was journaled for the import, otherwise { wouldHold, gateBlock }.
+      && (item.shadow === null || (item.shadow !== null && typeof item.shadow === "object"
+        && typeof item.shadow.wouldHold === "boolean"
+        && (item.shadow.gateBlock === null || typeof item.shadow.gateBlock === "string")
+        && (item.shadow.policyVersion === null || typeof item.shadow.policyVersion === "string")
+        && (item.shadow.threshold === null || typeof item.shadow.threshold === "number")));
   }
   quarantine({ status = "held", limit = null } = {}) {
     const params = new URLSearchParams();

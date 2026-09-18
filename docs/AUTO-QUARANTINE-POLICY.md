@@ -180,8 +180,14 @@ These are **not** up for the tap — they hold in every variant of this policy:
   "reputationScore, burstCount — stay null and skip their signals"). The reputation store is a
   later slice; auto-quarantine at 60 must be validated on the deterministic signals alone —
   which the shadow period does.
-- **The quarantine review UI does not exist yet.** Enforcement without a review screen is a
-  black hole; ship the UI in the same slice or later, never enforcement first.
+- **The quarantine review UI exists (PR #562) and shows the shadow hold
+  context.** Each held card lists the score, the exact signals that fired,
+  sender/channel/age, the Confirm / Dismiss / Split actions, and whether
+  auto-quarantine would actually have held the message under enforcement
+  (wouldHold) or which hard gate blocked it — the precision report measures
+  over reviewed would-be holds only, so reviewers see what their verdict
+  means for the report. Enforcement without this screen would be a black
+  hole; it shipped before enforcement, never after.
 - **No telegram/email inbound is live yet.** Today the import funnel runs on fixtures and the
   webhook drain. Shadow mode becomes meaningful the moment real inbound flows; until then it
   runs on fixtures and the scores stay theoretical.

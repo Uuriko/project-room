@@ -394,7 +394,38 @@ export class Inbox {
     // and excerpt come from the imported message, not the journal row.
     const { sender = null, subject = null } = source ?? {};
     const excerpt = source?.excerpt ?? source?.preview ?? null;
-    return { ...item, source, sender, subject, excerpt };
+    return { ...item, source, sender, subject, excerpt, shadow: this.quarantineShadow(auth, item) };
+  }
+  // Shadow enforcement-hold context for the review surface. The source.import
+  // receipt journals the shadowQuarantine decision (server/spam-shadow.mjs):
+  // wouldHold says whether auto-quarantine would actually have held this
+  // message under enforcement, and gateBlock names the first hard gate that
+  // blocked it (policy §2.3). The precision report
+  // (server/spam-shadow-report.mjs) measures over reviewed WOULD-BE holds,
+  // so the reviewer sees exactly which cards the report will count: a
+  // dismissed gate-blocked hold is a false_negative ("spam the hold logic
+  // missed"), not a true positive. The join uses the journal's explicit
+  // accountId/sourceId (gap #2) against the latest import receipt for that
+  // source, so re-imports show the current decision. Journal rows filed
+  // without an import receipt — pre-instrumentation imports, direct journal
+  // writes — get shadow: null: honest absence, not a verdict.
+  quarantineShadow(auth, item) {
+    try {
+      if (!item || !item.sourceId) return null;
+      const row = this.db.prepare(`SELECT receipt_json FROM private_inbox_commands
+        WHERE account_id=? AND json_extract(request_json,'$.action')='source.import'
+        AND json_extract(request_json,'$.sourceId')=?
+        ORDER BY sequence DESC LIMIT 1`).get(auth.account.id, item.sourceId);
+      if (!row) return null;
+      const decision = JSON.parse(row.receipt_json)?.shadowQuarantine ?? null;
+      if (!decision || typeof decision !== "object" || typeof decision.wouldHold !== "boolean") return null;
+      return Object.freeze({
+        policyVersion: typeof decision.policyVersion === "string" ? decision.policyVersion : null,
+        threshold: typeof decision.threshold === "number" ? decision.threshold : null,
+        wouldHold: decision.wouldHold,
+        gateBlock: typeof decision.gateBlock === "string" ? decision.gateBlock : null,
+      });
+    } catch { return null; }
   }
   quarantineMatch(auth, item) {
     if (!item) return null;

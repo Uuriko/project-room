@@ -2729,7 +2729,7 @@ paths:
           description: Max items, a positive integer.
           schema: { type: integer, minimum: 1 }
       responses:
-        '200': { description: "{ contractVersion: 1, viewer, status, counts: { held, released, dismissed }, items: [{ id, messageId, channel, connectionId, accountId, sourceId, reason: [{ key, weight, detail }], score, quarantinedAt, status, reviewedBy, reviewedAt, note, sender, subject, excerpt, source }] }  — accountId/sourceId are null on holds written before the gap-#2 columns existed" }
+        '200': { description: "{ contractVersion: 1, viewer, status, counts: { held, released, dismissed }, items: [{ id, messageId, channel, connectionId, accountId, sourceId, reason: [{ key, weight, detail }], score, quarantinedAt, status, reviewedBy, reviewedAt, note, sender, subject, excerpt, source, shadow }] }  — accountId/sourceId are null on holds written before the gap-#2 columns existed; shadow is the source.import receipt's shadowQuarantine decision ({ policyVersion, threshold, wouldHold, gateBlock }) or null when no shadow decision was journaled" }
         '401': { description: account_session_required }
         '422': { description: invalid_quarantine }
   /api/inbox/quarantine/release:
