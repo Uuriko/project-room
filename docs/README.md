@@ -74,6 +74,8 @@ Planning / thinking cousin pass: [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](
 Needle steal (tool/extract, not Ask chat): [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md).
 Ask / Compute / Room anti-noise: [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).
 Ask Artifacts-lite (long fences, P0): [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).
+Bonsai 24GB soft limit + vs gemma3-27b ladder (T060+T065, research):
+[ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md).
 
 ## The dated archive
 

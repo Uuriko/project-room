@@ -38,6 +38,7 @@ Architecture SoR (steal stack collapsed):
 | [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md) | Cactus Needle 3 steal — confidence / triggers / intelligence ladder for Second; not an Ask chat model (research only) |
 | [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md) | Ask + Compute + Room anti-noise ranking; Ask quiet-shell P0 (research only) |
 | [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel; not Room artifacts, not a full IDE (research only) |
+| [ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md) | T060+T065: Mac ~24GB soft limit next to Bonsai Community Provide; Bonsai vs gemma3-27b Ask ladder (research only; #258 cited, not edited) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |
