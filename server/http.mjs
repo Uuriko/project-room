@@ -25,6 +25,7 @@ import { listPins, setPin } from "./pins.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
+import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -83,6 +84,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null,
+  passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
@@ -112,6 +114,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const verdict = recoveryRedeemLimiter.check(`recovery-redeem:${rateHash(emailHint)}`);
     if (!verdict.allowed) reject(429, "rate_limited", verdict.message);
   };
+  // Long-lived passkey auth service (slice 5, RC-2026-09-17-014): one challenge
+  // store per server instance (one per Durable Object in production) so
+  // registration/authentication ceremonies survive across the options and
+  // finish calls.
+  // passkeyService is a test injection point for stubbed verification.
+  let passkeyAuthService = null;
+  const passkeys = () => passkeyService
+    ?? (passkeyAuthService ??= createPasskeyAuth({ store }));
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
   if (!Number.isInteger(streamInterval) || streamInterval < 1) throw new Error("Stream interval must be a positive integer of milliseconds");
@@ -410,6 +420,73 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
+      }
+      // ---- Passkey auth (slice 5, RC-2026-09-17-014) ----
+      const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+      if (url.pathname === "/api/auth/passkey/register/options" && req.method === "POST") {
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
+        const auth = store.authenticateAccountSession(slotToken); // 401 unless the slot is authenticated
+        protectWrite(req, auth, false);
+        rate(`passkey-register-options:${auth.account.id}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (data.userName !== undefined && typeof data.userName !== "string") {
+          reject(422, "invalid_passkey_request", "userName must be a string");
+        }
+        if (data.authenticatorSelection !== undefined
+          && (data.authenticatorSelection === null || typeof data.authenticatorSelection !== "object")) {
+          reject(422, "invalid_passkey_request", "authenticatorSelection must be an object");
+        }
+        return json(res, 200, passkeys().beginRegistration({ accountId: auth.account.id, rpId: params.rpId,
+          rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
+      }
+      if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
+        const auth = store.authenticateAccountSession(slotToken);
+        protectWrite(req, auth, false);
+        rate(`passkey-register-finish:${auth.account.id}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (!exact(data, ["challengeId", "response"]) || typeof data.challengeId !== "string"
+          || data.response === null || typeof data.response !== "object") {
+          reject(422, "invalid_passkey_response", "A challenge id and credential response are required");
+        }
+        return json(res, 201, passkeys().finishRegistration({ accountId: auth.account.id, challengeId: data.challengeId,
+          response: data.response, expectedOrigin: params.origin, rpId: params.rpId }));
+      }
+      if (url.pathname === "/api/auth/passkey/authenticate/options" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`passkey-auth-options:${remoteAddress}`, 20);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        await body(req); // discoverable-credential flow: the JSON body carries no required fields
+        return json(res, 200, passkeys().beginAuthentication({ rpId: params.rpId }));
+      }
+      if (url.pathname === "/api/auth/passkey/authenticate/finish" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`passkey-auth-finish:${remoteAddress}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (!exact(data, ["challengeId", "response", "sessionToken", "sessionRevision"])
+          || typeof data.challengeId !== "string" || data.response === null || typeof data.response !== "object"
+          || typeof data.sessionToken !== "string" || typeof data.sessionRevision !== "number") {
+          reject(422, "invalid_passkey_response", "A challenge id, credential response, and session are required");
+        }
+        const verified = passkeys().finishAuthentication({ challengeId: data.challengeId, response: data.response,
+          expectedOrigin: params.origin, rpId: params.rpId });
+        const oldRoomToken = cookie(req, roomCookieName);
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, verified.accountId, data.sessionRevision, {
+          method: { kind: "passkey", ref: verified.methodRef },
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+        });
+        return json(res, 200, accountView(loggedIn));
       }
       // Track C C14 — read-only growth analytics surface. The handler is a
       // pure read over the collector/scheduler; unknown /growth subpaths 404

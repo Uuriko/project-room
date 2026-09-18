@@ -134,6 +134,8 @@ needs `X-Session-Binding`. Bearer keys are never accepted here.
 | `POST /api/inbox/connections/:id/sync` | signed-in account session + CSRF + binding | owner of the connection; loopback only; 60/account/min |
 | `POST /api/guest-agent-links` | room bearer key, or room / account browser session + CSRF; room named in the body | room owner + `manage_members` (same operation as `POST /api/rooms/:id/guest-agent-links`); 30/address/min |
 | `POST /api/auth/recovery-codes/generate` | signed-in account session + CSRF | mints (or regenerates — invalidating the previous set) the account's recovery-code set, returned exactly once; codes are never logged or re-displayed; 10/address/min |
+| `POST /api/auth/passkey/register/options` | signed-in account session + CSRF | issues the WebAuthn registration challenge for the caller's own account (no passkey squatting); already-registered credentials are excluded; 10/account/min |
+| `POST /api/auth/passkey/register/finish` | signed-in account session + CSRF | verifies the attestation against the issued challenge (single-use, 5-minute TTL) and persists the credential; 10/account/min |
 
 `GET /api/inbox*` and `GET /api/account-rooms` are the matching reads: account
 session plus `X-Session-Binding`, 401 `account_session_required` for any
@@ -170,6 +172,8 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |
 | `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
 | `POST /api/auth/recovery-codes/redeem` | capability (verified email hint + recovery code; 10/address/min + 10/email-hint/15min) | open by design: the same 401 `invalid_recovery_code` for unknown email, no set, or wrong code; a successful redeem burns the code and upgrades the caller's session slot |
+| `POST /api/auth/passkey/authenticate/options` | none (anonymous ceremony step, same-origin POST; 20/address/min) | open by design: issues the WebAuthn authentication challenge (discoverable-credential flow); grants nothing by itself |
+| `POST /api/auth/passkey/authenticate/finish` | verified passkey assertion + slot token in the body (same-origin POST; 10/address/min) | open by design: verifies the assertion, resolves the account from the credential id, and upgrades the caller's anonymous slot; the same 401 `passkey_verification_failed` shape for bad challenges, failed assertions, and unknown credentials |
 
 ## Account routes (account session, not room credentials)
 
