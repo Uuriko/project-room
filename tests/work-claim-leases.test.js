@@ -2,9 +2,9 @@
 // Pure state-machine tests (no store) plus a handler smoke test with fakes.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, reassignWork, isLeaseExpired, releaseExpired,
+import { createWork, claimWork, updateWork, isLeaseExpired, releaseExpired,
   canCloseWork, roomWorkClaimConfig, workOwnedBy, unclaimedWork, ClaimError,
-  STATES, DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS } from "../server/work-claims.mjs";
+  DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof ClaimError && error.code === code);
