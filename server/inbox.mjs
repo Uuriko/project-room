@@ -8,6 +8,8 @@ import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";
 import { buildThreads } from "./inbox-threads.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
+import { assessThreadSla, slaTargets } from "./sla-clocks.mjs";
+import { buildMorningDigest } from "./morning-digest.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
@@ -348,15 +350,86 @@ export class Inbox {
         const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
           sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
         const byId = new Map(rows.map(row => [row.id, row]));
+        const infosById = new Map(infos.map(info => [info.row.id, info]));
         const threads = scoped.slice(0, take).map(thread => ({
           threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
           firstAt: thread.firstAt, lastAt: thread.lastAt,
+          // Per-channel SLA clock, inline in the thread list (task 24): an
+          // additive field; null when the thread carries nothing to clock.
+          sla: this.slaAssessment(infosById, thread, ctx.sentIds),
           entries: thread.entries
             .map(({ message, depth }) => ({ depth, source: this.sourceSummary(auth, byId.get(message.id), ctx) }))
             .filter(entry => entry.source)
         })).filter(thread => thread.entries.length > 0);
         return { contractVersion: 1, viewer: viewer(auth), threads, total: scoped.length };
       });
+    }
+    // Per-channel SLA assessment for one built thread. Direction comes from
+    // the stored envelope: owner-sent is outbound, messages addressing the
+    // owner are inbound, everything else is skipped (no one owes a reply).
+    // Pure view over stored facts; never a stored flag.
+    slaAssessment(infosById, thread, sentIds) {
+      const addressOf = value => (value?.address ?? "").toLowerCase();
+      const directionOf = info => {
+        try {
+          if (info.adapter === "email") {
+            const envelope = readEmailEnvelope(info.envelope);
+            const own = new Set([envelope.connection.identity, ...(envelope.connection.aliases ?? [])].map(addressOf));
+            const from = addressOf(envelope.message.from);
+            if (own.has(from)) return "outbound";
+            return envelope.message.to.some(a => own.has(addressOf(a))) ? "inbound" : "skip";
+          }
+          if (info.adapter !== "synthetic") {
+            const envelope = readChannelEnvelope(info.envelope);
+            const identity = envelope.connection?.identity, from = envelope.message?.from;
+            if (from && identity && String(from.id) === String(identity.id)) return "outbound";
+            return inboxNeedsYou({ adapter: info.adapter, envelope: info.envelope }, sentIds) ? "inbound" : "skip";
+          }
+        } catch { /* malformed envelope: skip, never break the thread view */ }
+        return "skip";
+      };
+      const channelCounts = new Map(), messages = [];
+      for (const entry of thread.entries) {
+        const info = infosById.get(entry.message.id);
+        if (!info) continue;
+        const channel = info.adapter === "email" ? "email" : info.channel;
+        if (channel) channelCounts.set(channel, (channelCounts.get(channel) ?? 0) + 1);
+        const direction = directionOf(info);
+        if (direction === "skip") continue;
+        messages.push({ id: entry.message.id, occurredAt: entry.message.occurredAt, direction });
+      }
+      if (!messages.length || !channelCounts.size) return null;
+      const channel = [...channelCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      try {
+        return assessThreadSla({ threadId: thread.threadId ?? "thread:" + messages[0].id,
+          channel, messages, now: Date.now(), targets: slaTargets });
+      } catch { return null; } // clock skew (now < latest inbound): omit rather than lie
+    }
+    // Morning digest (task 21): the overnight arrivals across channels as a
+    // daily brief, built from the thread view and the pure digest builder.
+    // In-app delivery first: format, delivery channel, and daily time are
+    // John's call (task 22), so this is an on-demand read, never a push.
+    digest(token, binding, { since = null, limit = null, includeChannels = false } = {}) {
+      const windowStart = since === null || since === undefined ? Date.now() - 24 * 3600 * 1000 : Date.parse(since);
+      if (!Number.isFinite(windowStart)) fail(422, "invalid_digest_since", "Supply a parseable since timestamp.");
+      const view = this.threads(token, binding, { limit, includeChannels });
+      const arrivals = [];
+      for (const thread of view.threads) {
+        const threadId = thread.threadId ?? null;
+        for (const entry of thread.entries) {
+          const source = entry.source;
+          if (!source || source.updatedAt < windowStart) continue;
+          const channel = source.connection?.channel ?? (source.adapter === "email" ? "email" : "unknown");
+          const sender = source.sender == null ? "unknown" : String(source.sender);
+          arrivals.push({ id: source.id, channel, threadId: threadId ?? source.id,
+            senderId: sender, senderLabel: sender, subject: source.subject == null ? "" : String(source.subject),
+            occurredAt: new Date(source.updatedAt).toISOString(), sla: thread.sla ?? null });
+        }
+      }
+      const now = new Date();
+      return { contractVersion: 1, viewer: view.viewer,
+        digest: buildMorningDigest({ arrivals, since: new Date(windowStart).toISOString(),
+          date: now.toISOString().slice(0, 10), now: now.toISOString() }) };
     }
     // Attachment descriptors for one source. Descriptors are metadata only: the
     // system never retains attachment bytes, so this is a listing and a

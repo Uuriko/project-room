@@ -1056,6 +1056,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
           { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        // Morning digest (task 21): the overnight arrivals across channels as
+        // an in-app daily brief. Channel sources need the reading view, like
+        // the threads list above. On-demand read, never a push (task 22).
+        if (url.pathname === "/api/inbox/digest" && req.method === "GET") return json(res, 200, store.inbox.digest(token, binding,
+          { since: url.searchParams.get("since"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
           { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,
