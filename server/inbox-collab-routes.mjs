@@ -60,7 +60,13 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
   const collab = store.collab;
   const caller = callerOf(auth);
   const asHuman = () => {
-    if (caller.kind !== "human") reject(403, "human_required", "This action requires a human room member.");
+    // RC-2026-09-18-023: the human gate is a deliberate trust boundary, not
+    // a missing feature — the denial says why and exactly what unlocks it.
+    if (caller.kind !== "human") reject(403, "human_required",
+      "Approval verdicts are intentionally human-gated: an agent cannot clear its own draft. " +
+      "Have a human room member issue the verdict with their own credential: " +
+      "POST /api/rooms/{roomId}/collab/approvals/{proposalId}/decide " +
+      "with {decision: \"approve\"|\"edit\"|\"reject\", note?, editedBody?}.");
     return { kind: "human", id: caller.id, label: caller.label };
   };
   const asAgent = () => {
