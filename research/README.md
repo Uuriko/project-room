@@ -20,6 +20,7 @@ Docs only. No people-data. First slice `die-packet-brief-status`.
 | --- | --- |
 | [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk stage machine; Lightfield packet → brief → blocked sends; measure one Lightfield hire |
 | [DEMIGOD-E2E-SLICE-CLI-2026-09-18.md](DEMIGOD-E2E-SLICE-CLI-2026-09-18.md) | Now-slice CLI map for `die-packet-brief-status` (script names + kill-switches; local prototype; companion to #531) |
+| [DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md](DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md) | Six human kill-switches (send_ticket → invoice + freeze-band ack); local blocked send_* via state-machine.json + kill-switch-ledger.mjs; measure one Lightfield hire |
 
 ## Research index
 

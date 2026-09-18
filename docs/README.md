@@ -30,6 +30,7 @@ No people-data. First slice `die-packet-brief-status`.
 | --- | --- |
 | [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk; Lightfield packet → brief → blocked sends; measure one Lightfield hire |
 | [DEMIGOD-E2E-SLICE-CLI-2026-09-18.md](../research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md) | Now-slice CLI map (`die-packet-brief-status`); scripts + kill-switches; local prototype only |
+| [DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md](../research/DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md) | Six human kill-switches + freeze-band ack; blocked send_* enforcement; Shipped ≠ Measured (one Lightfield hire) |
 
 ## Steal contracts (docs only, not live doors)
 
