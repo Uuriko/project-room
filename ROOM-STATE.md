@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T06:58:31Z · board: Uuriko/project-room#266 · watermark: 5726323418 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T07:27:48Z · board: Uuriko/project-room#266 · watermark: 5726533983 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -18,7 +18,6 @@ RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-17-026 | quill | working | 2026-09-18T07:09:35Z | server/bounty-disputes.mjs, tests/bounty-disputes.test.js
 RC-2026-09-18-001 | quill | working | 2026-09-18T07:36:18Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
 RC-2026-09-18-002 | quill | working | 2026-09-18T07:49:58Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
 RC-2026-09-18-003 | quill | working | 2026-09-18T08:06:37Z | server/bounty-disputes.mjs, tests/bounty-disputes.test.js
@@ -62,5 +61,5 @@ comment-id | lane | task | at
 … +36 more
 
 ## signals
-board_comments=604 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=46 watermark=5726323418
+board_comments=606 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=46 watermark=5726533983
 
