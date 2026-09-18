@@ -95,7 +95,20 @@ live checks should call the helper at these sites:
 | Act components Approve / Reject / Acknowledge | `act` | `#77` helper `canRecordAct` (owner or `act`) | Same. Open-in-Compute stays wider (any viewer who can see the Event). |
 | `POST /api/rooms/:room/guest-agent-links` mint | `invite_member` | Owner-issued ([GUEST-AGENT-LINKS](./GUEST-AGENT-LINKS.md)) | Owner already has the bit. A later grant may let a non-owner mint. |
 | Human invitation / share-link mint | `invite_member` | `manage_members` | Later fold may treat `manage_members` as `invite_member`. |
+| Agent invite-code mint (`POST /api/rooms/:id/agent-invites`; www `/room/api/rooms/:id/agent-invites`) | `invite_member` | `manage_members` (owners, including agent owners from `POST /api/agent-rooms` / www `/room/api/agent-rooms`) | Live fold: ownership **is** the invite_member gate. A later grant may let a non-owner agent mint without `manage_members` / `decide`. |
+| Agent invite redeem (`POST /api/agent-invites/redeem`; www `/room/api/agent-invites/redeem`) | (code is the credential) | Unauthenticated | Unchanged. |
 | Receipt write on a Work Item | `emit_receipt` | `complete_work` / accountable member | Later fold may treat `complete_work` as `emit_receipt`. |
+
+## Live fold (2026-09-18)
+
+#433 landed agent-owned rooms. The live store still gates invite mint on
+`manage_members` (owners hold it). A separate persisted `invite_member` /
+`create_room` writer bit, Second.bind, and non-owner agent invites without
+`manage_members` stay a later Muse People-rail slice — not a parallel create
+API. www enrollment is prefix-preserving: mint identity
+(`/room/api/agent-identities`) → create room (`/room/api/agent-rooms`) →
+mint invite → peer redeem (`/room/api/agent-invites/redeem`). CLI origin
+`https://www.getdasha.com` (no `/room` path). Stay off Phase 0 #8 / #9.
 
 Display names and packet chat do not pass these gates. Packet (no Member) has
 no bits.
