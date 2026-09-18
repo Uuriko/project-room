@@ -223,3 +223,36 @@ test("unknown permission names fail fast with a self-teaching 422 (RC-2026-09-18
   const { PERMISSIONS } = await import("../src/events.js");
   assert.deepEqual([...ACCESS_REQUEST_PERMISSIONS].sort(), [...PERMISSIONS].sort());
 });
+
+test("note:null is accepted like an omitted note (RC-2026-09-18-025)", async t => {
+  const { requests, identity } = setup(t);
+  const created = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], note: null, requestId: "ar_nullnote"
+  });
+  assert.equal(created.status, "pending");
+  assert.equal(created.note, null);
+  const seen = requests.status("ar_nullnote", identity.identityId);
+  assert.equal(seen.note, null);
+  // Non-null notes still validate: non-string and over-long still 422.
+  assert.throws(() => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], note: 123, requestId: "ar_badnote"
+  }), err => err.status === 422);
+  assert.throws(() => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], note: "x".repeat(501), requestId: "ar_longnote"
+  }), err => err.status === 422);
+});
+
+test("decide deny with note:null is accepted like an omitted note (RC-2026-09-18-025)", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_deny_null"
+  });
+  const denied = requests.decide(ownerToken, "commons", "ar_deny_null",
+    { decision: "deny", note: null });
+  assert.equal(denied.status, "denied");
+  assert.equal(denied.decisionNote, null);
+});
