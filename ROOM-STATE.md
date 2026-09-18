@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T19:58:01Z · board: Uuriko/project-room#266 · watermark: 5735452290 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T20:28:06Z · board: Uuriko/project-room#266 · watermark: 5735756517 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -21,14 +21,25 @@ RC-2026-09-18-010 | quill | working | 2026-09-18T20:30:26Z | server/agent-plugin
 RC-2026-09-18-011 | quill | working | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
 RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
 RC-2026-09-18-017 | quill | working | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
+RC-2026-09-18-018 | quill | working | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
+RC-2026-09-18-019 | quill | working | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
+RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
+RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
+RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
+RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 RC-2026-09-18-010 | quill | working | 2026-09-18T20:30:26Z | server/agent-plugin-store.mjs, server/agent-plugin-routes.mjs, server/store.mjs (agent-plugin wiring only), server/http.mjs (agent-plugin routes only), tests/agent-plugin-http.test.js
 RC-2026-09-18-011 | quill | working | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
 RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
 RC-2026-09-18-017 | quill | working | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
+RC-2026-09-18-018 | quill | working | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
+RC-2026-09-18-019 | quill | working | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
+RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
+RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
+RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
+RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -39,16 +50,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5735756517
+RC-2026 | none | 5735756283
+RC-2026 | none | 5735750802
+RC-2026 | none | 5735750587
+RC-2026 | none | 5735733304
 RC-2026-09-18-016 | 30c7f83d2ad2abe5cd057330c7560a293bafc609 | 5735009076
 W25-2026 | none | 5734922631
 unknown | none | 5734865291
 W25-2026 | none | 5734730735
 W26-2026 | none | 5734455681
-RC-2026-09-18-015 | 6d61cd488e06783d5740de65a11a51a67a8413f3 | 5734400834
-unknown | none | 5734319452
-unknown | none | 5734201175
-INST-2026 | none | 5734185517
-W23-2026 | none | 5734168932
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -65,5 +76,5 @@ comment-id | lane | task | at
 … +46 more
 
 ## signals
-board_comments=771 threshold=1500 rotation_due=no watcher=active open_claims=18 prose_open=0 unfenced_prose=56 watermark=5735452290
+board_comments=791 threshold=1500 rotation_due=no watcher=active open_claims=24 prose_open=0 unfenced_prose=56 watermark=5735756517
 
