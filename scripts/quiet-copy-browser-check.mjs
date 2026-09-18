@@ -54,9 +54,9 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
     const help = page.locator(".access-help > summary");
     await help.focus(); await page.keyboard.press("Enter");
-    const helpCopy = page.locator(".access-help p:not(#session-hint)");
-    assert.equal(await helpCopy.isVisible(), true);
-    assert.match(await helpCopy.textContent(), /keep your key private/i);
+    const helpBody = page.locator(".access-help > p").first();
+    assert.equal(await helpBody.isVisible(), true);
+    assert.match(await helpBody.textContent(), /keep your key private/i);
     await page.keyboard.press("Enter");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-login.png` });
     await page.getByLabel("Room key", { exact: true }).fill("invalid-key");
