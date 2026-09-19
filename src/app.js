@@ -333,6 +333,19 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+// Account-session restore flight: declared before the sign-in UI mounts.
+// The magic-link auto-redeem runs synchronously during mount (page load
+// with ?magic=), so ensureAccountSession must not sit in the temporal dead
+// zone below — a TDZ ReferenceError here silently broke one-tap sign-in
+// (RC-2026-09-19-066): the redeem failed before any network call and the
+// user was left on the welcome screen.
+let accountRestoreFlight = null;
+function ensureAccountSession() {
+  if (accountClient.session) return Promise.resolve(accountClient.session);
+  if (accountRestoreFlight) return accountRestoreFlight;
+  accountRestoreFlight = accountClient.restore().finally(() => { accountRestoreFlight = null; });
+  return accountRestoreFlight;
+}
 // Sign-in & security settings (slice 7): mounted inside the account rooms
 // panel's <details>, opened from the session menu.
 const accountSettingsUI = createAccountSettingsUI({ accountClient });
@@ -645,13 +658,6 @@ function handleFailureNotice(error) {
 function unreachableRoomMessage(error) {
   return error?.status >= 500 ? "The room service is unavailable right now. Try refreshing in a moment."
     : "Can’t reach the room. Check your connection, then try refreshing.";
-}
-let accountRestoreFlight = null;
-function ensureAccountSession() {
-  if (accountClient.session) return Promise.resolve(accountClient.session);
-  if (accountRestoreFlight) return accountRestoreFlight;
-  accountRestoreFlight = accountClient.restore().finally(() => { accountRestoreFlight = null; });
-  return accountRestoreFlight;
 }
 function sameAccountTuple(left, right) {
   return Boolean(left?.account && right?.account)
