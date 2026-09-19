@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer } from "../src/work-packet.js";
+import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -74,10 +74,14 @@ export function auditTextResults(db, state, history) {
       check(work && projected.get(event.id) === work.id && !audited.has(event.id)); audited.add(event.id);
       const { nativeText, text } = verifyTextCompletion(db, state, { ...work, receipt: parent ? { eventId: parent } : null }, data);
       const receipt = [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === event.id);
-      check(text.postSequence < row.sequence && isDeepStrictEqual(receipt, {
+      // Legacy stored receipts predate result segments; treat a missing
+      // segments field as the null backfill the new applier writes.
+      const normalized = { ...receipt, segments: receipt?.segments ?? null };
+      check(text.postSequence < row.sequence && isDeepStrictEqual(normalized, {
         reportedById: event.actorId, ...reportedProducer(data),
         summary: data.summary, evidenceUrl: null, nativeText, evidenceVersion: data.evidenceVersion,
-        checksClaimed: data.checksClaimed || [], nextAction: data.nextAction, eventId: event.id
+        checksClaimed: data.checksClaimed || [], segments: validateResultSegments(data.segments),
+        nextAction: data.nextAction, eventId: event.id
       }));
     }
     previous.set(data.workItemId, event.id);

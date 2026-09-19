@@ -1,8 +1,8 @@
-# Session Budgets (W4-46 H5)
+# Session Budgets (W4-46 H5) and Work Controls (RC-2026-09-19-063)
 
 A claimed work session can declare a **budget** — hard bounds on runtime,
-attempts, concurrency, and spend. The Room enforces them; any interaction
-with a runaway session stops it first.
+attempts, concurrency, spend, work-loop rounds, and tool calls. The Room
+enforces them; any interaction with a runaway session stops it first.
 
 ## Declaring a budget
 
@@ -10,16 +10,16 @@ Budgets are declared once, at claim time. Later status changes cannot
 silently change the brief — a `budget` on any other transition is rejected.
 
 ```sh
-node scripts/agent-inbox.mjs claim WORK_ID '{"maxRuntimeMs":3600000,"maxAttempts":3,"maxConcurrent":2,"maxSpendCents":5000}'
+node scripts/agent-inbox.mjs claim WORK_ID '{"maxRuntimeMs":3600000,"maxAttempts":3,"maxConcurrent":2,"maxSpendCents":5000,"maxRounds":20,"maxToolCalls":500}'
 ```
 
 Or from code:
 
 ```js
-await client.claimSession(workItemId, { budget: { maxRuntimeMs: 3600000, maxAttempts: 3 } });
+await client.claimSession(workItemId, { budget: { maxRuntimeMs: 3600000, maxAttempts: 3, maxRounds: 20 } });
 ```
 
-## The four bounds
+## The six bounds
 
 | Key | Meaning |
 |---|---|
@@ -27,25 +27,42 @@ await client.claimSession(workItemId, { budget: { maxRuntimeMs: 3600000, maxAtte
 | `maxAttempts` | How many times the work item may be started (`attempt_count` increments per start). |
 | `maxConcurrent` | How many live sessions the worker may hold at once. |
 | `maxSpendCents` | Cumulative reported spend, in integer cents. |
+| `maxRounds` | Work-loop rounds the session may run. **Exceeding pauses, not stops** — see below. |
+| `maxToolCalls` | Tool calls the session may make. Exceeding force-stops, like spend. |
 
-All four are optional. Anything undeclared is **explicitly labeled
+All six are optional. Anything undeclared is **explicitly labeled
 `"unknown"`** — on the session card, on the budget card, and in event
 data. An unknown quota is never treated as authorization for an overage:
 spend enforcement only trips on spend the worker actually reported.
 
 Caps: attempts and concurrency are bounded to 1–25, runtime to 1–7 days,
-spend to 1 cent–$10M. Unknown keys and empty budgets are rejected.
+spend to 1 cent–$10M, rounds to 1–10,000, tool calls to 1–1,000,000.
+Unknown keys and empty budgets are rejected.
 
 ## Enforcement
 
-- **Runtime / spend trip-wire.** Before any mutation touches a session, the
-  Room checks the stored budget. If the runtime or the known reported spend
-  is over the cap — including spend reported *on that very mutation* — the
-  session is force-stopped (`session.stopped`, status `failed`) in its own
-  committing transaction, and the caller's mutation is rejected with
-  `409 budget_exceeded`. The stop event carries
-  `budgetEnforced: true`, `reason: "budget_exceeded"`, and which `limit`
-  tripped, so the audit log shows who stopped what and why.
+- **Runtime / spend / tool-call trip-wire.** Before any mutation touches a
+  session, the Room checks the stored budget. If the runtime, the known
+  reported spend, or the reported tool calls are over the cap — including
+  numbers reported *on that very mutation* — the session is force-stopped
+  (`session.stopped`, status `failed`) in its own committing transaction,
+  and the caller's mutation is rejected with `409 budget_exceeded`. The
+  stop event carries `budgetEnforced: true`, `reason: "budget_exceeded"`,
+  and which `limit` tripped, so the audit log shows who stopped what and
+  why.
+- **Round limit: pause, report, resume.** A session that exceeds
+  `maxRounds` is **auto-suspended**, not stopped: the Room commits a
+  `session.status_changed` to `suspended` with `suspendReason:
+  "round_limit"` in its own committing transaction and rejects the
+  caller's mutation with `409 round_limit_exceeded`. The worker keeps its
+  claim through the pause but cannot self-resume — any resume by the
+  worker is rejected with the same code. Only the room owner (or a member
+  with `manage_claims`) can resume; the approved resume is recorded with
+  `resumeApproved: true`, restarts the round count at 0, and hands the
+  session back to the paused worker. The applier re-checks
+  `resumeApproved`, so a tampered log entry cannot smuggle a resume past.
+  The room owner is notified of every pause and every enforcement stop,
+  even when they are not the accountable member on the card.
 - **Attempts.** A start that would exceed `maxAttempts` is rejected with
   `409 budget_exceeded` before anything is written.
 - **Concurrency.** The bound follows the worker: the new claim's
@@ -57,27 +74,56 @@ spend to 1 cent–$10M. Unknown keys and empty budgets are rejected.
   verbatim at replay; the applier re-validates it, so a tampered log entry
   cannot smuggle a wider brief.
 
-## Reporting spend
+## Reporting usage
 
-Any `set_status` mutation may report cumulative spend:
+Any `set_status` mutation may report cumulative usage:
 
 ```js
 await client.workSessionAction({ requestId, workItemId, expectedRevision,
-  action: "set_status", status: "active", spendCents: 240 });
+  action: "set_status", status: "active", spendCents: 240, rounds: 6, toolCalls: 41 });
 ```
 
-The card shows `spendCents` as the last reported number, or `"unknown"`
-when nothing was ever reported. Over-budget reports stop the session on
-the spot — they are not stored and then tripped later.
+Reports are **monotonic**: the Room keeps the max, so a stale, reordered,
+or malicious report can never rewind the counters the limits are enforced
+on. The card shows `spendCents` as the last reported number (or
+`"unknown"` when nothing was ever reported), plus `rounds`, `toolCalls`,
+and — for a paused session — `suspendedBy: "round_limit"`. Over-budget
+reports stop (or pause) the session on the spot — they are not stored and
+then tripped later.
+
+## Result marks: fact / inference / proposal
+
+A completion may mark passages of its result so consumers know what they
+are acting on:
+
+```js
+await client.workAction("room_record_completion", { requestId, workItemId, expectedRevision,
+  summary: "...", evidenceUrl: "https://…", evidenceVersion: "v1", nextAction: "…",
+  segments: [
+    { kind: "fact", text: "The endpoint returned 200 on three probes." },
+    { kind: "inference", text: "The outage was likely a deploy, not a config change." },
+    { kind: "proposal", text: "Add a canary check before the next deploy." }
+  ] });
+```
+
+- `fact` — observed; `inference` — derived; `proposal` — suggested, never
+  authoritative.
+- Optional, 1–20 segments of 1–2000 characters each. Unmarked results stay
+  unmarked — the Room never guesses marks.
+- Validated on the way in and stored on the completion receipt; returned
+  by `work-result` and the native-result audit. Legacy completions without
+  segments replay with `segments: null`.
+- The same `segments` field works on `room_submit_text_result`.
 
 ## Cards
 
-Session cards now carry `started_at`, `attempt_count`, `budget`, and
-`spendCents`. `budget` is a four-key card where every undeclared quota
-reads `"unknown"`. Exact-object assertions in existing tests were updated
-for the new fields; nothing else about the session lifecycle changed.
+Session cards now carry `started_at`, `attempt_count`, `budget`,
+`spendCents`, `rounds`, `toolCalls`, and `suspendedBy`. `budget` is a
+six-key card where every undeclared quota reads `"unknown"`. Exact-object
+assertions in existing tests were updated for the new fields; nothing else
+about the session lifecycle changed.
 
-Tests: `tests/work-session-budget.test.js` (6/6).
+Tests: `tests/work-session-budget.test.js`, `tests/work-controls.test.js`.
 
 ## Room spend allowance (issue #6 C3)
 

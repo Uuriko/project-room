@@ -13,7 +13,8 @@ import { validAgentNext } from "../src/agent-error.mjs";
 import {
   SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType, attemptReceipts, cancellationState,
   listWorkItemSessions, workItemSessionContract, applySessionFields, sessionWorker,
-  presentedSessionStatus, SESSION_HEARTBEAT_STALE_MS
+  presentedSessionStatus, SESSION_HEARTBEAT_STALE_MS,
+  roundLimitExceeded, reportRounds, reportToolCalls
 } from "../src/work-item-session.js";
 
 const PEOPLE = /@gmail|John |Potter |acct-|accountId|people-data/i;
@@ -68,7 +69,7 @@ test("session contract stays on writer 27 and off Compute / Slack-with-bots / pe
 test("legacy work items read as queued; started/status/stop/stopped are exact transitions", () => {
   const item = { id: "legacy", title: "Old", state: "accepted", revision: 2, accountableMemberId: "agent" };
   assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
-    started_at: null, attempt_count: 0, budget: null, spend_cents: null, attempts: [] });
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null, round_count: 0, tool_calls: 0, suspended_by: null, attempts: [] });
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:00:00.000Z" });
   assert.equal(item.status, SESSION_STATUSES.PROCESSING);
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, at: "2026-09-10T21:01:00.000Z", data: { status: "active" } });
@@ -97,7 +98,7 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
   const review = state.workItems["work-spec-review"];
   assert.equal(review.state, "completed");
   assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
-    started_at: null, attempt_count: 0, budget: null, spend_cents: null, attempts: [] });
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null, round_count: 0, tool_calls: 0, suspended_by: null, attempts: [] });
   const next = applyEvent(state, {
     id: "session-seed-start", idempotencyKey: "session-seed-start", roomId: state.room.id,
     type: T.SESSION_STARTED, actorId: "codex", at: "2026-09-10T21:10:00.000Z",
@@ -431,4 +432,49 @@ test("G1 attempt environment and outputs flow through the session command path",
   const conflict = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
     data: sessionBody({ requestId: stopId, action: "set_status", status: "done", outputs: ["msg:different"], expectedRevision: 1 }) });
   assert.equal(conflict.status, 409);
+});
+
+// RC-2026-09-19-063: round limits pause rather than stop; usage reports are
+// monotonic; the applier guards the owner-approval gate on replay.
+test("roundLimitExceeded reads the pending count; reportRounds/reportToolCalls never rewind", () => {
+  const item = { id: "w", title: "T", state: "accepted", revision: 0, accountableMemberId: "a",
+    status: "active", budget: { maxRounds: 3 }, round_count: 2, tool_calls: 4 };
+  assert.equal(roundLimitExceeded(item), false);
+  assert.equal(roundLimitExceeded(item, 3), false, "at the limit is not over it");
+  assert.equal(roundLimitExceeded(item, 4), true);
+  assert.equal(roundLimitExceeded({ ...item, status: "done" }, 99), false, "terminal sessions are exempt");
+  assert.equal(roundLimitExceeded({ ...item, budget: null }, 99), false, "no declared limit is not a limit");
+  reportRounds(item, { data: { rounds: 1 } });
+  reportToolCalls(item, { data: { toolCalls: 2 } });
+  assert.equal(item.round_count, 2, "stale reports do not rewind rounds");
+  assert.equal(item.tool_calls, 4, "stale reports do not rewind tool calls");
+  reportRounds(item, { data: { rounds: 9 } });
+  reportToolCalls(item, { data: { toolCalls: 11 } });
+  assert.equal(item.round_count, 9);
+  assert.equal(item.tool_calls, 11);
+  assert.throws(() => reportRounds(item, { data: { rounds: -1 } }), /non-negative/);
+  assert.throws(() => reportToolCalls(item, { data: { toolCalls: 1.5 } }), /non-negative/);
+});
+
+test("a round-limit pause records its reason; resume without approval is refused on replay", () => {
+  const item = { id: "w", title: "T", state: "accepted", revision: 0, accountableMemberId: "a", status: "processing" };
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent",
+    at: "2026-09-10T21:00:00.000Z", data: { status: "suspended", suspendReason: "round_limit" } });
+  assert.equal(item.status, "suspended");
+  assert.equal(sessionRecord(item).suspended_by, "round_limit");
+  // The worker's own resume is refused even if the event log were tampered with.
+  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent",
+    at: "2026-09-10T21:01:00.000Z", data: { status: "active" } }), /owner approval/);
+  // An approved resume clears the pause with a fresh round count and keeps the worker.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "owner",
+    at: "2026-09-10T21:02:00.000Z", data: { status: "active", resumeApproved: true, rounds: 7 } });
+  const record = sessionRecord(item);
+  assert.equal(record.status, "active");
+  assert.equal(record.suspended_by, null);
+  assert.equal(record.round_count, 0, "the approved resume restarts the round count");
+  assert.equal(record.worker_member_id, "agent", "the paused worker keeps the session");
+  // A non-round-limit suspendReason is rejected at the gate.
+  assert.throws(() => applySessionFields({ ...item, status: "processing" },
+    { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent", at: "2026-09-10T21:03:00.000Z",
+      data: { status: "suspended", suspendReason: "lunch" } }), /suspendReason/);
 });

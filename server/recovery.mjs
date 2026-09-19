@@ -43,7 +43,47 @@ export function auditRecovery(store) {
         }
         return copy;
       };
-      requireState(canonical(stripChannels(actual)) === canonical(stripChannels(rebuilt)));
+      // Work controls: old stored projections may lack the round/tool-call
+      // counters and suspension cause while the replay backfills defaults.
+      // Receipts in old projections also lack result segments (new code adds
+      // null). Compare ignoring those fields, then verify the backfill is
+      // the deterministic default.
+      const stripWorkControls = (obj) => {
+        const copy = JSON.parse(JSON.stringify(obj));
+        const items = copy.state?.workItems;
+        if (items && typeof items === "object") {
+          for (const item of Object.values(items)) {
+            delete item.round_count;
+            delete item.tool_calls;
+            delete item.suspended_by;
+            delete item.receipt?.segments;
+            if (Array.isArray(item.receiptHistory)) {
+              for (const receipt of item.receiptHistory) delete receipt.segments;
+            }
+          }
+        }
+        return copy;
+      };
+      requireState(canonical(stripWorkControls(stripChannels(actual))) === canonical(stripWorkControls(stripChannels(rebuilt))));
+      // Verify the work-control backfill: where the stored projection already
+      // carries the fields the replay must match it; where it lacks them
+      // (legacy data) the replay must carry the deterministic defaults.
+      for (const [id, rebuiltItem] of Object.entries(rebuilt.state?.workItems ?? {})) {
+        const actualItem = actual.state?.workItems?.[id];
+        for (const [field, fallback] of [["round_count", 0], ["tool_calls", 0], ["suspended_by", null]]) {
+          if (actualItem && field in actualItem) requireState(rebuiltItem[field] === actualItem[field]);
+          else requireState(rebuiltItem[field] === fallback);
+        }
+        const receipts = [rebuiltItem.receipt, ...(rebuiltItem.receiptHistory ?? [])].filter(Boolean);
+        const actualReceipts = [actualItem?.receipt, ...(actualItem?.receiptHistory ?? [])].filter(Boolean);
+        receipts.forEach((receipt, index) => {
+          if (actualReceipts[index] && "segments" in actualReceipts[index]) {
+            requireState(JSON.stringify(receipt.segments) === JSON.stringify(actualReceipts[index].segments));
+          } else {
+            requireState(receipt.segments === null);
+          }
+        });
+      }
       // Verify the general channel backfill is consistent (compare essential
       // fields only; createdBy/createdAt may differ between repair and replay
       // for legacy data).

@@ -50,19 +50,40 @@ export function isRunningSession(status) {
 
 export function defaultWorkItemSession() {
   return { status: SESSION_STATUSES.QUEUED, stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
-    started_at: null, attempt_count: 0, budget: null, spend_cents: null };
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null, round_count: 0, tool_calls: 0,
+    suspended_by: null };
 }
 
-// W4-46 H5: session budgets. A claimer may declare bounds for their run;
-// undeclared keys stay "unknown" — never assumed zero or unlimited.
-export const SESSION_BUDGET_KEYS = Object.freeze(["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents"]);
-const BUDGET_CAPS = Object.freeze({ maxRuntimeMs: 30 * 86400000, maxAttempts: 1000, maxConcurrent: 25, maxSpendCents: 100000000 });
+// Replay backfill: rooms projected before work controls existed carry work
+// items without the round/tool-call counters and suspension cause, and
+// receipts without result segments. Backfill the deterministic defaults on
+// replay so no data migration is needed (mirrors ensureDefaultChannel).
+export function ensureWorkControlDefaults(state) {
+  const items = state?.workItems;
+  if (!items || typeof items !== "object") return;
+  for (const item of Object.values(items)) {
+    if (!item || typeof item !== "object") continue;
+    if (!Number.isSafeInteger(item.round_count) || item.round_count < 0) item.round_count = 0;
+    if (!Number.isSafeInteger(item.tool_calls) || item.tool_calls < 0) item.tool_calls = 0;
+    if (item.suspended_by !== "round_limit") item.suspended_by = null;
+    for (const receipt of [item.receipt, ...(item.receiptHistory ?? [])]) {
+      if (receipt && typeof receipt === "object" && !("segments" in receipt)) receipt.segments = null;
+    }
+  }
+}
+
+// RC-2026-09-19-063: session budgets grow two bounds. A claimer may declare
+// how many work-loop rounds one live session may run (maxRounds) and how many
+// tool calls it may make (maxToolCalls); undeclared keys stay "unknown" —
+// never assumed zero or unlimited.
+export const SESSION_BUDGET_KEYS = Object.freeze(["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents", "maxRounds", "maxToolCalls"]);
+const BUDGET_CAPS = Object.freeze({ maxRuntimeMs: 30 * 86400000, maxAttempts: 1000, maxConcurrent: 25, maxSpendCents: 100000000, maxRounds: 10000, maxToolCalls: 1000000 });
 export function validateSessionBudget(value) {
   if (value === undefined || value === null) return null;
   if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Budget must be an object");
   const keys = Object.keys(value);
   if (!keys.length || keys.some(key => !SESSION_BUDGET_KEYS.includes(key)))
-    throw new Error("Budget keys are maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents");
+    throw new Error("Budget keys are maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents, maxRounds, maxToolCalls");
   const budget = {};
   for (const key of keys) {
     const entry = value[key];
@@ -124,8 +145,8 @@ export function attemptLedger(item) {
 }
 
 // The tripped limit name when a live session has blown its budget, else null.
-// Spend only trips where spend is actually reported — unknown spend is not
-// evidence of anything.
+// Spend and tool calls only trip where the worker actually reported them —
+// unknown usage is not evidence of anything.
 export function budgetLimitExceeded(item, nowMs = Date.now()) {
   const session = sessionRecord(item);
   if (isTerminalSession(session.status) || !session.budget) return null;
@@ -133,7 +154,20 @@ export function budgetLimitExceeded(item, nowMs = Date.now()) {
     && nowMs - Date.parse(session.started_at) > session.budget.maxRuntimeMs) return "maxRuntimeMs";
   if (session.budget.maxSpendCents && session.spend_cents !== null && session.spend_cents > session.budget.maxSpendCents)
     return "maxSpendCents";
+  if (session.budget.maxToolCalls && session.tool_calls > session.budget.maxToolCalls)
+    return "maxToolCalls";
   return null;
+}
+
+// RC-2026-09-19-063: the round limit pauses instead of stopping — a worker
+// that blew its round budget must report status and wait for the owner, not
+// silently die. pendingRounds lets the trip-wire count the number reported on
+// the very mutation being processed.
+export function roundLimitExceeded(item, pendingRounds = null) {
+  const session = sessionRecord(item);
+  if (isTerminalSession(session.status) || session.budget?.maxRounds == null) return false;
+  const rounds = pendingRounds ?? session.round_count;
+  return Number.isSafeInteger(rounds) && rounds > session.budget.maxRounds;
 }
 
 export function sessionRecord(item) {
@@ -150,8 +184,12 @@ export function sessionRecord(item) {
   const started = typeof item.started_at === "string" && Number.isFinite(Date.parse(item.started_at)) ? item.started_at : null;
   const attempts = Number.isSafeInteger(item.attempt_count) && item.attempt_count >= 0 ? item.attempt_count : 0;
   const spend = Number.isSafeInteger(item.spend_cents) && item.spend_cents >= 0 ? item.spend_cents : null;
+  const rounds = Number.isSafeInteger(item.round_count) && item.round_count >= 0 ? item.round_count : 0;
+  const toolCalls = Number.isSafeInteger(item.tool_calls) && item.tool_calls >= 0 ? item.tool_calls : 0;
+  const suspendedBy = item.suspended_by === "round_limit" ? "round_limit" : null;
   return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker,
-    started_at: started, attempt_count: attempts, budget, spend_cents: spend, attempts: attemptLedger(item) };
+    started_at: started, attempt_count: attempts, budget, spend_cents: spend, round_count: rounds,
+    tool_calls: toolCalls, suspended_by: suspendedBy, attempts: attemptLedger(item) };
 }
 
 // The member currently holding a live claim on this session, or null when the
@@ -190,6 +228,12 @@ export function sessionCard(item, cancellation = null) {
     started_at: session.started_at,
     attempt_count: session.attempt_count,
     spendCents: session.spend_cents ?? "unknown",
+    // RC-2026-09-19-063: the counters behind the round and tool-call bounds,
+    // plus why a session is paused. Unreported rounds/calls read 0 — a
+    // worker that never reported any ran none that it counted.
+    rounds: session.round_count,
+    toolCalls: session.tool_calls,
+    suspendedBy: session.suspended_by,
     attempts: session.attempts,
     receipts: attemptReceipts(item),
     cancellation
@@ -255,7 +299,7 @@ export function workItemSessionContract() {
     schemaBump: false,
     writer: 27,
     workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id",
-      "started_at", "attempt_count", "budget", "spend_cents", "attempts"]),
+      "started_at", "attempt_count", "budget", "spend_cents", "round_count", "tool_calls", "suspended_by", "attempts"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
     workStateSeparate: true,
@@ -287,6 +331,22 @@ function reportSpend(item, incoming) {
   item.spend_cents = value;
 }
 
+// RC-2026-09-19-063: rounds and tool calls are cumulative worker reports —
+// monotonic, so a stale or malicious report can never rewind the counters.
+export function reportRounds(item, incoming) {
+  if (incoming.data?.rounds === undefined) return;
+  const value = incoming.data.rounds;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("rounds must be a non-negative integer");
+  item.round_count = Math.max(item.round_count ?? 0, value);
+}
+
+export function reportToolCalls(item, incoming) {
+  if (incoming.data?.toolCalls === undefined) return;
+  const value = incoming.data.toolCalls;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("toolCalls must be a non-negative integer");
+  item.tool_calls = Math.max(item.tool_calls ?? 0, value);
+}
+
 export function applySessionFields(item, incoming) {
   const session = sessionRecord(item);
   const at = incoming.at;
@@ -314,6 +374,9 @@ export function applySessionFields(item, incoming) {
     item.attempt_count = attempts;
     item.budget = budget;
     item.spend_cents = null;
+    item.round_count = 0;
+    item.tool_calls = 0;
+    item.suspended_by = null;
     (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
       attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
       environment, limits: budget, endedAt: null, outcome: null, outputs: null });
@@ -322,11 +385,37 @@ export function applySessionFields(item, incoming) {
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
     const next = incoming.data.status;
     if (!CHANGES[session.status]?.includes(next)) throw new Error(`Invalid session transition from ${session.status}`);
+    // RC-2026-09-19-063: a round-limit pause is recorded, and only an
+    // owner-approved resume clears it (with a fresh round count). A worker
+    // cannot dodge the limit by suspending and resuming on its own: the
+    // resume gate lives in the store, and the applier re-checks it so a
+    // tampered log entry cannot smuggle a resume past.
+    if (next === SESSION_STATUSES.SUSPENDED && incoming.data?.suspendReason !== undefined
+      && incoming.data.suspendReason !== "round_limit") throw new Error("suspendReason is round_limit or omitted");
+    if (session.status === SESSION_STATUSES.SUSPENDED && session.suspended_by === "round_limit") {
+      if (next !== SESSION_STATUSES.SUSPENDED && incoming.data?.resumeApproved !== true)
+        throw new Error("A round-limit pause resumes only with owner approval");
+    } else if (next === SESSION_STATUSES.SUSPENDED) {
+      item.suspended_by = incoming.data?.suspendReason === "round_limit" ? "round_limit" : null;
+    } else {
+      item.suspended_by = null;
+    }
     item.status = next;
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
-    item.worker_member_id = incoming.actorId;
+    // An owner-approved resume hands the session back to the worker that was
+    // paused — the owner supervises, the worker continues.
+    item.worker_member_id = incoming.data?.resumeApproved === true && session.worker_member_id
+      ? session.worker_member_id : incoming.actorId;
     reportSpend(item, incoming);
+    reportRounds(item, incoming);
+    reportToolCalls(item, incoming);
+    // The approved resume restarts the round count AFTER any reports on the
+    // resume event itself — those belong to the previous generation.
+    if (incoming.data?.resumeApproved === true) {
+      item.suspended_by = null;
+      item.round_count = 0;
+    }
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STOP_REQUESTED) {
@@ -349,6 +438,8 @@ export function applySessionFields(item, incoming) {
     item.heartbeat_at = at;
     item.worker_member_id = null;
     reportSpend(item, incoming);
+    reportRounds(item, incoming);
+    reportToolCalls(item, incoming);
     // G6: capture measured usage at close; a later attempt resets item spend.
     if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs;
       openAttempt.usageCents = Number.isSafeInteger(item.spend_cents) ? item.spend_cents : null; }
