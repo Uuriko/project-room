@@ -177,9 +177,9 @@ export class AgentPluginStore {
   // open path after the schema is exec'd.
   load() {
     // RC-2026-09-18-014: idempotent additive migration for the signed-card
-    // key envelope. CREATE TABLE IF NOT EXISTS cannot add columns to an
-    // existing table, so backfill them here (same pragma/ALTER pattern as
-    // the credentials migration in server/store.mjs). Legacy rows keep NULL
+    // key envelope. The IF NOT EXISTS form leaves existing tables untouched,
+    // so backfill new columns here (same pragma/ALTER pattern as the
+    // credentials migration in server/store.mjs). Legacy rows keep NULL
     // and pin a key on their next owner-signed republish.
     const cardColumns = new Set(this.db.prepare("PRAGMA table_info(agent_directory_cards)").all().map(c => c.name));
     if (!cardColumns.has("public_key")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN public_key TEXT");
