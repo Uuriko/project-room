@@ -183,8 +183,15 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(ROOM_DEEP_LINK_SCRIPT, /searchParams\.set\("room"/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
-  assert.match(html, /class="ghost join"/);
-  assert.match(html, /class="ghost people"/);
+  assert.match(html, /class="actions"/);
+  assert.match(html, /class="whispers"/);
+  assert.match(html, /aria-label="More ways in"/);
+  assert.match(html, /class="whisper join"/);
+  assert.match(html, /class="whisper people"/);
+  assert.doesNotMatch(html, /class="ghost /);
+  // One primary CTA; Join/Paste/Connect/People whisper beside it.
+  assert.equal([...html.matchAll(/class="open"/g)].length, 1);
+  assert.equal([...html.matchAll(/class="whisper[\s"]/g)].length, 4);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));
   assert.doesNotMatch(html, /Genie/);
