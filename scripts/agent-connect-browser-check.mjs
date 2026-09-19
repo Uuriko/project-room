@@ -99,6 +99,34 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 
+test("agent type catalog renders and click fills the same join path", { timeout: 25000 }, async t => {
+  const f = await setup(t);
+  await f.open();
+  const catalog = f.page.locator("#agent-type-catalog");
+  await catalog.waitFor({ state: "visible" });
+  for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {
+    assert.equal(await catalog.locator(`[data-agent-type="${id}"]`).count(), 1, id);
+  }
+  assert.match(await catalog.innerText(), /Best for local coding sessions with MCP tools/);
+  await f.page.locator('[data-agent-type="claude-code"]').click();
+  assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
+  assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
+  assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
+  assert.match(await f.page.locator("#agent-roster-hint").innerText(), /room_check_access/);
+  assert.equal(await f.page.locator("#agent-create").isHidden(), false);
+  const requests = [];
+  f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
+  await f.page.locator("#agent-create").click();
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].agentType, "claude-code");
+  assert.equal(requests[0].displayName, "Claude Code");
+  assert.equal(requests[0].access, "contribute");
+  assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
+  assert.equal(f.store.room("commons").state.members[requests[0].memberId].agentType, "claude-code");
+  await f.capture("catalog-claude-code");
+});
+
 test("named roster fills Muse and Grok Build; Grok Build shows import checklist", { timeout: 25000 }, async t => {
   const f = await setup(t);
   await f.open();

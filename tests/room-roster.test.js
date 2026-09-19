@@ -139,8 +139,10 @@ test("roster name collision is case-insensitive and ignores inactive or human me
 
 test("Add agent markup lists the four roster names", () => {
   const html = readFileSync(join(checkout, "index.html"), "utf8");
+  assert.match(html, /id="agent-type-catalog"/);
   for (const id of ["instinct", "muse", "grok-build", "grok-bot"]) {
     assert.match(html, new RegExp(`data-roster="${id}"`));
+    assert.match(html, new RegExp(`data-agent-type="${id}"`));
   }
   assert.match(html, /Muse app or WhatsApp/);
   assert.match(html, /id="agent-access-hint"/);

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Agentsky steal cut #1: private Connect **agent type catalog** on Add
+  agent (Claude Code, Codex, Cursor, Hermes, OpenCode, Pi, Grok Bot, plus
+  the named Instinct / Muse / Grok Build recipes). Icon + one-line “best
+  for”; click fills the same existing join path (packet / short invite
+  code / paste prompt / MCP URL). Optional `agentType` metadata on
+  Member. Nested under in-room Add agent and the Connect section — does
+  not rewrite #669 Open+Join first paint. Not a public marketplace or
+  paid store. Off #628, Compute fold, and Quill lanes.
 - Muse Connect / People chrome: getdasha `/room` first paint is Open +
   Join; one Connect spine (Paste a prompt, Add Room as MCP at
   `https://www.getdasha.com/room/mcp`, RM- secondary). #667 Join with

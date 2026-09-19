@@ -10,6 +10,7 @@ import { attemptReceipts, attemptLedger, cancellationState, spendLedger } from "
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -1168,7 +1169,10 @@ function render() {
     const doneChip = done
       ? `<span class="done-chip" title="${esc(done.title)}" data-done-work="${esc(done.workItemId)}">${esc(done.label)}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details></div></div>`;
+    const typeChip = m.kind === "agent" && m.agentType
+      ? `<span class="agent-type-chip" data-agent-type="${esc(m.agentType)}">${esc(catalogById(m.agentType)?.label || m.agentType)}</span>`
+      : "";
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -2713,9 +2717,9 @@ function roomActionEntries() {
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
     { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", reveal: "#people-panel" },
-    { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot connect wake pull desktop takeover", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
-    { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok help", always: true },
+    { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
     { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", always: true },
     { id: "usage", label: "Usage", words: "spend seats sessions caps limits budget headroom", always: true }

@@ -38,6 +38,22 @@ test("room conversation can address a human or agent without creating work", () 
   assert.equal(Object.keys(next.workItems).length, workBefore);
 });
 
+test("member.added can stamp optional catalog agentType and omits it when absent", () => {
+  const state = baseState();
+  const added = applyEvent(state, fixedEvent("catalog-agent", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-claude", displayName: "Claude Code", kind: "agent",
+    permissions: ["accept_work", "complete_work"], agentType: "claude-code"
+  }));
+  assert.equal(added.members["agent-claude"].agentType, "claude-code");
+  const plain = applyEvent(state, fixedEvent("plain-agent", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-plain", displayName: "Helper", kind: "agent", permissions: []
+  }));
+  assert.equal("agentType" in plain.members["agent-plain"], false);
+  assert.throws(() => applyEvent(state, fixedEvent("bad-type", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "agent-bad", displayName: "Bad", kind: "agent", permissions: [], agentType: "NOT VALID"
+  })), /agentType/);
+});
+
 test("invitation acceptance records the joining human as actor without granting its inviter's authority", () => {
   const state = baseState();
   const joined = fixedEvent("joined-from-invitation", EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION, "new-human", {

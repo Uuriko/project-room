@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
 import { isRoomMcpPath, roomMcpFetchResponse } from "../server/mcp-http.mjs";
+import { catalogDoorHtml } from "../src/room-roster.js";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
@@ -210,6 +211,15 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .works-with{margin:.15rem 0 1rem;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--clay)}
+.agent-type-catalog{margin:1rem 0}
+.agent-type-catalog p{margin:0 0 .75rem;font-size:15px;color:rgba(228,222,210,.72)}
+.agent-type-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr));gap:.55rem}
+.agent-type-card{display:flex;gap:.55rem;align-items:flex-start;min-height:48px;padding:.55rem .65rem;border:1px solid rgba(228,222,210,.18);border-radius:.45rem;color:inherit;text-decoration:none}
+.agent-type-card:hover{border-color:var(--clay)}
+.agent-type-icon{flex:0 0 1.75rem;height:1.75rem;font:650 12px/1.75rem ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;background:rgba(228,222,210,.08);border-radius:.3rem}
+.agent-type-copy{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.agent-type-copy strong{font-size:14px}
+.agent-type-copy span{font-size:12px;color:rgba(228,222,210,.58)}
 .connect code{font-size:.9em;color:#E4DED2}
 .join-agent{margin:1.6rem 0 0;padding-top:1.35rem;border-top:1px solid rgba(228,222,210,.12);max-width:34em}
 .join-agent h2{margin:0 0 10px;font:650 11px/1.3 "Hanken Grotesk",system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
@@ -263,6 +273,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <p class="help">Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
     <p class="help">Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
     <p class="help">Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    ${catalogDoorHtml()}
     <p class="help"><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>
@@ -309,6 +320,15 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .works-with{margin:.15rem 0 0;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--acid)}
+.agent-type-catalog{margin:0 0 1.2rem}
+.agent-type-catalog p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
+.agent-type-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr));gap:.55rem}
+.agent-type-card{display:flex;gap:.55rem;align-items:flex-start;min-height:48px;padding:.55rem .65rem;border:1px solid rgba(242,237,231,.18);border-radius:.45rem;color:inherit;text-decoration:none}
+.agent-type-card:hover{border-color:var(--acid)}
+.agent-type-icon{flex:0 0 1.75rem;height:1.75rem;font:650 12px/1.75rem ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;background:rgba(242,237,231,.08);border-radius:.3rem}
+.agent-type-copy{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.agent-type-copy strong{font-size:14px}
+.agent-type-copy span{font-size:12px;color:rgba(242,237,231,.58)}
 .connect code{font-size:.9em;color:var(--paper)}
 .mcp-join-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 .mcp-join-url{display:block;width:100%;box-sizing:border-box;margin:.4rem 0;padding:.5rem .7rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -352,6 +372,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
       ${connectMcpPathHtml()}
       <li class="connect-secondary"><strong>Invite-code (RM-)</strong> — Agents redeem via CLI. Not a human join path. Not a first-paint CTA.</li>
     </ol>
+    ${catalogDoorHtml()}
     <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
       <h2 id="join-agent-title">Join from your favorite agent app</h2>
       <p>Just paste a prompt.</p>

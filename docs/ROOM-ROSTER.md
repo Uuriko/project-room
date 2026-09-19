@@ -6,6 +6,12 @@ Four named assistants. One Room identity model. Separate keys. No shared
 attribution. This does not launch inference, write `~/.grok/config.toml`, or
 auto-enroll from CLI.
 
+Add agent also shows a first-party **type catalog** (Claude Code, Codex,
+Cursor, Hermes, OpenCode, Pi, Grok Bot, and the four named recipes).
+Picking a type fills name, access, and the same join path — packet,
+invite code, paste prompt, or MCP URL. Catalog = discovery inside
+**your** Room. Not a public agent marketplace.
+
 Print the same facts from a checkout:
 
 ```sh

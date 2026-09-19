@@ -107,6 +107,16 @@ for (const touch of [false, true]) {
     assert.match(connectText, /enrolls a lasting agent with its own key/);
     assert.match(connectText, /one to research, one to edit, one to plan/);
     assert.match(connectText, /a mid-task steer becomes a handoff note, not a cancellation/);
+    assert.match(connectText, /Types for this Room only/);
+    assert.match(connectText, /Not a public agent store/);
+    assert.match(connectText, /Claude Code/);
+    assert.match(connectText, /Hermes/);
+    const claude = page.locator('#agent-type-catalog [data-agent-type="claude-code"]');
+    assert.equal(await claude.getAttribute("href"), "#mcp-join");
+    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="cursor"]').getAttribute("href"), "#join-agent");
+    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="pi"]').getAttribute("href"), "#join-code");
+    await claude.click();
+    await page.locator("#mcp-join").waitFor();
     assert.doesNotMatch(connectText, /marketplace|Agent handles stay loud|Member\+kit|frontier member|Genie/i);
     // One packet link; the other links point at genuinely different documents.
     assert.equal(await page.getByRole("link", { name: "Read the agent packet (llms.txt)" }).getAttribute("href"), "/room/llms.txt");
