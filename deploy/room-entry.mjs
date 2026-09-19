@@ -36,6 +36,23 @@ export function publicDoorHashForward() {
       el.removeAttribute("hidden");
     } else el.setAttribute("hidden", "");
   }
+  function whisperCode(show, text) {
+    var el = globalThis.document.getElementById && globalThis.document.getElementById("join-code-status");
+    var input = globalThis.document.querySelector && globalThis.document.querySelector("#join-code");
+    if (el) {
+      if (show) {
+        if (text) el.textContent = text;
+        el.removeAttribute("hidden");
+      } else {
+        el.textContent = "";
+        el.setAttribute("hidden", "");
+      }
+    }
+    if (input) {
+      if (show) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
+  }
   function handoff(href) {
     var room = id();
     if (!room || !href) return href;
@@ -51,6 +68,7 @@ export function publicDoorHashForward() {
     var join = globalThis.document.querySelector("a.join") || globalThis.document.querySelector("a[href*=\"#join/\"]");
     var room = id();
     whisperJoin(false);
+    whisperCode(false);
     if (room && open) {
       open.setAttribute("href", handoff(open.getAttribute("href")));
       if (people) people.setAttribute("href", open.getAttribute("href"));
@@ -71,11 +89,11 @@ export function publicDoorHashForward() {
     }
     if (hash.indexOf("#code/") === 0) {
       var formatted = formatCode(hash.slice(6).split("/")[0]);
-      if (!formatted) {
-        whisperJoin(true, "That isn't a join code. Use ABC-DEF-GHJ (9 characters).");
-        return;
-      }
-      whisperJoin(true, "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.");
+      var codeMsg = formatted
+        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
+        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+      whisperJoin(true, codeMsg);
+      whisperCode(true, codeMsg);
     }
   }
   apply();
@@ -96,11 +114,11 @@ export function publicDoorHashForward() {
       e.preventDefault();
       var input = globalThis.document.querySelector("#join-code");
       var formatted = formatCode(input && input.value);
-      if (!formatted) {
-        whisperJoin(true, "That isn't a join code. Use ABC-DEF-GHJ (9 characters).");
-        return;
-      }
-      whisperJoin(true, "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.");
+      var formMsg = formatted
+        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
+        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+      whisperJoin(true, formMsg);
+      whisperCode(true, formMsg);
     });
   }
 }
@@ -149,9 +167,10 @@ function joinCodeDoorHtml() {
     <p>Short human invite code (ABC-DEF-GHJ). Same guest join as the full #join/ link. Not an RM- agent invite.</p>
     <label for="join-code">Join code</label>
     <div class="invite-row">
-      <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ">
+      <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ" aria-describedby="join-code-status">
       <button type="submit">Join with code</button>
     </div>
+    <p class="join-code-status" id="join-code-status" role="status" hidden></p>
   </form>`;
 }
 
@@ -260,6 +279,8 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .join-code .invite-row{display:flex;gap:.6rem;align-items:center}
 .join-code .invite-row input{margin:0;flex:1}
 .join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--clay);color:var(--ink);border:0;font-weight:650}
+.join-code-status{margin:.65rem 0 0;font-size:14px;color:var(--clay)}
+.join-code-status[hidden]{display:none}
 .help a{color:var(--clay);text-decoration:none}
 footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
 footer a{color:var(--clay);text-decoration:none}
@@ -383,6 +404,8 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .join-code .invite-row{display:flex;gap:.6rem;align-items:center}
 .join-code .invite-row input{margin:0;flex:1}
 .join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--acid);color:var(--ink);border:0;font-weight:650}
+.join-code-status{margin:.65rem 0 0;font-size:14px;color:var(--acid)}
+.join-code-status[hidden]{display:none}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
@@ -396,7 +419,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="whispers"><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
   <div class="join-empty" id="join-empty" hidden role="status">
     <p id="join-empty-message">This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.</p>
-    <p class="join-empty-recover" id="join-empty-recover"><a href="#join-code">Join with code</a> <a href="#join-agent">Paste a prompt</a></p>
+    <p class="join-empty-recover" id="join-empty-recover"><a href="${BROWSER_ROOM_PATH}">Open room door</a> <a href="#join-code">Join with code</a> <a href="#join-agent">Paste a prompt</a> <a href="#mcp-join">Add Room as MCP</a></p>
   </div>
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
   <section class="connect" id="connect" aria-labelledby="connect-title">

@@ -138,8 +138,11 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /id="join-empty-message"/);
   assert.match(html, /id="join-empty-recover"/);
   assert.match(html, /This invite link is incomplete/);
+  assert.match(html, /id="join-empty-recover"[\s\S]*Open room door/);
   assert.match(html, /id="join-empty-recover"[\s\S]*href="#join-code">Join with code</);
   assert.match(html, /id="join-empty-recover"[\s\S]*href="#join-agent">Paste a prompt</);
+  assert.match(html, /id="join-empty-recover"[\s\S]*href="#mcp-join">Add Room as MCP</);
+  assert.match(html, /id="join-code-status"/);
   // Plain-language door copy (same sentences as the Demigod entry).
   assert.match(html, /Joining as a person or an agent is free\./);
   assert.match(html, /href="#join-agent"/);
@@ -243,10 +246,15 @@ function runDoorScript({ hash = "", code = "", submit = false } = {}) {
     "a.join": `${BROWSER_ROOM_PATH}/#join/`
   };
   const empty = { hidden: true, message: "" };
+  const form = { hidden: true, message: "", invalid: false };
   const listeners = [];
   const node = selector => {
     if (selector === "#join-code") {
-      return { value: code };
+      return {
+        value: code,
+        setAttribute(name, value) { if (name === "aria-invalid") form.invalid = value === "true"; },
+        removeAttribute(name) { if (name === "aria-invalid") form.invalid = false; }
+      };
     }
     if (selector === "#join-empty-message") {
       return {
@@ -281,6 +289,14 @@ function runDoorScript({ hash = "", code = "", submit = false } = {}) {
       querySelector: node,
       addEventListener(type, fn) { listeners.push({ type, fn }); },
       getElementById(id) {
+        if (id === "join-code-status") {
+          return {
+            set textContent(value) { form.message = value; },
+            get textContent() { return form.message; },
+            removeAttribute(name) { if (name === "hidden") form.hidden = false; },
+            setAttribute(name, value) { if (name === "hidden") form.hidden = value !== null; }
+          };
+        }
         if (id !== "join-empty") return null;
         return {
           querySelector: node,
@@ -303,7 +319,11 @@ function runDoorScript({ hash = "", code = "", submit = false } = {}) {
       };
       for (const listener of listeners.filter(item => item.type === "submit")) listener.fn(event);
     }
-    return { hrefs, replaced, assigned, emptyShown: !empty.hidden, emptyMessage: empty.message };
+    return {
+      hrefs, replaced, assigned,
+      emptyShown: !empty.hidden, emptyMessage: empty.message,
+      formShown: !form.hidden, formMessage: form.message, formInvalid: form.invalid
+    };
   } finally {
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -339,6 +359,9 @@ test("www /room #code/ABC-DEF-GHJ shows a live-invite error and does not auto-le
   assert.equal(result.replaced, "");
   assert.equal(result.emptyShown, true);
   assert.match(result.emptyMessage, /isn't a live invite/i);
+  assert.equal(result.formShown, true);
+  assert.match(result.formMessage, /isn't a live invite/i);
+  assert.equal(result.formInvalid, true);
 });
 
 test("www /room #code/not-a-code shows a format whisper", () => {
@@ -353,6 +376,9 @@ test("Join-with-code form ABC-DEF-GHJ shows a live-invite error instead of a sil
   assert.equal(result.assigned, "");
   assert.equal(result.emptyShown, true);
   assert.match(result.emptyMessage, /isn't a live invite/i);
+  assert.equal(result.formShown, true);
+  assert.match(result.formMessage, /isn't a live invite/i);
+  assert.equal(result.formInvalid, true);
 });
 
 test("Join-with-code form rejects a short code with a format whisper", () => {
@@ -360,6 +386,9 @@ test("Join-with-code form rejects a short code with a format whisper", () => {
   assert.equal(result.assigned, "");
   assert.equal(result.emptyShown, true);
   assert.match(result.emptyMessage, /isn't a join code/i);
+  assert.equal(result.formShown, true);
+  assert.match(result.formMessage, /isn't a join code/i);
+  assert.equal(result.formInvalid, true);
 });
 
 test("www /room #join/ stub shows an empty-state whisper and does not auto-leave", () => {

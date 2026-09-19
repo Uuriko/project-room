@@ -511,3 +511,23 @@ test("open-room failure after a join recovers the credential and navigates", asy
     assert.equal(readUncertainJoin(), null);
   } finally { dom.uninstall(); }
 });
+
+test("incomplete invite shows recovery CTAs instead of a dead end", async () => {
+  const dom = guestJoinDom();
+  const accountClient = {
+    session: {},
+    async restore() { return this.session; },
+    async prepareShareLink() { throw new Error("must not preview an incomplete invite"); },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open"); } });
+    await ui.open({ token: null });
+    assert.equal(dom.node("#join-link-dialog").open, true);
+    assert.match(dom.node("#join-link-scope").textContent, /incomplete/i);
+    assert.equal(dom.node("#join-link-recover").hidden, false);
+    assert.equal(dom.node("#join-link-form").hidden, true);
+    ui.resetManagement?.();
+  } finally { dom.uninstall(); }
+});

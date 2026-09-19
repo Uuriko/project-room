@@ -155,11 +155,15 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("#join-empty-message").innerText(), /isn't a live invite/i);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
+    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
     assert.equal(new URL(page.url()).origin, origin, "fake #code/ stays on the door");
     await page.goto(`${origin}/room`);
     await page.locator("#join-code").fill("ABC-DEF-GHJ");
     await page.locator("#join-code-form button").click();
-    await page.locator("#join-empty").waitFor();
+    await page.locator("#join-code-status").waitFor();
+    assert.match(await page.locator("#join-code-status").innerText(), /isn't a live invite/i);
+    assert.equal(await page.locator("#join-code").getAttribute("aria-invalid"), "true");
     assert.match(await page.locator("#join-empty-message").innerText(), /isn't a live invite/i);
     await page.goto(`${origin}/room#join/`);
     await page.locator("#join-empty").waitFor();
@@ -167,6 +171,8 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("#join-empty").innerText(), /incomplete/i);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
     assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
+    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
     await page.locator("#join-empty-recover a[href='#join-code']").click();
     await page.locator("#join-code-form").waitFor();
     assert.equal(new URL(page.url()).origin, origin, "incomplete #join/ stays on the door");
