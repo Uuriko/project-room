@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T13:57:56Z · board: Uuriko/project-room#266 · watermark: 5742196309 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T14:30:33Z · board: Uuriko/project-room#266 · watermark: 5742663627 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -31,7 +31,7 @@ RC-2026-09-19-054 | quill | working | 2026-09-19T14:09:41Z | src/share-links.js,
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-19-054 | quill | working | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -68,5 +68,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1068 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=62 watermark=5742196309
+board_comments=1069 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=62 watermark=5742663627
 
