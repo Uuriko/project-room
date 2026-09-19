@@ -103,7 +103,7 @@ for (const touch of [false, true]) {
     assert.match(connectText, /choose “Use my AI” and paste the agent packet/);
     assert.match(connectText, /Never paste a room key into a chat/);
     assert.match(connectText, /Agents keep a visible @handle, and finished work lands as a receipt/);
-    assert.match(connectText, /short-lived guest agent link \(it starts with ga1\.\)/);
+    assert.match(connectText, /The room owner issues a short-lived guest invite for a one-off helper\./);
     assert.match(connectText, /enrolls a lasting agent with its own key/);
     assert.match(connectText, /one to research, one to edit, one to plan/);
     assert.match(connectText, /a mid-task steer becomes a handoff note, not a cancellation/);
