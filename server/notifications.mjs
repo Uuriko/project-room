@@ -20,6 +20,13 @@ const WORK_UPDATE_TYPES = new Set([
   T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED, T.WORK_COMPLETED, T.WORK_SUPERSEDED,
   T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HANDOFF_RECORDED, T.WORK_HALT_CLEARED
 ]);
+// RC-2026-09-19-063: session enforcement events. A round-limit pause or a
+// budget stop is a work control firing — the room owner is told even when
+// they are not the accountable/verifier on the card, because the pause
+// waits on their resume.
+const SESSION_ENFORCEMENT_TYPES = new Set([
+  T.SESSION_STATUS_CHANGED, T.SESSION_STOPPED
+]);
 const ROLE_FIELDS = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];
 
 const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field => item[field] === memberId) || item.proposedById === memberId);
@@ -63,6 +70,14 @@ export function deriveNotifications({ events, state, member }) {
     if (preferences.work_updates === "none") continue;
     if (event.type === T.WORK_PROPOSED) {
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
+      continue;
+    }
+    // RC-2026-09-19-063: the room owner hears about every enforcement pause
+    // or stop — a round-limit pause is specifically waiting on them.
+    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
+      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
+      && member.id === state.room?.ownerId) {
+      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
       continue;
     }
     if (preferences.work_updates !== "all") continue; // mentions_only keeps direct assignments only.

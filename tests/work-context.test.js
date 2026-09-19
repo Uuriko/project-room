@@ -233,7 +233,7 @@ test("access summary lists only what the member can read; quoted mentions and im
   assert.deepEqual(summary.omitted, context.context.omitted, "the preview repeats the exact omissions the read reports");
   assert.deepEqual(summary.omitted, [...WORK_CONTEXT_OMISSIONS]);
   assert.deepEqual(summary.evidence, { records: [], retrieved: false });
-  assert.deepEqual(summary.budget, { maxRuntimeMs: "unknown", maxAttempts: "unknown", maxConcurrent: "unknown", maxSpendCents: "unknown", spendCents: "unknown", attemptCount: 0, sessionStatus: "queued" });
+  assert.deepEqual(summary.budget, { maxRuntimeMs: "unknown", maxAttempts: "unknown", maxConcurrent: "unknown", maxSpendCents: "unknown", maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 0, sessionStatus: "queued" });
   assert.equal(summary.externalExecution, false); assert.equal(summary.credentials, "none");
   const text = JSON.stringify(summary);
   for (const leak of ["SENTINEL", "quoted-mention", "excerpt-import", "UNRELATED"]) assert.equal(text.includes(leak), false, leak);
@@ -251,7 +251,7 @@ test("access summary lists only what the member can read; quoted mentions and im
   f.send("producer", T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: revision() });
   f.store.mutateWorkSession(f.keys.producer, "commons", { requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: revision(), action: "set_status", status: "processing", budget: { maxSpendCents: 500, maxAttempts: 2 } });
   const budget = f.view().accessSummary.budget;
-  assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, spendCents: "unknown", attemptCount: 1, sessionStatus: "processing" });
+  assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 1, sessionStatus: "processing" });
   f.send("producer", T.WORK_STARTED, { workItemId: "test-handoff", expectedRevision: revision() });
   f.send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version" });
   const completed = f.view();

@@ -1,5 +1,5 @@
 import { REACTIONS } from "./conversation.js";
-import { proposalContext, nativeTextEvidence, reportedProducer } from "./work-packet.js";
+import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
@@ -353,7 +353,12 @@ function validateEnvelope(incoming) {
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs"].includes(key)) throw new Error(`Invalid ${key}`);
+    // RC-2026-09-19-063: fact/inference/proposal marks. The envelope guard is
+    // coarse (shape only); the applier runs the full segment validator.
+    if (key === "segments" && (!Array.isArray(value) || value.length === 0 || value.length > 20
+      || value.some(segment => !segment || typeof segment !== "object" || Array.isArray(segment)
+        || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -977,6 +982,10 @@ function completeWork(state, incoming) {
     ...(nativeText ? { nativeText } : {}),
     evidenceVersion: incoming.data.evidenceVersion,
     checksClaimed: incoming.data.checksClaimed || [],
+    // RC-2026-09-19-063: optional fact/inference/proposal marks, validated on
+    // the way in. Unmarked completions replay exactly as before — the field
+    // is present but null, never guessed.
+    segments: validateResultSegments(incoming.data.segments),
     nextAction: incoming.data.nextAction,
     eventId: incoming.id
   };

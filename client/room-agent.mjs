@@ -869,13 +869,17 @@ export class RoomAgentClient {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
   }
-  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents }, { signal } = {}) {
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents, rounds, toolCalls }, { signal } = {}) {
     if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
     if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
+    if (rounds !== undefined && (!Number.isSafeInteger(rounds) || rounds < 0)) throw new Error("rounds must be a non-negative integer");
+    if (toolCalls !== undefined && (!Number.isSafeInteger(toolCalls) || toolCalls < 0)) throw new Error("toolCalls must be a non-negative integer");
     return this.#request("/work-sessions", { requestId, workItemId, expectedRevision, action,
       ...(status === undefined ? {} : { status }),
       ...(budget === undefined ? {} : { budget }),
-      ...(spendCents === undefined ? {} : { spendCents }) }, signal);
+      ...(spendCents === undefined ? {} : { spendCents }),
+      ...(rounds === undefined ? {} : { rounds }),
+      ...(toolCalls === undefined ? {} : { toolCalls }) }, signal);
   }
   // Claim one queued session atomically: reads the card, then drives it to
   // processing with the card's revision. Throws session_claimed when held.

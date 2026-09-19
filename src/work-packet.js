@@ -7,6 +7,24 @@ const referenceFields = ["version", "roomId", "workItemId", "packetId", "basisRe
 const invalid = message => { throw new Error(message); };
 export const validResultBody = body => typeof body === "string" && body.length <= 4096 && body.trim().length > 0 && body.isWellFormed();
 
+// RC-2026-09-19-063: fact / inference / proposal. A result (or a passage of
+// it) is marked as observed fact, derived inference, or suggested action, so
+// downstream consumers know what they are acting on. Optional on submit —
+// unmarked results stay unmarked, never guessed.
+export const RESULT_SEGMENT_KINDS = Object.freeze(["fact", "inference", "proposal"]);
+export function validateResultSegments(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20)
+    invalid("Segments are 1–20 marked passages");
+  return value.map(segment => {
+    if (!segment || typeof segment !== "object" || Array.isArray(segment)) invalid("Each segment marks one passage");
+    if (!RESULT_SEGMENT_KINDS.includes(segment.kind)) invalid("Segment kind is fact, inference, or proposal");
+    if (typeof segment.text !== "string" || !segment.text.trim() || segment.text.length > 2000 || !segment.text.isWellFormed())
+      invalid("Segment text is 1–2000 characters");
+    return { kind: segment.kind, text: segment.text };
+  });
+}
+
 // Credit is an assertion about this result, never enrollment or identity proof.
 export function reportedProducer(data) {
   const producerId = data.producerId ?? null, external = Object.hasOwn(data, "externalProducer");

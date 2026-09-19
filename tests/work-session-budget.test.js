@@ -62,7 +62,7 @@ test("a claimed budget is visible on the card; undeclared quotas read 'unknown'"
   const res = await claim(workItemId, { budget: { maxRuntimeMs: 3600000, maxAttempts: 3 } });
   assert.equal(res.status, 201, JSON.stringify(res.json));
   const session = await card(workItemId);
-  assert.deepEqual(session.budget, { maxRuntimeMs: 3600000, maxAttempts: 3, maxConcurrent: "unknown", maxSpendCents: "unknown" });
+  assert.deepEqual(session.budget, { maxRuntimeMs: 3600000, maxAttempts: 3, maxConcurrent: "unknown", maxSpendCents: "unknown", maxRounds: "unknown", maxToolCalls: "unknown" });
   assert.equal(session.attempt_count, 1);
   assert.ok(session.started_at, "start time is recorded");
   assert.equal(session.spendCents, "unknown", "unreported spend is labeled unknown, not zero");
@@ -146,7 +146,7 @@ test("maxAttempts is enforced across retries: a finished session restarts until 
   assert.equal(retry.json.event.type, T.SESSION_STARTED);
   let session = await card(workItemId);
   assert.equal(session.attempt_count, 2); assert.equal(session.status, "processing");
-  assert.deepEqual(session.budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: "unknown" });
+  assert.deepEqual(session.budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: "unknown", maxRounds: "unknown", maxToolCalls: "unknown" });
   assert.equal((await mutate(workItemId, 3, { status: "done" })).status, 201);
   // Third attempt exceeds the budget and is refused with a clear reason; nothing changes.
   const refused = await mutate(workItemId, 4, { status: "processing" });

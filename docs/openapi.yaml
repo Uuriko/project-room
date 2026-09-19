@@ -1111,6 +1111,13 @@ paths:
         set_status -> processing on a queued card. Claims go stale after
         10 min without a heartbeat; a second live claim gets 409
         session_claimed.
+        Budgets (RC-2026-09-19-063): a start may declare maxRounds and
+        maxToolCalls alongside the existing bounds. Status changes may report
+        cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding
+        maxRounds auto-suspends the session (409 round_limit_exceeded) and the
+        pause resumes only with room-owner (or manage_claims) approval;
+        exceeding maxToolCalls force-stops the session (409 budget_exceeded).
+        The owner is notified of every enforcement pause and stop.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -1128,10 +1135,16 @@ paths:
                 status:
                   type: string
                   enum: [queued, processing, active, suspended, done, failed]
+                budget:
+                  type: object
+                  description: Declared on the start transition only. Optional keys: maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents, maxRounds, maxToolCalls; undeclared quotas read "unknown".
+                spendCents: { type: integer, description: Cumulative spend report }
+                rounds: { type: integer, description: Cumulative work-loop rounds report (monotonic) }
+                toolCalls: { type: integer, description: Cumulative tool-call report (monotonic) }
       responses:
         '201': { description: Committed }
         '409':
-          description: Stale revision or session already claimed
+          description: Stale revision, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; owner resume required)
           content:
             application/json:
               schema:
