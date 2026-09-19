@@ -138,12 +138,16 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   let capturedResolve;
   const captured = new Promise(resolve => { capturedResolve = resolve; });
   const held = new Promise(resolve => { releaseHeld = resolve; });
-  let heldFirstBrief = false;
+  // The return-brief panel now lives inside the Catch up dialog: opening the
+  // dialog issues the fetch (openCatchUp calls loadReturnBrief directly and the
+  // panel toggle fires once more), so more than one owner request can be in
+  // flight. Hold all of the owner's brief requests; the next session's
+  // requests must pass through untouched.
+  let holdOwnerBrief = true, capturedOwnerBrief = false;
   await page.route("**/api/rooms/commons/return-brief**", async route => {
-    if (heldFirstBrief) { await route.continue(); return; }
-    heldFirstBrief = true;
+    if (!holdOwnerBrief) { await route.continue(); return; }
     const response = await route.fetch();
-    capturedResolve();
+    if (!capturedOwnerBrief) { capturedOwnerBrief = true; capturedResolve(); }
     await held;
     await route.fulfill({ response });
   });
@@ -158,6 +162,11 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true, "stale-horizon actions stay disabled during a fresh brief request");
 
   // End the owner session while its newly fetched brief is still in flight.
+  // The modal dialog would otherwise intercept the sign-out click.
+  await page.locator("#catchup-close").click();
+  await page.locator("#catchup-dialog").waitFor({ state: "hidden" });
+  // From here the next session's brief requests must pass through unheld.
+  holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
