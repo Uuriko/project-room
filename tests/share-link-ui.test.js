@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom, readUncertainJoin, writeUncertainJoin, clearUncertainJoin } from "../src/share-links.js";
 
 test("human join share URLs keep the app path so www /room is not dropped", () => {
   const token = "T".repeat(43);
@@ -255,9 +255,9 @@ test("mint unlocks Create before a hanging clipboard write and never uses origin
   }
 });
 
-test("failed guest join retains its request, restores retry focus and keeps pending controls locked", async () => {
+const guestJoinDom = () => {
   const nodes = new Map();
-  let focused = null, rejectJoin, attempts = 0, opened = null;
+  let focused = null;
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
       value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
@@ -268,50 +268,246 @@ test("failed guest join retains its request, restores retry focus and keeps pend
     });
     return nodes.get(selector);
   };
-  const globals = { document: { querySelector: node }, window: { addEventListener() {} },
-    location: { hostname: "localhost", origin: "http://localhost:52331" } };
-  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const calls = [];
-  const accountClient = {
-    session: {},
-    async prepareShareLink() { return { session: this.session, preview: { room: { id: "commons", title: "Synthetic room" }, access: "Conversation only.", link: { expiresAt: Date.now() + 3600000, remainingJoins: 2 } } }; },
-    async joinShareLink(request) {
-      calls.push(structuredClone(request));
-      if (++attempts === 1) return new Promise((resolve, reject) => { rejectJoin = reject; });
-      return { roomId: "commons", session: { member: { id: "same-guest" } } };
-    },
+  const storage = new Map();
+  const localStorage = {
+    getItem: key => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => { storage.set(key, String(value)); },
+    removeItem: key => { storage.delete(key); },
   };
-  try {
-    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
-      async openRoom(roomId, roomMode, session) { opened = { roomId, roomMode, session }; } });
-    await ui.open({ token: "s".repeat(43) });
-    node("#join-link-name").value = "Retry guest";
-    const pending = node("#join-link-form").handlers.submit({ preventDefault() {} });
-    assert.equal(node("#join-link-submit").disabled, true);
-    assert.equal(node("#join-link-close").disabled, true);
-    assert.equal(node("#join-link-name").disabled, true);
-    let escapePrevented = false;
-    node("#join-link-dialog").handlers.cancel({ preventDefault() { escapePrevented = true; } });
-    assert.equal(escapePrevented, true);
-    rejectJoin(new TypeError("Synthetic lost response"));
-    await pending;
-    assert.equal(focused, "#join-link-submit");
-    assert.equal(node("#join-link-submit").disabled, false);
-    assert.equal(node("#join-link-close").disabled, false);
-    assert.equal(node("#join-link-name").disabled, false);
-    assert.equal(node("#join-link-name").value, "Retry guest");
-    assert.equal(node("#join-link-dialog").open, true);
-    assert.match(node("#join-link-status").textContent, /could not confirm the result/);
-    await node("#join-link-form").handlers.submit({ preventDefault() {} });
-    assert.deepEqual(calls[1], calls[0]);
-    assert.equal(opened.session.member.id, "same-guest");
-    assert.equal(node("#join-link-dialog").open, false);
-    assert.equal(focused, "#message-input");
-  } finally {
+  const location = { hostname: "localhost", origin: "http://localhost:52331", hash: "" };
+  const globals = { document: { querySelector: node }, window: { addEventListener() {} }, location, localStorage };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const install = () => { for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value }); };
+  const uninstall = () => {
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else delete globalThis[key];
     }
-  }
+  };
+  return { node, nodes, location, storage, focused: () => focused, install, uninstall };
+};
+
+const previewFor = (title = "Synthetic room") => ({
+  room: { id: "commons", title }, access: "Conversation only.",
+  link: { expiresAt: Date.now() + 3600000, remainingJoins: 2 },
+});
+
+test("uncertain join records round-trip, expire, and clear", () => {
+  const storage = new Map();
+  const localStorage = { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) };
+  assert.equal(readUncertainJoin(localStorage), null);
+  writeUncertainJoin({ linkToken: "t".repeat(43), redemptionId: "redemption-1", displayName: "Guest One" }, localStorage);
+  const record = readUncertainJoin(localStorage);
+  assert.equal(record.redemptionId, "redemption-1");
+  assert.equal(record.displayName, "Guest One");
+  clearUncertainJoin(localStorage);
+  assert.equal(readUncertainJoin(localStorage), null);
+  // Malformed or stale records never resume a join.
+  storage.set("room.guestJoin.uncertain.v1", "not json");
+  assert.equal(readUncertainJoin(localStorage), null);
+  storage.set("room.guestJoin.uncertain.v1", JSON.stringify({ linkToken: "short", redemptionId: "r", displayName: "x", at: Date.now() }));
+  assert.equal(readUncertainJoin(localStorage), null);
+  const stale = { linkToken: "t".repeat(43), redemptionId: "r", displayName: "x", at: Date.now() - 13 * 3600 * 1000 };
+  storage.set("room.guestJoin.uncertain.v1", JSON.stringify(stale));
+  assert.equal(readUncertainJoin(localStorage), null);
+  assert.equal(readUncertainJoin(undefined), null, "missing storage is not a crash");
+});
+
+test("interrupted guest join auto-recovers the same request and opens the room", async () => {
+  const dom = guestJoinDom();
+  let rejectJoin, attempts = 0, opened = null, restores = 0;
+  const calls = [];
+  const accountClient = {
+    session: {},
+    async restore() { restores++; return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink(request) {
+      calls.push(structuredClone(request));
+      if (++attempts === 1) return new Promise((_, reject) => { rejectJoin = reject; });
+      return { roomId: "commons", session: { member: { id: "same-guest" } } };
+    },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom(roomId, roomMode, session) { opened = { roomId, roomMode, session }; } });
+    await ui.open({ token: "s".repeat(43) });
+    dom.node("#join-link-name").value = "Retry guest";
+    const pending = dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(dom.node("#join-link-submit").disabled, true, "controls stay locked while the join is in flight");
+    assert.equal(dom.node("#join-link-close").disabled, true);
+    let escapePrevented = false;
+    dom.node("#join-link-dialog").handlers.cancel({ preventDefault() { escapePrevented = true; } });
+    assert.equal(escapePrevented, true);
+    rejectJoin(new TypeError("Synthetic lost response"));
+    await pending;
+    // The lost response triggers an automatic idempotent re-check: the session
+    // is restored first, then the SAME redemption id is re-issued.
+    assert.equal(restores, 1);
+    assert.equal(attempts, 2);
+    assert.deepEqual(calls[1], calls[0], "recovery re-issues the identical request, never a second join");
+    assert.equal(opened.session.member.id, "same-guest");
+    assert.equal(dom.node("#join-link-dialog").open, false);
+    assert.equal(dom.focused(), "#message-input");
+    assert.equal(readUncertainJoin(), null, "confirmed success clears the optimistic record");
+    ui.resetManagement?.();
+  } finally { dom.uninstall(); }
+});
+
+test("double-interrupted guest join stays honest, keeps the record, and names the room", async () => {
+  const dom = guestJoinDom();
+  const calls = [];
+  const accountClient = {
+    session: {},
+    async restore() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor("Dogfood room") }; },
+    async joinShareLink(request) { calls.push(structuredClone(request)); throw new TypeError("Synthetic lost response"); },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open"); } });
+    await ui.open({ token: "s".repeat(43) });
+    dom.node("#join-link-name").value = "Unlucky guest";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(calls.length, 2, "one automatic re-check, then honesty");
+    assert.deepEqual(calls[1], calls[0]);
+    assert.match(dom.node("#join-link-status").textContent, /couldn't confirm whether you joined “Dogfood room”/);
+    assert.match(dom.node("#join-link-status").textContent, /can't be joined twice/);
+    assert.equal(dom.node("#join-link-dialog").open, true, "dialog stays open with the recovery path");
+    const record = readUncertainJoin();
+    assert.equal(record?.redemptionId, calls[0].redemptionId, "uncertain outcome keeps the record for reload recovery");
+    assert.equal(dom.focused(), "#join-link-submit");
+  } finally { dom.uninstall(); }
+});
+
+test("confirmed join rejection rolls the optimistic record back", async () => {
+  const dom = guestJoinDom();
+  const expired = new Error("This link has expired, been cancelled, or reached its join limit. Ask for a new link.");
+  expired.status = 410; expired.code = "link_unavailable";
+  const accountClient = {
+    session: {},
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink() { throw expired; },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open"); } });
+    await ui.open({ token: "s".repeat(43) });
+    dom.node("#join-link-name").value = "Late guest";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.match(dom.node("#join-link-status").textContent, /expired, been cancelled/);
+    assert.equal(readUncertainJoin(), null, "confirmed failure clears the optimistic record");
+    assert.equal(dom.node("#join-link-dialog").open, true);
+  } finally { dom.uninstall(); }
+});
+
+test("reload resumes the uncertain join with the same redemption id", async () => {
+  const dom = guestJoinDom();
+  const token = "r".repeat(43);
+  const calls = [];
+  let opened = null;
+  const accountClient = {
+    session: {},
+    async restore() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor("Resume room") }; },
+    async joinShareLink(request) {
+      calls.push(structuredClone(request));
+      return { roomId: "commons", session: { member: { id: "resumed-guest" } } };
+    },
+  };
+  dom.install();
+  try {
+    writeUncertainJoin({ linkToken: token, redemptionId: "stored-redemption-9", displayName: "Returning guest" });
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom(roomId, roomMode, session) { opened = { roomId, roomMode, session }; } });
+    await ui.open({ token });
+    assert.equal(dom.node("#join-link-name").value, "Returning guest", "name is prefilled from the saved request");
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls.length, 1, "the uncertain join is re-checked automatically");
+    assert.equal(calls[0].redemptionId, "stored-redemption-9", "same redemption id, never a second join");
+    assert.equal(calls[0].displayName, "Returning guest");
+    assert.equal(opened.session.member.id, "resumed-guest");
+    assert.equal(dom.node("#join-link-dialog").open, false);
+  } finally { dom.uninstall(); }
+});
+
+test("a failed join keeps the invitation in the address bar instead of stranding the guest", async () => {
+  const dom = guestJoinDom();
+  const token = "f".repeat(43);
+  const expired = new Error("This link has expired, been cancelled, or reached its join limit. Ask for a new link.");
+  expired.status = 410; expired.code = "link_unavailable";
+  let statusText = "";
+  const accountClient = {
+    session: {},
+    async prepareShareLink() { return { session: this.session, preview: previewFor("Stranded room") }; },
+    async joinShareLink() { throw expired; },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open"); },
+      setConnectionStatus: text => { statusText = text; } });
+    await ui.open({ token });
+    dom.node("#join-link-name").value = "Late guest";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    // The guest closes the failed dialog: the invitation stays actionable in
+    // the address bar and the connection status orients back to the room.
+    dom.node("#join-link-dialog").handlers.close();
+    assert.equal(dom.location.hash, `#join/${token}`);
+    assert.match(statusText, /your invitation to “Stranded room” is still open in the address bar/);
+  } finally { dom.uninstall(); }
+});
+
+test("a successful join leaves no invitation fragment behind", async () => {
+  const dom = guestJoinDom();
+  const token = "g".repeat(43);
+  const accountClient = {
+    session: {},
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink() { return { roomId: "commons", session: { member: { id: "lucky-guest" } } }; },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() {} });
+    await ui.open({ token });
+    dom.node("#join-link-name").value = "Lucky guest";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(dom.node("#join-link-dialog").open, false);
+    assert.equal(dom.location.hash, "", "landed guests keep a clean address bar");
+  } finally { dom.uninstall(); }
+});
+
+test("open-room failure after a join recovers the credential and navigates", async () => {
+  const dom = guestJoinDom();
+  const calls = [];
+  let openAttempts = 0, opened = null;
+  const accountClient = {
+    session: {},
+    async restore() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink(request) {
+      calls.push(structuredClone(request));
+      return { roomId: "commons", duplicate: true, session: { member: { id: "same-guest" } } };
+    },
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom(roomId, roomMode, session) {
+        if (++openAttempts === 1) throw new TypeError("Synthetic navigation loss");
+        opened = { roomId, roomMode, session };
+      } });
+    await ui.open({ token: "o".repeat(43) });
+    dom.node("#join-link-name").value = "Navigating guest";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(openAttempts, 2, "the recovery re-navigates after re-checking the join");
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1], calls[0], "recovery uses the identical idempotent request");
+    assert.equal(opened.session.member.id, "same-guest");
+    assert.equal(dom.node("#join-link-dialog").open, false);
+    assert.equal(readUncertainJoin(), null);
+  } finally { dom.uninstall(); }
 });

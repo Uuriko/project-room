@@ -69,6 +69,34 @@ export function invitationManagementFailureMessage(error, operation) {
   return invitationFailureMessage(error);
 }
 
+const UNCERTAIN_JOIN_KEY = "room.guestJoin.uncertain.v1";
+const UNCERTAIN_JOIN_TTL_MS = 12 * 3600 * 1000;
+// A join POST whose response is lost leaves the outcome unknown: the server may
+// have committed the membership (and bumped the session revision/CSRF), so a
+// reload must be able to recover the *same* request idempotently. The redemption
+// record is persisted optimistically *before* the POST and cleared on any
+// confirmed outcome (success or a definitive rejection).
+export function readUncertainJoin(storage = globalThis.localStorage, now = Date.now()) {
+  try {
+    const raw = storage?.getItem(UNCERTAIN_JOIN_KEY);
+    if (!raw) return null;
+    const record = JSON.parse(raw);
+    if (!record || typeof record !== "object" || !tokenPattern.test(record.linkToken)
+      || typeof record.redemptionId !== "string" || typeof record.displayName !== "string"
+      || !Number.isSafeInteger(record.at) || now - record.at > UNCERTAIN_JOIN_TTL_MS) return null;
+    return record;
+  } catch { return null; }
+}
+export function writeUncertainJoin(record, storage = globalThis.localStorage) {
+  try {
+    storage?.setItem(UNCERTAIN_JOIN_KEY, JSON.stringify({ linkToken: record.linkToken, redemptionId: record.redemptionId,
+      displayName: record.displayName, roomId: record.roomId ?? null, roomTitle: record.roomTitle ?? null, at: Date.now() }));
+  } catch { /* private-mode writes may throw; the join still proceeds */ }
+}
+export function clearUncertainJoin(storage = globalThis.localStorage) {
+  try { storage?.removeItem(UNCERTAIN_JOIN_KEY); } catch { /* ignore */ }
+}
+
 export async function reuseVisibleRoom(client, roomId, visibleSession) {
   if (!visibleSession || visibleSession !== client.session || visibleSession.roomId !== roomId) return null;
   const generation = client.generation;
@@ -84,7 +112,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joinFocus = null;
-  let joined = null, previewRoomId = null;
+  let joined = null, previewRoomId = null, previewRoomTitle = null;
+  let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
@@ -96,6 +125,36 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   const member = () => getState()?.members[getSession()?.member.id];
   const canManage = () => member()?.kind === "human" && member()?.active !== false && member()?.permissions.includes("manage_members");
+  // The join POST's response can be lost *after* the server committed the join
+  // (which also bumps the slot revision and CSRF token). A naive retry with the
+  // stale session would 403, so: restore the session first, then re-issue the
+  // *same* redemption id. The server resolves it idempotently — a committed join
+  // returns the credential (duplicate), a never-started join runs for real, and
+  // the guest can never be joined twice. Errors carry `uncertainJoin` when the
+  // outcome could not be determined either way.
+  async function attemptJoin({ linkToken, displayName, redemptionId }) {
+    const uncertain = error => { error.uncertainJoin = true; return error; };
+    try {
+      return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
+    } catch (error) {
+      if (!canRetryInvitation(error)) throw error;
+      try { await accountClient.restore(); }
+      catch { throw uncertain(error); } // restore failed: the join outcome is still unknown
+      try {
+        return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
+      } catch (retryError) {
+        throw canRetryInvitation(retryError) ? uncertain(error) : retryError;
+      }
+    }
+  }
+  function joinFailureStatus(error) {
+    const room = previewRoomTitle ? `“${previewRoomTitle}”` : "the room";
+    if (error?.uncertainJoin) {
+      return `The connection was interrupted and we couldn't confirm whether you joined ${room}. ` +
+        `Your invitation is kept — reopen it (or reload this page) and we'll check whether your join went through. You can't be joined twice.`;
+    }
+    return invitationFailureMessage(error);
+  }
   const ownsManagement = () => managementSession && managementSession === getSession()
     && managementGeneration === client.generation && managementSession === client.session && client.ownsAccountSession() && canManage();
   const managementCurrent = (version, generation) => version === managementVersion && generation === client.generation && manager.open && ownsManagement();
@@ -344,7 +403,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   async function open(fragment) {
     if (joining) { joinStatus("Finish the current join before opening another invitation."); return; }
     const retryHadFocus = document.activeElement === $("#join-link-retry");
-    const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null;
+    const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null; previewRoomTitle = null;
+    joinAttempted = false; joinLanded = false;
+    // Resume path (#657 defect 3): an earlier attempt with this token left an
+    // uncertain redemption record. Reuse the SAME redemption id — never mint a
+    // second join for it.
+    const uncertain = readUncertainJoin();
+    const resume = uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
+    if (resume) redemptionId = resume.redemptionId;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#join-link-retry").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
@@ -356,13 +422,19 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     try {
       const { preview, session: account } = await accountClient.prepareShareLink(joinSecret);
       if (version !== joinVersion || !account) return;
-      previewRoomId = preview.room.id;
+      previewRoomId = preview.room.id; previewRoomTitle = preview.room.title;
       $("#join-link-title").textContent = `Join ${preview.room.title}`;
       $("#join-link-scope").textContent = "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
       updateSwitchWarning();
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
+      if (resume && version === joinVersion && !joining) {
+        // The guest already consented to this exact request; its outcome is
+        // unknown. Check whether it completed instead of asking them to re-join.
+        $("#join-link-name").value = resume.displayName ?? "";
+        performJoin({ resume: true });
+      }
     } catch (error) {
       if (version !== joinVersion) return;
       $("#join-link-scope").textContent = "Unable to open this invitation.";
@@ -373,24 +445,55 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     }
   }
   $("#join-link-retry").addEventListener("click", () => { if (joinSecret && !joining) open({ token: joinSecret }); });
-  $("#join-link-form").addEventListener("submit", async event => {
-    event.preventDefault(); if (joining || !joinSecret) return;
+  async function performJoin({ resume = false } = {}) {
+    if (joining || !joinSecret) return;
     const version = joinVersion, name = $("#join-link-name").value.trim(); let failed = false;
     joinBusy(true);
-    joinStatus(joined ? "Opening room…" : "Joining room…");
+    joinStatus(joined ? "Opening room…" : resume ? "Checking whether your earlier join completed…" : "Joining room…");
     try {
       if (!joined) {
         if (getState()) joined = await reuseVisibleRoom(client, previewRoomId, getSession());
         if (!joined) {
           if (!accountClient.session) await accountClient.restore();
           if (version !== joinVersion) return;
-          joined = await accountClient.joinShareLink({ linkToken: joinSecret, displayName: name, redemptionId });
+          // Optimistic persistence (#657 defect 3): record the request BEFORE
+          // the POST. A lost response must not orphan the membership — a reload
+          // resumes this exact request idempotently. Cleared on any confirmed
+          // outcome; kept while the outcome is unknown.
+          joinAttempted = true;
+          writeUncertainJoin({ linkToken: joinSecret, redemptionId, displayName: name, roomId: previewRoomId, roomTitle: previewRoomTitle });
+          try {
+            joined = await attemptJoin({ linkToken: joinSecret, displayName: name, redemptionId });
+          } catch (joinError) {
+            if (!joinError.uncertainJoin) clearUncertainJoin();
+            throw joinError;
+          }
+          clearUncertainJoin();
         }
         if (!joined) throw new Error("Your browser identity changed. Close and reopen the invitation.");
       }
       if (version !== joinVersion) return;
-      await openRoom(joined.roomId, joined.roomMode === true, joined.session);
+      try {
+        await openRoom(joined.roomId, joined.roomMode === true, joined.session);
+      } catch (openError) {
+        if (!canRetryInvitation(openError)) throw openError;
+        // "Open joined room" recovery (#657 defect 2): the join may have
+        // landed while the room view or credential went stale. Recover the
+        // credential through the idempotent join, then navigate for real.
+        joinAttempted = true;
+        joinStatus("Reconnecting to your joined room…");
+        writeUncertainJoin({ linkToken: joinSecret, redemptionId, displayName: name, roomId: joined.roomId, roomTitle: previewRoomTitle });
+        try {
+          joined = await attemptJoin({ linkToken: joinSecret, displayName: name, redemptionId });
+        } catch (joinError) {
+          if (!joinError.uncertainJoin) clearUncertainJoin();
+          throw joinError;
+        }
+        clearUncertainJoin();
+        await openRoom(joined.roomId, joined.roomMode === true, joined.session);
+      }
       if (version !== joinVersion) return;
+      joinLanded = true;
       const focus = joinFocus; joinFocus = null;
       joinDialog.close();
       if (focus && onJoinedRoom) onJoinedRoom(focus);
@@ -398,14 +501,15 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     } catch (error) {
       if (version !== joinVersion) return;
       failed = true;
-      joinStatus(invitationFailureMessage(error));
+      joinStatus(joinFailureStatus(error));
       $("#join-link-signout").hidden = error.code !== "guest_session_ended";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);
       if (failed && version === joinVersion && joinDialog.open) $("#join-link-submit").focus();
     }
-  });
+  }
+  $("#join-link-form").addEventListener("submit", event => { event.preventDefault(); return performJoin(); });
   $("#join-link-signout").addEventListener("click", async () => {
     if (joining) return;
     const version = joinVersion;
@@ -431,14 +535,30 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-link-close").addEventListener("click", () => { if (!joining) joinDialog.close(); });
   joinDialog.addEventListener("cancel", event => { if (joining) event.preventDefault(); });
   joinDialog.addEventListener("close", () => {
-    joinVersion++; joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; $("#join-link-form").reset();
+    joinVersion++;
+    const pendingToken = joinSecret, attempted = joinAttempted, landed = joinLanded, roomTitle = previewRoomTitle;
+    joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; previewRoomTitle = null;
+    joinAttempted = false; joinLanded = false;
+    $("#join-link-form").reset();
     $("#join-link-retry").hidden = true;
+    if (pendingToken && attempted && !landed) {
+      // #657 defect 4: never strand the guest on an unrelated page. The address
+      // bar keeps the invitation, so reopening it (or reloading) resumes the
+      // same join idempotently instead of landing on the fixtures inbox.
+      suppressJoinHash = true;
+      location.hash = `#join/${pendingToken}`;
+    }
     if (!getState()) {
       $("#auth-panel").hidden = false;
-      setConnectionStatus("Not connected · open an invitation link to join");
+      setConnectionStatus(attempted && !landed && roomTitle
+        ? `Not connected · your invitation to “${roomTitle}” is still open in the address bar`
+        : "Not connected · open an invitation link to join");
       ($("#google-signin") ?? $("#auth-title") ?? $("#access-key")).focus?.();
     }
   });
-  window.addEventListener("hashchange", () => { const fragment = consumeJoinFragment(); if (fragment) open(fragment); });
+  window.addEventListener("hashchange", () => {
+    if (suppressJoinHash) { suppressJoinHash = false; return; }
+    const fragment = consumeJoinFragment(); if (fragment) open(fragment);
+  });
   return { sync, resetManagement, open };
 }
