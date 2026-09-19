@@ -6,6 +6,8 @@ import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
+import { createMagicLinkMailer } from '../server/magic-links.mjs';
+import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
@@ -43,6 +45,14 @@ export class ProjectRoom {
     catch (error) { console.warn(`room google auth disabled: ${error.message}`); }
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
       googleAuth,
+      // Magic-link email is optional like Google auth: without RESEND_API_KEY
+      // the mailer seam reports mail_not_configured instead of breaking boot.
+      magicLinkMailer: (() => {
+        const send = magicLinkMailerFromEnv(env);
+        return send
+          ? createMagicLinkMailer({ send, baseUrl: env.ROOM_ORIGIN })
+          : createMagicLinkMailer();
+      })(),
       // Verified provider webhook updates are journaled in the Durable Object's
       // SQLite (pending_channel_updates), so they survive eviction and restart.
       channelWebhooks: (this.channelWebhooks = new ChannelWebhookInbox(this.store)),

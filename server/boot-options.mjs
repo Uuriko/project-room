@@ -5,7 +5,13 @@
 // and Telegram inbound deliveries never land. Cloudflare's entry point
 // (cloudflare/room.mjs) passes an equivalent value itself.
 import { ChannelWebhookInbox } from "./channel-import.mjs";
+import { createMagicLinkMailer } from "./magic-links.mjs";
+import { magicLinkMailerFromEnv } from "./resend-mailer.mjs";
 
-export function defaultServerArgs({ store, ...rest }) {
-  return { ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null };
+export function defaultServerArgs({ store, env = process.env, ...rest }) {
+  const send = magicLinkMailerFromEnv(env);
+  const magicLinkMailer = send
+    ? createMagicLinkMailer({ send, baseUrl: rest.origin ?? null })
+    : createMagicLinkMailer();
+  return { ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
 }
