@@ -8,6 +8,7 @@ import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
+import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -2086,30 +2087,37 @@ $("#access-key-reveal")?.addEventListener("click", () => {
   $("#access-key-reveal").textContent = show ? "Hide" : "Show";
   $("#access-key-reveal").setAttribute("aria-pressed", show ? "true" : "false");
 });
-$("#invite-link")?.addEventListener("change", () => {
-  const secret = inviteSecretFromText($("#invite-link").value);
-  if (!secret) return;
-  $("#invite-link").value = "";
+function openShareOrTargetedInvite(text) {
+  const share = shareJoinSecretFromText(text);
+  if (share && shareLinksUI) {
+    shareLinksUI.open({ token: share });
+    return true;
+  }
+  const secret = inviteSecretFromText(text);
+  if (!secret) return false;
   openInvitation({ valid: true, secret });
+  return true;
+}
+$("#invite-link")?.addEventListener("change", () => {
+  const text = $("#invite-link").value;
+  if (!openShareOrTargetedInvite(text)) return;
+  $("#invite-link").value = "";
 });
 $("#invite-link")?.addEventListener("paste", event => {
-  const secret = inviteSecretFromText(event.clipboardData?.getData("text") ?? $("#invite-link").value);
-  if (!secret) return;
+  const text = event.clipboardData?.getData("text") ?? $("#invite-link").value;
+  if (!openShareOrTargetedInvite(text)) return;
   event.preventDefault();
   $("#invite-link").value = "";
-  openInvitation({ valid: true, secret });
 });
 function redeemInviteInput() {
   const input = $("#invite-link");
   const err = $("#invite-error");
-  const secret = inviteSecretFromText(input?.value ?? "");
-  if (!secret) {
-    if (err) err.textContent = "That doesn't look like an invite link. Paste the full invite link.";
+  if (openShareOrTargetedInvite(input?.value ?? "")) {
+    if (err) err.textContent = "";
+    input.value = "";
     return;
   }
-  if (err) err.textContent = "";
-  input.value = "";
-  openInvitation({ valid: true, secret });
+  if (err) err.textContent = "That doesn't look like an invite link or join code. Paste the full invite link or ABC-DEF-GHJ.";
 }
 $("#invite-redeem")?.addEventListener("click", redeemInviteInput);
 $("#invite-link")?.addEventListener("keydown", e => {

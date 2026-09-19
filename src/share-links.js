@@ -1,4 +1,5 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
+import { parseShareInviteCode } from "./share-invite-code.js";
 // Invite copy uses publicJoinInviteHref (origin + /room path). Never `${location.origin}/#join/`.
 
 const $ = selector => document.querySelector(selector);
@@ -17,6 +18,11 @@ export function humanJoinShareUrl(token, purposePath = "", locationLike = global
 }
 
 export function consumeJoinFragment() {
+  if (location.hash.startsWith("#code/")) {
+    const formatted = parseShareInviteCode(location.hash.slice(6).split("/")[0]);
+    history.replaceState(history.state, "", location.pathname + location.search);
+    return { token: formatted || null, focus: null };
+  }
   if (!location.hash.startsWith("#join/")) return null;
   const value = location.hash.slice(6);
   history.replaceState(history.state, "", location.pathname + location.search);
@@ -103,6 +109,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function updateCopyControls() {
     $("#share-link-copy").disabled = copying || !currentLink;
+    if ($("#share-link-code-copy")) $("#share-link-code-copy").disabled = copying || !currentLink || !$("#share-link-code")?.value;
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
       || !$("#share-note-preview").value;
   }
@@ -110,6 +117,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const heldFocus = $("#share-link-result").contains(document.activeElement);
     copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
     $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
+    if ($("#share-link-code")) $("#share-link-code").value = "";
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
@@ -249,6 +257,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const inviteUrl = publicJoinInviteHref(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "")
         || humanJoinShareUrl(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
       $("#share-link-url").value = inviteUrl;
+      if ($("#share-link-code")) $("#share-link-code").value = result.code || "";
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Nothing else in the room is shared.`;
       $("#share-link-url").dataset.linkId = result.link.id;
@@ -264,7 +273,15 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       creationBusy(false);
       list(version, generation).catch(() => {});
       const clipboard = globalThis.navigator?.clipboard;
-      if (!copying && inviteUrl && clipboard?.writeText) {
+      const joinCode = result.code || "";
+      if (!copying && joinCode && clipboard?.writeText) {
+        try {
+          await clipboard.writeText(joinCode);
+          if (managementCurrent(version, generation) && currentLink && $("#share-link-code")?.value === joinCode) {
+            status("Copied join code. They can also open the invite link.");
+          }
+        } catch { /* Copy buttons remain */ }
+      } else if (!copying && inviteUrl && clipboard?.writeText) {
         try {
           await clipboard.writeText(inviteUrl);
           if (managementCurrent(version, generation) && currentLink && $("#share-link-url").value === inviteUrl) {
@@ -302,6 +319,26 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } finally { copying = false; sync(); updateCopyControls(); }
   }
+  $("#share-link-code-copy")?.addEventListener("click", async () => {
+    sync();
+    const version = managementVersion, generation = client.generation;
+    const value = $("#share-link-code")?.value;
+    if (copying || !managementCurrent(version, generation) || !checkResult() || !value) return;
+    copying = true; updateCopyControls();
+    status("Copying join code…");
+    try {
+      await navigator.clipboard.writeText(value);
+      if (managementCurrent(version, generation) && checkResult() && $("#share-link-code").value === value) {
+        status("Copied join code. They can also open the invite link.");
+      }
+    } catch {
+      if (managementCurrent(version, generation)) {
+        $("#share-link-code").focus();
+        $("#share-link-code").select?.();
+        status("Select and copy the join code above.");
+      }
+    } finally { copying = false; sync(); updateCopyControls(); }
+  });
   $("#share-link-copy").addEventListener("click", () => copy(false));
   $("#share-note-copy").addEventListener("click", () => copy(true));
   async function open(fragment) {

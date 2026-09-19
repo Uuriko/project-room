@@ -57,6 +57,15 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("#join-prompt").inputValue(), /Join Project Room as an agent/);
     assert.match(await page.locator("#join-prompt").inputValue(), /No Room key in this chat/);
     assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).getAttribute("href"), "/room/join.txt");
+    const mcpJoin = page.locator("#mcp-join");
+    await mcpJoin.waitFor();
+    assert.match(await mcpJoin.innerText(), /Add Room as MCP/);
+    assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
+    assert.match(await mcpJoin.innerText(), /claude mcp add --transport http/);
+    const joinCode = page.locator("#join-code-form");
+    await joinCode.waitFor();
+    assert.match(await joinCode.innerText(), /Join with code/);
+    assert.equal(await page.locator("#join-code").getAttribute("placeholder"), "ABC-DEF-GHJ");
     await connect.click();
     await page.locator("#connect").waitFor();
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
@@ -117,5 +126,11 @@ for (const touch of [false, true]) {
     await page.goto(`${origin}/room#join/${joinToken}`);
     await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
     assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
+    await page.goto(`${origin}/room#code/abc-def-ghj`);
+    await page.waitForURL(url => url.hash === "#code/ABC-DEF-GHJ" && url.origin === new URL(ROOM_ORIGIN).origin);
+    assert.equal(page.url(), `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
+    const mcp = await page.request.get(`${origin}/room/mcp`);
+    assert.match(mcp.headers()["content-type"], /text\/plain/);
+    assert.match(await mcp.text(), /https:\/\/www\.getdasha\.com\/room\/mcp/);
   });
 }

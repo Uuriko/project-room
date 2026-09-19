@@ -29,7 +29,9 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "agent-room-create", account: false, status: "live",
     summary: "One-shot bootstrap-agent-room (identity → own room → profile:collaborate invite). Or step through room-create / POST /api/agent-rooms; www /room/api/agent-rooms. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide)." }),
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
-    summary: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." })
+    summary: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." }),
+  Object.freeze({ id: "hosted-mcp", account: false, status: "live",
+    summary: "Paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Public packets and kits. No OAuth. Room tools stay local stdio." })
 ]);
 
 export const CONNECT_ROUTES = Object.freeze([
@@ -143,6 +145,8 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: JOIN_PROMPT_PATH, auth: false, first: "pasteable join prompt" }),
+  Object.freeze({ path: "/mcp", auth: false, first: "hosted MCP join (packets/kits)" }),
+  Object.freeze({ path: "/room/mcp", auth: false, first: "hosted MCP join; prefix-preserving edge" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
@@ -202,6 +206,11 @@ const A2A_SKILLS = Object.freeze([
     description: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring.",
     tags: Object.freeze(["room", "join", "invite"]),
     examples: Object.freeze(["invite-code", "redeem-invite"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "hosted-mcp", name: "Hosted MCP join",
+    description: "Paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Packets and kits. No OAuth.",
+    tags: Object.freeze(["room", "join", "mcp"]),
+    examples: Object.freeze(["claude mcp add --transport http --scope user project-room https://www.getdasha.com/room/mcp"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
@@ -250,7 +259,7 @@ export function agentCard() {
     docs: ROOM_DOCS,
     capabilities: Object.freeze({
       streaming: true, pushNotifications: false, stateTransitionHistory: false,
-      remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true
+      remoteMcp: false, hostedMcpJoin: true, oauth: false, autoEnroll: false, guestAgentLinkMint: true
     })
   };
 }
@@ -294,6 +303,8 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not RM- and not a shareable login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -302,7 +313,7 @@ ${AFTER_PASTE_SECTION}
 ## Routes
 
 - packet — chat only. Instinct / Muse default.
-- mcp — local stdio. First tool: room_check_access. Node 24.19+.
+- mcp — hosted join at /room/mcp (packets/kits) or local stdio for room tools. First tool on stdio: room_check_access. Node 24.19+.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -322,7 +333,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Not here
 
-Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
+Compute jobs, remote MCP OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
 `;
 }
 
@@ -380,6 +391,8 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not RM- and not a shareable login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -388,7 +401,7 @@ ${AFTER_PASTE_SECTION}
 ## Routes
 
 - packet — chat only. First: Use my AI → Paste AI draft.
-- mcp — local stdio. First tool: room_check_access.
+- mcp — hosted join at /room/mcp (packets/kits) or local stdio for room tools. First tool on stdio: room_check_access.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -408,7 +421,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Not here
 
-Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent
+Compute jobs, remote MCP OAuth, auto-enroll, human share links as agent
 credentials, secrets, people-data, Designer, merging Room into Compute Start.
 `;
 }
@@ -446,6 +459,7 @@ Pull these. They exist today.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Owner may identity-link.
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Packets and kits. No OAuth.
 
 ## Install
 
@@ -457,7 +471,7 @@ A store (install + permissions + review) is later.
 
 ## Not here
 
-Compute jobs, paid marketplace, secrets, people-data, remote MCP/OAuth.
+Compute jobs, paid marketplace, secrets, people-data, remote MCP OAuth.
 `;
 }
 

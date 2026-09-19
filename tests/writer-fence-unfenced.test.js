@@ -28,6 +28,7 @@ test("all CREATE TABLE tables in server modules are registered application table
 test("unfenced additive tables stay outside the v34 writer fence", () => {
   assert.ok(unfencedAdditiveTables.includes("access_requests"));
   assert.ok(unfencedAdditiveTables.includes("private_inbox_reads"));
+  assert.ok(unfencedAdditiveTables.includes("share_link_codes"));
 });
 
 // The packaged runtime verifier (scripts/runtime-package.mjs) requires every
