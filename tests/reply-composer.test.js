@@ -88,3 +88,13 @@ test("late selected context cannot activate a replacement session", async () => 
   client.disconnect(); client.session = { ...identity, sessionBinding: "replacement" }; release();
   await assert.rejects(read, /identity changed/); assert.equal(client.session.sessionBinding, "replacement");
 });
+test("replyDraftData forwards an explicit channelId on plain, request and response drafts", () => {
+  const plain = replyDraftData(null, { body: "hi", toMemberId: null, replyToId: null, messageId: "m1", channelId: "c-design" });
+  assert.equal(plain.channelId, "c-design");
+  const plainDefault = replyDraftData(null, { body: "hi", toMemberId: null, replyToId: null, messageId: "m1" });
+  assert.ok(!("channelId" in plainDefault), "no channelId key when none supplied");
+  const request = replyDraftData({ kind: "request" }, { body: "work", toMemberId: "owner", replyToId: null, messageId: "m2", channelId: "c-design" });
+  assert.equal(request.channelId, "c-design");
+  const response = replyDraftData(mode("answered"), { body: "done", toMemberId: "owner", replyToId: "question", messageId: "m3", channelId: "c-design" });
+  assert.equal(response.channelId, "c-design");
+});

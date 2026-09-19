@@ -397,6 +397,18 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-channels",
+      "claim": "Discord/Slack-like room channels: one main #general channel plus user-created channels; chat and work share the selected channel's timeline; replies pin to their thread root's channel.",
+      "evidence": {
+        "unit": [
+          "tests/room-channels.test.js"
+        ],
+        "browser": [
+          "scripts/channels-browser-check.mjs"
+        ]
+      }
     }
   ]
 }

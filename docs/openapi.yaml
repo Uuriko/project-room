@@ -38,6 +38,22 @@ paths:
         answers 409 room_archived. `member.access_changed` targeted at the
         caller with unchanged permissions and `active: false` is a leave and
         needs no manage_members; the owner cannot leave.
+
+        Room channels (Phase 2): Every room has a `#general` channel plus
+        optional user-created channels. Channels are managed via generic
+        commands (no dedicated CRUD routes):
+        - `channel.created`: data {channelId, name}. Any active member may
+          create. Names normalize to lowercase, spaces become dashes;
+          allowed chars: a-z, 0-9, dash, underscore; length 1-48. Max 50
+          channels per room. Duplicate names rejected (409).
+        - `channel.renamed`: data {channelId, name, expectedRevision}.
+          Owner-only. `general` cannot be renamed.
+        - `channel.archived`: data {channelId, expectedRevision}.
+          Owner-only. `general` cannot be archived. Archived channels reject
+          new messages (409 channel_archived).
+        Messages carry `channelId`; omitted defaults to `general`. Replies
+        are pinned to the thread root's channel. Events: `channel.created`,
+        `channel.renamed`, `channel.archived`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -5118,7 +5134,7 @@ components:
           description: Client-generated idempotency key (UUID)
         type:
           type: string
-          description: Event type, e.g. message.posted, message.edited, message.deleted, message.pinned, message.unpinned, notifications.preferences_set, capabilities.advertised
+          description: Event type, e.g. message.posted, message.edited, message.deleted, message.pinned, message.unpinned, channel.created, channel.renamed, channel.archived, notifications.preferences_set, capabilities.advertised
         data:
           type: object
           description: Event payload; validated per event type
