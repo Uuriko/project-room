@@ -226,11 +226,12 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
-      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
+      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|\\[done\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
          // {p: null, tail: $rest}) as $pf
       | ($body | fence("claim")) as $fclaim
       | ($body | fence("receipt")) as $frcpt
       | ($body | fence("handoff")) as $fhand
+      | ($body | fence("done")) as $fdone
       | (if $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
            else ($body | prose_claim($lp.lane)) end
@@ -241,6 +242,16 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
             merged:($body | first_sha),
             ref:($pf.tail | first_rc),
             receipt:(if $frcpt then ($frcpt|fields) else null end)}
+         elif $pf.p == "[done]" then
+           # 2026-09-19: [lane][done] + ```room-done block is the
+           # canonical terminal close (RC-2026-09-18-014 used it; the
+           # parser previously ignored it, causing false RECLAIMs).
+           (($fdone | fields) // {}) as $df
+           | {kind:"done",
+              ref:(($df["task-id"] // null) // ($pf.tail | first_rc) // ($body | first_rc)),
+              receipt:{"task-id":(($df["task-id"] // null)),
+                       merged:(($df["sha"] // null) // ($df["merged"] // null)),
+                       pr:(($df["pr"] // null))}}
          elif $pf.p == "STATUS:" then
            (if ($pf.tail | test("^[ \t]*ACK[ \t]+RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+")) then
               {ack:true, ack_task:(($pf.tail | first_rc))}
@@ -1286,6 +1297,9 @@ main() {
   case "$verb" in
     help|--help|-h) usage; exit 0 ;;
     claim|heartbeat|release|query|handoff|receipt|rebuild|sweep|receipts-scan|rotation-check|metrics|_parse|_state)
+      # Per-verb --help must not fall through to a live run (2026-09-19:
+      # `sweep --help` executed a live sweep because cmd_sweep ignores args).
+      case "${1:-}" in --help|-h) usage; exit 0 ;; esac
       "cmd_${verb//-/_}" "$@" ;;
     *) printf 'room: unknown verb: %s\n' "$verb" >&2; exit 1 ;;
   esac
