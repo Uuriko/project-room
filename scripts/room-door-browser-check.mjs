@@ -59,12 +59,13 @@ for (const touch of [false, true]) {
     assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).getAttribute("href"), "/room/join.txt");
     const mcpJoin = page.locator("#mcp-join");
     await mcpJoin.waitFor();
-    assert.match(await mcpJoin.innerText(), /Add Room as MCP/);
+    // Door h2s use text-transform:uppercase; match source text like join-agent.
+    assert.match(await page.locator("#mcp-join-title").textContent(), /Add Room as MCP/);
     assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
-    assert.match(await mcpJoin.innerText(), /claude mcp add --transport http/);
+    assert.match(await mcpJoin.innerText(), /claude mcp add --transport http/i);
     const joinCode = page.locator("#join-code-form");
     await joinCode.waitFor();
-    assert.match(await joinCode.innerText(), /Join with code/);
+    assert.match(await page.locator("#join-code-title").textContent(), /Join with code/);
     assert.equal(await page.locator("#join-code").getAttribute("placeholder"), "ABC-DEF-GHJ");
     await connect.click();
     await page.locator("#connect").waitFor();
