@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T23:58:43Z · board: Uuriko/project-room#266 · watermark: 5737600625 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T00:28:07Z · board: Uuriko/project-room#266 · watermark: 5737777558 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -50,19 +50,20 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5737761717
+unknown | none | 5737755463
+unknown | none | 5737754086
+unknown | 8654bd0bcd1d481da09257ee536f57c31c466b96 | 5737746671
+unknown | 00848f3555148e090d449790e80103fec0cc6401 | 5737677409
 unknown | 5b43c9b82df66845154da988e45c8c399cc5840c | 5737600625
 unknown | 2ad5010e784a5353bcd1a9842300b63d6c5495ba | 5737526113
 unknown | eaa1368daa4175194e04b9dfb20bae7683696e54 | 5737454744
 RC-2026 | none | 5737359180
 unknown | 2b70471292ddf3ba63df97590a11fcd81b26e36b | 5737342896
-unknown | 5ab128c01585961304b105329a14167a57a97652 | 5737252607
-RC-2026 | none | 5737237864
-unknown | 86180a778f4a42cbd11541cf621c9b15f1ecf192 | 5737144948
-RC-2026 | none | 5737107148
-unknown | none | 5737049763
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5737777558 | muse | - | 2026-09-19T00:20:21Z
 5736964658 | muse | - | 2026-09-18T22:30:30Z
 5736663031 | jill | - | 2026-09-18T21:55:44Z
 5735996178 | jill | - | 2026-09-18T20:48:32Z
@@ -72,9 +73,8 @@ comment-id | lane | task | at
 5734751693 | jill | - | 2026-09-18T18:55:14Z
 5734701050 | Jillian | - | 2026-09-18T18:50:48Z
 5734686428 | Jillian | - | 2026-09-18T18:49:30Z
-5734603544 | Jillian | - | 2026-09-18T18:42:33Z
-… +50 more
+… +51 more
 
 ## signals
-board_comments=888 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=60 watermark=5737600625
+board_comments=898 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=61 watermark=5737777558
 
