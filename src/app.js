@@ -542,7 +542,13 @@ $("#room-archive-button").addEventListener("click", async () => {
   button.disabled = true;
   try {
     await client.send({ id: crypto.randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
-    if (sameSession(generation, roomId, memberId)) notice("Room archived. It is read only now; export stays available.");
+    if (sameSession(generation, roomId, memberId)) {
+      // Everything this changed is outside the dialog the button lives in: the
+      // read-only note in the room chrome, the composer, the switcher. Leaving
+      // the modal up hides its own result behind itself.
+      if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+      notice("Room archived. It is read only now; export stays available.");
+    }
   } catch (error) {
     if (!sameSession(generation, roomId, memberId)) return;
     notice(error.code === "room_archived" ? "This room is already archived." : "Couldn’t archive the room. Refresh and try again.", true);
@@ -558,6 +564,9 @@ $("#room-leave-button").addEventListener("click", async () => {
   try {
     await client.send({ id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
       data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } });
+    // Same reason as archiving: access to this room has ended, and what the
+    // member sees next is the account's room list, not this dialog.
+    if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   } catch (error) {
     if (!sameSession(generation, roomId, member.id)) return;
     notice(error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
