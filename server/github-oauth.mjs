@@ -95,9 +95,37 @@ export function buildGitHubAuthUrl({ clientId, redirectUri, state, codeChallenge
 // States are stored under sha256 digests and compared in constant time;
 // entries expire after ttlMs and the table is bounded (oldest entries are
 // evicted past max, so a flood of starts cannot grow memory without bound).
-export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_MS, random = randomBytes, max = GITHUB_PENDING_MAX } = {}) {
+//
+// Persistent backend (production): pass a `persistentStore` with
+// { create({provider,stateHash,slotToken,expectedRevision,verifier,expiresAt,link}),
+//   consume(provider,stateHash), delete(provider,stateHash) } backed by SQLite,
+// so the callback survives Worker isolate eviction. Without it the in-memory
+// Map is used (tests, single-process dev).
+export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_MS, random = randomBytes, max = GITHUB_PENDING_MAX, persistentStore = null } = {}) {
   if (!Number.isSafeInteger(ttlMs) || ttlMs < 0 || !Number.isSafeInteger(max) || max < 1) {
     throw new GitHubOAuthError("github_pending_invalid");
+  }
+  if (persistentStore) {
+    return {
+      size: () => 0, // bounded by the store's own limit
+      create({ sessionToken, sessionRevision, link = false }) {
+        if (!/^[A-Za-z0-9_-]{43}$/.test(sessionToken || "")
+          || !Number.isSafeInteger(sessionRevision) || sessionRevision < 0) fail("github_session_required");
+        const state = base64urlToken(random(32));
+        const codeVerifier = createCodeVerifier(random);
+        persistentStore.create({ provider: "github", stateHash: digest(state),
+          slotToken: sessionToken, expectedRevision: sessionRevision,
+          verifier: codeVerifier, expiresAt: now() + ttlMs, link: link === true });
+        return { state, codeVerifier };
+      },
+      consume(state) {
+        if (typeof state !== "string" || state.length === 0 || state.length > 256) fail("github_state_invalid");
+        const entry = persistentStore.consume("github", digest(state));
+        if (!entry) fail("github_state_invalid");
+        return { codeVerifier: entry.verifier, sessionToken: entry.slotToken,
+          sessionRevision: entry.expectedRevision, link: entry.link === true };
+      }
+    };
   }
   const pending = new Map(); // digest(state) -> { codeVerifier, sessionToken, sessionRevision, createdAt }
   const sweep = () => {

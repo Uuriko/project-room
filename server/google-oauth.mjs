@@ -53,8 +53,8 @@ function decodeJwtPart(part) {
 }
 
 export class GoogleSignIn {
-  #clientId; #clientSecret; #redirectUri; #fetch; #now; #pending = new Map(); #keys = new Map(); #keysFetchedAt = 0;
-  constructor({ clientId, clientSecret, redirectUri, fetchImpl = fetch, now = Date.now }) {
+  #clientId; #clientSecret; #redirectUri; #fetch; #now; #pending = new Map(); #keys = new Map(); #keysFetchedAt = 0; #pendingStore = null;
+  constructor({ clientId, clientSecret, redirectUri, fetchImpl = fetch, now = Date.now, pendingStore = null }) {
     let redirect;
     try { redirect = new URL(redirectUri); } catch { fail('google_configuration_invalid'); }
     if (!clientIdPattern.test(clientId || '') || !opaque(clientSecret) || redirect.pathname !== GOOGLE_CALLBACK_PATH
@@ -66,22 +66,33 @@ export class GoogleSignIn {
     this.#redirectUri = redirect.href;
     this.#fetch = fetchImpl;
     this.#now = now;
+    // Persistent PKCE state store (SQLite-backed in production). Without it
+    // the in-memory Map loses state when the Worker isolate is evicted
+    // between the provider redirect and the callback.
+    this.#pendingStore = pendingStore;
   }
 
   begin({ slotToken, expectedRevision, link = false }) {
     if (!tokenPattern.test(slotToken || '') || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       fail('google_session_required');
-    for (const [key, entry] of this.#pending) {
-      if (entry.expiresAt <= this.#now() || entry.slotToken === slotToken) this.#pending.delete(key);
-    }
-    if (this.#pending.size >= 100) fail('google_connection_busy');
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(32).toString('base64url');
     const expiresAt = this.#now() + 10 * 60 * 1000;
+    const key = digest(state);
+    const entry = { slotToken, expectedRevision, verifier, expiresAt, link: link === true };
+    if (this.#pendingStore) {
+      // Persistent store prunes expired and de-dupes by slot token on write.
+      this.#pendingStore.create({ provider: 'google', stateHash: key, ...entry });
+    } else {
+      for (const [k, e] of this.#pending) {
+        if (e.expiresAt <= this.#now() || e.slotToken === slotToken) this.#pending.delete(k);
+      }
+      if (this.#pending.size >= 100) fail('google_connection_busy');
+      this.#pending.set(key, entry);
+    }
     // Link intent: the settings "connect Google" flow carries link=true so the
     // callback attaches the Google subject to the signed-in account instead of
     // the sign-in find-or-provision order.
-    this.#pending.set(digest(state), { slotToken, expectedRevision, verifier, expiresAt, link: link === true });
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({
       client_id: this.#clientId, redirect_uri: this.#redirectUri, response_type: 'code',
@@ -168,13 +179,20 @@ export class GoogleSignIn {
     const state = url.searchParams.get('state');
     if (!state || !/^[A-Za-z0-9_-]{43}$/.test(state)) fail('google_state_invalid');
     const key = digest(state);
-    const entry = this.#pending.get(key);
-    if (!entry || entry.used || entry.expiresAt <= this.#now()) {
-      if (entry?.expiresAt <= this.#now()) this.#pending.delete(key);
-      fail('google_state_invalid');
-    }
-    if (entry.used) fail('google_state_invalid');
-    entry.used = true;
+    // Persistent store: consume() atomically marks used and returns the entry;
+    // a missing/consumed/expired entry yields null. In-memory fallback below.
+    const entry = this.#pendingStore
+      ? this.#pendingStore.consume('google', key)
+      : (() => {
+          const e = this.#pending.get(key);
+          if (!e || e.used || e.expiresAt <= this.#now()) {
+            if (e?.expiresAt <= this.#now()) this.#pending.delete(key);
+            return null;
+          }
+          e.used = true;
+          return e;
+        })();
+    if (!entry) fail('google_state_invalid');
     if (url.searchParams.has('error')) fail('google_consent_denied');
     const code = url.searchParams.get('code');
     if (!opaque(code)) fail('google_callback_invalid');
@@ -188,7 +206,8 @@ export class GoogleSignIn {
     const scopes = typeof tokens.scope === 'string' ? tokens.scope.trim().split(/\s+/) : [];
     if (!scopes.includes('openid')) fail('google_scope_mismatch');
     const claims = await this.verifyIdToken(tokens.id_token);
-    this.#pending.delete(key);
+    if (this.#pendingStore) this.#pendingStore.delete('google', key);
+    else this.#pending.delete(key);
     return { claims, idToken: tokens.id_token, slotToken: entry.slotToken, expectedRevision: entry.expectedRevision,
       link: entry.link === true };
   }
