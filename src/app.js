@@ -2404,7 +2404,8 @@ function submitRequest(form) {
   try {
     if (!pendingMessage) {
       const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
-        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID() });
+        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID(),
+        channelId: activeChannelId });
       pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
     }
   } catch (error) { setComposerError(error.message); return; }
