@@ -92,6 +92,11 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   if (touch) await page.locator('#message-form button[type=submit]').click(); else await page.locator('#message-input').press('Enter');
   await page.locator('#request-mode-bar').waitFor({ state: 'hidden' });
   assert.equal(state().workItems[workItemId].revision, 0, 'A conversational yes is not assignment, acceptance or completion');
+  // The reply flow above leaves the room inside the request thread, where the
+  // unified timeline work cards are not rendered. Return to the room timeline
+  // before using the work-card accept control.
+  await page.locator('#thread-back').click();
+  await page.waitForFunction(() => !document.querySelector('#thread-bar') || document.querySelector('#thread-bar').hidden);
   await page.locator(`[data-work-id="${workItemId}"][data-action="accept"]`).click();
   await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
   assert.equal(state().workItems[workItemId].state, 'accepted');
@@ -175,7 +180,13 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     assert.equal(await choices.evaluate(node => node.open), true, 'Catch-up opens the same choices as the primary shortcut');
     await choices.locator('summary').click();
   }
-  await page.locator('#return-brief-panel > summary').click();
+  if (multiple) {
+    // The catch-up drill-through above closed the dialog; the room shortcut
+    // below must work from the room timeline.
+    await page.locator('#catchup-dialog').waitFor({ state: 'hidden' });
+  } else {
+    await page.locator('#return-brief-panel > summary').click();
+  }
   await page.locator('#contribution-open').focus();
   await page.locator('#contribution-open').press('Enter');
   if (multiple) {

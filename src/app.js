@@ -1782,6 +1782,8 @@ function revealWork(id) {
 }
 function revealDrafts(id) {
   if (!state?.workItems[id] || busy) return;
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   selectWorkView("work");
   const choices = workRecord(id)?.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }

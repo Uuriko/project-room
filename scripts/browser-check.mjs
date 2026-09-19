@@ -296,7 +296,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // A late event stays out of the frozen history while current stays live on the next fetch.
     await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("New changes available"));
     assert.match(await page.locator("#rb-history-boundary").textContent(), /through 59/);
-    await panel.evaluate(e => { e.open = false; }); await panel.locator(":scope > summary").click(); // reopen: fresh horizon
+    // The attention drill-through above closed Catch up again, so the panel
+    // summary is hidden. Reopen Catch up normally for a fresh horizon.
+    await openCatchUp(page);
     await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through 60"));
     assert.equal(await page.locator("#rb-history-list").textContent().then(t => t.includes("arrived while reading")), false); // still paged out
     await page.locator("#rb-more-button").click(); // the continuation keeps the SAME frozen horizon
