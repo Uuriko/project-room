@@ -71,6 +71,12 @@ function sweep() {
   step(T.CAPABILITIES_ADVERTISED, "producer", { capabilities: ["text"] });
   step(T.MEMBER_MUTE_SET, "owner", { memberId: "guest", muted: true });
 
+  // Channels arrived after this sweep was written; the EVENT_TYPES tripwire
+  // below is what forced them to be covered rather than silently skipped.
+  step(T.CHANNEL_CREATED, "owner", { channelId: "side", name: "side-quest" });
+  step(T.CHANNEL_RENAMED, "owner", { channelId: "side", name: "side-track" });
+  step(T.CHANNEL_ARCHIVED, "owner", { channelId: "side" });
+
   step(T.MESSAGE_POSTED, "producer", { messageId: "chat-1", body: "hello room" });
   step(T.MESSAGE_EDITED, "producer", { messageId: "chat-1", body: "hello room, again", expectedMessageRevision: 0 });
   step(T.MESSAGE_REACTION_SET, "reviewer", { messageId: "chat-1", reaction: "like", active: true });
@@ -144,7 +150,7 @@ test("the sweep covers enough of the event surface to be worth trusting", () => 
   // refused - which would make the test above pass for the wrong reason.
   const all = Object.values(T);
   const missing = all.filter(type => !result.exercised.has(type));
-  assert.ok(result.exercised.size >= 30,
+  assert.ok(result.exercised.size >= 33,
     `only ${result.exercised.size} of ${all.length} event types were exercised; not covered: ${missing.join(", ")}`);
 });
 
@@ -152,6 +158,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 41,
+  assert.equal(Object.values(T).length, 44,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
