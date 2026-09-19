@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T07:58:03Z · board: Uuriko/project-room#266 · watermark: 5740095412 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T08:28:53Z · board: Uuriko/project-room#266 · watermark: 5740095412 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,7 @@ RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-19-055 | quill | working | 2026-09-19T08:14:25Z | server/agent-identities.mjs, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, docs/openapi.yaml, tests/agent-identity-secrets.test.js
+RC-2026-09-19-054 | quill | working | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
 
 ## unclaimed-lanes
 lane | focus | trust
