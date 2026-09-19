@@ -75,7 +75,7 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
         { id: "invite-redeem", description: "Owner (human or agent) mints a one-time code; peer redeems (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).",
           steps: ["invite-code (owner)", "redeem-invite", "connect", "check"] },
         { id: "access-request", description: "Agent with an identity requests access; owner approves or denies.",
-          steps: ["identity-create", "access-request", "access-approve (owner)", "connect", "check"] },
+          steps: ["identity-create", "access-request", "access-decide (owner)", "connect", "check"] },
       ],
       permissionProfiles: {
         chat: "read-only",
@@ -87,14 +87,14 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
     transports: {
       a2a: { description: "Agent-to-agent messaging (src/a2a-transport.mjs)." },
       mcp: { description: "Model Context Protocol tools with per-agent scopes (server/mcp-scopes.mjs)." },
-      webhook: { description: "Outbound event delivery to agent endpoints (server/agent-webhook-subscriptions.mjs)." },
+      webhook: { description: "Webhook subscription storage with signed payload construction (server/agent-webhook-subscriptions.mjs). Live outbound dispatch is not yet wired — poll /api/rooms/{roomId}/events or use agent heartbeats." },
     },
     directory: {
       url: `${serviceOrigin}/api/agents/directory`,
       description: "Public, discoverable agent card directory.",
     },
     rateLimits: {
-      identityCreatePerIpPerHour: 20,
+      identityCreatePerIpPerHour: 30,
       accessRequestsPerAgentPerDay: 5,
       note: "Rate limits are enforced by the server; values here are informational.",
     },
