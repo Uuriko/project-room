@@ -492,7 +492,8 @@ async function ensureDefaultRoom() {
       $("#account-rooms-status").textContent = "Setting up your first room…";
       const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
       if (accountClient.session !== owned) return null;
-      if (body?.room?.id) await openAccountRoom(body.room.id);
+      // Refresh the list to show the new room (or the existing one).
+      if (body?.room?.id) await loadAccountRooms();
       else $("#account-rooms-status").textContent = "No rooms yet.";
       return body;
     } catch {

@@ -119,6 +119,18 @@ function ensureAccountProfileSchema(db) {
   if (!columns.has("display_name")) db.exec("ALTER TABLE accounts ADD COLUMN display_name TEXT");
   if (!columns.has("avatar_url")) db.exec("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
   if (!columns.has("onboarded")) db.exec("ALTER TABLE accounts ADD COLUMN onboarded INTEGER NOT NULL DEFAULT 1");
+  // RC-2026-09-19-088: ever_had_room tracks whether the account has ever held
+  // a room membership, so the default-room endpoint never resurrects a room
+  // for someone who deliberately left (or was removed from) all of theirs.
+  if (!columns.has("ever_had_room")) {
+    db.exec("ALTER TABLE accounts ADD COLUMN ever_had_room INTEGER NOT NULL DEFAULT 0");
+    db.exec("UPDATE accounts SET ever_had_room=1 WHERE id IN (SELECT account_id FROM member_accounts)");
+  }
+  db.exec(`CREATE TRIGGER IF NOT EXISTS member_accounts_ever_had_room
+    AFTER INSERT ON member_accounts
+    BEGIN
+      UPDATE accounts SET ever_had_room=1 WHERE id=NEW.account_id;
+    END`);
 }
 const DISPLAY_NAME_LIMIT = 64;
 const AVATAR_URL_LIMIT = 2048;
@@ -590,7 +602,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL, archived_at TEXT);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
       CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
-      CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL, display_name TEXT, avatar_url TEXT, onboarded INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL, display_name TEXT, avatar_url TEXT, onboarded INTEGER NOT NULL DEFAULT 1, ever_had_room INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE member_accounts (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, account_id TEXT NOT NULL REFERENCES accounts(id), origin TEXT NOT NULL, PRIMARY KEY(room_id,member_id), UNIQUE(room_id,account_id));
       CREATE TABLE account_access_events (account_id TEXT NOT NULL REFERENCES accounts(id), revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), auth_epoch INTEGER NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(account_id,revision));
       CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, account_id TEXT REFERENCES accounts(id), account_auth_epoch INTEGER);

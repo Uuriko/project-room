@@ -1513,11 +1513,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const existing = store.db.prepare(
           "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
         if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
-        // Only fresh accounts (created within the last hour) get a default
-        // room — never resurrect one for someone who deliberately left all
-        // of their rooms.
-        const row = store.db.prepare("SELECT created_at, display_name FROM accounts WHERE id=?").get(auth.account.id);
-        if (!row || store.now() - row.created_at > 3600000) return json(res, 200, { room: null, created: false });
+        // An account that has ever held a room but holds none now deliberately
+        // left (or was removed from) all of them — never resurrect a room.
+        const row = store.db.prepare("SELECT ever_had_room, display_name FROM accounts WHERE id=?").get(auth.account.id);
+        if (!row || row.ever_had_room) return json(res, 200, { room: null, created: false });
         const roomId = `personal-${randomBytes(9).toString("base64url")}`;
         const displayName = (typeof row.display_name === "string" && row.display_name.trim()) || "Owner";
         const created = store.createAccountRoom(token, binding, {

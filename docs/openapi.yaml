@@ -2948,11 +2948,12 @@ paths:
         (X-CSRF-Token, Origin, X-Session-Binding), 10 per minute per account.
         Idempotent: an account that already holds any room membership gets its
         first room back with `created: false` and nothing is created. An
-        account with no rooms that was created within the last hour gets a
+        account with no rooms that has never held one gets a
         fresh personal room ("My first room") with the account as owner
-        (`created: true`). Older room-less accounts get `{ room: null,
-        created: false }` — the endpoint never resurrects a room for someone
-        who deliberately left all of theirs. The client only calls this when
+        (`created: true`). An account that held rooms before but holds none
+        now gets `{ room: null, created: false }` — the endpoint never
+        resurrects a room for someone who deliberately left (or was removed
+        from) all of theirs. The client only calls this when
         no invitation is being redeemed.
       security:
         - accountSession: []

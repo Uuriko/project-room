@@ -84,11 +84,15 @@ test("ensure-default-room returns the existing room when the account has one", a
   assert.equal(body.room.id, roomId);
 });
 
-test("ensure-default-room does not resurrect a room for an old account", async t => {
+test("ensure-default-room does not resurrect a room after the account left all rooms", async t => {
   const { f, origin, creds, accountId } = await passwordAccount(t, 4);
-  // Age the account past the freshness window.
-  f.store.db.prepare("UPDATE accounts SET created_at=? WHERE id=?")
-    .run(f.store.now() - 2 * 3600000, accountId);
+  // The account had a room, then left it: ever_had_room is set via trigger.
+  const roomId = "room-left-1";
+  const create = await authedPost(origin, "/api/account-rooms", creds,
+    { roomId, title: "Left", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(create.status, 201);
+  assert.equal(f.store.db.prepare("SELECT ever_had_room FROM accounts WHERE id=?").get(accountId).ever_had_room, 1);
+  f.store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(accountId);
   const res = await authedPost(origin, "/api/account/ensure-default-room", creds);
   assert.equal(res.status, 200);
   const body = await res.json();

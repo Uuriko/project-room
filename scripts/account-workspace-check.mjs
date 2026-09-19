@@ -52,8 +52,11 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
   await p.locator("#inbox-send-preview").click(); await p.locator("#inbox-send-confirm").click();
   await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
   assert.equal(f.provider.submits, 1); assert.deepEqual(f.store.room("commons"), before);
-  await p.locator("#inbox-ask").click(); await p.getByText("No rooms yet.", { exact: true }).waitFor();
-  assert.equal(await p.locator("#account-rooms-list button").count(), 0); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
+  await p.locator("#inbox-ask").click();
+  // RC-2026-09-19-088: a fresh account's first sign-in ensures a default room
+  // instead of landing in an empty void.
+  await p.getByText("My first room", { exact: true }).waitFor();
+  assert.equal(await p.locator("#account-rooms-list button").count(), 1); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
   await p.locator("#nav-inbox").click(); await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Let’s start with one small idea.");
   if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
