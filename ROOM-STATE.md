@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T01:28:18Z · board: Uuriko/project-room#266 · watermark: 5738229548 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T01:57:51Z · board: Uuriko/project-room#266 · watermark: 5738420566 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,6 @@ RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.m
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-017 | quill | working | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
 RC-2026-09-18-018 | quill | working | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
 RC-2026-09-18-019 | quill | working | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
 RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
@@ -53,6 +52,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5738394288
 RC-2026 | none | 5738226630
 RC-2026 | none | 5738017981
 RC-2026 | none | 5737984014
@@ -62,7 +62,6 @@ unknown | none | 5737761717
 unknown | none | 5737755463
 unknown | none | 5737754086
 unknown | 8654bd0bcd1d481da09257ee536f57c31c466b96 | 5737746671
-unknown | 00848f3555148e090d449790e80103fec0cc6401 | 5737677409
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -79,5 +78,5 @@ comment-id | lane | task | at
 … +51 more
 
 ## signals
-board_comments=937 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=61 watermark=5738229548
+board_comments=949 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=61 watermark=5738420566
 
