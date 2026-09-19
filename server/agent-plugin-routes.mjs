@@ -345,7 +345,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
           description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once in the 201." })]
       : subscriptions.slice(0, 3).map(s => Object.freeze({ action: "check-journal", method: "GET",
           path: `/api/agent-webhooks/${encodeURIComponent(s.subscriptionId)}/deliveries`,
-          description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed states, attempts, and errors.` }));
+          description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters are redriven at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive.` }));
     return json(res, 200, { subscriptions, next });
   });
 
@@ -383,7 +383,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
           "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret." }),
         Object.freeze({ action: "check-journal", method: "GET",
           path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
-          description: "Read the per-subscription delivery journal: delivery states (pending/delivered/failed), attempts, and errors." }),
+          description: "Read the per-subscription delivery journal: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters redrive at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive; the delivery rate is at GET /api/agent-webhooks/metrics." }),
       ];
       if (hasSecret) {
         steps.unshift(Object.freeze({ action: "store-secret",
@@ -411,6 +411,63 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     return json(res, 200, { subscriptionId,
       deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
+  });
+
+  // RC-2026-09-19-064: signed dispatch surface. Deliveries are signed with
+  // a fresh timestamp on every attempt (replay-resistant), retried with
+  // backoff, and dead-lettered after exhaustion; this is where an agent
+  // reads the whole picture, redrives dead letters, and measures the
+  // falsifiable claim.
+  const DELIVERY_REDRIVE_ROUTE = /^\/api\/agent-webhooks\/deliveries\/([A-Za-z0-9_-]{1,64})\/redrive$/;
+
+  const deliveryLog = translate(async (req, res, { url }) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-log:${auth.identityId}`, 120);
+    const state = url.searchParams.get("state");
+    const limit = url.searchParams.get("limit");
+    return json(res, 200, {
+      deliveries: store.agentPlugin.deliveryLogFor({ identityId: auth.identityId, state, limit }),
+      next: [Object.freeze({ action: "dead-letter", method: "GET", path: "/api/agent-webhooks/dead-letter",
+        description: "Deliveries that exhausted all attempts and need manual redrive." }),
+        Object.freeze({ action: "metrics", method: "GET", path: "/api/agent-webhooks/metrics",
+          description: "Delivery-rate metric measuring the falsifiable claim." })],
+    });
+  });
+
+  const deadLetterQueue = translate(async (req, res, { url }) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-dead-letter:${auth.identityId}`, 120);
+    return json(res, 200, {
+      deliveries: store.agentPlugin.deadLettersFor({ identityId: auth.identityId, limit: url.searchParams.get("limit") }),
+      next: [Object.freeze({ action: "redrive", method: "POST",
+        path: "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
+        description: "Redrive a dead-lettered delivery: it returns to pending with a clean attempt counter." })],
+    });
+  });
+
+  const redriveDelivery = translate(async (req, res, { deliveryId }) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-redrive:${auth.identityId}`, 60);
+    return json(res, 200, {
+      delivery: store.agentPlugin.redriveDeadLetter({ identityId: auth.identityId, deliveryId }),
+    });
+  });
+
+  const deliveryMetrics = translate(async (req, res) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-metrics:${auth.identityId}`, 120);
+    return json(res, 200, store.agentPlugin.deliveryMetricsFor({ identityId: auth.identityId }));
+  });
+
+  // Agent-triggered dispatch sweep over the caller's own deliveries (the
+  // Cloudflare cron sweeps everything globally). The point is dogfood and
+  // repair: an agent can force delivery of its backlog without waiting for
+  // the next tick, and rate limits keep it from hammering receivers.
+  const processWebhooks = translate(async (req, res) => {
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    rate(`agent-webhooks-process:${auth.identityId}`, 12);
+    const summary = await store.agentPlugin.drainWebhookDeliveries({ agentId: auth.identityId });
+    return json(res, 200, { summary });
   });
 
   // RC-2026-09-18-049: identity verification tiers. The attester must be a
@@ -531,6 +588,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
     const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
     if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
+    // RC-2026-09-19-064: signed dispatch surface (fixed paths before the
+    // subscription-id regexes so they cannot shadow each other).
+    if (pathname === "/api/agent-webhooks/deliveries" && method === "GET") { await deliveryLog(req, res, { url }); return true; }
+    if (pathname === "/api/agent-webhooks/dead-letter" && method === "GET") { await deadLetterQueue(req, res, { url }); return true; }
+    if (pathname === "/api/agent-webhooks/metrics" && method === "GET") { await deliveryMetrics(req, res); return true; }
+    if (pathname === "/api/agent-webhooks/process" && method === "POST") { await processWebhooks(req, res); return true; }
+    const redriveMatch = method === "POST" ? DELIVERY_REDRIVE_ROUTE.exec(pathname) : null;
+    if (redriveMatch) { await redriveDelivery(req, res, { deliveryId: redriveMatch[1] }); return true; }
     const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
     if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
     const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;

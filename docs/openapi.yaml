@@ -2539,6 +2539,17 @@ paths:
         echoed back. 20 per address per minute. The identity-scoped event
         `agent.wake` is also subscribable: a pending journal entry is written
         whenever this identity is mentioned or DM'd while offline.
+        Deliveries are POSTed as JSON
+        { deliveryId, subscriptionId, eventType, issuedAt, roomId, data }
+        with headers x-webhook-delivery, x-webhook-subscription,
+        x-webhook-event, x-webhook-timestamp (ISO-8601), and
+        x-webhook-signature: the hex HMAC-SHA256 of the canonical JSON of
+        { deliveryId, eventType, issuedAt, data } keyed by the subscription
+        secret, recomputed with a fresh timestamp on every attempt. Receivers
+        must reject deliveries older than 5 minutes (replay resistance) and
+        should deduplicate on deliveryId. Retryable failures (429/5xx)
+        back off exponentially (5s doubling, 10m cap) up to 5 attempts, then
+        dead-letter; other 4xx responses are never retried.
       security:
         - bearerAuth: []
       requestBody:
@@ -2581,18 +2592,112 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `webhooks:manage` scope. Only the subscribing identity can read its
         own journal; cross-identity reads are 404 `unknown_subscription`.
-        Entries carry deliveryId, eventType, state (pending/delivered/failed),
-        attempts, error, createdAt — never secrets or signatures. 120 per
+        Entries carry deliveryId, eventType, state
+        (pending/delivered/failed/dead_letter), attempts, error, createdAt,
+        updatedAt, nextAttemptAt — never secrets or signatures. 120 per
         address per minute.
       security:
         - bearerAuth: []
       parameters:
         - { name: subscriptionId, in: path, required: true, schema: { type: string } }
       responses:
-        '200': { description: "{ subscriptionId, deliveries: [{ deliveryId, eventType, state, attempts, error, createdAt }] }" }
+        '200': { description: "{ subscriptionId, deliveries: [{ deliveryId, eventType, state, attempts, error, createdAt, updatedAt, nextAttemptAt }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '404': { description: unknown_subscription }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/deliveries:
+    get:
+      summary: Read the caller's delivery log across subscriptions
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Identity-scoped: only the caller's own
+        deliveries, newest first, across all their subscriptions. Optional
+        `state` filter (pending/delivered/failed/dead_letter) and `limit`
+        (1-500, default 100). 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, enum: [pending, delivered, failed, dead_letter] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200': { description: "{ deliveries: [{ deliveryId, subscriptionId, eventType, state, attempts, error, createdAt, updatedAt, nextAttemptAt }], next: [...] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_state }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/dead-letter:
+    get:
+      summary: Read the caller's dead-letter queue
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Deliveries that exhausted all attempts (or
+        were permanently rejected by the receiver) and need manual redrive.
+        Identity-scoped, newest first. 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200': { description: "{ deliveries: [{ deliveryId, subscriptionId, eventType, state: dead_letter, attempts, error, createdAt, updatedAt }], next: [...] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/deliveries/{deliveryId}/redrive:
+    post:
+      summary: Redrive a dead-lettered delivery
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Returns a dead_letter delivery to pending
+        with a clean attempt counter so the next sweep retries it.
+        Cross-identity redrives are 404 `unknown_delivery`; redriving a
+        delivery that is not dead_letter is 422 `not_dead_letter`. 60 per
+        identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: deliveryId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ delivery: { deliveryId, state: pending, attempts: 0, ... } }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_delivery }
+        '422': { description: not_dead_letter }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/metrics:
+    get:
+      summary: Read webhook delivery metrics for the caller
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Identity-scoped delivery-rate measurement:
+        `deliveryRateWithin3Attempts` is the share of terminal deliveries
+        (delivered + dead_letter) that reached delivered within 3 attempts —
+        the falsifiable claim "signed webhook dispatch delivers >=99% of
+        events within 3 attempts". Null until the first terminal delivery
+        (honest zero-sample baseline). 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ claim, totalTerminal, delivered, deliveredWithin3Attempts, deliveryRateWithin3Attempts, deadLettered, pending, failedAwaitingRetry, maxAttempts, byState }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/process:
+    post:
+      summary: Trigger a dispatch sweep of the caller's due deliveries
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Runs the signed-dispatch sweep over the
+        caller's own pending/failed deliveries whose backoff has elapsed
+        (the Cloudflare cron sweeps everything globally). Returns
+        { summary: { processed, delivered, retried, deadLettered, skipped } }.
+        12 per identity per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ summary: { processed, delivered, retried, deadLettered, skipped } }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
         '429': { description: rate_limited }
   /api/agent-heartbeats:
     post:
