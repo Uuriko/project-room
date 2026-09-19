@@ -31,6 +31,29 @@ test("resendMagicLinkSend posts the code to the Resend API", async () => {
   assert.ok(body.html.includes("123456"), "html carries the code");
 });
 
+test("resendMagicLinkSend includes a one-tap sign-in link when baseUrl is set", async () => {
+  const calls = [];
+  const fetchFn = async (url, options) => { calls.push(options); return { ok: true, status: 200 }; };
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn });
+  await send({ to: "user@example.com", code: "abc123", baseUrl: "https://room.example.com/" });
+  const body = JSON.parse(calls[0].body);
+  const expected = "https://room.example.com/?magic=abc123&email=user%40example.com";
+  assert.ok(body.text.includes(expected), "plaintext carries the sign-in link");
+  assert.ok(body.html.includes(`href="${expected.replace(/&/g, "&amp;")}"`), "html links the sign-in button");
+  assert.ok(body.html.includes("abc123"), "html keeps the code as fallback");
+  assert.equal(body.subject, "Your Project Room sign-in link");
+});
+
+test("resendMagicLinkSend falls back to code-only without a baseUrl", async () => {
+  const calls = [];
+  const fetchFn = async (url, options) => { calls.push(options); return { ok: true, status: 200 }; };
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn });
+  await send({ to: "user@example.com", code: "999999" });
+  const body = JSON.parse(calls[0].body);
+  assert.ok(!body.text.includes("?magic="), "no link without baseUrl");
+  assert.ok(body.text.includes("999999"), "code still sent");
+});
+
 test("resendMagicLinkSend throws a clear error on API failure", async () => {
   const fetchFn = async () => ({ ok: false, status: 401, text: async () => "{\"message\":\"bad key\"}" });
   const send = resendMagicLinkSend({ apiKey: "re_bad", from: "Room <noreply@example.com>", fetchFn });

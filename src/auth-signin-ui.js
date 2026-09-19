@@ -246,12 +246,43 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
   };
 
+  // One-tap magic link: the sign-in email links to ?magic=<code>&email=<addr>.
+  // Redeem it immediately on load so the tap signs the user in with no
+  // typing. The params are stripped from the URL before any network call
+  // so the single-use code doesn't linger in history.
+  async function consumeMagicLinkFromUrl() {
+    let params;
+    try { params = new URLSearchParams(window.location.search); }
+    catch { return; }
+    const code = (params.get("magic") || "").trim();
+    const email = (params.get("email") || "").trim();
+    if (!code || !email) return;
+    params.delete("magic");
+    params.delete("email");
+    const rest = params.toString();
+    const clean = window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash;
+    try { window.history.replaceState(null, "", clean); } catch { /* ignore */ }
+    if (accountClient.session?.authenticated) return;
+    activeMethod = "magic";
+    magicEmail = email;
+    magicPhase = "code";
+    renderPanel();
+    setStatus("Signing you in…");
+    await withBusy(async () => {
+      const session = await authedSession();
+      const view = await api(session, "/api/auth/magic/consume",
+        { email, code, sessionRevision: session.sessionRevision });
+      await finish(view);
+    });
+  }
+
   return {
     mount(target) {
       container = target;
       render();
       container.addEventListener("click", onClick);
       container.addEventListener("submit", onSubmit);
+      void consumeMagicLinkFromUrl();
     }
   };
 }
