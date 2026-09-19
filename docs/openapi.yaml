@@ -5143,6 +5143,7 @@ paths:
         'verified', verifiedBy, verifiedAt }) or { identityId, level:
         'unverified' } when unattested. Verification is host-supplied —
         attested by a room owner, never self-asserted.
+      security: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:

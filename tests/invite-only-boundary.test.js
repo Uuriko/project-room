@@ -52,7 +52,16 @@ const PROBES = {
   "POST /api/agent-identities": [{ displayName: "Boundary probe" }, 201],
   "POST /api/identity-create": [{ displayName: "Boundary probe" }, 201],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
-  "POST /api/access-requests": [{ roomId: "commons", identityId: "no-such-identity", displayName: "Boundary probe", requestedPermissions: ["read"], note: "probe", requestId: "probe-request-1" }, 404],
+  // "read" is not a room permission and never was; a later vocabulary check
+  // started refusing it with 422, so this probe stopped reaching the thing it
+  // is here to prove - that an unknown identity gets a bare 404 that says
+  // nothing about whether the identity or the room exists.
+  "POST /api/access-requests": [{ roomId: "commons", identityId: "no-such-identity", displayName: "Boundary probe", requestedPermissions: ["steer"], note: "probe", requestId: "probe-request-1" }, 404],
+  // Verification tier: a public read by design, so an agent can gate on another
+  // agent's tier before working with it. An unknown id is not a 404 - it answers
+  // 200 with level "unverified", which is the same answer a real-but-unattested
+  // identity gets, so the route tells a prober nothing about who exists.
+  "GET /api/agent-identities/{}/verification": [undefined, 200],
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
