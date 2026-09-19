@@ -49,6 +49,15 @@ export function readAccountHint(storage) {
   }
 }
 
+// First-paint session probe gate (QAU-006): the remembered room id and the
+// account hint are the only client-side signals that a session cookie could
+// exist for this browser. Firing GET /api/session without one can only 401,
+// which the browser logs as a console error on the welcome screen — so the
+// probe is skipped and the signed-out state renders directly.
+export function hasSessionHint(storage) {
+  return Boolean(readLastRoom(storage) || readAccountHint(storage));
+}
+
 export function readLastRoom(storage) {
   try {
     const value = (storage ?? globalThis.localStorage).getItem(LAST_ROOM_KEY);

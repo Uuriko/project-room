@@ -43,7 +43,7 @@ export function toAuthenticationResponse(credential) {
 
 const METHOD_LABELS = { password: "Email + password", magic: "Magic link", passkey: "Passkey", recovery: "Recovery code" };
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart, onMagicLinkFailure }) {
   let container = null;
   let activeMethod = null;
   let passwordMode = "signup"; // or "login"
@@ -279,12 +279,25 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     magicPhase = "code";
     renderPanel();
     setStatus("Signing you in…");
+    // The status line above lives inside the collapsed "More options" panel,
+    // so a failed redemption would leave the user staring at Welcome with no
+    // indication the link failed. Report the failure to the host too, so first
+    // paint can surface it visibly (QAX-002).
+    let linkFailure = null;
     await withBusy(async () => {
-      const session = await authedSession();
-      const view = await api(session, "/api/auth/magic/consume",
-        { email, code, sessionRevision: session.sessionRevision });
-      await finish(view);
+      try {
+        const session = await authedSession();
+        const view = await api(session, "/api/auth/magic/consume",
+          { email, code, sessionRevision: session.sessionRevision });
+        const signed = view?.session ?? view;
+        if (!signed?.authenticated || !signed?.account) throw new Error("Sign-in didn\u2019t complete. Try again.");
+        await finish(view);
+      } catch (error) {
+        linkFailure = failureText(error);
+        throw error;
+      }
     });
+    if (linkFailure && !accountClient.session?.authenticated) onMagicLinkFailure?.(linkFailure);
   }
 
   return {

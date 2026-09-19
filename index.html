@@ -38,6 +38,7 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
         <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
@@ -121,7 +122,7 @@
             <label class="inbox-filter-toggle"><input id="inbox-group-toggle" type="checkbox" checked> Group by connection</label>
           </div>
           <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Sample inbox. Add a connection below. Email connections are local fixtures for now, with no real mailbox behind them. Telegram can go live once the deployment's bot token and webhook secret bindings are set; until then nothing arrives and replies stay on this server as samples. WhatsApp connections are pairing-required and not live yet.</p>
+          <p id="inbox-empty" class="form-hint">Nothing here yet. This inbox collects your mentions, assigned work, and messages from your connected accounts. Open a room to pick up your first task.</p>
           <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
           <details id="inbox-add-connection" class="inbox-add-connection" hidden>
             <summary>Add connection</summary>
