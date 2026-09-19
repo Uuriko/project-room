@@ -464,11 +464,41 @@ async function loadAccountRooms(more = false) {
     }
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
+    // RC-2026-09-19-088: first sign-in must never land in an empty void. A
+    // fresh account with no rooms and no pending invitation gets its default
+    // room created and opened.
+    if (!more && !$("#account-rooms-list").children.length && !roomListCursor) ensureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
     else $("#account-rooms-status").textContent = "Couldn’t load rooms. Choose Rooms to retry.";
   }
+}
+// RC-2026-09-19-088: ensure a fresh account's default room. Never runs when an
+// invitation is being redeemed — the invite flow owns the landing. Idempotent
+// server-side; a second call returns the existing room.
+let defaultRoomFlight = null;
+async function ensureDefaultRoom() {
+  if (defaultRoomFlight) return defaultRoomFlight;
+  // Never create a default room when entering through an invitation or a
+  // shared join link — those flows own the landing.
+  if (initialInvitationFragment || initialJoinFragment || invitation.secret) return null;
+  const owned = accountClient.session;
+  if (!owned?.authenticated) return null;
+  defaultRoomFlight = (async () => {
+    try {
+      $("#account-rooms-status").textContent = "Setting up your first room…";
+      const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
+      if (accountClient.session !== owned) return null;
+      if (body?.room?.id) await openAccountRoom(body.room.id);
+      else $("#account-rooms-status").textContent = "No rooms yet.";
+      return body;
+    } catch {
+      if (accountClient.session === owned) $("#account-rooms-status").textContent = "No rooms yet.";
+      return null;
+    } finally { defaultRoomFlight = null; }
+  })();
+  return defaultRoomFlight;
 }
 async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
@@ -4167,6 +4197,19 @@ shareLinksUI = installShareLinks({ client, accountClient, getState: () => state,
   }
 });
 configureAuthPanel();
+// RC-2026-09-19-088: surface OAuth callback failures with an actionable
+// message instead of silently returning to the sign-in screen. The query
+// param is cleared so a refresh doesn't re-show the banner.
+{
+  const params = new URLSearchParams(location.search);
+  const failedProvider = params.get("google") === "error" ? "Google"
+    : params.get("github") === "error" ? "GitHub" : null;
+  if (failedProvider) {
+    setFormStatus($("#auth-link-error"),
+      `${failedProvider} sign-in didn't complete. ${failedProvider === "Google" ? "Try again with the button below, or" : "Please"} sign in another way.`, true);
+    history.replaceState(history.state, "", location.pathname);
+  }
+}
 if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
   if (initialJoinFragment) {
