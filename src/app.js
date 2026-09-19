@@ -1415,6 +1415,11 @@ function renderMessages() {
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
   const focusedFeedback = focused?.closest(".draft-feedback");
+  // A control inside a work card is restored by setTimelineWorkNode when that
+  // card is re-rendered, but the interleave can then move the card, and moving
+  // a node drops focus. Remembered here, restored once at the end, when every
+  // node is in its final place.
+  const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
@@ -1477,7 +1482,11 @@ function renderMessages() {
       }
       node._content = html;
     }
-    if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    // Position is settled once, below, after work cards are interleaved.
+    // Placing message nodes at their message index here put them in front of
+    // the work cards, which the interleave then had to undo - two moves per
+    // render for nodes that were already in the right place, and a focused
+    // control inside a moved node loses focus.
     ordered.push(node);
   });
   // Interleave work cards chronologically into the single timeline.
@@ -1515,6 +1524,11 @@ function renderMessages() {
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
     replacement?.focus({ preventScroll: true });
+  }
+  // Only when the update dropped focus to the body: a member who moved focus
+  // themselves while the render was in flight keeps it.
+  if (focusedKey && document.activeElement === document.body) {
+    [...list.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusedKey)?.focus({ preventScroll: true });
   }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
