@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -282,6 +283,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await historyMessage.count(), 1, "history exposes the underlying message");
     await historyMessage.click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), "catch-up-55", "history drill-through focuses the message");
+    // The history drill-through closes Catch up; re-open it for the attention item.
+    await openCatchUp(page);
     await page.locator('#rb-attention-list [data-open-work="w-brief"]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), "w-brief", "current action drill-through focuses the work card");
     mkdirSync("test-results", { recursive: true });
@@ -396,6 +399,8 @@ for (const outcome of ["success", "failure"]) {
       await new Promise(resolve => { release = resolve; arrived(); });
       await route.fulfill({ status: outcome === "success" ? 200 : 401, headers: { "x-test-held": "brief" }, contentType: "application/json", body: JSON.stringify(outcome === "success" ? body : { error: { message: "Obsolete failure" } }) });
     });
+    // The catch-up dialog must be open for the refresh button to be visible.
+    await openCatchUp(page);
     await page.locator("#rb-refresh-button").click(); await held;
     key = store.issueAccessKey("commons", "owner"); await enter();
     release();

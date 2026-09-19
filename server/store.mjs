@@ -318,7 +318,7 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
