@@ -371,6 +371,23 @@ const inboxNext = (roomId, directMessages, assignments, mentions) => {
   return steps;
 };
 
+// RC-2026-09-18-054: presence guidance — who is around and how to reach
+// them (DM via the message.posted command with toMemberId).
+const presenceNext = (roomId, memberIds) => {
+  if (memberIds.length > 0) {
+    return [Object.freeze({
+      action: "dm-member",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `DM a member directly: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "hello", toMemberId: "${memberIds[0]}" } }. Send your identity secret as the Bearer token.`,
+    })];
+  }
+  return [Object.freeze({
+    action: "watch-presence",
+    description: "Nobody is online right now. Presence lists online members and who is holding work sessions.",
+  })];
+};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
@@ -1915,12 +1932,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const p = agentPresence(memberId);
         if (p && p.status !== "unregistered") online.set(memberId, { watching: false, offline: true });
       }
-      return { members: [...online.entries()].map(([memberId, info]) => ({
+      const listed = [...online.entries()].map(([memberId, info]) => ({
         memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
         watching: info.watching, workingOn: info.workingOn ?? [],
         statusMessage: members[memberId].statusMessage ?? null,
         presence: agentPresence(memberId), // null for non-agent/unlinked members
-      })) };
+      }));
+      return {
+        members: listed,
+        // RC-2026-09-18-054: presence answers "who's here" — name how to
+        // reach them. The first listed member is a concrete DM example.
+        next: Object.freeze(presenceNext(roomId, listed.map(m => m.memberId))),
+      };
     });
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
