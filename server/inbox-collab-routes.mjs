@@ -29,6 +29,14 @@ const STATUS_BY_CODE = new Map(Object.entries({
   routing_invalid: 422, routing_not_found: 404, routing_transition: 409,
   assignment_not_found: 404, lock_not_found: 404,
   handoff_no_account_scope: 409,
+  // Typed handoff envelopes (RC-2026-09-19-062): validation is 422, unknown
+  // envelopes are 404, recipient/sender actor rules are 403, and illegal
+  // lifecycle moves are 409.
+  invalid_handoff_envelope: 422, invalid_envelope_status: 422, invalid_envelope_room: 422,
+  envelope_checks_required: 422, envelope_unknown_check: 422, envelope_expiry_system_only: 422,
+  envelope_not_found: 404,
+  envelope_recipient_only: 403, envelope_sender_only: 403, envelope_party_only: 403,
+  invalid_envelope_transition: 409, envelope_duplicate_id: 409,
 }));
 
 export function collabHttpError(error) {
@@ -272,6 +280,49 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
         const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
         const handoff = collab.transitionHandoff(accountId, collabId, fields.status, { note: fields.note ?? null });
         return json(res, 200, { handoff });
+      }
+      // Typed handoff envelopes (RC-2026-09-19-062): agent-to-agent delegation
+      // with objective, inputs, scoped authority, expected output, acceptance
+      // test, termination, and provenance. The journal lives on the store
+      // (store.handoffEnvelopes); these routes are thin room-scoped adapters.
+      case "envelopes": {
+        if (req.method === "POST") {
+          const fields = await body(req);
+          if (!shape(fields, { required: ["to", "objective", "inputs", "authority", "expectedOutput", "acceptanceTest", "termination"],
+            optional: ["provenance"] })) {
+            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?}");
+          }
+          const receipt = store.handoffEnvelopes.create(roomId, fields, { from: caller.id });
+          return json(res, 201, receipt);
+        }
+        if (req.method === "GET") {
+          const status = url.searchParams.get("status");
+          const to = url.searchParams.get("to");
+          return json(res, 200, {
+            envelopes: store.handoffEnvelopes.list(roomId, { status, to }),
+          });
+        }
+        return reject(405, "method_not_allowed", "Method not allowed");
+      }
+      case "envelope-transition": {
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        const fields = await body(req);
+        if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed"] })) {
+          invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
+        }
+        const envelope = store.handoffEnvelopes.transition(roomId, collabId, fields.status,
+          { by: caller.id, note: fields.note ?? null, checksPassed: fields.checksPassed ?? null });
+        return json(res, 200, { envelope });
+      }
+      case "envelope-sweep": {
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        await body(req); // no fields; the sweep is idempotent
+        const moved = store.handoffEnvelopes.sweepExpired(roomId);
+        return json(res, 200, { swept: moved });
+      }
+      case "envelope-metrics": {
+        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed");
+        return json(res, 200, store.handoffEnvelopes.metrics(roomId));
       }
       default:
         return reject(404, "not_found", "Not found");

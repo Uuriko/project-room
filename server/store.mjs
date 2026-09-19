@@ -26,6 +26,7 @@ import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantin
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
+import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
@@ -464,6 +465,7 @@ export class RoomStore {
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
 this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
+    this.handoffEnvelopes = new HandoffEnvelopeJournal(this); // RC-2026-09-19-062: typed handoff envelope journal.
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
@@ -504,6 +506,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
         this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
+        this.handoffEnvelopes.verifySchema({ allowAbsent: true }); // RC-2026-09-19-062: typed envelopes additive, read-only never migrates.
         this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
@@ -630,6 +633,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(inboxHandoffSchema);
+      // The typed handoff envelope journal (RC-2026-09-19-062) follows the
+      // same additive pattern: IF NOT EXISTS is idempotent, no schema version
+      // bump, and the table is intentionally outside the writer fence
+      // (see unfencedAdditiveTables).
+      this.db.exec(handoffEnvelopeSchema);
       // Lane D agent plug-in tables (RC-2026-09-18-010): scoped API keys,
       // directory cards, webhook subscriptions. Same additive pattern —
       // IF NOT EXISTS is idempotent, no schema version bump, intentionally

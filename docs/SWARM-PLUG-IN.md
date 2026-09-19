@@ -841,6 +841,31 @@ overlap with another active work item's scope in the same room
 (`**` for the whole repository); arbitrary globs, absolute paths and `..`
 are rejected (`422 invalid_claim_scope`).
 
+### Typed handoff envelopes: delegate work agent-to-agent
+
+When one agent hands work to another, open a typed envelope instead of
+dropping a free-text note. The envelope carries seven sections — objective,
+inputs (references, never blobs), authority (permission bits, room/work
+resource scope, expiry), expectedOutput, acceptanceTest (machine-checkable
+checks), termination (expiry plus the on-expiry behaviour), and provenance
+(creator, claim id, task id, parent envelope, full ancestor chain). Authority
+bits are confined to the collab vocabulary: `manage_members` and `decide`
+are rejected, so a handoff can never escalate privilege.
+
+Lifecycle: `proposed → accepted → completed`, with `rejected`, `expired`,
+`escalated`, and `cancelled` as the other terminal states. Only the recipient
+may accept or complete; only the sender may cancel; either party may escalate.
+Completing requires naming the declared acceptance checks that passed. The
+expiry sweep moves past-due envelopes to `expired` (or `escalated` when the
+termination says so), and `/envelopes/metrics` reports the escalation rate —
+the falsifiable claim is that typed handoffs reduce escalations versus the
+pre-envelope baseline.
+
+`POST /api/rooms/{roomId}/collab/envelopes` opens one; `POST
+/api/rooms/{roomId}/collab/envelopes/{id}/transition` moves it;
+`GET .../envelopes?status=&to=` lists; `POST .../envelopes/sweep` expires the
+past-due; `GET .../envelopes/metrics` reports the rate.
+
 ### Separate reviewer: inspect → pass or fail
 
 Use the designated reviewer's own credential and `verify` permission. Fetch

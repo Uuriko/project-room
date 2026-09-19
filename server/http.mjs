@@ -1872,11 +1872,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const collabRoutingPolicyMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/routing\/policy$/.exec(url.pathname);
       const collabHandoffsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/handoffs$/.exec(url.pathname);
       const collabHandoffTransitionMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/handoffs\/([^/]{1,64})\/transition$/.exec(url.pathname);
+      // Typed handoff envelopes (RC-2026-09-19-062). The sweep/metrics
+      // literals are separate templates so they are never mistaken for an
+      // envelope id by the transition template below.
+      const collabEnvelopesMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/envelopes$/.exec(url.pathname);
+      const collabEnvelopeSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/envelopes\/sweep$/.exec(url.pathname);
+      const collabEnvelopeMetricsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/envelopes\/metrics$/.exec(url.pathname);
+      const collabEnvelopeTransitionMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/envelopes\/([^/]{1,64})\/transition$/.exec(url.pathname);
       const collabMatch = collabAssignmentsMatch ?? collabAssignmentReleaseMatch ?? collabNotesMatch
         ?? collabLockAcquireMatch ?? collabLockReleaseMatch ?? collabLocksMatch ?? collabApprovalsMatch
         ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch ?? collabRoutingMentionsMatch
         ?? collabRoutingMatch ?? collabRoutingResolveMatch ?? collabRoutingPolicyMatch ?? collabHandoffsMatch
-        ?? collabHandoffTransitionMatch;
+        ?? collabHandoffTransitionMatch ?? collabEnvelopesMatch ?? collabEnvelopeSweepMatch
+        ?? collabEnvelopeMetricsMatch ?? collabEnvelopeTransitionMatch;
       // Work claims with leases, delivery modes and review policies (task
       // RC-2026-09-18-041): every route template below is documented in
       // docs/openapi.yaml — the route-docs gate extracts these literals from
@@ -1921,7 +1929,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
       if (collabMatch) {
-        const collabRoute = collabAssignmentsMatch ? "assignments"
+        // Typed envelope routes (RC-2026-09-19-062) resolve first so the
+        // /sweep and /metrics literals never read as an envelope id.
+        const collabRoute = collabEnvelopesMatch ? "envelopes"
+          : collabEnvelopeSweepMatch ? "envelope-sweep"
+          : collabEnvelopeMetricsMatch ? "envelope-metrics"
+          : collabEnvelopeTransitionMatch ? "envelope-transition"
+          : collabAssignmentsMatch ? "assignments"
           : collabAssignmentReleaseMatch ? "assignment-release"
           : collabNotesMatch ? "notes"
           : collabLockAcquireMatch ? "lock-acquire"
@@ -1936,7 +1950,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : collabRoutingPolicyMatch ? "routing-policy"
           : collabHandoffsMatch ? "handoffs" : "handoff-transition";
         const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
-          ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch;
+          ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
           collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null, helpers: { json, reject, body } });
       }

@@ -51,6 +51,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
   "inbox_handoffs",
+  // handoff_envelopes (typed handoff envelopes, RC-2026-09-19-062) is purely
+  // additive and intentionally NOT fenced: same rationale — older writers
+  // have no code path to it, and the journal's
+  // proposed→accepted→completed|rejected|expired|escalated|cancelled
+  // transitions plus the recipient/sender actor rules are the gate.
+  "handoff_envelopes",
   // Lane C inbox collaboration (task RC-2026-09-18-011): collab_assignments,
   // collab_notes, collab_draft_locks, collab_approvals, collab_routing_events.
   // Purely additive and intentionally NOT fenced: older writers have no code
