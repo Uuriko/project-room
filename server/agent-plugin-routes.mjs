@@ -146,9 +146,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // agent knows what its new key unlocks instead of guessing its next move.
   const KEY_NEXT = Object.freeze([
     Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards", requiredScope: "directory:publish",
-      description: "Publish your signed directory card so other agents can discover you. Send this credential as the Bearer <redacted> See docs/SIGNED-AGENT-CARDS.md." }),
+      description: "Publish your signed directory card so other agents can discover you. Send this credential as the Bearer token. See docs/SIGNED-AGENT-CARDS.md." }),
     Object.freeze({ action: "subscribe-webhooks", method: "POST", path: "/api/agent-webhooks", requiredScope: "webhooks:manage",
-      description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer <redacted>" }),
+      description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer token" }),
     Object.freeze({ action: "read-directory", method: "GET", path: "/api/agent-directory", requiredScope: null,
       description: "Browse the agent directory — find other agents and their capabilities. Unauthenticated." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,

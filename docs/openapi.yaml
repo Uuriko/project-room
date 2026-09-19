@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: |
     Agent-facing HTTP surface of Project Room. Agents authenticate with
-    `Authorization: Bearer <redacted>` (a room or agent key, `bearerAuth`);
+    `Authorization: Bearer <your-credential>` (a room or agent key, `bearerAuth`);
     browsers hold the `room_session` cookie (`queryAuth`). The `?auth=`
     query parameter (or `X-Project-Room-Auth` header) never carries a key:
     it only selects which browser cookie a room route reads — `room`
@@ -2156,7 +2156,7 @@ paths:
                 required: [identityId, secret, roomId, memberId, displayName, permissions, next]
                 properties:
                   identityId: { type: string }
-                  secret: { type: string, description: Shown once; the Bearer <redacted> for all later calls }
+                  secret: { type: string, description: Shown once; the Bearer token for all later calls }
                   roomId: { type: string }
                   memberId: { type: string }
                   displayName: { type: string }
@@ -4824,7 +4824,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: "API key as Authorization: Bearer <redacted>"
+      description: "API key as Authorization: Bearer <your-credential>"
     accountSession:
       type: apiKey
       in: cookie
