@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
-import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" : "desktop"}: join, answer, return, review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -35,7 +35,6 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator('[data-message-record-id="journey-background"]').waitFor();
   assert.equal(await page.evaluate(() => document.activeElement.id), "contribution-open", "background activity preserves next-step focus");
   await page.getByRole("button", { name: "Say hello", exact: true }).click();
-  await closeCatchUp(page);
   assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
   await page.locator("#message-input").fill("I can help review the agenda.");
   await page.locator('#message-form button[type="submit"]').click();

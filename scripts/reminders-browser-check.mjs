@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUpPanel } from "./room-chrome.mjs";
+import { closeCatchUp, openCatchUpPanel } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -61,6 +61,7 @@ for (const mobile of [false, true]) {
     assert.deepEqual(snapshot(), initial, "time passing and catch-up viewing never acknowledge or change work");
 
     // Rescheduling stores the instant shown before a ten-minute pause.
+    await closeCatchUp(page);
     await open(); const shown = await page.locator("#reminder-preview").textContent(), beforePause = at;
     at += 600000; await page.clock.fastForward(600000);
     let drop = true;
@@ -79,6 +80,7 @@ for (const mobile of [false, true]) {
     send(T.WORK_PROPOSED, { workItemId: "replacement", title: "Replacement plan", definitionOfDone: "A revised agenda", accountableMemberId: "owner", mode: "read" });
     send(T.WORK_SUPERSEDED, { workItemId: "test-handoff", expectedRevision: 0, supersededByWorkItemId: "replacement", reason: "Replanned" });
     await page.locator("#refresh-button").click();
+    await openCatchUpPanel(page, "reminder-panel");
     await page.locator("#reminder-pending button").click();
     await page.locator('#reminder-form[aria-busy="false"]').waitFor();
     await capture("retry");
