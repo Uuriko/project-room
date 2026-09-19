@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T18:57:42Z · board: Uuriko/project-room#266 · watermark: 5744514386 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T19:28:40Z · board: Uuriko/project-room#266 · watermark: 5744612963 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -27,7 +27,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-RC-2026-09-19-054 | quill | working | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
+RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
 … +21 more
 
 ## expiring-soon (<6h)
@@ -69,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1129 threshold=1500 rotation_due=no watcher=active open_claims=46 prose_open=0 unfenced_prose=62 watermark=5744514386
+board_comments=1133 threshold=1500 rotation_due=no watcher=active open_claims=46 prose_open=0 unfenced_prose=62 watermark=5744612963
 
