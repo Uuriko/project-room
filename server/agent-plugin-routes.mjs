@@ -58,12 +58,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
       if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
         || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
-      if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
-        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
         || error.name === "VerificationError"
         || error.name === "HeartbeatError")) {
         reject(error.status ?? (error.code === "directory_not_found" ? 404 : 422), error.code, error.message);
-      }
       }
       throw error;
     }
@@ -444,6 +441,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const identityVerification = translate(async (req, res, { identityId }) => {
     const attestation = store.agentPlugin.verificationAttestation(identityId);
     return json(res, 200, attestation ?? { identityId, level: "unverified" });
+  });
 
   // ---- Wakeable agent presence (RC-2026-09-18-051) ----
   //
