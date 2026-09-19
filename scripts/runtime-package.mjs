@@ -124,6 +124,8 @@ optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/
 optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)
 optional.push("connectors/muse.md"); // Muse custom-connector brief (served at /connectors/muse.md)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
+optional.push("server/account-deletion.mjs"); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs; imports the src planner below)
+optional.push("src/account-deletion.mjs"); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
 optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (imported by server/http.mjs)

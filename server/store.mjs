@@ -106,6 +106,37 @@ const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(
 export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
+// RC-2026-09-19-078: account profile columns (display name / avatar) and
+// the first-run onboarding flag converge on existing databases via ALTER
+// TABLE — the same additive pattern as migrateSpamQuarantineColumns and
+// ensureIdentitySecretSchema. Existing rows backfill display_name/avatar_url
+// NULL and onboarded 1, so legacy accounts are not forced through
+// first-run onboarding; createAccount inserts new accounts with
+// onboarded 0.
+function ensureAccountProfileSchema(db) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='accounts'").get()) return;
+  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('accounts')").all().map(r => r.name));
+  if (!columns.has("display_name")) db.exec("ALTER TABLE accounts ADD COLUMN display_name TEXT");
+  if (!columns.has("avatar_url")) db.exec("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
+  if (!columns.has("onboarded")) db.exec("ALTER TABLE accounts ADD COLUMN onboarded INTEGER NOT NULL DEFAULT 1");
+}
+const DISPLAY_NAME_LIMIT = 64;
+const AVATAR_URL_LIMIT = 2048;
+const normalizeDisplayName = value => {
+  if (typeof value !== "string") fail(422, "invalid_profile", "displayName must be a string");
+  const name = value.trim();
+  if (name.length === 0 || name.length > DISPLAY_NAME_LIMIT) fail(422, "invalid_profile", `displayName must be 1..${DISPLAY_NAME_LIMIT} characters`);
+  return name;
+};
+const normalizeAvatarUrl = value => {
+  if (typeof value !== "string") fail(422, "invalid_profile", "avatarUrl must be a string");
+  if (value === "") return null; // empty string clears the avatar
+  if (value.length > AVATAR_URL_LIMIT) fail(422, "invalid_profile", `avatarUrl must be at most ${AVATAR_URL_LIMIT} characters`);
+  let protocol = null;
+  try { protocol = new URL(value).protocol; } catch { protocol = null; }
+  if (protocol !== "https:") fail(422, "invalid_profile", "avatarUrl must be an https URL");
+  return value;
+};
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const redemptionPattern = /^(?:[A-Za-z0-9_-]{43}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 const invitationStatus = (row, now) => row.status === "pending" && row.expires_at <= now ? "expired" : row.status;
@@ -559,7 +590,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL, archived_at TEXT);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
       CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
-      CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL, display_name TEXT, avatar_url TEXT, onboarded INTEGER NOT NULL DEFAULT 1);
       CREATE TABLE member_accounts (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, account_id TEXT NOT NULL REFERENCES accounts(id), origin TEXT NOT NULL, PRIMARY KEY(room_id,member_id), UNIQUE(room_id,account_id));
       CREATE TABLE account_access_events (account_id TEXT NOT NULL REFERENCES accounts(id), revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), auth_epoch INTEGER NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(account_id,revision));
       CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, account_id TEXT REFERENCES accounts(id), account_auth_epoch INTEGER);
@@ -602,6 +633,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // databases via ALTER TABLE; old rows backfill NULL and keep reading
       // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
       ensureIdentitySecretSchema(this.db);
+      // RC-2026-09-19-078: account profile (display_name/avatar_url) and
+      // onboarding flag converge the same additive way; no version bump.
+      ensureAccountProfileSchema(this.db);
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
@@ -733,7 +767,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   migrateIdentityV3(sourceVersion) {
     this.transaction(() => {
       this.db.exec(`
-        CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL, display_name TEXT, avatar_url TEXT, onboarded INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS member_accounts (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, account_id TEXT NOT NULL REFERENCES accounts(id), origin TEXT NOT NULL, PRIMARY KEY(room_id,member_id), UNIQUE(room_id,account_id));
         CREATE TABLE IF NOT EXISTS account_access_events (account_id TEXT NOT NULL REFERENCES accounts(id), revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), auth_epoch INTEGER NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(account_id,revision));
       `);
@@ -742,7 +776,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!columns.has("account_auth_epoch")) this.db.exec("ALTER TABLE credentials ADD COLUMN account_auth_epoch INTEGER");
       this.db.exec("CREATE INDEX IF NOT EXISTS credential_account ON credentials(account_id)");
       const origin = `legacy-v${sourceVersion}`;
-      const insertAccount = this.db.prepare("INSERT OR IGNORE INTO accounts(id,active,revision,auth_epoch,origin,created_at) VALUES(?,1,0,0,?,?)");
+      const insertAccount = this.db.prepare("INSERT OR IGNORE INTO accounts(id,active,revision,auth_epoch,origin,created_at,onboarded) VALUES(?,1,0,0,?,?,1)");
       const insertBinding = this.db.prepare("INSERT OR IGNORE INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)");
       for (const { id: roomId, projection } of this.db.prepare("SELECT id,projection FROM rooms ORDER BY id").all()) {
         const state = JSON.parse(projection);
@@ -1194,8 +1228,62 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof origin !== "string" || !origin.trim() || origin.length > 128) fail(422, "invalid_account", "A bounded account origin is required");
     return this.transaction(() => {
       if (this.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) fail(409, "account_exists", "Account already exists");
-      this.db.prepare("INSERT INTO accounts(id,active,revision,auth_epoch,origin,created_at) VALUES(?,1,0,0,?,?)").run(accountId, origin.trim(), this.now());
+      // New accounts start un-onboarded (onboarded=0) so they land on the
+      // first-run onboarding step (RC-2026-09-19-078).
+      this.db.prepare("INSERT INTO accounts(id,active,revision,auth_epoch,origin,created_at,onboarded) VALUES(?,1,0,0,?,?,0)").run(accountId, origin.trim(), this.now());
       return this.account(accountId);
+    });
+  }
+  // RC-2026-09-19-078: account-level profile (display name / avatar). Reads
+  // tolerate pre-migration databases where the columns do not exist yet
+  // (account() keeps its exact legacy shape; profile fields live here).
+  accountProfile(accountId) {
+    const row = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(accountId);
+    if (!row) fail(404, "account_not_found", "Account not found");
+    return {
+      id: row.id,
+      displayName: row.display_name ?? null,
+      avatarUrl: row.avatar_url ?? null,
+      onboardingComplete: row.onboarded == null || row.onboarded !== 0,
+    };
+  }
+  updateAccountProfile(accountId, patch) {
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) fail(422, "invalid_profile", "A profile patch object is required");
+    const keys = Object.keys(patch);
+    if (keys.length === 0) fail(422, "invalid_profile", "Supply displayName and/or avatarUrl");
+    for (const key of keys) {
+      if (key !== "displayName" && key !== "avatarUrl") fail(422, "invalid_profile", `Unknown profile field "${key}"`);
+    }
+    return this.transaction(() => {
+      this.account(accountId); // 404 when missing
+      const sets = [], values = [];
+      if (Object.hasOwn(patch, "displayName")) { sets.push("display_name=?"); values.push(normalizeDisplayName(patch.displayName)); }
+      if (Object.hasOwn(patch, "avatarUrl")) { sets.push("avatar_url=?"); values.push(normalizeAvatarUrl(patch.avatarUrl)); }
+      this.db.prepare(`UPDATE accounts SET ${sets.join(", ")} WHERE id=?`).run(...values, accountId);
+      return this.accountProfile(accountId);
+    });
+  }
+  // RC-2026-09-19-078: first-run onboarding. createAccount leaves new
+  // accounts with onboarded=0; they land on GET /api/account/onboarding
+  // until POST /api/account/onboarding/complete marks them done.
+  onboardingState(accountId) {
+    const profile = this.accountProfile(accountId);
+    return {
+      accountId: profile.id,
+      completed: profile.onboardingComplete,
+      steps: [
+        { id: "set-profile", title: "Choose a display name",
+          detail: "How other members will see you in rooms.", done: profile.displayName !== null },
+        { id: "review-signin", title: "Review your sign-in methods",
+          detail: "Check which sign-in methods are linked to this account.", done: this.accountLogins.listMethods(accountId).length > 0 },
+      ],
+    };
+  }
+  completeOnboarding(accountId) {
+    return this.transaction(() => {
+      this.account(accountId); // 404 when missing
+      this.db.prepare("UPDATE accounts SET onboarded=1 WHERE id=?").run(accountId);
+      return this.onboardingState(accountId);
     });
   }
   issueAccountAccessKey(accountId, lifetimeMs = 7 * 86400000) {
