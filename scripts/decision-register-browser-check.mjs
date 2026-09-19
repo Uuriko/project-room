@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { dialogPrimarySubmit, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, key = "owner") {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -42,11 +43,11 @@ test("a human with decide records a source-backed decision from a message", { ti
   assert.match(await page.locator("#decision-source").textContent(), /Disposable test room/);
   await page.locator("#decision-statement-input").fill("Weekly agenda ships every Friday.");
   await page.locator("#decision-note-input").fill("Pilot policy");
-  await page.locator('#decision-form button[type="submit"]').click();
+  await dialogPrimarySubmit(page, "#decision-form").click();
   await page.getByText("Decision recorded.", { exact: true }).waitFor();
   const list = page.locator("#decision-list");
   await page.locator("#decision-count").filter({ hasText: "1" }).waitFor({ state: "attached" });
-  await page.locator("#record-panel > summary").click();
+  await openSettings(page, "record-panel");
   await page.locator("#decision-section > summary").click();
   await list.locator("li").first().waitFor({ state: "visible" });
   assert.match(await list.textContent(), /Weekly agenda ships every Friday\./);

@@ -14,6 +14,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { ensurePeopleOpen } from "./room-chrome.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -46,7 +47,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   await fillAccessKey(page, owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#people-panel > summary").click();
+  await ensurePeopleOpen(page);
   const row = page.locator('#presence-list .presence-member[data-member-record-id="codex"]');
   const guestRow = page.locator('#presence-list .presence-member[data-member-record-id="guest"]');
   const ownerRow = page.locator('#presence-list .presence-member[data-member-record-id="owner"]');

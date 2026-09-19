@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { CHARTER_TYPE } from "../src/room-charter.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, { mobile = false, seeded = false, actor = "owner", noStream = false } = {}) {
   const f = createAcceptanceFixture();
@@ -21,7 +22,7 @@ async function setup(t, { mobile = false, seeded = false, actor = "owner", noStr
   page.on("pageerror", e => errors.push(e.message));
   await page.route("**/*", route => { const url = new URL(route.request().url()); if (url.origin !== origin) { outside.push(url.href); return route.abort(); } if (noStream && url.pathname.endsWith("/stream")) return route.abort(); return route.continue(); });
   await page.goto(origin); await fillAccessKey(page, f.keys[actor]); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
-  const open = async () => { await page.locator("#room-about").evaluate(el => { el.open = true; }); await page.locator("#room-instructions-open").click(); };
+  const open = async () => { await openSettings(page, "room-about"); await page.locator("#room-instructions-open").click(); };
   const edit = async () => { await open(); if (await page.locator("#room-instructions-edit").isVisible()) await page.locator("#room-instructions-edit").click(); };
   const field = name => page.locator(`#room-instructions-form [name='${name}']`);
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/room-instructions-${name}.png` }); };

@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { closeCatchUp, openCatchUpPanel } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -48,12 +49,11 @@ for (const mobile of [false, true]) {
     assert.equal(f.store.reminders.list(f.keys.owner, "commons").reminders[0].dueAt, dueAt);
     assert.equal(f.store.reminders.list(f.keys.guest, "commons").reminders.length, 0);
     assert.deepEqual(snapshot(), initial);
-    await page.locator("#return-brief-panel > summary").click();
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
-    assert.equal(await page.locator("#reminder-scheduled").evaluate(node => node.open), false);
+    await openCatchUpPanel(page, "reminder-panel");
+    await page.locator("#reminder-upcoming li").waitFor({ state: "visible" });
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
-    if (!await page.locator("#return-brief-panel").evaluate(node => node.open)) await page.locator("#return-brief-panel > summary").click();
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
+    await openCatchUpPanel(page, "reminder-panel");
+    await page.locator("#reminder-upcoming li").waitFor({ state: "visible" });
     at = dueAt + 1000; await page.clock.fastForward(240000);
     await page.locator("#reminder-due li").waitFor();
     await page.locator("#reminder-due li").scrollIntoViewIfNeeded();
@@ -61,6 +61,7 @@ for (const mobile of [false, true]) {
     assert.deepEqual(snapshot(), initial, "time passing and catch-up viewing never acknowledge or change work");
 
     // Rescheduling stores the instant shown before a ten-minute pause.
+    await closeCatchUp(page);
     await open(); const shown = await page.locator("#reminder-preview").textContent(), beforePause = at;
     at += 600000; await page.clock.fastForward(600000);
     let drop = true;
@@ -79,6 +80,7 @@ for (const mobile of [false, true]) {
     send(T.WORK_PROPOSED, { workItemId: "replacement", title: "Replacement plan", definitionOfDone: "A revised agenda", accountableMemberId: "owner", mode: "read" });
     send(T.WORK_SUPERSEDED, { workItemId: "test-handoff", expectedRevision: 0, supersededByWorkItemId: "replacement", reason: "Replanned" });
     await page.locator("#refresh-button").click();
+    await openCatchUpPanel(page, "reminder-panel");
     await page.locator("#reminder-pending button").click();
     await page.locator('#reminder-form[aria-busy="false"]').waitFor();
     await capture("retry");
@@ -93,7 +95,7 @@ for (const mobile of [false, true]) {
     const elsewhere = { requestId: randomUUID(), workItemId: "replacement", expectedRevision: 0, action: "schedule", dueAt: at + 3600000 };
     f.store.reminders.mutate(f.keys.owner, "commons", elsewhere);
     await page.locator("#return-brief-panel > summary").click();
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" }); await page.locator("#reminder-scheduled > summary").click();
+    await page.locator("#reminder-panel").evaluate(node => { node.open = true; });
     await page.locator("#reminder-upcoming button").click(); await page.locator('#reminder-form[aria-busy="false"]').waitFor();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
@@ -101,6 +103,7 @@ for (const mobile of [false, true]) {
     await page.locator("#reminder-cancel").click(); await page.locator("#reminder-dialog").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#return-brief-panel > summary").evaluate(node => node === document.activeElement), true);
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
+    await closeCatchUp(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reminder-due").textContent(), ""); assert.equal(await page.locator("#reminder-upcoming").textContent(), "");
     assert.equal(await page.locator("#reminder-work-title").textContent(), ""); assert.deepEqual(errors, []); assert.deepEqual(external, []);

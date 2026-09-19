@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUpPanel } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -35,12 +36,11 @@ for (const mobile of [false, true]) {
 
     await page.goto(origin); await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
-    // The badge shows before the panel is opened; the list is inside catch-up.
+    // The list lives inside Catch up → Notifications; open both to read the feed.
     const badge = page.locator("#notification-count");
+    await openCatchUpPanel(page, "notification-panel");
     await badge.waitFor({ state: "visible" });
     assert.equal(await badge.textContent(), "2 for you");
-    assert.equal(await page.locator("#notification-panel").isVisible(), false);
-    await page.locator("#return-brief-panel > summary").click();
     await page.locator("#notification-panel").waitFor({ state: "visible" });
     const items = page.locator("#notification-list .notification-item");
     await items.nth(1).waitFor();
@@ -60,7 +60,7 @@ for (const mobile of [false, true]) {
     const row = page.locator('#message-list [data-message-record-id="mention-owner"]');
     await row.waitFor({ state: "visible" });
     assert.equal(await row.evaluate(node => node === document.activeElement || node.contains(document.activeElement)), true, "the mentioned message receives focus");
-    if (!await page.locator("#return-brief-panel").evaluate(node => node.open)) await page.locator("#return-brief-panel > summary").click();
+    await openCatchUpPanel(page, "notification-panel");
 
     // A failed cursor POST is reported as a failed save and moves nothing.
     let failCursor = true, failSnapshot = false;

@@ -11,6 +11,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'touch' : 'desktop'}: reuse, fresh authority and changed evidence`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -70,6 +71,7 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   const beforeDiscovery = auditRecovery(f.store).dataSha256;
+  await openSearch(page);
   await page.locator('#message-search').fill('telescope');
   const hit = page.locator(`#search-list [data-open-work="${sourceId}"]`);
   await hit.focus(); await hit.press('Enter');

@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { dialogPrimarySubmit, ensurePeopleOpen, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -50,7 +51,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#report-dialog").waitFor({ state: "visible" });
     assert.match(await page.locator("#report-source").textContent(), /^Message from Test producer: Synthetic message/);
     await page.locator("#report-reason-input").fill("Off-topic and repeated.");
-    await page.locator('#report-form button[type="submit"]').click();
+    await dialogPrimarySubmit(page, "#report-form").click();
     await page.locator("#report-dialog").waitFor({ state: "hidden" });
     await page.locator("#status").filter({ hasText: "Report sent to the room owner. Only the owner sees it." }).waitFor({ state: "visible" });
     const recorded = f.reports();
@@ -61,7 +62,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // Reporting again is a no-op receipt, not a second report.
     await target.locator('[data-message-action="report"]').click();
     await page.locator("#report-reason-input").fill("Still off-topic.");
-    await page.locator('#report-form button[type="submit"]').click();
+    await dialogPrimarySubmit(page, "#report-form").click();
     await page.locator("#report-dialog").waitFor({ state: "hidden" });
     await page.locator("#status").filter({ hasText: "You already reported this message" }).waitFor({ state: "visible" });
     assert.equal(f.reports().length, 1); assert.equal(f.store.room("commons").sequence, sequenceBefore, "reports append no room events");
@@ -88,7 +89,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await target.locator(".message-body").textContent(), "Synthetic message the guest will report and then mute.");
     assert.equal(f.guestState().mutedMemberIds, undefined);
     // Mute from the people rail works the same way, through the disclosed capabilities block.
-    await page.locator("#people-panel").evaluate(el => { el.open = true; });
+    await ensurePeopleOpen(page);
     await page.locator('#presence-list [data-focus-key="member-capabilities:producer"]').click();
     await railToggle.click();
     await target.locator(".message-muted").waitFor({ state: "visible" });
@@ -105,7 +106,7 @@ test("moderation owner view: only the owner lists reports, with the reporter's n
   f.post("producer", "mod-target", "Synthetic message that gets reported.");
   f.store.moderation.report(f.keys.guest, "commons", { messageId: "mod-target", reason: "Off-topic and repeated." });
   const page = await f.signIn(f.keys.owner);
-  await page.locator("#record-panel").evaluate(el => { el.open = true; });
+  await openSettings(page, "record-panel");
   const section = page.locator("#reports-section");
   await section.waitFor({ state: "visible" });
   await section.locator("summary").click();

@@ -13,6 +13,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -81,6 +82,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.match(await f.items.nth(1).locator(".pinned-meta").textContent(), /Test producer/);
 
     // "Pinned only" search: pins alone with no term, narrowed by the term, no work results; the toggle clears with the search.
+    await openSearch(page);
     const pinnedToggle = page.getByRole("button", { name: "Pinned only", exact: true }), results = page.locator("#search-list li");
     assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "false");
     await pinnedToggle.focus(); await page.keyboard.press("Enter");

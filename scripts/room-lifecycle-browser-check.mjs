@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport) {
   const f = createAcceptanceFixture();
@@ -71,7 +72,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator('#message-form button[type="submit"]').click();
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
     // Archive: owner only, from About; afterwards the room is read only and says so.
-    await page.locator("#room-about").evaluate(element => { element.open = true; });
+    await openSettings(page, "room-about");
     await page.locator("#room-archive-button").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-leave-button").isHidden(), true, "the owner cannot leave");
     await page.locator("#room-archive-button").click();
@@ -113,7 +114,7 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await row.waitFor(); await row.click();
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator("#room-kind-badge").textContent(), "Personal", "rooms from before the kind attribute read as personal");
-  await page.locator("#room-about").evaluate(element => { element.open = true; });
+  await openSettings(page, "room-about");
   await page.locator("#room-leave-button").waitFor({ state: "visible" });
   assert.equal(await page.locator("#room-archive-button").isHidden(), true, "only the owner archives");
   const sequence = f.store.room("commons").sequence;

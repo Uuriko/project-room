@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
@@ -44,7 +45,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     };
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
-    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    assert.match(await input.getAttribute("placeholder"), /Message #/);
 
     // @-mention autocomplete is a real listbox: rows are options, the textarea points at the active one.
     const mentionList = page.locator("#mention-list");
@@ -105,6 +106,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/commands");
     await page.locator('[data-message-record-id="topic"] button[data-reaction="like"]').click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="false"]'));
+    await openSearch(page);
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
     assert.match(await page.locator("#search-results").textContent(), /Ping @Room owner/);
@@ -112,9 +114,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#search-results").isHidden(), true);
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "false");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
-    assert.match(await input.getAttribute("placeholder"), /Reply in this thread/);
+    assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
     await page.locator("#thread-back").click();
-    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    assert.match(await input.getAttribute("placeholder"), /Message #/);
     await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").check();
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));

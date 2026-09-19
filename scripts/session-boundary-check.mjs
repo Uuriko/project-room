@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
   ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH }
@@ -71,14 +72,16 @@ async function openReadyBrief(page) {
     return button && !button.disabled && /^\d+$/.test(button.dataset.horizon);
   });
   await ready(); // Let the initial snapshot's brief settle before opening it.
-  if (!await panel.evaluate(element => element.open)) {
+  const dialog = page.locator("#catchup-dialog");
+  if (!(await dialog.evaluate(element => element.open))) {
     // Opening schedules another fetch. Do not read the old button while its
     // asynchronous toggle handler is about to replace the displayed horizon.
     await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      panel.locator(":scope > summary").click()
+      page.locator("#topbar-catchup").click()
     ]);
   }
+  await panel.evaluate(element => { element.open = true; });
   await ready();
 }
 
@@ -218,10 +221,14 @@ test("a shared browser cookie cannot expose another tab's return brief", { timeo
     new MutationObserver(() => window.returnBriefTexts.push(document.querySelector("#rb-attention-list").textContent))
       .observe(document.querySelector("#rb-attention-list"), { childList: true, characterData: true, subtree: true });
   });
-  if (await ownerTab.locator("#return-brief-panel").evaluate(node => node.open)) {
+  if (await ownerTab.locator("#return-brief-panel").evaluate(node => node.open)
+    && await ownerTab.locator("#catchup-dialog").evaluate(node => node.open)) {
     await ownerTab.locator("#rb-refresh-button").click();
   } else {
-    await ownerTab.locator("#return-brief-panel > summary").click();
+    await Promise.all([
+      ownerTab.waitForResponse(response => response.url().endsWith("/return-brief")).catch(() => {}),
+      ownerTab.locator("#topbar-catchup").click()
+    ]);
   }
   await ownerTab.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await ownerTab.locator("#main").isVisible(), false);
@@ -747,6 +754,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="list"] [data-reaction="heart"]').getAttribute("title"), /Alex \(duplicate-a\).*Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
+  await openSearch(page);
   await page.locator("#message-search").fill("First Alex identity message");
   assert.match(await page.locator("#search-list").textContent(), /Alex \(duplicate-a\)/);
   await page.locator("#clear-search").click();
@@ -783,9 +791,10 @@ test("record identities and fragments remain collision-safe and legacy work link
   // while newly emitted room links use the collision-free application namespace.
   await page.evaluate(() => { location.hash = "#room-title"; });
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "room-title");
-  if (!await page.locator("#return-brief-panel").evaluate(node => node.open)) {
-    await page.locator("#return-brief-panel > summary").click();
+  if (!(await page.locator("#catchup-dialog").evaluate(node => node.open))) {
+    await page.locator("#topbar-catchup").click();
   }
+  await page.locator("#return-brief-panel").evaluate(node => { node.open = true; });
   const roomLink = page.locator("#rb-history-list [data-open-room]").first();
   await page.locator("#rb-history-section > summary").click();
   await roomLink.waitFor();

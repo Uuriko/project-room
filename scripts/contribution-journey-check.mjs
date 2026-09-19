@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" : "desktop"}: join, answer, return, review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -28,6 +29,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator("#main").waitFor({ state: "visible" });
   const member = Object.values(state().members).find(person => person.displayName === "Journey guest");
   assert.ok(member); assert.deepEqual(member.permissions, []);
+  await openCatchUp(page);
   await page.locator("#contribution-open").focus();
   send("message.posted", { messageId: "journey-background", body: "A little more room context." });
   await page.locator('[data-message-record-id="journey-background"]').waitFor();
@@ -38,17 +40,16 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator('#message-form button[type="submit"]').click();
   await page.locator("#contribution-next").waitFor({ state: "hidden" });
   send("message.posted", { messageId: "journey-question", body: "Should the agenda include a review?", toMemberId: member.id, requestKind: "reply" });
+  await openCatchUp(page);
   await page.getByRole("button", { name: "Open request", exact: true }).waitFor();
   // Full-page capture currently resets Chromium's touch media emulation. Keep
   // mobile captures viewport-sized so subsequent Return checks remain touch checks.
   await page.screenshot({ path: `test-results/contribution-${touch ? "touch" : "desktop"}-request.png`, fullPage: !touch });
-  await page.locator("#return-brief-panel > summary").click();
   await page.locator('#rb-attention-list [data-open-message="journey-question"]').waitFor();
   await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled);
   await page.locator("#rb-ack-button").click();
   await page.waitForFunction(() => document.querySelector("#rb-ack-button").textContent === "Already caught up");
   assert.equal(await page.getByRole("button", { name: "Open request", exact: true }).isVisible(), true, "read is not resolved");
-  await page.locator("#return-brief-panel > summary").click();
   await page.locator("#contribution-open").click();
   await page.locator('[data-message-id="journey-question"][data-message-action="request-answered"]').click();
   await page.waitForFunction(() => !document.querySelector("#message-input").disabled);
@@ -74,6 +75,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   send("work.completed", { workItemId: "journey-work", expectedRevision: 1, evidenceKind: "room_text", evidenceMessageId: "journey-result",
     evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: "owner", summary: "A short agenda", nextAction: "Check the final step and owner." });
   page = await context.newPage(); await page.goto(`${origin}/?room=commons`); await page.locator("#main").waitFor({ state: "visible" });
+  await openCatchUp(page);
   await page.getByRole("button", { name: "Review result", exact: true }).waitFor();
   assert.equal(await page.locator("#contribution-title").textContent(), "An agenda we can use");
   await page.screenshot({ path: `test-results/contribution-${touch ? "touch" : "desktop"}-return.png`, fullPage: !touch });
