@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T00:28:07Z · board: Uuriko/project-room#266 · watermark: 5737777558 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T00:59:17Z · board: Uuriko/project-room#266 · watermark: 5738045906 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -16,7 +16,7 @@ RC-2026-09-18-005 | (none) | submitted | 2026-09-18T10:45:10Z | docs/README.md (
 RC-2026-09-18-006 | (none) | submitted | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
 RC-2026-09-18-007 | (none) | submitted | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
 RC-2026-09-18-008 | quill | submitted | 2026-09-18T20:02:36Z | server/channel-adapters/sms.mjs, server/channel-adapters/messenger.mjs, server/sms-ingest.mjs, server/messenger-ingest.mjs, server/sms-outbound.mjs, server/messenger-outbound.mjs, server/channel-connection.mjs, server/channel-adapters/index.mjs, tests/channel-sms-adapter.test.js, tests/channel-messenger-adapter.test.js, tests/sms-ingest.test.js, tests/messenger-ingest.test.js, tests/sms-messenger-outbound.test.js
-RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
+RC-2026-09-18-009 | (none) | submitted | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 RC-2026-09-18-010 | quill | working | 2026-09-18T20:30:26Z | server/agent-plugin-store.mjs, server/agent-plugin-routes.mjs, server/store.mjs (agent-plugin wiring only), server/http.mjs (agent-plugin routes only), tests/agent-plugin-http.test.js
 RC-2026-09-18-011 | quill | working | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
 RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.
 RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +1 more
+… +4 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -40,6 +40,9 @@ RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.
 RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
+RC-2026-09-18-049 | quill | working | 2026-09-19T06:38:44Z | server/identity-verification.mjs, server/agent-identities.mjs, server/agent-directory.mjs, docs/openapi.yaml, tests/identity-verification.test.js
+RC-2026-09-18-050 | quill | working | 2026-09-19T06:38:45Z | scripts/agent-inbox.mjs, docs/openapi.yaml, tests/agent-inbox-keys.test.js
+RC-2026-09-18-051 | quill | working | 2026-09-19T06:38:46Z | server/agent-heartbeats.mjs, server/http.mjs, server/outbound-webhooks.mjs, docs/openapi.yaml, tests/agent-heartbeats.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -50,16 +53,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5738017981
+RC-2026 | none | 5737984014
+unknown | none | 5737929540
+unknown | none | 5737916217
 unknown | none | 5737761717
 unknown | none | 5737755463
 unknown | none | 5737754086
 unknown | 8654bd0bcd1d481da09257ee536f57c31c466b96 | 5737746671
 unknown | 00848f3555148e090d449790e80103fec0cc6401 | 5737677409
 unknown | 5b43c9b82df66845154da988e45c8c399cc5840c | 5737600625
-unknown | 2ad5010e784a5353bcd1a9842300b63d6c5495ba | 5737526113
-unknown | eaa1368daa4175194e04b9dfb20bae7683696e54 | 5737454744
-RC-2026 | none | 5737359180
-unknown | 2b70471292ddf3ba63df97590a11fcd81b26e36b | 5737342896
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -76,5 +79,5 @@ comment-id | lane | task | at
 … +51 more
 
 ## signals
-board_comments=898 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=61 watermark=5737777558
+board_comments=918 threshold=1500 rotation_due=no watcher=active open_claims=29 prose_open=0 unfenced_prose=61 watermark=5738045906
 
