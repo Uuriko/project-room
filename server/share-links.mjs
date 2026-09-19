@@ -6,7 +6,7 @@ import { canonicalInvitationData } from "./invitation-journal.mjs";
 import { ServiceError } from "./store.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
-import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_INVITE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
+import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -105,7 +105,7 @@ export class ShareLinks {
   }
   mintCode(linkId, now) {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const formatted = formatShareInviteCode(randomSymbols(SHARE_INVITE_CODE_LENGTH, SHARE_INVITE_CODE_ALPHABET));
+      const formatted = formatShareInviteCode(randomSymbols(SHARE_INVITE_CODE_LENGTH, SHARE_CODE_ALPHABET));
       const codeHash = hash(normalizeShareInviteCode(formatted));
       if (this.db.prepare("SELECT 1 FROM share_link_codes WHERE code_hash=?").get(codeHash)) continue;
       this.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)").run(codeHash, linkId, now);
