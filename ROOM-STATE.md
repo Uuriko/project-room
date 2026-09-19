@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T08:28:53Z · board: Uuriko/project-room#266 · watermark: 5740095412 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T08:57:43Z · board: Uuriko/project-room#266 · watermark: 5740563696 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +6 more
+… +5 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -43,6 +43,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-19-065 | none | 5740563696
 RC-2026-09-19-066 | none | 5740095412
 RC-2026-09-18-031 | fe5eff07ef9f7f86eca9ebe7df69ecebca57525d | 5739639755
 RC-2026 | 2564e961 | 5739163147
@@ -52,7 +53,6 @@ RC-2026 | 302136bb | 5738877275
 RC-2026 | 8a7af896 | 5738677085
 unknown | none | 5738582543
 RC-2026 | none | 5738394288
-RC-2026 | none | 5738226630
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -69,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1052 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5740095412
+board_comments=1054 threshold=1500 rotation_due=no watcher=active open_claims=30 prose_open=0 unfenced_prose=62 watermark=5740563696
 
