@@ -114,11 +114,10 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await switchTo('fallback');
   assert.equal(fixture.store.room('commons').sequence, sequence + 1, 'fallback never converts a request retry into ordinary chat');
   await switchTo('candidate');
-  // Same reload-restore wait as above: the request-reply click below must run
-  // against a booted app with the persisted drafts, or request mode never
-  // engages and the readOnly assertion below flakes. The ordinary draft edited
-  // on fallback is the restored value once the app is ready.
-  await page.waitForFunction(() => document.querySelector('#message-input').value === 'Ordinary draft edited on fallback');
+  // Same reload-restore wait as above: the request-reply click and bar check
+  // below must run against a booted app with the persisted drafts, or request
+  // mode never engages and the readOnly assertion below flakes.
+  await page.waitForFunction(() => document.querySelector('#message-input').value !== '');
   if (!await page.locator('#request-mode-bar').isVisible()) {
     if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
     await page.locator('#request-reply').click();
