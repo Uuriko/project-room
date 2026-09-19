@@ -5,6 +5,7 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId, memberCan } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
+import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
@@ -113,6 +114,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, directSendFetch = null,
+  sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
@@ -343,6 +345,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       return { mode: telegram.configured ? "live" : "fixture", transport: new SyntheticInboxTransport(store.inbox, adapter) };
     }, 2000);
   });
+  // Per-connection send budgets (task #41): one token bucket per
+  // (channel, account, connection) guarding the channel-sends path below.
+  // Defaults to 30 sends/min per Telegram bot; env and per-connection
+  // overrides are documented in server/channel-send-budgets.mjs.
+  const sendBudgets = sendBudgetRegistry ?? createSendBudgetRegistry({ env: sendBudgetEnv ?? process.env, now: () => store.now(),
+    connectionBudget: (channel, accountId, connectionId) => {
+      if (!connectionId || connectionId === "direct") return null;
+      try { return store.connections.connection(accountId, connectionId)?.sendBudget ?? null; }
+      catch { return null; }
+    } });
+  // Provider id (from the channel connection link) to the budgeted channel.
+  // Fixture and live transports share the budget: it guards the send intent,
+  // not the network call, so both paths behave identically.
+  const sendBudgetChannelFor = provider => provider === "telegram-bot" ? "telegram" : null;
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
     throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
   if (syntheticInboxTransport && (!(syntheticInboxTransport instanceof SyntheticInboxTransport)
@@ -1281,7 +1297,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const liveRecord = connectionId => {
           const record = store.connections.connectionRecord(token, connectionId, binding);
           const live = telegramLiveView({ config: telegram, connection: store.connections.connection(auth.account.id, connectionId), record: record.connection,
-            status: telegramStatus, importAvailable: Boolean(channelWebhooks) });
+            status: telegramStatus, importAvailable: Boolean(channelWebhooks),
+            // Send-budget diagnostics (task #41): remaining sends and refill time.
+            sendBudget: sendBudgets.view({ channel: "telegram", accountId: auth.account.id, connectionId: record.connection.id }) });
           return { ...record, syncAvailable: loopback, live };
         };
         if (url.pathname === connectionRoutes.commands && req.method === "POST") {
@@ -1388,6 +1406,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (data && typeof data === "object" && !Array.isArray(data) && typeof data.channel === "string") {
             rate(`inbox-direct-send:${auth.account.id}`, 20);
             validateDirectSend(data);
+            // Per-connection send budget (task #41): a Telegram send costs one
+            // token; exhaustion is an honest 429 with Retry-After before
+            // anything is journaled, instead of hammering the provider into a
+            // ban. Gmail is NOT budgeted: live Gmail send budgets are
+            // [JOHN]-gated (task 17, Gmail send-slice design) and wait on that
+            // approval (see server/channel-send-budgets.mjs).
+            if (data.channel === "telegram")
+              sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
             const fetchImpl = directSendFetch ?? fetch;
             const sendId = randomUUID();
             const bodyHash = createHash("sha256").update(data.body, "utf8").digest("hex");
@@ -1415,6 +1441,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
           const sender = channelSendFor(data.sourceId);
           if (!sender) reject(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
+          // Per-connection send budget for reply dispatches (task #41): one
+          // token per dispatch, honest 429 with Retry-After on exhaustion.
+          // Reconciles only read provider state, so they spend no budget.
+          if (data.action === "dispatch") {
+            const budgetChannel = sendBudgetChannelFor(sender.provider);
+            if (budgetChannel) sendBudgets.check({ channel: budgetChannel, accountId: auth.account.id, connectionId: sender.connectionId });
+          }
           const send = await sender.transport[data.action](token, data.sourceId, data.sendId, binding);
           const last = telegramStatus.snapshot(auth.account.id, sender.connectionId).lastSendResult;
           return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: Boolean(syntheticInboxTransport), channelSend: channelSendView(sender), send,
