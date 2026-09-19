@@ -324,6 +324,48 @@ export function validateCommand(command) {
   }
 }
 
+// RC-2026-09-18-052: the agent inbox is the agent's to-do list, so every
+// item type names its next action. The most common first move is replying
+// to a DM (the sender's memberId goes back into toMemberId on the
+// message.posted command); assignments and routing mentions point at
+// their own read/resolve routes. An empty inbox says what it will carry.
+const inboxNext = (roomId, directMessages, assignments, mentions) => {
+  const steps = [];
+  if (directMessages.length > 0) {
+    const latest = directMessages[0];
+    steps.push(Object.freeze({
+      action: "reply-dm",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `Reply to the DM from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your reply", toMemberId: "${latest.from}" } }. Send your identity secret as the Bearer token.`,
+    }));
+  }
+  if (assignments.length > 0) {
+    steps.push(Object.freeze({
+      action: "read-assignments",
+      method: "GET",
+      path: `/api/rooms/${roomId}/collab/assignments`,
+      description: "List your open work assignments with full thread context.",
+    }));
+  }
+  if (mentions.length > 0) {
+    const routingId = mentions[0].routingId;
+    steps.push(Object.freeze({
+      action: "resolve-mention",
+      method: "POST",
+      path: `/api/rooms/${roomId}/collab/routing/${routingId}/resolve`,
+      description: "Mark the routed @agent mention as handled once you have acted on it.",
+    }));
+  }
+  if (steps.length === 0) {
+    steps.push(Object.freeze({
+      action: "watch-inbox",
+      description: "Your inbox is empty. It will carry targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
+    }));
+  }
+  return steps;
+};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
@@ -2174,6 +2216,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMessages: Object.freeze(directMessages),
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions)),
       });
     });
   }
