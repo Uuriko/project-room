@@ -67,6 +67,16 @@ export async function openSettings(page, panelId) {
   if (panelId) await page.locator(`#${panelId}`).evaluate(node => { node.open = true; });
 }
 
+// Settings is a modal: anything it is left open over cannot be clicked. A
+// check that opened it and then goes back to the room has to close it, the
+// same way a member would.
+export async function closeSettings(page) {
+  const dialog = page.locator("#settings-dialog");
+  if (!(await dialog.evaluate(node => node.open))) return;
+  await page.locator("#settings-close").click();
+  await dialog.waitFor({ state: "hidden" });
+}
+
 export async function openSearch(page) {
   const form = page.locator("#search-form");
   if (await form.isHidden()) await page.locator("#topbar-search-toggle").click();

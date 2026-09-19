@@ -9,7 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openSettings } from "./room-chrome.mjs";
+import { closeSettings, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -123,6 +123,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.deepEqual([f.policy().requireIndependentReview, f.policy().requireOwnerDecision, f.policy().revision], [true, false, 2]);
     // The new-work form follows the same policy (locked review, free approval).
     await page.locator("#room-instructions-close").click(); await page.locator("#room-instructions-dialog").waitFor({ state: "hidden" });
+    // Instructions opened from inside Settings, which is still up and would
+    // swallow the click on the composer's New work button.
+    await closeSettings(page);
     await f.openForm(); assert.equal(await f.review.isDisabled(), true); assert.equal(await f.decision.isDisabled(), false);
     await page.locator("#cancel-work-button").click();
     // A member sees the policy in force, read only, with the one-line explanation and no control.
