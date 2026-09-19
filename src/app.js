@@ -23,7 +23,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -357,6 +357,13 @@ const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
   onOAuthStart: stashInviteForOAuth,
+  // QAX-002: the module's own status line lives inside the collapsed "More
+  // options" panel, so mirror a failed magic-link redemption where first
+  // paint can see it — above the sign-in panel, not behind the toggle.
+  onMagicLinkFailure: message => {
+    setFormStatus($("#auth-link-error"),
+      `${message} Request a new link with More options below, or sign in another way.`, true);
+  },
   onSignedIn: async () => {
     await accountClient.restore();
     const requestedRoom = selectedRoomFromLocation();
@@ -691,6 +698,8 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
   const roomTitle = readLastRoomTitle(roomId);
   $("#auth-title").textContent = authPanelTitle(roomId, roomTitle);
+  // Fresh auth paint clears any stale magic-link failure banner (QAX-002).
+  setFormStatus($("#auth-link-error"), "");
   const roomHint = $("#auth-room-hint");
   if (roomHint) {
     roomHint.hidden = true;
@@ -4188,13 +4197,18 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     else await client.restore(requestedRoom);
     return;
   }
-  try {
-    await client.restore();
-    return;
-  } catch (error) {
-    if (![401, 403].includes(error.status)) throw error;
-  }
-  if (readLastRoom() || readAccountHint()) {
+  // QAU-006: only probe for a session when a browser hint says one could
+  // exist. A signed-out first paint with no remembered room or account hint
+  // would 401 the GET /api/session probe, and the browser surfaces that as a
+  // console error on the welcome screen — so skip the probe and render the
+  // signed-out state directly.
+  if (hasSessionHint()) {
+    try {
+      await client.restore();
+      return;
+    } catch (error) {
+      if (![401, 403].includes(error.status)) throw error;
+    }
     let account = null;
     try { account = await ensureAccountSession(); } catch { account = null; }
     if (account?.authenticated) {
