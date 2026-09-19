@@ -142,9 +142,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   };
   const google = () => {
     if (!googleAuth) return null;
+    // Persistent PKCE state: the Durable Object's SQLite survives Worker
+    // isolate eviction between the Google redirect and the callback, where
+    // the old in-memory Map silently lost the flow (google_state_invalid).
+    const pendingStore = {
+      create: entry => store.oauthPendingStateCreate(entry),
+      consume: (provider, stateHash) => store.oauthPendingStateConsume(provider, stateHash),
+      delete: (provider, stateHash) => store.oauthPendingStateDelete(provider, stateHash),
+    };
     googleSignIn ??= new GoogleSignIn({ clientId: googleAuth.clientId, clientSecret: googleAuth.clientSecret,
       redirectUri: googleAuth.redirectUri || expectedOrigin() + GOOGLE_CALLBACK_PATH,
-      fetchImpl: googleAuth.fetchImpl ?? fetch, now: () => store.now() });
+      fetchImpl: googleAuth.fetchImpl ?? fetch, now: () => store.now(), pendingStore });
     return googleSignIn;
   };
   // ---- Recovery codes (slice 6, RC-2026-09-17-015) ----
@@ -192,7 +200,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         throw new Error("Invalid GitHub authentication configuration");
       }
       githubOAuth = { clientId, clientSecret, redirectUri, fetchImpl: githubAuth.fetchImpl ?? fetch,
-        pending: createPendingStore({ now: () => store.now() }) };
+        // Persistent PKCE state (same isolate-eviction fix as Google above).
+        pending: createPendingStore({ now: () => store.now(), persistentStore: {
+          create: entry => store.oauthPendingStateCreate(entry),
+          consume: (provider, stateHash) => store.oauthPendingStateConsume(provider, stateHash),
+          delete: (provider, stateHash) => store.oauthPendingStateDelete(provider, stateHash),
+        } }) };
     }
     return githubOAuth;
   };
