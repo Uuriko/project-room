@@ -239,6 +239,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="clear-session"/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
+  assert.doesNotMatch(html, /<details id="people-panel"[^>]*>[\s\S]*?id="connect-agent-button"/);
   assert.match(html, /id="message-input"/);
   assert.match(html, /id="message-list"/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
