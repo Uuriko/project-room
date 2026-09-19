@@ -109,6 +109,11 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.equal(await page.locator("#auth-error").textContent(), "");
   assert.equal(await page.locator(".connection-bar").isVisible(), false);
   await page.route("**/api/session", route => route.abort("failed"));
+  // The first-paint session probe only fires when the browser holds a session hint
+  // (remembered room or account); without one the client never requests /api/session
+  // and there is no failure to surface. Plant a hint so the restore is attempted and
+  // the aborted request exercises the genuine service-failure path.
+  await page.evaluate(() => localStorage.setItem("pr-last-room", "commons"));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator(".connection-bar").isVisible(), true);

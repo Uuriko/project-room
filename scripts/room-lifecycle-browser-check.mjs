@@ -76,12 +76,17 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#room-archive-button").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-leave-button").isHidden(), true, "the owner cannot leave");
     await page.locator("#room-archive-button").click();
+    // The archived note lives in the sidebar, which collapses behind the
+    // sidebar toggle on small viewports; open it first the way a mobile
+    // reader would before checking the note.
+    if (label === "mobile") await page.locator("#sidebar-toggle").click();
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
     assert.match(await page.locator("#room-archived-note").textContent(), /^Archived .+ · read only\. Reading and export stay available; nothing new is recorded\.$/);
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), true);
     assert.equal(await page.locator("#new-work-button").isHidden(), true);
     assert.equal(await page.locator("#room-archive-button").isHidden(), true);
+    if (label === "mobile") await page.keyboard.press("Escape"); // Close the sidebar again so it cannot cover the room switcher below.
     const state = f.store.room(created).state;
     assert.equal(typeof state.room.archivedAt, "string"); assert.equal(state.room.archivedById, "owner");
     assert.equal(f.store.db.prepare("SELECT archived_at FROM rooms WHERE id=?").get(created).archived_at, state.room.archivedAt);
@@ -98,6 +103,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await commons.locator("span").textContent(), "Open", "the other room is unchanged");
     await row.click();
     await page.locator("#main").waitFor({ state: "visible" });
+    // Same as above: the note lives in the collapsible sidebar on mobile.
+    if (label === "mobile") await page.locator("#sidebar-toggle").click();
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
@@ -132,7 +139,10 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await page.locator("#account-room-purpose").fill("A guest account cannot spawn rooms.");
   await page.locator("#account-room-name").fill("Guest");
   await page.locator("#account-room-submit").click();
-  await page.getByText("Creating a room needs membership administration in one of your rooms.", { exact: true }).waitFor();
+  // Denial copy changed in RC-2026-09-19-080 ("Your first room is free..."): a
+  // zero-membership account may create its first room, but this account still
+  // holds the left room's binding, so the administration requirement stands.
+  await page.getByText("Your first room is free to create, but more rooms need membership administration in one of your rooms.", { exact: true }).waitFor();
   assert.equal(f.roomCount(), before, "no room was created");
   assert.equal(await page.locator("#account-room-title").inputValue(), "Not allowed", "the form keeps what was typed");
 });

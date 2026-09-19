@@ -123,6 +123,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.deepEqual([f.policy().requireIndependentReview, f.policy().requireOwnerDecision, f.policy().revision], [true, false, 2]);
     // The new-work form follows the same policy (locked review, free approval).
     await page.locator("#room-instructions-close").click(); await page.locator("#room-instructions-dialog").waitFor({ state: "hidden" });
+    // The instructions dialog was opened from Settings, which stays open behind it;
+    // dismiss Settings the way a reader would before returning to the room.
+    await page.locator("#settings-close").click(); await page.locator("#settings-dialog").waitFor({ state: "hidden" });
     await f.openForm(); assert.equal(await f.review.isDisabled(), true); assert.equal(await f.decision.isDisabled(), false);
     await page.locator("#cancel-work-button").click();
     // A member sees the policy in force, read only, with the one-line explanation and no control.

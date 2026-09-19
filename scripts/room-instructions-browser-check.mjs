@@ -57,6 +57,9 @@ test("unknown committed charter retains exact retry through close, later update 
   });
   await f.save.click(); await f.page.getByText("Save not confirmed. Retry the original before making changes.", { exact: true }).waitFor();
   await f.close.click(); f.change("A newer saved version");
+  // The instructions dialog was opened from Settings, which stays open behind it;
+  // dismiss Settings before signing out, the way a reader returning to the room would.
+  await f.page.locator("#settings-close").click(); await f.page.locator("#settings-dialog").waitFor({ state: "hidden" });
   let warning; f.page.once("dialog", async d => { warning = d.message(); await d.dismiss(); }); if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /may already be saved/);
   await f.open(); assert.equal(await f.field("purpose").isDisabled(), true);
   for (let i = 0; i < 3; i++) { await f.save.click(); if (i < 2) await f.ready(); }
