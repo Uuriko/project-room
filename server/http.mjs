@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
-import { validId } from "../src/events.js";
+import { validId, memberCan } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -17,6 +17,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
@@ -43,7 +44,7 @@ const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -537,12 +538,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
-      checkOrigin(req);
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
       const inboundPath = url.pathname;
+      if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
+        rate(`mcp-join:${remoteAddress}`, 60);
+        if (req.method === "POST") {
+          const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          return writeRoomMcpNode(req, res, url, { bodyText: text });
+        }
+        return writeRoomMcpNode(req, res, url);
+      }
+      checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
@@ -1739,7 +1748,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -1914,6 +1923,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
         return json(res, 200, buildActivationPack(store, roomId));
+      }
+      if (route === "verification-policy" && req.method === "GET") {
+        // RC-2026-09-18-049: read the room's verified-agents gate policy.
+        return json(res, 200, store.agentPlugin.roomVerificationPolicy(roomId));
+      }
+      if (route === "verification-policy" && req.method === "POST") {
+        // RC-2026-09-18-049: room owners toggle whether the room only admits
+        // verified agents. Enforcement happens in AgentIdentities.link.
+        const data = await body(req);
+        if (!exact(data, ["requireVerified"]) || typeof data.requireVerified !== "boolean") {
+          reject(422, "invalid_policy", "requireVerified (boolean) is the only accepted field");
+        }
+        const authority = store.roomAuthority(roomId);
+        if (!auth.member?.id || !memberCan(authority, auth.member.id, "manage_members")) {
+          reject(403, "access_denied", "Membership administration grant required");
+        }
+        return json(res, 200, store.agentPlugin.setRoomVerificationPolicy({
+          roomId, requireVerified: data.requireVerified, setBy: auth.member.id,
+        }));
       }
       if (route === "onboarding-funnel" && req.method === "GET") {
         return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));

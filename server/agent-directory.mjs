@@ -67,7 +67,7 @@ const freezeDeep = node => {
 // Validate one trust-evidence record from the trust source. Returns a frozen
 // record, or null when the source has nothing for the agent. Trust evidence
 // is host-supplied (approver, authority envelope, lifecycle status, last
-// seen) — it is never self-asserted by the card publisher.
+// seen, verification tier) — it is never self-asserted by the card publisher.
 const validateTrust = record => {
   if (record === null || record === undefined) return null;
   check(record !== null && typeof record === "object", "trust() must return an object or null");
@@ -77,6 +77,10 @@ const validateTrust = record => {
     grants = [],
     status = "active",
     lastSeenAt = null,
+    // RC-2026-09-18-049: verification tier, host-supplied alongside trust
+    // evidence. Explicit "unverified" keeps the default tier visible rather
+    // than ambiguous; null means the host supplies no tier.
+    verification = null,
   } = record;
   check(approvedBy === null || (typeof approvedBy === "string" && approvedBy.length > 0),
     "trust.approvedBy must be a non-empty string or null");
@@ -88,23 +92,55 @@ const validateTrust = record => {
     `trust.status must be one of ${TRUST_STATUSES.join(", ")}`);
   check(lastSeenAt === null || (typeof lastSeenAt === "number" && lastSeenAt > 0),
     "trust.lastSeenAt must be a positive number or null");
-  return Object.freeze({
+  check(verification === null || verification === "verified" || verification === "unverified",
+    "trust.verification must be verified, unverified, or null");
+  const evidence = {
     approvedBy,
     approvedAt,
     grants: Object.freeze([...grants]),
     status,
     lastSeenAt,
-  });
+  };
+  // Additive: the tier rides along only when the trust source supplies one,
+  // so existing consumers see no shape change.
+  if (verification !== null) evidence.verification = verification;
+  return Object.freeze(evidence);
+};
+
+// Validate one presence record from the presence source. Returns a frozen
+// record, or null when the source has nothing for the agent. Presence is
+// host-reported (an agent's hosts heartbeat in) — it is never self-asserted
+// by the card publisher.
+const PRESENCE_STATUSES = ["online", "offline", "unregistered"];
+const validatePresence = record => {
+  if (record === null || record === undefined) return null;
+  check(record !== null && typeof record === "object", "presence() must return an object or null");
+  const {
+    status = "unregistered",
+    lastSeenAt = null,
+    hosts = 0,
+  } = record;
+  check(PRESENCE_STATUSES.includes(status),
+    `presence.status must be one of ${PRESENCE_STATUSES.join(", ")}`);
+  check(lastSeenAt === null || (typeof lastSeenAt === "number" && lastSeenAt > 0),
+    "presence.lastSeenAt must be a positive number or null");
+  check(Number.isInteger(hosts) && hosts >= 0,
+    "presence.hosts must be a non-negative integer");
+  return Object.freeze({ status, lastSeenAt, hosts });
 };
 
 // Create an agent directory. store is a caller-owned Map (agentId -> entry).
 // trust is an optional function (agentId) => trust-evidence record or null,
 // letting the host attach verifiable trust evidence to each card document.
-// Without it, cards carry trust: null and the surface is unchanged.
-export function createAgentDirectory({ store, clock, trust } = {}) {
+// presence is an optional function (agentId) => presence record or null,
+// letting the host attach live host-reported presence to each card document.
+// Without either, cards carry trust: null / presence: null and the surface
+// is unchanged.
+export function createAgentDirectory({ store, clock, trust, presence } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(trust === undefined || typeof trust === "function", "trust must be a function if given");
+  check(presence === undefined || typeof presence === "function", "presence must be a function if given");
   const entries = store ?? new Map();
   const now = clock ?? Date.now;
 
@@ -124,6 +160,11 @@ export function createAgentDirectory({ store, clock, trust } = {}) {
     // authority envelope, its current lifecycle status, and when it was last
     // seen. Null when the host supplies no trust source.
     trust: validateTrust(trust ? trust(entry.agentId) : null),
+    // Host-reported presence: whether any of the agent's hosts recently
+    // heartbeated, when the newest heartbeat landed, and how many hosts
+    // the agent has registered. Null when the host supplies no presence
+    // source (e.g. no host ever reported).
+    presence: validatePresence(presence ? presence(entry.agentId) : null),
     visibility: entry.visibility,
     publishedAt: entry.publishedAt,
     updatedAt: entry.updatedAt,

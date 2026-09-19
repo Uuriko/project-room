@@ -18,10 +18,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError } from "./agent-directory.mjs";
+import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-verification.mjs";
 import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
 import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
 } from "./agent-webhook-subscriptions.mjs";
+import { buildWakePing, WAKE_PING_EVENT } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
@@ -66,6 +68,21 @@ export const agentPluginSchema = `
     journal_json TEXT NOT NULL DEFAULT '[]'
   );
   CREATE INDEX IF NOT EXISTS agent_webhook_sub_agent ON agent_webhook_subs(agent_id);
+  -- RC-2026-09-18-049: agent verification tiers. A row attests that a room
+  -- owner vouches for the identity (verifiedBy = attesting owner's member
+  -- id); absence of a row means the identity is unverified. A second table
+  -- holds the per-room gate policy.
+  CREATE TABLE IF NOT EXISTS agent_identity_verification (
+    identity_id TEXT PRIMARY KEY,
+    verified_by TEXT NOT NULL,
+    verified_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS room_verification_policy (
+    room_id TEXT PRIMARY KEY,
+    require_verified INTEGER NOT NULL DEFAULT 0 CHECK(require_verified IN (0,1)),
+    set_by TEXT,
+    updated_at INTEGER NOT NULL
+  );
 `;
 
 export class AgentPluginError extends Error {
@@ -84,9 +101,35 @@ export class AgentPluginStore {
     this.keys = new Map();
     this.cards = new Map();
     this.subs = new Map();
+    this.verifications = new Map();
+    this.verificationPolicies = new Map();
     const clock = () => store.now();
     this.apiKeys = createAgentApiKeys({ store: this.keys, clock });
-    this.directory = createAgentDirectory({ store: this.cards, clock });
+    // RC-2026-09-18-049: verification tiers ride on the trust evidence —
+    // a verified attestation becomes host-supplied trust for the card's
+    // owner identity; unverified cards still surface an explicit
+    // verification:"unverified" tier so readers can decide.
+    this.identityVerification = createIdentityVerification({ store: this.verifications, clock });
+    const verificationTrust = agentId => {
+      // Card ownership lives in the DB (the directory Map is keyed by
+      // agentId); the attestation is for the card's owner identity.
+      const row = this.db.prepare(
+        "SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+      const attestation = row?.ownerIdentityId
+        ? this.identityVerification.attestation(row.ownerIdentityId)
+        : null;
+      return {
+        approvedBy: attestation?.verifiedBy ?? null,
+        approvedAt: attestation?.verifiedAt ?? null,
+        grants: [],
+        status: "active",
+        lastSeenAt: null,
+        verification: attestation ? VERIFIED : UNVERIFIED,
+      };
+    };
+    this.directory = createAgentDirectory({ store: this.cards, clock,
+      trust: verificationTrust,
+      presence: agentId => this.presenceForCard(agentId) });
     this.webhooks = createAgentWebhookSubscriptions({
       store: this.subs,
       clock,
@@ -115,6 +158,8 @@ export class AgentPluginStore {
     this.keys.clear();
     this.cards.clear();
     this.subs.clear();
+    this.verifications.clear();
+    this.verificationPolicies.clear();
     for (const row of this.db.prepare("SELECT * FROM agent_api_keys").all()) {
       this.keys.set(row.key_id, {
         keyId: row.key_id,
@@ -154,12 +199,30 @@ export class AgentPluginStore {
         deliveries: JSON.parse(row.journal_json),
       });
     }
+    // RC-2026-09-18-049: verification attestations and per-room gate policy.
+    for (const row of this.db.prepare("SELECT * FROM agent_identity_verification").all()) {
+      this.verifications.set(row.identity_id, Object.freeze({
+        identityId: row.identity_id,
+        level: VERIFIED,
+        verifiedBy: row.verified_by,
+        verifiedAt: row.verified_at,
+      }));
+    }
+    for (const row of this.db.prepare("SELECT * FROM room_verification_policy").all()) {
+      this.verificationPolicies.set(row.room_id, Object.freeze({
+        roomId: row.room_id,
+        requireVerified: row.require_verified === 1,
+        setBy: row.set_by ?? null,
+        updatedAt: row.updated_at,
+      }));
+    }
   }
 
   // Read-only open path: verify the additive tables, allowing absence like
   // the other additive journals (read-only never migrates).
   verifySchema({ allowAbsent = false } = {}) {
-    const tables = ["agent_api_keys", "agent_directory_cards", "agent_webhook_subs"];
+    const tables = ["agent_api_keys", "agent_directory_cards", "agent_webhook_subs",
+      "agent_identity_verification", "room_verification_policy"];
     const missing = tables.filter(name =>
       !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
     if (missing.length && !allowAbsent) throw new Error(`agent-plugin tables missing: ${missing.join(", ")}`);
@@ -175,11 +238,12 @@ export class AgentPluginStore {
   // entries are restored.
   mutate(fn) {
     const snapshot = map => new Map([...map].map(([k, v]) => [k, structuredClone(v)]));
-    const before = { keys: snapshot(this.keys), cards: snapshot(this.cards), subs: snapshot(this.subs) };
+    const before = { keys: snapshot(this.keys), cards: snapshot(this.cards), subs: snapshot(this.subs),
+      verifications: snapshot(this.verifications), verificationPolicies: snapshot(this.verificationPolicies) };
     try {
       return this.store.transaction(fn);
     } catch (err) {
-      for (const name of ["keys", "cards", "subs"]) {
+      for (const name of ["keys", "cards", "subs", "verifications", "verificationPolicies"]) {
         const target = this[name], saved = before[name];
         target.clear();
         for (const [k, v] of saved) target.set(k, v);
@@ -247,6 +311,84 @@ export class AgentPluginStore {
     });
   }
 
+  // ---- Agent verification tiers (RC-2026-09-18-049) ----
+  //
+  // A room owner attests an agent identity as verified — vouching it is
+  // genuine and under legitimate control. Everything unattested is
+  // unverified. Attestation is global (one row per identity); rooms gate on
+  // the tier through the per-room verification policy below.
+
+  // True when the identity is linked as a member in at least one room where
+  // that member is the room's owner: the attestation authority.
+  isRoomOwner(identityId) {
+    return this.store.readTransaction(() =>
+      !!this.db.prepare(
+        `SELECT 1 FROM identity_links il JOIN rooms r ON il.room_id = r.id
+         WHERE il.identity_id = ?
+           AND json_extract(r.projection, '$.room.ownerId') = il.member_id
+         LIMIT 1`).get(identityId));
+  }
+
+  verifyIdentity({ identityId, verifiedBy }) {
+    return this.mutate(() => {
+      const record = this.identityVerification.verify(identityId, { verifiedBy });
+      this.db.prepare(`INSERT INTO agent_identity_verification (identity_id, verified_by, verified_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(identity_id) DO UPDATE SET verified_by=excluded.verified_by, verified_at=excluded.verified_at`)
+        .run(record.identityId, record.verifiedBy, record.verifiedAt);
+      return record;
+    });
+  }
+
+  unverifyIdentity({ identityId }) {
+    return this.mutate(() => {
+      const result = this.identityVerification.unverify(identityId);
+      this.db.prepare("DELETE FROM agent_identity_verification WHERE identity_id=?").run(identityId);
+      return result;
+    });
+  }
+
+  verificationAttestation(identityId) {
+    return this.store.readTransaction(() => this.identityVerification.attestation(identityId));
+  }
+
+  verificationLevel(identityId) {
+    return this.store.readTransaction(() => this.identityVerification.level(identityId));
+  }
+
+  verificationAttestations() {
+    return this.store.readTransaction(() => this.identityVerification.attestations());
+  }
+
+  // Per-room gate: when requireVerified is set, linking an unverified
+  // identity into the room is denied (see AgentIdentities.link).
+  setRoomVerificationPolicy({ roomId, requireVerified, setBy = null }) {
+    if (typeof roomId !== "string" || !roomId) {
+      throw new AgentPluginError(422, "invalid_room", "roomId is required");
+    }
+    if (typeof requireVerified !== "boolean") {
+      throw new AgentPluginError(422, "invalid_policy", "requireVerified must be a boolean");
+    }
+    return this.mutate(() => {
+      const at = this.store.now();
+      const policy = Object.freeze({ roomId, requireVerified, setBy, updatedAt: at });
+      this.verificationPolicies.set(roomId, policy);
+      this.db.prepare(`INSERT INTO room_verification_policy (room_id, require_verified, set_by, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(room_id) DO UPDATE SET require_verified=excluded.require_verified,
+          set_by=excluded.set_by, updated_at=excluded.updated_at`)
+        .run(roomId, requireVerified ? 1 : 0, setBy, at);
+      return policy;
+    });
+  }
+
+  roomVerificationPolicy(roomId) {
+    return this.store.readTransaction(() => {
+      const policy = this.verificationPolicies.get(roomId);
+      return policy ?? Object.freeze({ roomId, requireVerified: false, setBy: null, updatedAt: null });
+    });
+  }
+
   // ---- Agent directory (public document; owner-scoped publish/withdraw) ----
 
   publishCard({ identityId, agentId, card, publicKey, signature, rotationSignature = null,
@@ -257,7 +399,7 @@ export class AgentPluginStore {
         throw new AgentPluginError(409, "card_owned_by_another_identity",
           `Card "${agentId}" is published by another identity`);
       }
-      const doc = this.directory.publish({
+      this.directory.publish({
         agentId, card, visibility, publicKey, signature, rotationSignature,
         allowRecovery: ownerRecovery,
       });
@@ -270,7 +412,9 @@ export class AgentPluginStore {
           public_key=excluded.public_key, signature=excluded.signature`)
         .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
           entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
-      return doc;
+      // Rebuild the doc after the owner row exists so the trust source sees
+      // the card's owner identity (RC-2026-09-18-049 verification tiers).
+      return this.directory.get(agentId);
     });
   }
 
@@ -424,6 +568,41 @@ export class AgentPluginStore {
         throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
       }
       return this.directory.get(agentId);
+    });
+  }
+
+  // RC-2026-09-18-051: host-supplied presence for a directory card. The card
+  // is keyed by public agentId; heartbeats are keyed by the owning identity,
+  // so resolve through the card's owner_identity_id. Returns null when the
+  // heartbeat tables are absent (read-only on an older database) or the
+  // agent never registered a host.
+  presenceForCard(agentId) {
+    const heartbeats = this.store.agentHeartbeats;
+    if (!heartbeats) return null;
+    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row) return null;
+    const status = heartbeats.statusOf(row.ownerIdentityId);
+    return { status: status.status, lastSeenAt: status.lastSeenAt, hosts: status.hosts.length };
+  }
+
+  // RC-2026-09-18-051: journal an agent.wake delivery for every enabled
+  // subscription of the identity that listens for wake pings. Delivery is
+  // pending (actual HTTP dispatch is a later slice); the agent sees the
+  // pending entry in its delivery journal. No subscription, no delivery —
+  // the heartbeat queue alone carries the wake.
+  deliverWakePing({ identityId, signal }) {
+    return this.mutate(() => {
+      const rows = this.db.prepare(
+        "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
+      const deliveries = [];
+      for (const row of rows) {
+        let events = [];
+        try { events = JSON.parse(row.eventsJson); } catch { continue; }
+        if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
+        deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
+          { eventType: WAKE_PING_EVENT, data: buildWakePing({ agentId: identityId, signal }) }));
+      }
+      return Object.freeze({ deliveries: Object.freeze(deliveries) });
     });
   }
 

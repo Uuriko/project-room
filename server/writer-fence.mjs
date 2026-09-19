@@ -60,6 +60,18 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_api_keys",
   "agent_directory_cards",
   "agent_webhook_subs",
+  // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
+  // room_verification_policy (per-room gate). Purely additive and
+  // intentionally NOT fenced: older writers have no code path to them, and
+  // each store verifies its own schema on open.
+  "agent_identity_verification",
+  "room_verification_policy",
+  // Wakeable agent presence (RC-2026-09-18-051): agent_hosts and
+  // agent_wake_signals. Purely additive and intentionally NOT fenced:
+  // older writers have no code path to them, every row is scoped to an
+  // agent identity, and AgentHeartbeats.verifySchema() is read-only-safe.
+  "agent_hosts",
+  "agent_wake_signals",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
@@ -87,7 +99,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "stitch_links",
   "stitch_revocations",
   "stitch_suggestions",
-  "stitch_receipts"
+  "stitch_receipts",
+  // share_link_codes: short human invite aliases of existing #join/ share-links.
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to them, and share_links.verify() plus hash-only storage are the gate.
+  "share_link_codes"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

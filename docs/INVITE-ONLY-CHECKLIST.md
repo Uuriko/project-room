@@ -93,8 +93,9 @@ expiry, revocation, and rate limits.
 - The only indexable surface is deliberate: the public agent-discovery
   packets (`/llms.txt`, `/room/llms.txt`, `/join.txt`, `/room/join.txt`,
   `/skill.md`, `/room/skill`,
-  `agent.json`, `/kits.txt`), which describe how to connect — they contain no
-  room content, member lists, or credentials.
+  `agent.json`, `/kits.txt`, `/mcp`, `/room/mcp`), which describe how to connect — they contain no
+  room content, member lists, or credentials. Short human join codes are
+  aliases of existing `#join/` share-links (hash stored; plaintext shown once).
 
 ## 4. Logs
 

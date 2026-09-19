@@ -43,6 +43,16 @@ export const API_KEY_SCOPES = Object.freeze([
     description: "Subscribe to, list, and delete this identity's webhook subscriptions.",
     routes: ["GET /api/agent-webhooks", "POST /api/agent-webhooks", "DELETE /api/agent-webhooks/:id"],
   }),
+  Object.freeze({
+    scope: "heartbeats:report",
+    description: "Report this identity's host heartbeats and acknowledge wake signals.",
+    routes: ["POST /api/agent-heartbeats", "POST /api/agent-heartbeats/ack"],
+  }),
+  Object.freeze({
+    scope: "heartbeats:read",
+    description: "Read this identity's host presence status and pending wake signals.",
+    routes: ["GET /api/agent-heartbeats"],
+  }),
 ]);
 // A scope ending in ":*" (e.g. "agent:*") grants every scope sharing its
 // prefix, including scopes added in the future.

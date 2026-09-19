@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Agent Room steal A + C (2026-09-19): hosted MCP join at `/mcp` and
+  `/room/mcp` (GET host-exact Claude / Codex / Cursor snippets; POST
+  initialize / tools/list / tools/call for public packets and kits; no
+  OAuth; room tools stay local stdio). Door copy points at
+  `https://www.getdasha.com/room/mcp`. Human mint copies a short
+  `ABC-DEF-GHJ` join code that aliases the existing `#join/<token>`
+  share-link (`#code/…` and Join with code). Not #628 shareable login,
+  not RM- agent invites, not Beronel.
 - Auth / session friction (2026-09-18): `POST /api/identity-create` is an
   alias of `POST /api/agent-identities` (www `/room/api/identity-create`);
   browser last-room / had-account hints restore an account cookie after

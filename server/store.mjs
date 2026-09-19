@@ -13,7 +13,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
-import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
+import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
@@ -39,6 +39,8 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -327,6 +329,48 @@ export function validateCommand(command) {
   }
 }
 
+// RC-2026-09-18-052: the agent inbox is the agent's to-do list, so every
+// item type names its next action. The most common first move is replying
+// to a DM (the sender's memberId goes back into toMemberId on the
+// message.posted command); assignments and routing mentions point at
+// their own read/resolve routes. An empty inbox says what it will carry.
+const inboxNext = (roomId, directMessages, assignments, mentions) => {
+  const steps = [];
+  if (directMessages.length > 0) {
+    const latest = directMessages[0];
+    steps.push(Object.freeze({
+      action: "reply-dm",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `Reply to the DM from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your reply", toMemberId: "${latest.from}" } }. Send your identity secret as the Bearer token.`,
+    }));
+  }
+  if (assignments.length > 0) {
+    steps.push(Object.freeze({
+      action: "read-assignments",
+      method: "GET",
+      path: `/api/rooms/${roomId}/collab/assignments`,
+      description: "List your open work assignments with full thread context.",
+    }));
+  }
+  if (mentions.length > 0) {
+    const routingId = mentions[0].routingId;
+    steps.push(Object.freeze({
+      action: "resolve-mention",
+      method: "POST",
+      path: `/api/rooms/${roomId}/collab/routing/${routingId}/resolve`,
+      description: "Mark the routed @agent mention as handled once you have acted on it.",
+    }));
+  }
+  if (steps.length === 0) {
+    steps.push(Object.freeze({
+      action: "watch-inbox",
+      description: "Your inbox is empty. It will carry targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
+    }));
+  }
+  return steps;
+};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
@@ -369,6 +413,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
+    this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,
@@ -408,6 +453,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
         this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
+        this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
@@ -488,6 +534,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Fresh databases are created in the v35 shape already; skip the
       // rebuild for them.
       if (version > 0 && version < 35) this.migrateShareLinkAgentIssuerV35();
+      // Short human invite codes alias share_links. After the v35 rebuild so
+      // the FK targets the live table. Purely additive, no version bump,
+      // intentionally outside the writer fence.
+      this.db.exec(shareLinkCodeSchema);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -499,6 +549,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueuePauseSchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
+      // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
+      // wake-signal queue are purely additive as well: IF NOT EXISTS is
+      // idempotent, no schema version bump.
+      this.db.exec(agentHeartbeatSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
       // The spam-guard quarantine journal is purely additive as well:
@@ -1843,10 +1897,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (!m || m.active === false) continue;
         online.set(memberId, { watching: !!online.get(memberId)?.watching, workingOn: items });
       }
+      // RC-2026-09-18-051: additive host presence for agent members. The
+      // member's linked agent identity (identity_links) resolves to its
+      // heartbeat status; offline agents with registered hosts are listed
+      // (watching:false) so clients can see wakeable agents that are away.
+      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const agentPresence = memberId => {
+        const m = members[memberId];
+        if (!m || m.kind !== "agent" || m.active === false) return null;
+        const link = identityLinkOf.get(roomId, memberId);
+        if (!link) return null;
+        const status = this.agentHeartbeats.statusOf(link.identityId);
+        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      };
+      for (const memberId of Object.keys(members)) {
+        if (online.has(memberId)) continue;
+        const p = agentPresence(memberId);
+        if (p && p.status !== "unregistered") online.set(memberId, { watching: false, offline: true });
+      }
       return { members: [...online.entries()].map(([memberId, info]) => ({
         memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
         watching: info.watching, workingOn: info.workingOn ?? [],
-        statusMessage: members[memberId].statusMessage ?? null
+        statusMessage: members[memberId].statusMessage ?? null,
+        presence: agentPresence(memberId), // null for non-agent/unlinked members
       })) };
     });
   }
@@ -1860,9 +1933,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
+      // RC-2026-09-18-051: additive host presence for agent members.
+      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const agentPresence = m => {
+        if (!m || m.kind !== "agent" || m.active === false) return null;
+        const link = identityLinkOf.get(roomId, m.id);
+        if (!link) return null;
+        const status = this.agentHeartbeats.statusOf(link.identityId);
+        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      };
       return { members: Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
-        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities }))
+        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities,
+          presence: agentPresence(m) }))
         .filter(m => !needle || m.capabilities.some(c => c.toLowerCase().includes(needle)))
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
     });
@@ -2193,6 +2276,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMessages: Object.freeze(directMessages),
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions)),
       });
     });
   }
@@ -2294,7 +2378,51 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
+      // RC-2026-09-18-051: wake-on-mention. An @-mention or DM addressed to
+      // an offline wakeable agent enqueues a wake signal (delivered on the
+      // agent's next heartbeat) and journals an agent.wake webhook delivery
+      // for any subscription the agent registered. Runs in the same
+      // transaction as the message event, so a wake is never recorded
+      // without its triggering message.
+      if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
       return { sequence, event: incoming, duplicate: false };
     });
+  }
+
+  // Wake-on-mention for message.posted: resolve @mentions and the DM target
+  // to agent members, then wake the offline ones via their registered
+  // agent identity. Never throws for unparseable input — a mention that
+  // resolves to nobody (or to an online agent) is simply not woken.
+  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
+    const members = state?.members ?? {};
+    const targets = new Map(); // memberId -> "mention" | "dm"
+    let names = [];
+    try { names = extractMentions(typeof data.body === "string" ? data.body : ""); }
+    catch { names = []; }
+    const memberIdForName = name => {
+      const lower = name.toLowerCase();
+      for (const [memberId, member] of Object.entries(members)) {
+        if (!member || member.active === false || member.kind !== "agent" || memberId === senderMemberId) continue;
+        const display = typeof member.displayName === "string" ? member.displayName.toLowerCase() : "";
+        if (memberId.toLowerCase() === lower || (display !== "" && display === lower)) return memberId;
+      }
+      return null;
+    };
+    for (const name of names) {
+      const memberId = memberIdForName(name);
+      if (memberId && !targets.has(memberId)) targets.set(memberId, "mention");
+    }
+    const dm = typeof data.toMemberId === "string" ? members[data.toMemberId] : null;
+    if (dm && dm.active !== false && dm.kind === "agent" && data.toMemberId !== senderMemberId
+      && !targets.has(data.toMemberId)) targets.set(data.toMemberId, "dm");
+    if (targets.size === 0) return;
+    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    for (const [memberId, kind] of targets) {
+      const link = linkOf.get(roomId, memberId);
+      if (!link) continue;
+      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+      if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+    }
   }
 }

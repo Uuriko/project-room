@@ -174,7 +174,7 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
     async request(path, options) {
       if (options?.method === "POST") {
         created = structuredClone(options.data);
-        return { link: { id: "www-link", status: "active", expiresAt: options.data.expiresAt } };
+        return { link: { id: "www-link", status: "active", expiresAt: options.data.expiresAt }, code: "ABC-DEF-GHJ" };
       }
       return { links: [] };
     },
@@ -189,6 +189,7 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
     assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     assert.doesNotMatch(node("#share-link-url").value, /#room\//);
+    assert.equal(node("#share-link-code").value, "ABC-DEF-GHJ");
     ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {

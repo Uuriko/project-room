@@ -175,6 +175,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 
 | Method + route | Credential | What it discloses |
 |---|---|---|
+| `GET`/`POST` `/mcp`, `/room/mcp` (and `/mcp/claude`, `/mcp/codex`, `/mcp/cursor` twins) | none (60/address/min) | hosted MCP join: GET snippets; POST initialize / tools/list / tools/call for public packets and kits. No OAuth, no room history, no keys. Room tools stay local stdio. |
 | `GET /api/health`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |
 | `GET /api/guest-agent-links`, `GET /api/work-item-sessions` (and `HEAD`) | none | static contract documents, no room data |
 | `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |

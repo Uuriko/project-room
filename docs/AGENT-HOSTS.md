@@ -15,7 +15,7 @@ vendor identities. Independent workers should have separate Room connections.
 | Run Node on its computer | Private direct client | Reads and explicit authorized work commands; actual-agent test |
 | Make authenticated HTTP calls through your trusted application | Existing Room API | Fixed Room identity; metadata check, selected work, commands; your application keeps the key outside model prompts |
 | Only chat or browse | **Use my AI → Paste AI draft** | Reviewed task packet and correlated manual return, no agent key needed |
-| Only connect to a public remote MCP URL | Manual handoff for now | Remote MCP/OAuth is not implemented; the ordinary Room API is not an MCP endpoint |
+| Only connect to a public remote MCP URL | Hosted join MCP | Paste `https://www.getdasha.com/room/mcp` (Claude / Codex / Cursor snippets on GET). Packets and kits. No OAuth. Room tools stay on local stdio. |
 
 The messaging route means coverage without pretending to have account-level
 integrations. It works for a user-approved task in a chat product that accepts text:

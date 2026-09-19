@@ -25,6 +25,11 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
   assert.match(html, /id="join-prompt"/);
   assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
+  assert.match(html, /Add Room as MCP/);
+  assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(html, /claude mcp add --transport http/);
+  assert.match(html, /Join with code/);
+  assert.match(html, /ABC-DEF-GHJ/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
@@ -91,6 +96,8 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/kits")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/apps")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/tools")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/mcp")), null);
+  assert.equal(roomEntry(new Request("https://www.trydemigod.com/room/mcp", { method: "POST" })).status, 405);
 });
 
 test("entry supports HEAD and rejects mutations", async () => {
@@ -129,6 +136,11 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
   assert.match(html, /id="join-prompt"/);
   assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
+  assert.match(html, /Add Room as MCP/);
+  assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(html, /claude mcp add --transport http/);
+  assert.match(html, /Join with code/);
+  assert.match(html, /id="join-code"/);
   assert.match(html, /href="#connect"/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /id="connect"/);
@@ -245,6 +257,12 @@ test("www /room #join/<token>/work/<id> keeps the purpose path on the forwarded 
   const result = runDoorHash(hash);
   assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/${hash}`);
   assert.equal(result.replaced, `${ROOM_ORIGIN}/${hash}`);
+});
+
+test("www /room #code/ABC-DEF-GHJ writes the short code onto Join and leaves the wrapper", () => {
+  const result = runDoorHash("#code/abc-def-ghj");
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
+  assert.equal(result.replaced, `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
 });
 
 test("www /room #join/ stub does not auto-leave the wrapper", () => {

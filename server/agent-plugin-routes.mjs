@@ -26,7 +26,11 @@ import { EVENT_TYPES } from "../src/events.js";
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Derived from EVENT_TYPES so the taught list can never drift from what the
 // dispatcher actually emits; "*" subscribes to every event type.
-const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), "*"]);
+// RC-2026-09-18-051: "agent.wake" is not a room event — it is the
+// identity-scoped wake ping journaled when an offline agent is mentioned or
+// DM'd. Listed here so an agent can subscribe to its own wake pings.
+const WAKE_PING_EVENT = "agent.wake";
+const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT, "*"]);
 
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
@@ -53,8 +57,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     } catch (error) {
       if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
       if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
-        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError")) {
-        reject(error.code === "directory_not_found" ? 404 : 422, error.code, error.message);
+        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
+        || error.name === "VerificationError"
+        || error.name === "HeartbeatError")) {
+        reject(error.status ?? (error.code === "directory_not_found" ? 404 : 422), error.code, error.message);
       }
       throw error;
     }
@@ -146,11 +152,15 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // agent knows what its new key unlocks instead of guessing its next move.
   const KEY_NEXT = Object.freeze([
     Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards", requiredScope: "directory:publish",
-      description: "Publish your signed directory card so other agents can discover you. Send this credential as the Bearer <redacted> See docs/SIGNED-AGENT-CARDS.md." }),
+      description: "Publish your signed directory card so other agents can discover you. Send this credential as the Bearer token. See docs/SIGNED-AGENT-CARDS.md." }),
     Object.freeze({ action: "subscribe-webhooks", method: "POST", path: "/api/agent-webhooks", requiredScope: "webhooks:manage",
-      description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer <redacted>" }),
+      description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer token" }),
     Object.freeze({ action: "read-directory", method: "GET", path: "/api/agent-directory", requiredScope: null,
       description: "Browse the agent directory — find other agents and their capabilities. Unauthenticated." }),
+    Object.freeze({ action: "report-heartbeat", method: "POST", path: "/api/agent-heartbeats", requiredScope: "heartbeats:report",
+      description: "Report this host's liveness (hostId, mode wakeable|pull-only, wakeUrl for wakeable hosts). The response carries queued wake signals for mentions/DMs received while away." }),
+    Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
+      description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
       description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface. Unauthenticated." }),
   ]);
@@ -403,6 +413,75 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
   });
 
+  // RC-2026-09-18-049: identity verification tiers. The attester must be a
+  // room owner (someone who owns at least one room); the attestation is
+  // global to the identity. Reads are public so other agents can gate on
+  // the tier.
+  const VERIFY_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verify$/;
+  const VERIFICATION_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verification$/;
+
+  const verifyIdentity = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-identity-verify:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
+      reject(403, "not_room_owner", "Only a room owner can attest an agent identity as verified");
+    }
+    if (!store.identities.get(identityId)) reject(404, "identity_not_found", "No such agent identity");
+    return json(res, 201, store.agentPlugin.verifyIdentity({ identityId, verifiedBy: auth.identityId }));
+  });
+
+  const unverifyIdentity = translate(async (req, res, { identityId }) => {
+    const auth = ownerAuth(req);
+    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
+      reject(403, "not_room_owner", "Only a room owner can revoke a verification attestation");
+    }
+    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId }));
+  });
+
+  const identityVerification = translate(async (req, res, { identityId }) => {
+    const attestation = store.agentPlugin.verificationAttestation(identityId);
+    return json(res, 200, attestation ?? { identityId, level: "unverified" });
+  });
+
+  // ---- Wakeable agent presence (RC-2026-09-18-051) ----
+  //
+  // POST /api/agent-heartbeats — an agent host reports liveness. The
+  // response carries the agent's queued wake signals (mentions/DMs that
+  // arrived while the agent was offline); the host acknowledges them via
+  // POST /api/agent-heartbeats/ack once handled. GET reads the agent's
+  // host presence. heartbeats:report posts and acks; heartbeats:read
+  // reads. The owner identity secret grants both.
+  const heartbeatNext = pendingWakes => pendingWakes.length > 0
+    ? [Object.freeze({ action: "ack-wakes", method: "POST", path: "/api/agent-heartbeats/ack",
+        description: "Acknowledge the wake signals you received (signalIds) so they stop being returned on the next heartbeat." })]
+    : [];
+
+  const reportHeartbeat = translate(async (req, res, { remoteAddress }) => {
+    rate(`agent-heartbeat:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    const data = await body(req);
+    if (!data || !(exact(data, ["hostId", "mode"]) || exact(data, ["hostId", "mode", "wakeUrl"])))
+      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only), with optional wakeUrl, are the accepted fields");
+    const { host, pendingWakes } = store.agentHeartbeats.heartbeat({
+      agentId: auth.identityId, hostId: data.hostId, mode: data.mode, wakeUrl: data.wakeUrl ?? null });
+    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, next: heartbeatNext(pendingWakes) });
+  });
+
+  const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
+    rate(`agent-heartbeat-ack:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    const data = await body(req);
+    if (!data || !exact(data, ["signalIds"]) || !Array.isArray(data.signalIds))
+      reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field");
+    return json(res, 200, store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds }));
+  });
+
+  const readHeartbeats = translate(async (req, res) => {
+    const auth = agentAuth(req, requiredScope("heartbeats:read"));
+    rate(`agent-heartbeats-read:${auth.identityId}`, 120);
+    return json(res, 200, store.agentHeartbeats.statusOf(auth.identityId));
+  });
+
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
     const pathname = url.pathname, method = req.method;
     if (pathname === "/api/agent-keys" && method === "POST") { await issueKey(req, res, { remoteAddress }); return true; }
@@ -423,6 +502,17 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
     const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
     if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
+    const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
+    if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
+    const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;
+    if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
+    const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
+    if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
+
+    // RC-2026-09-18-051: wakeable agent presence.
+    if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }
+    if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res); return true; }
+    if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
     return false;
   };
 }

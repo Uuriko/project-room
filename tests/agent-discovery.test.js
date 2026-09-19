@@ -38,19 +38,21 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/join.txt", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
+    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
     "/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
-  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
+  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
   assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "live");
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
+  assert.equal(card.join.find(row => row.id === "hosted-mcp").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
   assert.equal(card.capabilities.remoteMcp, false);
+  assert.equal(card.capabilities.hostedMcpJoin, true);
   assert.equal(card.capabilities.guestAgentLinkMint, true);
   assert.match(card.description, /Work Items/);
   assert.match(card.description, /receipts/i);
@@ -64,6 +66,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\/room\/llms.txt/);
   assert.equal(DISCOVERY_PATHS.includes("/room"), false);
   assert.equal(DISCOVERY_PATHS.includes("/room/"), false);
+  assert.equal(DISCOVERY_PATHS.includes("/mcp"), false);
+  assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, /Humans: open this invite link/);
@@ -79,6 +83,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(text, /hosted-mcp \(live, no account\)/);
+  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(text, /human-join-code \(live\)/);
   assert.match(text, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
@@ -94,7 +101,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
+  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
   assert.equal(card.capabilities.streaming, true);
   assert.equal(card.capabilities.pushNotifications, false);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -234,6 +241,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.match(catalog.body, /guest-agent-link \(live, owner-issued\)/);
   assert.match(catalog.body, /enrolled-key \(live\)/);
   assert.match(catalog.body, /agent-room-create \(live, no account\)/);
+  assert.match(catalog.body, /hosted-mcp \(live, no account\)/);
   assert.match(catalog.body, /\/room\/llms\.txt/);
   assert.match(catalog.body, /\.well-known\/agent\.json/);
   assert.match(catalog.body, /\/health/);
