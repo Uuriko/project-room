@@ -29,7 +29,7 @@ try {
     await panel.locator(":scope > summary").click();
     await page.screenshot({ path: join(directory, "offer.png") });
     await card.locator('[data-action="select-offer"][data-offer-id="' + targetId + '"]').click();
-    await page.locator('[name="reason"]').fill("Simulated owner: use this welcome draft for review.");
+    await page.locator('#action-fields [name="reason"]').fill("Simulated owner: use this welcome draft for review.");
   } else {
     const message = before.state.messages.find(m => m.id === targetId);
     assert.equal(message?.authorId, "helper"); assert.equal(message.workItemId, config.workItemId);
