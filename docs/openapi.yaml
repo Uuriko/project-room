@@ -968,7 +968,36 @@ paths:
         - $ref: '#/components/parameters/RoomId'
         - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
       responses:
-        '200': { description: The room's access requests }
+        '200':
+          description: The room's access requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  requests:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        requestId: { type: string }
+                        displayName: { type: string }
+                        requestedPermissions:
+                          type: array
+                          items: { type: string }
+                        status: { type: string }
+                  next:
+                    type: array
+                    description: Machine-readable follow-ups — decide-request when requests are pending (the request's id is filled into the decide path), watch-requests when none are pending
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        description: { type: string }
         '403': { description: access_denied (manage_members required) }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
