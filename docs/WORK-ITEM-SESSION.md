@@ -49,7 +49,6 @@ allowed at pilot capacity so a session can be ended.
 
 | Method | Path | Result |
 | --- | --- | --- |
-| `GET` | `/api/work-item-sessions` | Public contract (`schemaBump: false`) |
 | `GET` | `/api/rooms/:room/work-sessions` | Cards: title, status, Stop timestamp, heartbeat. Optional `?status=` |
 | `POST` | `/api/rooms/:room/work-sessions` | `set_status` or `request_stop` → the matching Event |
 

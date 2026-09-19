@@ -1,5 +1,9 @@
 # Agent handoff protocol (task 23)
 
+> Retired 2026-09-19: the `/api/inbox/handoffs` HTTP routes were removed (no
+> callers). The handoff journal (`server/inbox-handoff.mjs`) remains and is
+> used by the collab lane. This doc is kept as design history.
+
 ## What this is
 
 When triage returns `needs_human`, the thread doesn't sit in a queue — it is

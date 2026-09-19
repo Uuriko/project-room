@@ -20,7 +20,7 @@ import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
-import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
+import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests } from "./access-requests.mjs";
@@ -1232,36 +1232,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
           { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
-        // Cross-channel thread stitching (task #19): owner review + status
-        // surface. Read-only GETs ride the existing account-session auth;
-        // the three mutations reuse account session + CSRF + the same
-        // inbox rate limit as every other inbox write.
-        if (url.pathname === "/api/inbox/stitch/status" && req.method === "GET")
-          return json(res, 200, store.inbox.stitchStatus(token, binding));
-        if (url.pathname === "/api/inbox/stitch/suggestions" && req.method === "GET")
-          return json(res, 200, store.inbox.stitchSuggestions(token, binding, { limit: url.searchParams.get("limit") }));
-        if (url.pathname === "/api/inbox/stitch/confirm" && req.method === "POST") {
-          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-          const data = await body(req);
-          if (!data || !exact(data, ["suggestionId"]) || typeof data.suggestionId !== "string")
-            reject(422, "invalid_stitch_confirm", "Choose the suggestion to confirm.");
-          return json(res, 200, store.inbox.stitchConfirm(token, binding, { suggestionId: data.suggestionId }));
-        }
-        if (url.pathname === "/api/inbox/stitch/dismiss" && req.method === "POST") {
-          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-          const data = await body(req);
-          if (!data || !exact(data, ["suggestionId"]) || typeof data.suggestionId !== "string")
-            reject(422, "invalid_stitch_dismiss", "Choose the suggestion to dismiss.");
-          return json(res, 200, store.inbox.stitchDismiss(token, binding, { suggestionId: data.suggestionId }));
-        }
-        if (url.pathname === "/api/inbox/stitch/split" && req.method === "POST") {
-          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-          const data = await body(req);
-          if (!data || !exact(data, ["stitchKey", "sourceId", "channel", "reason", "scope"]))
-            reject(422, "invalid_stitch_split", "Choose the stitched identity to split.");
-          return json(res, 200, store.inbox.stitchSplit(token, binding,
-            { stitchKey: data.stitchKey, sourceId: data.sourceId, channel: data.channel, reason: data.reason, scope: data.scope }));
-        }
         // Held-message quarantine review (owner review surface): the four
         // routes ride the existing account-session auth, and the three
         // mutations reuse account session + CSRF + the same inbox rate
@@ -1296,32 +1266,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_quarantine_split", "Choose the held message to split.");
           return json(res, 200, store.inbox.quarantineSplit(token, binding, { quarantineId: data.quarantineId, note: data.note }));
         }
-        // Morning digest (task 21): the overnight arrivals across channels as
-        // an in-app daily brief. Channel sources need the reading view, like
-        // the threads list above. On-demand read, never a push (task 22).
-        if (url.pathname === "/api/inbox/digest" && req.method === "GET") return json(res, 200, store.inbox.digest(token, binding,
-          { since: url.searchParams.get("since"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         // SLA dashboard (task 26): response-time percentiles, breach counts
         // by channel and severity, and the end-of-day open-conversation
         // sweep ("nothing closes unowned") across Telegram and email.
         // Read-only, same account-session auth as the other inbox reads.
         if (url.pathname === "/api/inbox/sla/dashboard" && req.method === "GET")
           return json(res, 200, store.inbox.slaDashboard(token, binding));
-        // Agent handoff protocol (task 23): journal a structured context
-        // packet when a thread is handed to a named agent, so nothing closes
-        // unowned. Account session + CSRF, like the other inbox writes; the
-        // packet carries no PII beyond what the thread view already shows.
-        if (url.pathname === "/api/inbox/handoffs" && req.method === "POST") {
-          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-          const result = store.inbox.handoff(token, binding, await body(req), { includeChannels: view !== null });
-          return json(res, result.duplicate ? 200 : 201, result);
-        }
-        if (url.pathname === "/api/inbox/handoffs" && req.method === "GET") return json(res, 200, store.inbox.handoffs(token, binding,
-          { status: url.searchParams.get("status") }));
-        if (url.pathname === "/api/inbox/handoffs/transition" && req.method === "POST") {
-          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-          return json(res, 200, store.inbox.handoffTransition(token, binding, await body(req)));
-        }
         if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
           { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,
@@ -1735,9 +1685,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
       }
-      if (url.pathname === "/api/work-item-sessions" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, workItemSessionContract(), req.method === "HEAD");
-      }
       if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`guest-agent-mint:${remoteAddress}`, 30);
@@ -1901,7 +1848,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2095,9 +2042,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.agentPlugin.setRoomVerificationPolicy({
           roomId, requireVerified: data.requireVerified, setBy: auth.member.id,
         }));
-      }
-      if (route === "onboarding-funnel" && req.method === "GET") {
-        return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
       }
       if (route === "search" && req.method === "GET") {
         // Round-2 #113: full-text search over messages and work items.

@@ -2,7 +2,7 @@
 
 This guide covers deployment, backup, and configuration for Project Room
 administrators. For agent/developer onboarding, see
-`docs/AGENT-DEVELOPER-GUIDE.md`. For
+`docs/SWARM-PLUG-IN.md`. For
 end-user help, see `docs/USER-GUIDE.md`.
 
 ## Deployment

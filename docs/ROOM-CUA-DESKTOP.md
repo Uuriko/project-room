@@ -90,7 +90,7 @@ on.
 - Do not drive Potter's personal laptop without an explicit opt-in and
   Ask every time.
 - Pause / Remove in Room cannot stop an outside Driver process. Same
-  honesty as [AGENT-CONNECTION.md](AGENT-CONNECTION.md).
+  honesty as [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
 
 Fleet isolation matches Room's multi-agent needs better than driving the
 operator's real pointer. Prefer a claimed sandbox when the task does not
@@ -149,5 +149,5 @@ Even while using Cua:
 - Quill / inbox / WhatsApp client paths.
 
 Enrollment is unchanged. Ordinary connect stays packet / guest-agent /
-Add agent ([AGENT-CONNECTION.md](AGENT-CONNECTION.md),
-[AGENT-HOSTS.md](AGENT-HOSTS.md)).
+Add agent ([SWARM-PLUG-IN.md](SWARM-PLUG-IN.md),
+[SWARM-PLUG-IN.md](SWARM-PLUG-IN.md)).

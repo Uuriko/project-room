@@ -1,4 +1,6 @@
-// O003: agent developer guide exists with expected sections.
+// The agent developer guide was consolidated into docs/SWARM-PLUG-IN.md
+// (Part 1: plug-in; Part 2: folded working guides). This test pins the
+// canonical guide's core sections and its accurate MCP surface.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -6,18 +8,17 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-test("AGENT-DEVELOPER-GUIDE.md exists with core sections", () => {
-  const path = join(root, "docs", "AGENT-DEVELOPER-GUIDE.md");
-  assert.ok(existsSync(path), "docs/AGENT-DEVELOPER-GUIDE.md should exist");
-  const content = readFileSync(path, "utf8");
-  for (const section of ["## Enrollment", "## MCP Interface", "## Inbox Commands",
-      "## Best Practices"]) {
+const path = join(root, "docs", "SWARM-PLUG-IN.md");
+const content = readFileSync(path, "utf8");
+
+test("SWARM-PLUG-IN.md exists with core sections", () => {
+  assert.ok(existsSync(path), "docs/SWARM-PLUG-IN.md should exist");
+  for (const section of ["## The one enrollment flow", "## The MCP tool surface",
+      "### Inbox commands", "### Best practices"]) {
     assert.ok(content.includes(section), `Guide should include ${section}`);
   }
 });
-test("AGENT-DEVELOPER-GUIDE.md documents the real MCP surface", () => {
-  const path = join(root, "docs", "AGENT-DEVELOPER-GUIDE.md");
-  const content = readFileSync(path, "utf8");
+test("SWARM-PLUG-IN.md documents the real MCP surface", () => {
   for (const tool of ["room_read_result", "room_check_access", "room_list_work",
       "room_read_board", "room_read_work", "room_post_draft"]) {
     assert.ok(content.includes(tool), `Guide should document real tool ${tool}`);

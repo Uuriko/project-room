@@ -60,7 +60,7 @@ display preference, not authority (`docs/MODERATION.md`).
   `SameSite=Strict` (`server/http.mjs`, `scopedCookieName` and the
   `Set-Cookie` header).
 - **Agent and script clients** talk to the same HTTPS origin with a bearer
-  `ROOM_TOKEN` (`scripts/dasha-bridge.mjs` `roomClient()`; `docs/AGENT-CLIENT.md`).
+  `ROOM_TOKEN` (`scripts/dasha-bridge.mjs` `roomClient()`; `docs/SWARM-PLUG-IN.md`).
 
 ### Credentials at rest (hashed)
 
@@ -128,7 +128,7 @@ Values are never recorded here or anywhere in the repository.
 | `NODE_ENV`, `ROOM_DEPLOYMENT`, `HOST`, `PORT`, `ROOM_DB`, `ROOM_STREAM_INTERVAL_MS` | `/etc/project-room/pilot.env` with private permissions (Node fallback) | Strict production mode, loopback listener, database path, event-stream poll interval (optional, default 250 ms) | Edited by the operator; service restart | `deploy/pilot.env.example`, `docs/INVITE-ONLY-DEPLOYMENT.md` step 4, `docs/SERVICE.md` "Run and provision" |
 | Room access keys and account keys | Printed once by provisioning; stored hashed | Member and account login | Seven-day expiry; reissuing revokes previous keys and their sessions; account-key rotation clears account-session slots; account suspension bumps the authorization epoch | `docs/SERVICE.md` "Run and provision" (keys and account keys), `server/store.mjs` |
 | Sessions | HttpOnly cookies; hashed server side | Browser sessions | At most eight hours; logout, key rotation or suspension advances the slot | `docs/SERVICE.md` "Run and provision", `server/http.mjs` |
-| Agent connection keys | Hashed; owned by the agent connection | Agent API access | `rotate` and `disconnect` actions on the connection | `server/agent-connections.mjs`, `docs/AGENT-CONNECTION.md` |
+| Agent connection keys | Hashed; owned by the agent connection | Agent API access | `rotate` and `disconnect` actions on the connection | `server/agent-connections.mjs`, `docs/SWARM-PLUG-IN.md` |
 | Telegram webhook secret | Hashed in the connection record | Verify provider callbacks | Reconfigured through `connection.webhook`; 16 to 256 characters enforced | `docs/UNIFIED-INBOX.md` "Routes" (B49), `server/channel-import.mjs` |
 | `ROOM_TOKEN`, `ROOM_ORIGIN`, `ROOM_ID`, `AGENT_MEMBER_ID` | Environment of whoever runs an agent script; never on the service | Script-side room access | Same as the underlying agent key | `scripts/dasha-bridge.mjs` header comment and `roomClient()` |
 | `DASHA_API_KEY`, `DASHA_BASE_URL`, `DASHA_MODEL` | Environment of whoever runs `scripts/dasha-bridge.mjs`; never on the service | External AI runtime access (see section 6) | Issued and rotated by the external provider; not this repository's concern | `scripts/dasha-bridge.mjs` header comment |
@@ -193,7 +193,7 @@ snapshot it fetches in step 1 sits in plaintext on the machine running it.
 The agreed Room to Dasha adapter contract keeps real execution behind a
 submission-reconciliation gate (`docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md`
 section 3). Any other agent member reads room content through
-`docs/AGENT-CLIENT.md` with its own key and takes that content into its own
+`docs/SWARM-PLUG-IN.md` with its own key and takes that content into its own
 runtime; the Room does not control or encrypt that path.
 
 ## 7. Logs and diagnostics

@@ -73,4 +73,4 @@ A classic store waits on a real install + permissions + review path.
 Do not ship a payment storefront or a pretend app list before that
 contract exists. This catalog stays honest and thin until then.
 
-See [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md).
+See [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).

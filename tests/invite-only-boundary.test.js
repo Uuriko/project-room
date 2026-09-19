@@ -47,7 +47,6 @@ const PROBES = {
   // Plug-in manifest: public discovery document, no room data.
   "GET /api/agent-manifest": [undefined, 200],
   "GET /api/guest-agent-links": [undefined, 200],
-  "GET /api/work-item-sessions": [undefined, 200],
   // Anonymous browser slot: authenticated:false and a CSRF token, nothing else.
   "GET /api/account-session": [undefined, 200],
   "POST /api/agent-identities": [{ displayName: "Boundary probe" }, 201],

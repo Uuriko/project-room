@@ -100,4 +100,4 @@ isolate secrets. Do not reuse Grok Build’s directory.
 - Claim native-host acceptance for Grok Build (setup instructions only).
 - Reset the Durable Object, deploy, or write host config files.
 
-See [private setup](AGENT-CONNECTION.md) and [host routes](AGENT-HOSTS.md).
+See [private setup](SWARM-PLUG-IN.md) and [host routes](SWARM-PLUG-IN.md).

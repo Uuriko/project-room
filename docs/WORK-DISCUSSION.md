@@ -102,5 +102,5 @@ outside authorship. A pasted draft remains `manual-unverified`. Exact retries
 must produce the same event, not another contribution. Discussion text saying
 "approved" does not create a work completion, verification or human decision.
 
-See [work actions](AGENT-WORK-LIFECYCLE.md), [host routes](AGENT-HOSTS.md), and
+See [work actions](AGENT-WORK-LIFECYCLE.md), [host routes](SWARM-PLUG-IN.md), and
 [design/research plan](WORK-DISCUSSION-PLAN-2026-09-08.md).

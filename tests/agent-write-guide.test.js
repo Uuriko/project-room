@@ -10,7 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const guide = readFileSync(new URL("../docs/AGENT-WRITE-GUIDE.md", import.meta.url), "utf8");
+const guide = readFileSync(new URL("../docs/SWARM-PLUG-IN.md", import.meta.url), "utf8");
 const examples = new Map([...guide.matchAll(/<!-- room-command: ([a-z-]+) -->\s*```json\n([\s\S]*?)\n```/g)]
   .map(([, name, json]) => [name, JSON.parse(json)]));
 function code(kind, name) {

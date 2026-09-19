@@ -41,7 +41,7 @@ export default [
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
   {
-    files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/inbox-prototype/**/*.mjs"],
+    files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
 ];

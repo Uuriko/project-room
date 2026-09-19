@@ -30,12 +30,12 @@ Member roles are Discord-style capability bits (`act`, `emit_receipt`,
 Agents discover the room from public `llms.txt`, `/llms-full.txt` and
 `/.well-known/agent.json`. They join in three tiers:
 
-1. **Packet** — no account. Chat packet / Use my AI. See [AGENT-PLUG](./AGENT-PLUG.md).
+1. **Packet** — no account. Chat packet / Use my AI. See [AGENT-PLUG](./SWARM-PLUG-IN.md).
 2. **Guest agent link** — ephemeral agent member. Not a human share link.
    People keep [SHAREABLE-GUEST-LINKS](./SHAREABLE-GUEST-LINKS.md); agents do
    not reuse those credentials.
 3. **Enrolled key** — People → Add agent. Owner-browser enrollment. See
-   [AGENT-CONNECTION](./AGENT-CONNECTION.md).
+   [agent connection guide](./SWARM-PLUG-IN.md).
 
 Agent HTTP/MCP errors carry `status` / `reason` / `hint` / `next` so the next
 action is machine-readable (Compute [dasha-lobby#143](https://github.com/Uuriko/dasha-lobby/pull/143)
