@@ -867,6 +867,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
         }
         let changed = false;
+        // Phase 2 channels: legacy projections (stored before channels existed)
+        // gain #general so the stored projection matches a replay. Mirrors
+        // ensureDefaultChannel in src/events.js.
+        if (state.room) {
+          state.channels ??= {};
+          if (!state.channels[DEFAULT_CHANNEL_ID]) {
+            state.channels[DEFAULT_CHANNEL_ID] = {
+              id: DEFAULT_CHANNEL_ID,
+              name: DEFAULT_CHANNEL_ID,
+              createdBy: state.room.ownerId,
+              createdAt: state.room.createdAt ?? null,
+              archivedAt: null
+            };
+            changed = true;
+          }
+        }
         for (const item of missing) {
           const proposer = proposers.get(item.id);
           if (proposer) { item.proposedById = proposer; changed = true; }
@@ -984,20 +1000,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   room(roomId) {
     const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const state = JSON.parse(row.projection);
-    // Phase 2 channels: legacy stored projections gain #general in memory so
-    // reads match a replay. The stored bytes stay untouched (upgrade no-op).
-    if (state.room && !state.channels?.[DEFAULT_CHANNEL_ID]) {
-      state.channels ??= {};
-      state.channels[DEFAULT_CHANNEL_ID] = {
-        id: DEFAULT_CHANNEL_ID,
-        name: DEFAULT_CHANNEL_ID,
-        createdBy: state.room.ownerId,
-        createdAt: state.room.createdAt ?? null,
-        archivedAt: null
-      };
-    }
-    return { sequence: row.sequence, state };
+    return { sequence: row.sequence, state: JSON.parse(row.projection) };
   }
   roomAuthority(roomId) {
     // Fresh storage read, not an authorization cache. Keep membership provenance

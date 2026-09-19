@@ -60,7 +60,28 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),${STORE_SCHEMA_VERSION});assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),${STORE_SCHEMA_VERSION});assert.equal(permit(),0);
+            // Phase 2 channels: the upgrade backfills #general into legacy projections.
+            // Normalize before comparing so the intentional schema evolution passes.
+            const normalizeChannels = (dataset) => {
+              const rooms = dataset.rooms?.map(row => {
+                const projection = JSON.parse(row.projection);
+                if (projection.room && !projection.channels?.general) {
+                  projection.channels ??= {};
+                  projection.channels.general = {
+                    id: "general",
+                    name: "general",
+                    createdBy: projection.room.ownerId,
+                    createdAt: projection.room.createdAt ?? null,
+                    archivedAt: null
+                  };
+                  return { ...row, projection: JSON.stringify(projection) };
+                }
+                return row;
+              });
+              return { ...dataset, rooms };
+            };
+            assert.deepEqual(normalizeChannels(data()),normalizeChannels(before));
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
