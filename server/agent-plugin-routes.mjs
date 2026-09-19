@@ -53,7 +53,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     } catch (error) {
       if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
       if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
-        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError")) {
+        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
+        || error.name === "VerificationError")) {
         reject(error.code === "directory_not_found" ? 404 : 422, error.code, error.message);
       }
       throw error;
@@ -403,6 +404,36 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
   });
 
+  // RC-2026-09-18-049: identity verification tiers. The attester must be a
+  // room owner (someone who owns at least one room); the attestation is
+  // global to the identity. Reads are public so other agents can gate on
+  // the tier.
+  const VERIFY_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verify$/;
+  const VERIFICATION_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/verification$/;
+
+  const verifyIdentity = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-identity-verify:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
+      reject(403, "not_room_owner", "Only a room owner can attest an agent identity as verified");
+    }
+    if (!store.identities.get(identityId)) reject(404, "identity_not_found", "No such agent identity");
+    return json(res, 201, store.agentPlugin.verifyIdentity({ identityId, verifiedBy: auth.identityId }));
+  });
+
+  const unverifyIdentity = translate(async (req, res, { identityId }) => {
+    const auth = ownerAuth(req);
+    if (!store.agentPlugin.isRoomOwner(auth.identityId)) {
+      reject(403, "not_room_owner", "Only a room owner can revoke a verification attestation");
+    }
+    return json(res, 200, store.agentPlugin.unverifyIdentity({ identityId }));
+  });
+
+  const identityVerification = translate(async (req, res, { identityId }) => {
+    const attestation = store.agentPlugin.verificationAttestation(identityId);
+    return json(res, 200, attestation ?? { identityId, level: "unverified" });
+  });
+
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
     const pathname = url.pathname, method = req.method;
     if (pathname === "/api/agent-keys" && method === "POST") { await issueKey(req, res, { remoteAddress }); return true; }
@@ -423,6 +454,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
     const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
     if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
+    const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
+    if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
+    const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;
+    if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
+    const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
+    if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
     return false;
   };
 }

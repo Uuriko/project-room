@@ -111,6 +111,7 @@ optional.push("server/agent-directory.mjs"); // Lane D: agent card directory (im
 optional.push("server/agent-plugin-manifest.mjs"); // Lane D: plug-in manifest builder/validator (imported by server/agent-plugin-store.mjs and server/agent-plugin-routes.mjs; pure, no imports)
 optional.push("server/outbound-webhooks.mjs"); // webhook URL validation (imported by server/agent-webhook-subscriptions.mjs; pure, no imports)
 optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent webhook subscriptions (imported by server/agent-plugin-store.mjs; imports outbound-webhooks.mjs)
+optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)

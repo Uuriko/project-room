@@ -4807,6 +4807,90 @@ paths:
                   generatedAt: { type: string }
         '401': { description: unauthenticated }
         '404': { description: room_not_found }
+  /api/agent-identities/{identityId}/verify:
+    post:
+      summary: Attest an agent identity as verified
+      description: >-
+        Owner-scoped (`pri_` identity secret): the caller must own at least
+        one room. Records that the attesting owner vouches the identity is
+        genuine and under legitimate control; the attestation is global to
+        the identity. Idempotent — re-attesting refreshes the timestamp.
+        20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: "{ identityId, level: 'verified', verifiedBy, verifiedAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "not_room_owner (caller owns no room)" }
+        '404': { description: identity_not_found }
+        '429': { description: rate_limited }
+    delete:
+      summary: Revoke a verification attestation
+      description: >-
+        Owner-scoped (`pri_` identity secret), room-owner only. Removes the
+        attestation; the identity returns to the unverified tier.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, level: 'unverified' }" }
+        '401': { description: unauthenticated }
+        '403': { description: "not_room_owner (caller owns no room)" }
+  /api/agent-identities/{identityId}/verification:
+    get:
+      summary: Read an identity's verification tier
+      description: >-
+        Public read. Returns the current attestation ({ identityId, level:
+        'verified', verifiedBy, verifiedAt }) or { identityId, level:
+        'unverified' } when unattested. Verification is host-supplied —
+        attested by a room owner, never self-asserted.
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "the verification tier record" }
+  /api/rooms/{roomId}/verification-policy:
+    get:
+      summary: Read the room's verified-agents gate policy
+      description: >-
+        Requires a room credential like every other /api/rooms/{roomId}
+        read. Returns { roomId, requireVerified, setBy, updatedAt } —
+        requireVerified false means any linked identity may join.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "the room verification policy" }
+        '401': { description: unauthenticated }
+        '404': { description: room_not_found }
+    post:
+      summary: Set the room's verified-agents gate policy
+      description: >-
+        Membership administration (`manage_members`) only. When
+        requireVerified is true, linking an unverified identity into the
+        room is denied (403 `unverified_identity`). Enforcement happens in
+        the identity link path.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requireVerified]
+              additionalProperties: false
+              properties:
+                requireVerified: { type: boolean }
+      responses:
+        '200': { description: "{ roomId, requireVerified, setBy, updatedAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "access_denied (manage_members required)" }
+        '404': { description: room_not_found }
+        '422': { description: invalid_policy }
 components:
   securitySchemes:
     queryAuth:

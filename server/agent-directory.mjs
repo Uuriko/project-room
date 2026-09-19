@@ -67,7 +67,7 @@ const freezeDeep = node => {
 // Validate one trust-evidence record from the trust source. Returns a frozen
 // record, or null when the source has nothing for the agent. Trust evidence
 // is host-supplied (approver, authority envelope, lifecycle status, last
-// seen) — it is never self-asserted by the card publisher.
+// seen, verification tier) — it is never self-asserted by the card publisher.
 const validateTrust = record => {
   if (record === null || record === undefined) return null;
   check(record !== null && typeof record === "object", "trust() must return an object or null");
@@ -77,6 +77,10 @@ const validateTrust = record => {
     grants = [],
     status = "active",
     lastSeenAt = null,
+    // RC-2026-09-18-049: verification tier, host-supplied alongside trust
+    // evidence. Explicit "unverified" keeps the default tier visible rather
+    // than ambiguous; null means the host supplies no tier.
+    verification = null,
   } = record;
   check(approvedBy === null || (typeof approvedBy === "string" && approvedBy.length > 0),
     "trust.approvedBy must be a non-empty string or null");
@@ -88,13 +92,19 @@ const validateTrust = record => {
     `trust.status must be one of ${TRUST_STATUSES.join(", ")}`);
   check(lastSeenAt === null || (typeof lastSeenAt === "number" && lastSeenAt > 0),
     "trust.lastSeenAt must be a positive number or null");
-  return Object.freeze({
+  check(verification === null || verification === "verified" || verification === "unverified",
+    "trust.verification must be verified, unverified, or null");
+  const evidence = {
     approvedBy,
     approvedAt,
     grants: Object.freeze([...grants]),
     status,
     lastSeenAt,
-  });
+  };
+  // Additive: the tier rides along only when the trust source supplies one,
+  // so existing consumers see no shape change.
+  if (verification !== null) evidence.verification = verification;
+  return Object.freeze(evidence);
 };
 
 // Create an agent directory. store is a caller-owned Map (agentId -> entry).
