@@ -265,6 +265,7 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     $("#work-dialog").close();
+    if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
     for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
@@ -1631,14 +1632,21 @@ function revealDrafts(id) {
 }
 function revealMember(id) {
   if (!state?.members[id] || busy) return;
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   $("#people-panel").open = true;
   focusRecord([...$("#presence-list").querySelectorAll("[data-member-record-id]")]
     .find(node => node.dataset.memberRecordId === id));
 }
-function revealRoom() { if (state && !busy) focusRecord($("#room-title")); }
+function revealRoom() {
+  if (!state || busy) return;
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
+  focusRecord($("#room-title"));
+}
 function revealEvent(id) {
   if (!state || busy) return;
-  $("#record-panel").open = true;
+  openSettings("record-panel");
   focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
     .find(node => node.dataset.eventRecordId === id));
 }
