@@ -169,6 +169,7 @@ for (const mobile of [false, true]) {
     }), true, "large-text acknowledgement remains reachable without horizontal scrolling");
     await capture("large-text-controls"); await page.evaluate(() => document.documentElement.style.fontSize = "");
     page.once("dialog", dialog => dialog.accept()); // Explicit synthetic consent to discard our draft.
+    await closeCatchUp(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");
