@@ -4,7 +4,7 @@ import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
-import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
+import { SESSION_EVENT_TYPES, applySessionFields, ensureWorkControlDefaults } from "./work-item-session.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -323,6 +323,10 @@ export function applyEvent(current, incoming) {
   // the ensure skips.
   ensureDefaultChannel(state, incoming.at);
   handler(state, incoming);
+  // Work controls predate some stored projections: backfill the round /
+  // tool-call counters, suspension cause, and receipt segments on replay.
+  // Runs after the handler so newly created items gain the defaults too.
+  ensureWorkControlDefaults(state);
   state.eventLog.push(incoming);
   state.seenEvents[incoming.id] = fingerprint;
   state.seenIdempotencyKeys[incoming.idempotencyKey] = incoming.id;

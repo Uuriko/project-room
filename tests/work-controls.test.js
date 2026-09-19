@@ -219,3 +219,19 @@ test("a completion without segments still works: the receipt carries segments nu
   const receipt = store.room("commons").state.workItems[workItemId].receipt;
   assert.equal(receipt.segments, null, "unmarked completions replay with segments null, never guessed");
 });
+
+test("legacy projections backfill work-control defaults on replay (no migration)", async t => {
+  const { store, propose } = await serve(t);
+  const workItemId = propose("legacy item");
+  // Simulate a pre-controls stored projection: strip the new fields as the
+  // old code would have written them, then rebuild from the event log.
+  const room = store.room("commons");
+  const item = room.state.workItems[workItemId];
+  delete item.round_count; delete item.tool_calls; delete item.suspended_by;
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(room.state));
+  const rebuilt = store.rebuildProjection("commons");
+  const backfilled = rebuilt.state.workItems[workItemId];
+  assert.equal(backfilled.round_count, 0);
+  assert.equal(backfilled.tool_calls, 0);
+  assert.equal(backfilled.suspended_by, null);
+});

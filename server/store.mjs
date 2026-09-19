@@ -54,7 +54,7 @@ import { classifyCommand } from "./action-classes.mjs";
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
-  validateAttemptEnvironment, validateAttemptOutputs
+  validateAttemptEnvironment, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -1131,6 +1131,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
     let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
     let sequence = checkpoint?.sequence ?? 0;
+    // Work controls predate some stored projections and their checkpoints:
+    // backfill the round/tool-call counters, suspension cause, and receipt
+    // segments before replaying, so a checkpoint with no later events still
+    // rebuilds to the current shape (mirrors ensureDefaultChannel).
+    ensureWorkControlDefaults(state);
     if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
     const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
     for (const row of rows) {

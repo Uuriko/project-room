@@ -54,6 +54,24 @@ export function defaultWorkItemSession() {
     suspended_by: null };
 }
 
+// Replay backfill: rooms projected before work controls existed carry work
+// items without the round/tool-call counters and suspension cause, and
+// receipts without result segments. Backfill the deterministic defaults on
+// replay so no data migration is needed (mirrors ensureDefaultChannel).
+export function ensureWorkControlDefaults(state) {
+  const items = state?.workItems;
+  if (!items || typeof items !== "object") return;
+  for (const item of Object.values(items)) {
+    if (!item || typeof item !== "object") continue;
+    if (!Number.isSafeInteger(item.round_count) || item.round_count < 0) item.round_count = 0;
+    if (!Number.isSafeInteger(item.tool_calls) || item.tool_calls < 0) item.tool_calls = 0;
+    if (item.suspended_by !== "round_limit") item.suspended_by = null;
+    for (const receipt of [item.receipt, ...(item.receiptHistory ?? [])]) {
+      if (receipt && typeof receipt === "object" && !("segments" in receipt)) receipt.segments = null;
+    }
+  }
+}
+
 // RC-2026-09-19-063: session budgets grow two bounds. A claimer may declare
 // how many work-loop rounds one live session may run (maxRounds) and how many
 // tool calls it may make (maxToolCalls); undeclared keys stay "unknown" —
