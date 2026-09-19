@@ -127,7 +127,6 @@ let accessEndContext = null;
 let lastComposerSelection = null;
 let lastInvitationOpener = null;
 let roomActionsContext = null;
-let selectedWorkView = "work";
 // C6: owner-facing agent controls. agentPauses is the owner's last-read paused
 // roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
 // Remove button is waiting for its confirming second click.
@@ -253,7 +252,7 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
+    for (const id of ["message-list", "event-list", "presence-list", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
     $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
@@ -1148,7 +1147,6 @@ function render() {
   syncRecipeStrip();
   syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
-  renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
@@ -1180,11 +1178,6 @@ function render() {
     $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
   }
   syncComposerChrome();
-  const items = Object.values(state.workItems);
-  const openWork = items.map(item => nextWorkStep(item)).filter(step => !["complete", "superseded"].includes(step.action));
-  const waiting = openWork.filter(step => step.needsAttention && step.memberId === session?.member?.id).length;
-  setText("#room-work-count", openWork.length ? `(${openWork.length})` : "");
-  setText("#room-attention-count", waiting ? `(${waiting} need you)` : "");
   renderMessages();
   syncRequestComposer();
   renderSpendAllowance();
@@ -1231,7 +1224,9 @@ function renderMessages() {
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
   const keep = new Set(messages.map(m => m.id));
-  for (const [id, node] of previous) if (!keep.has(id)) node.remove();
+  for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries();
+  const ordered = [];
   messages.forEach((message, index) => {
     const node = previous.get(message.id) || document.createElement("li");
     const cluster = messageCluster(messages, index);
@@ -1272,8 +1267,31 @@ function renderMessages() {
       node._content = html;
     }
     if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    ordered.push(node);
   });
-  if (!messages.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${can("manage_members") ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  // Interleave work cards chronologically into the single timeline.
+  const msgTs = m => Date.parse(m.createdAt) || 0;
+  const workById = new Map();
+  for (const entry of workEntries) {
+    let wnode = previous.get(`work:${entry.item.id}`);
+    if (!wnode || !wnode.hasAttribute("data-work-timeline")) wnode = makeTimelineWorkNode(entry);
+    setTimelineWorkNode(wnode, entry.html);
+    workById.set(entry.item.id, wnode);
+  }
+  for (const [key, node] of previous) if (key?.startsWith("work:") && !workById.has(key.slice(5))) node.remove();
+  let wi = 0;
+  const merged = [];
+  messages.forEach((message, index) => {
+    while (wi < workEntries.length && workEntries[wi].ts <= msgTs(message)) merged.push(workById.get(workEntries[wi++].item.id));
+    merged.push(ordered[index]);
+  });
+  while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
+  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${can("manage_members") ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  else {
+    list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
+    merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
+    while (list.children.length > merged.length) list.lastChild.remove();
+  }
   list.dataset.view = view;
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
@@ -1457,17 +1475,15 @@ $("#recipe-strip").addEventListener("click", event => {
   const control = event.target.closest("[data-recipe-action]");
   if (!control) return;
   const action = control.dataset.recipeAction;
-  if (action === "open-catch-up") document.querySelector('[data-room-section="catch-up"]')?.click();
-  if (action === "open-chat") document.querySelector('[data-room-section="chat"]')?.click();
+  if (action === "open-catch-up") openCatchUp();
+  if (action === "open-chat") { $("#message-input").focus(); }
   if (action === "focus-work") {
-    document.querySelector('[data-room-section="work"]')?.click();
     const card = document.getElementById(workDomId(control.dataset.workId));
     card?.scrollIntoView({ block: "nearest", behavior: "instant" }); card?.focus({ preventScroll: true });
   }
   if (action === "draft-review") {
     const item = state?.workItems?.[control.dataset.workId];
     if (!item) return;
-    document.querySelector('[data-room-section="chat"]')?.click();
     setRequestMode({ kind: "request" }, { body: `Could you review "${item.title ?? control.dataset.workId}"? The result has been waiting for verification.`, toMemberId: control.dataset.to });
   }
 });
@@ -1518,6 +1534,8 @@ function switchThread(threadId, focusComposer = false) {
 }
 function revealMessage(id) {
   if (!state || busy || !conversation.byId.has(id)) return;
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   inboxUI?.showRooms();
   const message = conversation.byId.get(id);
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
@@ -1531,18 +1549,17 @@ function revealMessage(id) {
 }
 function focusRecord(node) {
   if (!node) return;
-  if (node.closest("#work-list")) selectWorkView("work");
   inboxUI?.showRooms();
   node.focus({ preventScroll: true });
   node.scrollIntoView({ block: "nearest", behavior: "instant" });
 }
 function workRecord(id) {
-  return [...$("#work-list").querySelectorAll("[data-work-record-id]")]
-    .find(node => node.dataset.workRecordId === id) || null;
+  return $(`#message-list [data-work-record-id="${CSS.escape(id)}"]`);
 }
 function revealWork(id) {
   if (!state?.workItems[id] || busy) return;
-  selectWorkView("work");
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   const card = workRecord(id);
   if (card) card.querySelector(".work-details").open = true;
   focusRecord(card);
@@ -1778,6 +1795,69 @@ function releaseSubmission(ticket, { restoreFocus = false } = {}) {
     const end = target.value.length;
     target.setSelectionRange(Math.min(ticket.selection.start, end), Math.min(ticket.selection.end, end), ticket.selection.direction);
   }
+}
+// Unified timeline: work items render inline in #message-list, interleaved
+// chronologically with messages (Discord/Slack-style single channel). Phase 1
+// keeps the #chat channel only; user-created channels are Phase 2.
+function timelineWorkEntries() {
+  const now = Date.now();
+  const draftsByWork = new Map();
+  for (let index = state.messages.length - 1; index >= 0; index--) {
+    const message = state.messages[index];
+    if (!message.workItemId || !message.proposal) continue;
+    if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
+    draftsByWork.get(message.workItemId).push(message);
+  }
+  return Object.values(state.workItems)
+    .map(item => ({ item, ts: Date.parse(item.updatedAt) || 0,
+      html: workCard(item, now, draftsByWork.get(item.id) ?? [], state.messages) }))
+    .sort((a, b) => a.ts - b.ts);
+}
+function makeTimelineWorkNode(entry) {
+  const wnode = document.createElement("li");
+  wnode.dataset.key = `work:${entry.item.id}`;
+  wnode.setAttribute("data-work-timeline", entry.item.id);
+  wnode.className = "tl-work"; wnode.tabIndex = -1;
+  return wnode;
+}
+function setTimelineWorkNode(wnode, html) {
+  if (wnode._content === html) return;
+  const saved = captureDisclosures(wnode);
+  wnode.innerHTML = html; wnode._content = html;
+  restoreDisclosures(wnode, saved);
+}
+// Syncs work cards into the message timeline without disturbing messages.
+// Used by renderReturnBrief for work updates that bypass renderMessages.
+function syncTimelineWork() {
+  const list = $("#message-list");
+  if (!list || !state) return;
+  if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
+  const entries = timelineWorkEntries();
+  const byId = new Map(entries.map(e => [e.item.id, e]));
+  const stale = [];
+  list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => {
+    const id = n.getAttribute("data-work-timeline");
+    if (byId.has(id)) byId.get(id).node = n; else stale.push(n);
+  });
+  stale.forEach(n => n.remove());
+  const tsById = new Map(state.messages.map(m => [m.id, Date.parse(m.createdAt) || 0]));
+  const workTs = new Map(entries.map(e => [e.item.id, e.ts]));
+  const childTs = child => child.hasAttribute("data-work-timeline")
+    ? workTs.get(child.getAttribute("data-work-timeline")) ?? 0
+    : tsById.get(child.dataset.key) ?? 0;
+  for (const entry of entries) {
+    let wnode = entry.node;
+    if (!wnode) { wnode = makeTimelineWorkNode(entry); entry.node = wnode; }
+    setTimelineWorkNode(wnode, entry.html);
+    let ref = null;
+    for (const child of list.children) {
+      if (child === wnode) continue;
+      if (childTs(child) > entry.ts) { ref = child; break; }
+    }
+    if (wnode.parentNode !== list || wnode.nextSibling !== ref) list.insertBefore(wnode, ref);
+  }
+  const emptyNote = list.querySelector(":scope > .empty-note");
+  if (emptyNote && (entries.length || list.querySelector(":scope > [data-message-record-id]"))) emptyNote.remove();
 }
 async function submit(form, fn, { failureHint } = {}) {
   if (busy) return;
@@ -2474,13 +2554,12 @@ function ownsRoomActions(context = roomActionsContext) {
 function roomActionEntries() {
   return [
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
-    { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
-    { id: "mentions", label: "Mentioned you", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true },
-    { id: "pinned-search", label: "Pinned only", words: "pins pinned search", target: "#search-pinned", activate: true },
-    { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
-    { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
-    { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
-    { id: "people", label: "People & agents", words: "members collaborators team second", target: "#people-panel > summary", reveal: "#people-panel" },
+    { id: "search", label: "Search room", words: "find messages work", target: "#message-search", always: true },
+    { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
+    { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
+    { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
+    { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
+    { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
@@ -2489,8 +2568,8 @@ function roomActionEntries() {
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok help", always: true },
     { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
-    { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true },
-    { id: "usage", label: "Usage summary", words: "spend seats sessions caps limits budget headroom", target: "#usage-panel > summary", reveal: "#usage-panel" }
+    { id: "instructions", label: "Room instructions", words: "guidance brief charter", always: true },
+    { id: "usage", label: "Usage", words: "spend seats sessions caps limits budget headroom", always: true }
   ].filter(entry => {
     if (entry.always) return true;
     const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]");
@@ -2547,6 +2626,13 @@ function chooseRoomAction(id) {
     if (!$("#workspace-nav").hidden) { $("#nav-inbox").click(); return; }
     notice("Inbox uses Account key. Sign out, then choose Account key on the welcome screen.");
     return;
+  }
+  if (id === "catch-up") { openCatchUp(); return; }
+  if (id === "results") { selectWorkView("results"); return; }
+  if (id === "usage") { openSettings("usage-panel"); return; }
+  if (id === "instructions") { openSettings("room-about"); $("#room-instructions-open").click(); return; }
+  if (id === "search" || id === "mentions" || id === "pinned-search") {
+    if ($("#search-form").hidden) $("#topbar-search-toggle").click();
   }
   if (entry.reveal) $(entry.reveal).open = true;
   const target = $(entry.target); target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
@@ -2909,7 +2995,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#work-title");
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }
@@ -2943,7 +3029,7 @@ $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); 
 $("#new-work-form").addEventListener("change", syncWorkForm);
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
-$("#work-list").addEventListener("click", e => {
+$("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-work]")) { $("#new-work-button").click(); return; }
   if (e.target.closest("[data-empty-suggest]")) { $("#message-input").focus(); return; }
   const button = e.target.closest("[data-reuse-work]");
@@ -3035,15 +3121,29 @@ const actionSpecs = {
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 let resultView = null;
-function selectWorkView(view) {
-  selectedWorkView = view;
-  $("#work-list").hidden = view !== "work"; $("#room-results-list").hidden = view !== "results";
-  $("#new-work-button").textContent = view === "results" ? "New work" : "New";
-  for (const name of ["work", "results"]) $("#work-view-" + name).setAttribute("aria-pressed", String(view === name));
+// Work and results now live in the single timeline (work) and the settings
+// dialog (results); the old Work/Results tab toggle is gone. selectWorkView
+// stays as a seam for callers: "results" opens Settings at Results.
+function openSettings(panelId) {
+  const dialog = $("#settings-dialog");
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  if (panelId) {
+    const panel = document.getElementById(panelId);
+    if (panel) { panel.open = true; panel.querySelector("summary")?.focus({ preventScroll: true }); }
+  }
 }
-for (const name of ["work", "results"]) $("#work-view-" + name).addEventListener("click", () => {
-  if (ownsRoomActions(null)) selectWorkView(name);
-});
+function openCatchUp() {
+  const dialog = $("#catchup-dialog");
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  $("#return-brief-panel").open = true;
+  $("#return-brief-panel > summary").focus({ preventScroll: true });
+  loadReturnBrief();
+}
+function selectWorkView(view) {
+  if (view === "results") openSettings("results-panel");
+}
 function resultRow(item) {
   const result = currentResult(item), title = esc(item.title);
   const open = result.kind === "room_text"
@@ -3065,9 +3165,9 @@ function closeResult(restore = true) {
   $("#result-status").textContent = ""; $("#result-body").textContent = "";
   $("#result-original").hidden = true;
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
-    if (view.fromResults && selectedWorkView === "results") {
+    if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
-      (row?.querySelector("[data-read-result]") || $("#work-view-results")).focus({ preventScroll: true });
+      (row?.querySelector("[data-read-result]") || $("#results-panel > summary")).focus({ preventScroll: true });
       return;
     }
     const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
@@ -3136,7 +3236,7 @@ function readResult(e) {
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
   openWorkAction(state.workItems[button.dataset.workId], button.dataset.action, null, button.dataset.offerId);
 }
-$("#work-list").addEventListener("click", readResult);
+$("#message-list").addEventListener("click", readResult);
 $("#room-results-list").addEventListener("click", e => {
   readResult(e);
   const work = e.target.closest("[data-result-work]");
@@ -3647,17 +3747,10 @@ function renderReturnBrief() {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
     const items = Object.values(state.workItems);
-    const draftsByWork = new Map();
-    for (let index = state.messages.length - 1; index >= 0; index--) {
-      const message = state.messages[index];
-      if (!message.workItemId || !message.proposal) continue;
-      if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
-      draftsByWork.get(message.workItemId).push(message);
-    }
-    renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [], state.messages)).join("") || `<p class="empty-note">${can("steer") ? 'Turn a message into work, or start something new. <button type="button" class="text-button" data-empty-work>Start work</button>' : 'Suggest work in the conversation. The owner can create it. <button type="button" class="text-button" data-empty-suggest>Write a suggestion</button>'}</p>`);
+    syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
-    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<p class="empty-note">Completed results appear here after work is finished.</p>');
-    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#work-view-results").focus({ preventScroll: true });
+    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>');
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#results-panel > summary").focus({ preventScroll: true });
     resultStatus();
     syncActionForm();
     const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
@@ -3807,19 +3900,36 @@ async function exportRoomHtml() {
   } finally { if (request === exportRequest) button.disabled = false; }
 }
 $("#record-export-html").addEventListener("click", () => exportRoomHtml());
-$("#room-navigation").addEventListener("click", e => {
-  const section = e.target.closest("[data-room-section]")?.dataset.roomSection;
-  if (!section || !state || busy) return;
-  saveComposer();
-  if (section === "catch-up") {
-    const panel = $("#return-brief-panel");
-    if (panel.open) loadReturnBrief();
-    else panel.open = true;
-    focusRecord($("#return-brief-panel > summary"));
-  } else if (section === "people") {
-    $("#people-panel").open = true;
-    focusRecord($("#people-panel > summary"));
-  } else focusRecord($(section === "work" ? "#work-title" : "#conversation-title"));
+$("#topbar-catchup").addEventListener("click", () => { if (state && !busy) openCatchUp(); });
+$("#sidebar-toggle").addEventListener("click", () => {
+  const shell = $("#main"), open = shell.classList.toggle("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", String(open));
+  if (open) $("#room-sidebar .channel.is-active")?.focus();
+});
+document.addEventListener("click", event => {
+  const shell = $("#main");
+  if (!shell.classList.contains("sidebar-open")) return;
+  if (event.target.closest("#room-sidebar") || event.target.closest("#sidebar-toggle")) return;
+  shell.classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const shell = $("#main");
+  if (!shell.classList.contains("sidebar-open")) return;
+  shell.classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  $("#sidebar-toggle").focus();
+});
+$("#topbar-settings").addEventListener("click", () => openSettings());
+$("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
+$("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
+$("#topbar-search-toggle").addEventListener("click", () => {
+  const form = $("#search-form"), show = form.hidden;
+  form.hidden = !show;
+  $("#topbar-search-toggle").setAttribute("aria-expanded", String(show));
+  if (show) $("#message-search").focus();
+  else { $("#message-search").value = ""; renderSearch(Date.now()); }
 });
 $("#rb-refresh-button").addEventListener("click", loadReturnBrief);
 $("#rb-more-button").addEventListener("click", async () => {

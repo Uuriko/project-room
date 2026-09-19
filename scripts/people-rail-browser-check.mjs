@@ -68,7 +68,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await fillAccessKey(page, owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#people-panel > summary").click();
+  if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
+    await page.locator("#people-panel > summary").click();
+  }
   const hint = page.locator("#people-hint");
   await hint.waitFor();
   assert.match(await hint.textContent(), /your Second \/ their agents \/ one Room/);
@@ -129,7 +131,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#people-panel").scrollIntoViewIfNeeded();
   await page.screenshot({ path: "test-results/people-rail-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('[data-room-section="people"]').click();
+  await page.locator("#sidebar-toggle").click();
   await page.locator("#people-panel").evaluate(node => { node.open = true; node.scrollIntoView({ block: "start" }); });
   await codex.waitFor();
   await page.screenshot({ path: "test-results/people-rail-mobile.png" });

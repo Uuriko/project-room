@@ -220,153 +220,27 @@
         <div class="inbox-draft-actions"><button id="inbox-send-close" class="button ghost" type="button">Close</button><button id="inbox-send-confirm" class="button primary" type="button" disabled>Send sample</button></div>
       </dialog>
       <main id="main" class="community-shell" hidden>
-        <nav id="room-navigation" class="room-navigation" aria-label="Room sections">
-          <button class="text-button" type="button" data-room-section="chat">Chat</button>
-          <button class="text-button" type="button" data-room-section="work">Work <span id="room-work-count"></span></button>
-          <button class="text-button" type="button" data-room-section="catch-up">Catch-up <span id="room-attention-count"></span></button>
-          <button class="text-button" type="button" data-room-section="people">People</button>
-        </nav>
-        <section class="room-stage" aria-labelledby="room-title">
-          <header class="room-heading">
-            <div>
-              <h1 id="room-title" tabindex="-1">Project Room</h1>
-              <span id="room-kind-badge" class="room-kind-badge" hidden></span>
-              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button><div class="room-lifecycle-actions"><button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button><button id="room-leave-button" class="button ghost" type="button" hidden>Leave room</button></div></details>
-              <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
-            </div>
-            <div class="room-heading-actions">
-              <div class="room-presence-summary">
-                <div id="member-stack" class="member-stack" aria-hidden="true"></div>
-                <span id="presence-count">Membership loading…</span>
-              </div>
-              <button id="room-actions-open" class="button ghost" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Actions <kbd aria-hidden="true">⌘ K</kbd></button>
-            </div>
-          </header>
-
-          <section id="contribution-next" class="contribution-next" aria-label="For you" hidden>
-            <div><span id="contribution-label" class="form-hint"></span><p id="contribution-title"></p></div>
-            <div class="contribution-actions"><button id="contribution-open" class="button secondary" type="button"></button><button id="contribution-more" class="text-button" type="button" hidden></button></div>
-          </section>
-          <details id="return-brief-panel" class="panel return-brief-panel">
-            <summary>
-              <span id="return-brief-heading">Catch me up</span>
-              <span class="catchup-signals"><span id="catchup-count"></span><small id="notification-count" hidden></small><small id="reminder-count" hidden></small></span>
-            </summary>
-            <div class="return-brief-body">
-              <p id="summary-grid" class="sr-only"></p>
-              <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
-              <section id="notification-panel" aria-labelledby="notification-heading" hidden>
-                <h3 id="notification-heading">Notifications</h3>
-                <p id="notification-status" class="rb-note" role="status"></p>
-                <ul id="notification-list" class="rb-list notification-list"></ul>
-                <div class="rb-actions"><button id="notification-read-button" class="button secondary" type="button" disabled>Mark read</button></div>
-                <p class="rb-note">Mentions, replies and work that names you, filtered by your notification preferences. Reading runs no one; marking read moves your caught-up marker.</p>
-              </section>
-              <section id="reminder-panel" aria-label="Your reminders" hidden>
-                <h3 id="reminder-due-heading">Your reminders</h3>
-                <p id="reminder-load-error" class="rb-note" role="status"></p>
-                <button id="reminder-refresh" class="button secondary" type="button" hidden>Retry reminders</button>
-                <ul id="reminder-due" class="rb-list reminder-list"></ul>
-                <h3 id="reminder-pending-heading" hidden>Save needs confirmation</h3>
-                <ul id="reminder-pending" class="rb-list reminder-list"></ul>
-                <details id="reminder-scheduled"><summary id="reminder-scheduled-heading">Scheduled</summary><ul id="reminder-upcoming" class="rb-list reminder-list"></ul></details>
-              </section>
-              <section aria-labelledby="rb-current-heading">
-                <h3 id="rb-current-heading">Needs you</h3>
-                <ul id="rb-attention-list" class="rb-list"></ul>
-                <button id="rb-show-all" class="text-button" type="button" aria-expanded="false" aria-controls="rb-attention-list" hidden>Show all</button>
-                <details id="rb-involving-section">
-                <summary id="rb-involving-heading" class="section-summary"><span class="section-label"><strong>Ongoing</strong></span></summary>
-                <ul id="rb-involving-list" class="rb-list"></ul>
-                </details>
-              </section>
-              <details id="rb-history-section">
-                <summary id="rb-history-heading" class="section-summary"><span class="section-label"><strong>Updates</strong></span><span id="rb-history-count" class="count-chip"></span></summary>
-                <p id="rb-current-boundary" class="rb-boundary"></p>
-                <p id="rb-history-boundary" class="rb-boundary"></p>
-                <ul id="rb-history-list" class="rb-list rb-history"></ul>
-                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
-              </details>
-                <div class="rb-actions">
-                  <button id="rb-refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh catch-up" title="Refresh catch-up"><span aria-hidden="true">↻</span></button>
-                  <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
-                </div>
-                <p id="rb-ack-note" class="rb-note"></p>
-            </div>
-          </details>
-
-          <section class="panel conversation-panel" aria-labelledby="conversation-title">
-            <div class="panel-header conversation-header">
-              <div>
-                <h2 id="conversation-title" tabindex="-1"># commons</h2>
-              </div>
-              <span id="message-count" class="count-chip"></span>
-            </div>
-            <form id="search-form" class="conversation-search" role="search" aria-label="Search this room">
-              <label class="sr-only" for="message-search">Search messages and work</label>
-              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search room…" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentioned you</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned only</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
-            </form>
-            <section id="search-results" class="search-results" aria-label="Messages and work search results" hidden>
-              <p id="search-count" role="status"></p>
-              <ol id="search-list"></ol>
-            </section>
-            <div id="thread-bar" class="thread-bar" hidden>
-              <button id="thread-back" class="button ghost" type="button">← Back to room</button>
-              <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
-            </div>
-            <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
-            <div id="room-guide" class="room-guide" hidden>
-              <p>This is the chat. Write below. Type <kbd>@</kbd> to address a person or agent. Invite people. Plug AI agents in from <strong>People</strong> — they join this conversation like anyone else. Inbox uses <strong>Account key</strong>.</p>
-              <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
-            </div>
-            <details id="pinned-panel" class="pinned-panel" hidden>
-              <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
-              <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
-            </details>
-            <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
-            <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
-            <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></span></div>
-            <form id="message-form" class="composer">
-              <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
-              <div class="composer-toolbar" id="composer-toolbar" hidden>
-                <label class="sr-only" for="message-to-select">Talking to</label>
-                <select id="message-to-select" aria-label="Who this message addresses"></select>
-                <span class="audience-note" id="audience-note" hidden>Room-visible</span>
-                <button id="composer-work-button" class="text-button" type="button" hidden>New work</button>
-              </div>
-              <div id="request-mode-bar" class="reply-bar" hidden>
-                <span id="request-mode-label"></span>
-                <button id="request-refresh" class="button ghost" type="button" hidden>Refresh context</button>
-                <button id="request-exit" class="button ghost" type="button">Back to chat</button>
-              </div>
-              <div class="composer-row">
-                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Write to the room… @ to address someone" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
-                <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
-              </div>
-              <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
-              <p id="composer-status" class="status form-status" role="status"></p>
-              <details id="composer-options" class="conversation-boundaries"><summary class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
-                <p id="draft-hint" class="form-hint">Enter to send · Shift + Enter for a new line</p>
-                <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
-                <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
-                <p id="draft-recovery-status" class="form-hint" role="status">This tab only. Use a trusted device. Clears after 12 hours or sign-out.</p>
-                <p>Visible to everyone here. Addressing an agent doesn’t run it or grant access.</p>
-              </details>
-            </form>
-            <span id="cursor-label" class="sr-only"></span>
-          </section>
-        </section>
-
-        <aside class="context-rail">
-          <details id="people-panel" class="panel presence-panel">
-            <summary id="presence-title" class="section-summary"><span class="section-label"><strong>People & agents</strong></span></summary>
+        <aside id="room-sidebar" aria-label="Channels and people">
+          <div class="sidebar-head">
+            <h1 id="room-title" tabindex="-1">Project Room</h1>
+            <span id="room-kind-badge" class="room-kind-badge" hidden></span>
+          </div>
+          <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
+          <nav aria-label="Channels">
+            <p class="sidebar-label">Channels</p>
+            <ol id="channel-list" class="channel-list">
+              <li><button type="button" class="channel is-active" data-channel="chat" aria-current="page"><span aria-hidden="true">#</span> chat</button></li>
+            </ol>
+          </nav>
+          <details id="people-panel" class="sidebar-panel" open>
+            <summary id="presence-title" class="sidebar-label"><span>People</span><span id="presence-count" class="count-chip"></span></summary>
             <div class="people-actions">
               <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
-              <button id="invite-agents-button" class="button secondary" type="button" hidden>Invite agents</button>
+              <button id="invite-agents-button" class="button secondary" type="button" hidden>Invite</button>
             </div>
             <details id="create-room-details" class="create-room-details">
               <summary>Create Room</summary>
-              <p>Create your Room, then invite peers. No human owner token.</p>
+              <p>Create your Room, then invite peers.</p>
               <p>One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret.</p>
               <p>Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code></p>
               <p>Open this invite link to invite a person. <code>#room/{roomId}</code> opens a room for members already in it — it is not a shareable invite.</p>
@@ -374,121 +248,156 @@
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
           </details>
-          <details id="spend-panel" class="panel presence-panel spend-panel" data-spend-allowance="none">
-            <summary class="section-summary"><span class="section-label"><strong>Agent spend</strong></span><span id="spend-summary" class="summary-note"></span></summary>
-            <p id="spend-figures" class="form-hint"></p>
-            <form id="spend-allowance-form" class="spend-allowance-form" hidden>
-              <label>Allowance (USD) <input id="spend-allowance-input" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" required></label>
-              <label>Over (days) <input id="spend-period-input" type="number" min="1" max="365" step="1" value="30" required></label>
-              <div class="spend-allowance-actions">
-                <button class="button secondary" type="submit">Set allowance</button>
-                <button id="spend-allowance-remove" class="button ghost" type="button" hidden>Remove</button>
-              </div>
-              <p class="form-status form-hint" role="status"></p>
-            </form>
-            <p id="spend-note" class="form-hint"></p>
-          </details>
+        </aside>
 
-
-          <section class="panel work-panel" aria-labelledby="work-title">
-            <div class="panel-header">
-              <div>
-                <div class="work-views" role="group" aria-label="Work view">
-                  <h2 id="work-title" tabindex="-1"><button id="work-view-work" type="button" aria-pressed="true">Work</button></h2>
-                  <button id="work-view-results" type="button" aria-pressed="false">Results</button>
-                </div>
-              </div>
-              <button id="new-work-button" class="button secondary" type="button">New</button>
+        <section class="room-main" aria-labelledby="conversation-title">
+          <header class="room-topbar">
+            <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu">&#9776;</button>
+            <h2 id="conversation-title" tabindex="-1"># chat</h2>
+            <span id="message-count" class="count-chip"></span>
+            <div class="topbar-actions">
+              <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search">&#8981;</button>
+              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Actions <kbd aria-hidden="true">&#8984;K</kbd></button>
+              <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings">&#9881;</button>
             </div>
-            <div id="recipe-strip" class="recipe-strip" hidden></div>
-            <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
-            <div id="recipe-preview" class="recipe-preview" hidden></div>
-            <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
-            <dialog id="work-dialog" aria-labelledby="new-work-title">
-            <form id="new-work-form" class="new-work-form" hidden>
-              <h2 id="new-work-title">New work</h2>
-              <input id="source-message-id" type="hidden">
-              <div id="source-context" class="source-context" hidden></div>
-              <p id="work-reuse-hint" class="form-hint" hidden>Only outcome and done criteria copied.</p>
-              <label id="work-recipe-field" hidden>Start from a recipe <select id="work-recipe-select"><option value="">Blank outcome</option></select></label>
-              <label>Outcome <textarea id="work-title-input" rows="1" maxlength="4096" required></textarea></label>
-              <label>Done when… <textarea id="work-done-input" rows="2" maxlength="4096" required></textarea></label>
-              <label>Owner <select id="assignee-select" required></select></label>
-              <label id="verifier-field">Reviewer <select id="verifier-select" required aria-describedby="reviewer-unavailable"></select></label>
-              <div id="reviewer-unavailable" class="reviewer-unavailable" hidden>
-                <p id="reviewer-unavailable-text">No independent reviewer available. Change the owner or turn off review.</p>
-                <button id="review-settings-button" class="button secondary" type="button">Review settings</button>
-              </div>
-              <details id="work-options"><summary class="section-summary"><span class="section-label"><strong>Review & permissions</strong></span><span id="work-options-summary" class="summary-note"></span></summary>
-              <label>Mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
-              <fieldset class="work-checks" aria-describedby="work-checks-help">
-                <legend>Required to finish</legend>
-                <label class="check-option"><input id="require-verification" type="checkbox" checked><span>Independent review</span></label>
-                <label class="check-option"><input id="require-decision" type="checkbox" checked><span>Owner approval</span></label>
-                <p id="work-checks-help" class="form-hint">Evidence is always required.</p>
-                <p id="work-policy-note" class="form-hint" hidden></p>
-              </fieldset>
-              </details>
-              <p class="form-hint">Creates a record, not permission to act elsewhere.</p>
-              <p id="new-work-status" class="status form-status" role="alert"></p>
-              <p id="work-retry-hint" class="form-hint" hidden>Creation is unconfirmed. Retry the original before editing. Closing won't undo it.</p>
-              <div class="form-actions">
-                <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
-                <button class="button primary" type="submit">Create outcome</button>
-                <button id="retry-work-button" class="button primary" type="button" hidden>Retry original</button>
-              </div>
-            </form>
-            </dialog>
-            <dialog id="decision-dialog" aria-labelledby="decision-title">
-            <form id="decision-form">
-              <h2 id="decision-title">Record decision</h2>
-              <p id="decision-source" class="source-context"></p>
-              <label>Decision <textarea id="decision-statement-input" rows="2" maxlength="500" required></textarea></label>
-              <label>Note (optional) <input id="decision-note-input" maxlength="500"></label>
-              <p class="form-hint">Records a source-backed decision in the room history. A suggestion becomes policy only through this act.</p>
-              <p id="decision-status" class="status form-status" role="alert"></p>
-              <div class="form-actions">
-                <button id="close-decision" class="button ghost" type="button">Cancel</button>
-                <button class="button primary" type="submit">Save decision</button>
-              </div>
-            </form>
-            </dialog>
-            <dialog id="report-dialog" aria-labelledby="report-title">
-            <form id="report-form">
-              <h2 id="report-title">Report to the room owner</h2>
-              <p id="report-source" class="source-context"></p>
-              <label>Why are you reporting this? <textarea id="report-reason-input" rows="2" maxlength="280" required></textarea></label>
-              <p class="form-hint">Only the room owner sees your report and your name. Nothing is posted to the room or sent outside it. To stop seeing this person's messages yourself, use Mute instead.</p>
-              <p id="report-status" class="status form-status" role="alert"></p>
-              <div class="form-actions">
-                <button id="close-report" class="button ghost" type="button">Cancel</button>
-                <button class="button primary" type="submit">Send report</button>
-              </div>
-            </form>
-            </dialog>
-            <div id="work-list" class="work-list"></div>
-            <div id="room-results-list" class="work-list" aria-label="Completed results" hidden></div>
+          </header>
+          <form id="search-form" class="topbar-search" role="search" aria-label="Search this room" hidden>
+            <label class="sr-only" for="message-search">Search messages and work</label>
+            <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentions</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
+          </form>
+          <section id="search-results" class="search-results" aria-label="Search results" hidden>
+            <p id="search-count" role="status"></p>
+            <ol id="search-list"></ol>
           </section>
+          <div id="thread-bar" class="thread-bar" hidden>
+            <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
+            <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
+          </div>
+          <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
+          <div id="room-guide" class="room-guide" hidden>
+            <p>Type <kbd>@</kbd> to mention someone. Inbox uses <strong>Account key</strong>.</p>
+            <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
+          </div>
+          <details id="pinned-panel" class="pinned-panel" hidden>
+            <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
+            <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
+          </details>
+          <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
+          <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
+          <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
+          <form id="message-form" class="composer">
+            <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
+            <div class="composer-toolbar" id="composer-toolbar" hidden>
+              <label class="sr-only" for="message-to-select">Talking to</label>
+              <select id="message-to-select" aria-label="Who this message addresses"></select>
+              <span class="audience-note" id="audience-note" hidden>Room-visible</span>
+              <button id="composer-work-button" class="text-button" type="button" hidden>New work</button>
+            </div>
+            <div id="request-mode-bar" class="reply-bar" hidden>
+              <span id="request-mode-label"></span>
+              <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
+              <button id="request-exit" class="button ghost" type="button">Back to chat</button>
+            </div>
+            <div class="composer-row">
+              <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work">+</button>
+              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #chat" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
+              <button class="button primary icon-button" type="submit" aria-label="Send" title="Send">&uarr;</button>
+            </div>
+            <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
+            <p id="composer-status" class="status form-status" role="status"></p>
+            <details id="composer-options" class="conversation-boundaries"><summary class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
+              <p id="draft-hint" class="form-hint">Enter to send &middot; Shift + Enter for a new line</p>
+              <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
+              <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
+              <p id="draft-recovery-status" class="form-hint" role="status">Clears after 12 hours or sign-out.</p>
+              <p>Visible to everyone here.</p>
+            </details>
+          </form>
+          <span id="cursor-label" class="sr-only"></span>
+          <div id="recipe-strip" class="recipe-strip" hidden></div>
+          <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
+          <div id="recipe-preview" class="recipe-preview" hidden></div>
+          <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
+        </section>
 
+        <dialog id="catchup-dialog" aria-labelledby="catchup-title">
+          <div class="dialog-head"><h2 id="catchup-title">Catch up</h2><button id="catchup-close" class="button ghost" type="button">Close</button></div>
+          <section id="contribution-next" class="contribution-next" aria-label="For you" hidden>
+            <div><span id="contribution-label" class="form-hint"></span><p id="contribution-title"></p></div>
+            <div class="contribution-actions"><button id="contribution-open" class="button secondary" type="button"></button><button id="contribution-more" class="text-button" type="button" hidden></button></div>
+          </section>
+          <details id="return-brief-panel" class="panel return-brief-panel">
+            <summary id="return-brief-heading" class="section-summary"><span class="section-label"><strong>Catch up</strong></span><span class="notification-dot" id="notification-count" hidden></span><span class="notification-dot" id="reminder-count" hidden></span></summary>
+            <div id="summary-grid" class="summary-grid"></div>
+            <p id="rb-status" class="status form-status" role="status"></p>
+            <details id="notification-panel" class="rb-panel">
+              <summary id="notification-heading" class="section-summary"><span class="section-label"><strong>Notifications</strong></span></summary>
+              <p class="form-hint">Mentions, replies, and work naming you.</p>
+              <p id="notification-status" class="status form-status" role="status"></p>
+              <ul id="notification-list" class="rb-list"></ul>
+              <button id="notification-read-button" class="button ghost" type="button" hidden>Mark read</button>
+            </details>
+            <details id="reminder-panel" class="rb-panel">
+              <summary id="reminder-due-heading" class="section-summary"><span class="section-label"><strong>Reminders</strong></span></summary>
+              <p id="reminder-load-error" class="status form-status" role="status"></p>
+              <button id="reminder-refresh" class="button ghost" type="button" hidden>Refresh</button>
+              <ol id="reminder-due" class="reminder-list"></ol>
+              <h3 id="reminder-pending-heading" hidden>Needs confirmation</h3>
+              <ol id="reminder-pending" class="reminder-list"></ol>
+              <h3 id="reminder-scheduled-heading" hidden>Scheduled</h3>
+              <ol id="reminder-scheduled" class="reminder-list"></ol>
+              <div id="reminder-upcoming"></div>
+            </details>
+            <h3 id="rb-current-heading">Needs you</h3>
+            <ul id="rb-attention-list" class="rb-list"></ul>
+            <button id="rb-show-all" class="text-button" type="button">Show all</button>
+            <details id="rb-involving-section">
+              <summary id="rb-involving-heading" class="section-summary"><span class="section-label"><strong>Ongoing</strong></span></summary>
+              <ul id="rb-involving-list" class="rb-list"></ul>
+            </details>
+            <details id="rb-history-section">
+              <summary id="rb-history-heading" class="section-summary"><span class="section-label"><strong>Updates</strong></span><span id="rb-history-count" class="count-chip"></span></summary>
+              <div id="rb-current-boundary" class="rb-boundary"></div>
+              <div id="rb-history-boundary" class="rb-boundary"></div>
+              <ol id="rb-history-list" class="rb-list"></ol>
+              <button id="rb-more-button" class="text-button" type="button">More</button>
+            </details>
+            <div class="rb-actions"><button id="rb-refresh-button" class="button ghost" type="button">Refresh</button><button id="rb-ack-button" class="button primary" type="button">Mark read</button><span id="rb-ack-note" class="form-hint"></span></div>
+          </details>
+        </dialog>
+
+        <dialog id="settings-dialog" aria-labelledby="settings-title">
+          <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
+          <details id="room-about" class="room-about" open>
+            <summary>About</summary>
+            <p class="room-purpose"></p>
+            <details id="room-instructions" class="room-instructions"><summary>Instructions</summary><div class="room-instructions-body"></div></details>
+            <div class="room-about-actions">
+              <button id="room-instructions-open" class="button ghost" type="button">Room instructions</button>
+              <button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button>
+              <button id="room-leave-button" class="button ghost" type="button" hidden>Leave room</button>
+            </div>
+          </details>
+          <details id="results-panel" class="panel">
+            <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
+            <ol id="room-results-list" class="results-list" aria-label="Completed work results"></ol>
+          </details>
           <details id="record-panel" class="panel record-panel">
-            <summary class="panel-header section-summary">
-              <span class="section-label"><strong id="record-title">History</strong></span>
-              <span id="event-count" class="count-chip"></span>
-            </summary>
+            <summary class="panel-header section-summary"><span class="section-label"><strong id="record-title">History</strong></span><span id="event-count" class="count-chip"></span></summary>
             <details id="decision-section">
               <summary class="panel-header section-summary"><span class="section-label"><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
               <ul id="decision-list" class="rb-list"></ul>
             </details>
             <details id="reports-section" hidden>
               <summary class="panel-header section-summary"><span class="section-label"><strong>Reports</strong></span><span id="report-count" class="count-chip"></span></summary>
-              <p class="form-hint">Messages members reported to you. Only the room owner sees this list and who reported.</p>
+              <p class="form-hint">Only the owner sees this.</p>
               <p id="report-list-status" class="status form-status" role="status"></p>
-              <button id="report-refresh" class="button secondary" type="button">Refresh reports</button>
+              <button id="report-refresh" class="button secondary" type="button">Refresh</button>
               <ul id="report-list" class="rb-list"></ul>
             </details>
             <ol id="event-list" class="event-list"></ol>
-            <div class="record-actions"><button id="record-export-html" class="button ghost" type="button">Export as HTML</button><p id="record-export-status" class="form-hint" role="status"></p></div>
-            <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>
+            <div class="record-actions"><button id="record-export-html" class="button ghost" type="button">Export</button><p id="record-export-status" class="form-hint" role="status"></p></div>
           </details>
           <details id="usage-panel" class="panel usage-panel">
             <summary class="panel-header section-summary">
@@ -497,10 +406,69 @@
             </summary>
             <p id="usage-status" class="form-hint" role="status"></p>
             <div id="usage-grid" class="usage-grid"></div>
-            <div class="usage-actions"><button id="usage-refresh" class="button ghost" type="button" hidden>Refresh usage</button></div>
-            <p class="form-hint">Read-only. Spend is what agents reported for their sessions; unreported spend stays unknown, never zero.</p>
+            <div class="usage-actions"><button id="usage-refresh" class="button ghost" type="button" hidden>Refresh</button></div>
+            <p class="form-hint">What agents reported.</p>
           </details>
-        </aside>
+          <details id="spend-panel" class="panel spend-panel">
+            <summary class="panel-header section-summary">
+              <span class="section-label"><strong>Spend</strong></span>
+              <span id="spend-summary" class="count-chip"></span>
+            </summary>
+            <div id="spend-figures" class="spend-figures"></div>
+            <form id="spend-allowance-form" class="spend-allowance-form">
+              <label>Allowance (USD)<input id="spend-allowance-input" inputmode="decimal" autocomplete="off"></label>
+              <label>Days<input id="spend-period-input" inputmode="numeric" autocomplete="off"></label>
+              <button class="button secondary" type="submit">Set</button>
+              <button id="spend-allowance-remove" class="button ghost" type="button">Remove</button>
+            </form>
+            <p id="spend-note" class="status form-status" role="status"></p>
+          </details>
+        </dialog>
+
+        <dialog id="work-dialog" aria-labelledby="work-dialog-title">
+          <form id="new-work-form" method="dialog" hidden>
+            <div class="dialog-head"><h2 id="work-dialog-title">New work</h2></div>
+            <p id="work-reuse-hint" class="form-hint" hidden></p>
+            <p id="new-work-status" class="status form-status" role="status"></p>
+            <label id="work-title-label" class="field"><span>Title</span><input id="work-title-input" name="title" maxlength="200" required></label>
+            <input id="new-work-title" type="hidden" name="new-work-title">
+            <input id="source-message-id" type="hidden" name="sourceMessageId">
+            <p id="source-context" class="form-hint source-context"></p>
+            <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
+            <label id="work-done-field" class="field"><span>Done looks like</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="2000"></textarea></label>
+            <label id="assignee-field" class="field"><span>Owner</span><select id="assignee-select" name="assigneeId"></select></label>
+            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label"></select><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
+            <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label">Options</span></summary>
+              <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
+              <label class="check"><input id="require-verification" type="checkbox" name="requireVerification" checked> Require verification</label>
+              <label class="check"><input id="require-decision" type="checkbox" name="requireDecision" checked> Require decision</label>
+              <p id="work-checks-help" class="form-hint">Verification confirms the result; a decision records the call.</p>
+              <p id="work-policy-note" class="form-hint"></p>
+            </details>
+            <div class="dialog-actions"><button id="cancel-work-button" class="button ghost" type="button">Cancel</button><button id="retry-work-button" class="button secondary" type="button" hidden>Retry</button><button id="create-work-button" class="button primary" value="default" type="submit">Create</button></div>
+            <p id="work-retry-hint" class="form-hint" hidden></p>
+          </form>
+        </dialog>
+        <dialog id="decision-dialog" aria-labelledby="decision-title">
+          <form id="decision-form" method="dialog">
+            <div class="dialog-head"><h2 id="decision-title">Record decision</h2></div>
+            <p id="decision-source" class="form-hint"></p>
+            <label class="field"><span>Decision</span><textarea id="decision-statement-input" name="statement" rows="3" maxlength="2000" required></textarea></label>
+            <label class="field"><span>Note</span><textarea id="decision-note-input" name="note" rows="2" maxlength="2000"></textarea></label>
+            <p id="decision-status" class="status form-status" role="status"></p>
+            <div class="dialog-actions"><button id="close-decision" class="button ghost" value="cancel" formnovalidate type="submit">Close</button><button class="button primary" value="default" type="submit">Record</button></div>
+          </form>
+        </dialog>
+        <dialog id="report-dialog" aria-labelledby="report-title">
+          <form id="report-form" method="dialog">
+            <div class="dialog-head"><h2 id="report-title">Report</h2></div>
+            <p id="report-source" class="form-hint"></p>
+            <label class="field"><span>Why?</span><textarea id="report-reason-input" name="reason" rows="3" maxlength="2000" required></textarea></label>
+            <p id="report-status" class="status form-status" role="status"></p>
+            <p class="form-hint">Only the owner sees this.</p>
+            <div class="dialog-actions"><button id="close-report" class="button ghost" value="cancel" formnovalidate type="submit">Close</button><button class="button primary" value="default" type="submit">Send report</button></div>
+          </form>
+        </dialog>
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
@@ -776,3 +744,4 @@
     </dialog>
   </body>
 </html>
+

@@ -157,7 +157,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-invite-dialog"/);
   assert.match(html, /bootstrap-agent-room/);
   assert.match(html, /#room\/\{roomId\}/);
-  assert.match(html, /Write to the room/);
+  assert.match(html, /Message #chat/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
   assert.match(html, /id="signin-more"/);
@@ -173,7 +173,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="clear-session-menu"/);
   assert.match(html, /id="share-link-intro"/);
   assert.match(html, /Open this invite link/);
-  assert.match(html, /data-room-section="people"/);
+  assert.match(html, /id="room-sidebar"/);
+  assert.match(html, /id="channel-list"/);
+  assert.match(html, /id="catchup-dialog"/);
+  assert.match(html, /id="settings-dialog"/);
   assert.match(html, /id="agent-import-checklist"/);
   assert.match(html, /id="agent-connect-route"/);
   assert.match(html, /id="agent-host-snippets"/);
@@ -192,9 +195,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
-  assert.match(app, /Completed results appear here after work is finished/);
-  assert.match(html, /This is the chat/);
-  assert.match(html, /@ to address someone/);
+  assert.match(app, /No completed results yet/);
+  assert.match(html, /to mention someone/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
   assert.match(app, /data-empty-invite/);
@@ -224,7 +226,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="reply-mention"/);
   assert.match(html, /Also @/);
   assert.match(html, /id="search-mentions"/);
-  assert.match(html, />Mentioned you</);
+  assert.match(html, />Mentions</);
   assert.match(app, /parseSearchQuery/);
   assert.match(app, /mentionsFilterOn/);
   assert.match(app, /reactionPills/);
@@ -261,7 +263,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(css, /\.member-handle-agent/);
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
   assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);
-  assert.match(css, /\.room-navigation \{ position: sticky;/);
+  assert.match(css, /#room-sidebar \{[^}]*border-right:/);
   assert.match(css, /#account-rooms-list \.inbox-row \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
   assert.match(css, /#agent-import-checklist/);
   assert.doesNotMatch(readFileSync(join(checkout, "docs/ROOM-ROSTER.md"), "utf8"), /member key cannot/i);

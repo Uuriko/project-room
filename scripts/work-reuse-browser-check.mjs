@@ -100,7 +100,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     await page.keyboard.press("Escape"); await f.form.waitFor({ state: "hidden" });
     await page.waitForFunction(id => document.activeElement?.dataset.reuseWork === id, sourceId);
     assert.equal(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
-    assert.equal(await page.locator("#work-list").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    assert.equal(await page.locator("#message-list").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     assert.equal(Object.keys(f.snapshot().state.workItems).length, Object.keys(before.state.workItems).length);
     if (name === "mobile") await page.evaluate(() => document.documentElement.style.fontSize = "");
     await page.locator("#new-work-button").click();

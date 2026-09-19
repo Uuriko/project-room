@@ -132,6 +132,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await focusedReply.evaluate(e => e === window.retainedControl && e === document.activeElement), true);
 
     // Search lands at the original reply, including when it was hidden in a thread.
+    await page.locator("#topbar-search-toggle").click();
     await page.locator("#message-search").fill("paperback edition");
     await page.locator(`#search-list [data-open-message="${posted[0].id}"]`).click();
     assert.equal(await page.locator("#thread-bar").isVisible(), true);
@@ -147,8 +148,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const work = Object.values(store.snapshot(owner, "commons").state.workItems);
     assert.equal(work.length, 1); assert.equal(work[0].sourceMessageId, posted[0].id);
     await page.locator("#thread-back").click();
-    await page.locator("#work-list .work-details > summary").click();
-    await page.locator('#work-list [data-open-message]').click();
+    await page.locator('#message-list [data-work-timeline] .work-details > summary').click();
+    await page.locator('#message-list [data-work-timeline] [data-open-message]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
 
     // Literal markup is text, and long text still reflows at this viewport.
@@ -168,6 +169,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // Revoking a session removes every private discussion and in-memory draft.
     await input.fill("Clear this private draft on revocation");
+    if (await page.locator("#search-form").evaluate(node => node.hidden)) {
+      await page.locator("#topbar-search-toggle").click();
+    }
     await page.locator("#message-search").fill("paperback");
     const rotated = store.issueAccessKey("commons", "owner");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -237,6 +241,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // The rail entry opens to live current sections and a frozen first page of history.
     const panel = page.locator("#return-brief-panel");
+    await page.locator("#topbar-catchup").click();
     await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent && !document.querySelector("#rb-refresh-button").disabled);
     if (!await panel.evaluate(node => node.open)) {
       await Promise.all([
@@ -379,10 +384,7 @@ for (const outcome of ["success", "failure"]) {
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
     };
     await page.goto(origin); await enter();
-    await Promise.all([
-      page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      page.locator("#return-brief-panel > summary").click()
-    ]);
+    // The catch-up dialog load in enter() already fetched the brief; the panel is open.
     await page.waitForFunction(() => !document.querySelector("#rb-refresh-button").disabled);
     let release, arrived;
     const held = new Promise(resolve => arrived = resolve);

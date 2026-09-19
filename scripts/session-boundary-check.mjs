@@ -227,7 +227,7 @@ test("a shared browser cookie cannot expose another tab's return brief", { timeo
   assert.equal(await ownerTab.locator("#main").isVisible(), false);
   assert.equal(await ownerTab.locator("#identity-label").textContent(), "Not signed in");
   assert.equal(await ownerTab.locator("#message-list").textContent(), "");
-  assert.equal(await ownerTab.locator("#work-list").textContent(), "");
+  assert.equal(await ownerTab.locator("#room-results-list").textContent(), "");
   assert.equal(await ownerTab.locator("#rb-attention-list").textContent(), "");
   assert.equal(await ownerTab.evaluate(() => window.returnBriefTexts.some(text => text.includes("Maya-only return item"))), false,
     "the mismatched viewer payload is rejected before it can render");
