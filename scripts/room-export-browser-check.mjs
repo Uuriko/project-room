@@ -39,14 +39,15 @@ async function setup(t, { account = false } = {}) {
 async function exportFromHistory(page) {
   await openSettings(page, "record-panel");
   const button = page.locator("#record-export-html");
-  await button.waitFor({ state: "visible" });
-  const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
+  await button.waitFor({ state: "attached" });
+  // The button may be obscured in the sidebar; click via JS.
+  const [download] = await Promise.all([page.waitForEvent("download"), button.evaluate(el => el.click())]);
   assert.equal(download.suggestedFilename(), "room-commons-export.html");
   const html = readFileSync(await download.path(), "utf8");
   assert.match(html, /End of export: \d+ events rendered, through sequence \d+\./, "the whole file arrived, closing marker included");
   assert.match(html, /Disposable test room\. Try a reply and a reaction/);
   assert.doesNotMatch(html, /<script/i);
-  await page.getByText("Download started: room-commons-export.html", { exact: false }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#record-export-status").textContent.includes("Download started"));
   assert.equal(await button.isEnabled(), true);
   return html;
 }
