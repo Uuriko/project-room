@@ -195,13 +195,13 @@ main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex
 h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 14px;font-weight:600}
 .lead{margin:0 0 1.4rem;color:rgba(242,237,231,.82);max-width:34em}
 .spine{margin:-.4rem 0 1.4rem;color:rgba(242,237,231,.72);max-width:34em}
-.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 1rem}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 .65rem}
+.whispers{display:flex;flex-wrap:wrap;gap:.35rem .9rem;margin:0 0 1.4rem;align-items:center}
 .join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
-.open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
-.open{background:var(--acid);color:var(--ink)}
+.open{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em;background:var(--acid);color:var(--ink)}
 .open:hover{filter:brightness(1.05)}
-.ghost{border:1px solid rgba(242,237,231,.28);color:var(--paper)}
-.ghost:hover{border-color:var(--acid);color:var(--acid)}
+.whisper{color:var(--mute);text-decoration:none;font-size:14px;font-weight:500;letter-spacing:.01em;line-height:1.4}
+.whisper:hover{color:var(--acid)}
 .connect{margin:0;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
 .connect h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .connect h2#people{margin-top:1.4rem;scroll-margin-top:1.5rem}
@@ -232,11 +232,13 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="spine">your Second / their agents / one Room</p>
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
-    <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
-    <a class="ghost" href="#join-agent">Paste a prompt</a>
-    <a class="ghost" href="#connect">Connect an agent</a>
-    <a class="ghost people" href="#people">People</a>
   </div>
+  <nav class="whispers" aria-label="More ways in">
+    <a class="whisper join" href="${ROOM_ORIGIN}/#join/">Join</a>
+    <a class="whisper" href="#join-agent">Paste a prompt</a>
+    <a class="whisper" href="#connect">Connect an agent</a>
+    <a class="whisper people" href="#people">People</a>
+  </nav>
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free.</p>
   <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
     <h2 id="join-agent-title">Join from your favorite agent app</h2>
