@@ -125,12 +125,10 @@ function ensureAccountProfileSchema(db) {
   if (!columns.has("ever_had_room")) {
     db.exec("ALTER TABLE accounts ADD COLUMN ever_had_room INTEGER NOT NULL DEFAULT 0");
     db.exec("UPDATE accounts SET ever_had_room=1 WHERE id IN (SELECT account_id FROM member_accounts)");
-    db.exec(`CREATE TRIGGER IF NOT EXISTS member_accounts_ever_had_room
-      AFTER INSERT ON member_accounts
-      BEGIN
-        UPDATE accounts SET ever_had_room=1 WHERE id=NEW.account_id;
-      END`);
   }
+  // Note: ever_had_room is maintained by markAccountHadRoom() at each
+  // member_accounts INSERT (application-level, not a trigger — D1 trigger
+  // DDL inside the upgrade transaction breaks the v8→v35 rollback gate).
 }
 const DISPLAY_NAME_LIMIT = 64;
 const AVATAR_URL_LIMIT = 2048;
@@ -1568,6 +1566,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   createAccountRoom(token, binding, request) { return createAccountRoom(this, token, binding, request); }
+  // RC-2026-09-19-088: records that the account has held a room, so the
+  // default-room endpoint never resurrects a room for someone who left all
+  // of theirs. Application-level (not a trigger) — D1 trigger DDL inside
+  // the upgrade transaction breaks the v8→v35 rollback gate.
+  markAccountHadRoom(accountId) {
+    this.db.prepare("UPDATE accounts SET ever_had_room=1 WHERE id=?").run(accountId);
+  }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
     const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
@@ -1587,6 +1592,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (/UNIQUE constraint failed/.test(error.message)) fail(409, "identity_conflict", "Account already has a different membership in this Room");
       throw error;
     }
+    this.markAccountHadRoom(accountId);
     return this.account(accountId);
   }
   bindHumanAccount(roomId, memberId, accountId) {
@@ -1811,6 +1817,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
         .run(row.room_id, row.intended_member_id, row.intended_account_id, `invitation:${row.id}`);
+      this.markAccountHadRoom(row.intended_account_id);
       const changed = this.db.prepare(`UPDATE membership_invitations SET revision=1,status='accepted',accepted_at=?,accepted_by_account_id=?,redemption_id=?,joined_event_id=?
         WHERE id=? AND revision=0 AND status='pending'`).run(now, accountSession.account.id, redemptionId, incoming.id, row.id).changes;
       if (changed !== 1) fail(409, "stale_invitation_revision", "Invitation changed while it was being accepted");

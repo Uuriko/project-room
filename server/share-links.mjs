@@ -256,6 +256,7 @@ export class ShareLinks {
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)").run(row.room_id, memberId, auth.account.id, `invitation:${invitationId}`);
+      this.store.markAccountHadRoom(auth.account.id);
       this.db.prepare("UPDATE membership_invitations SET revision=1,status='accepted',accepted_at=?,accepted_by_account_id=?,redemption_id=?,joined_event_id=? WHERE id=?").run(now, auth.account.id, redemptionId, incoming.id, invitationId);
       this.db.prepare(`INSERT INTO membership_invitation_events(invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason)
         VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(invitationId, auth.account.id, memberId, auth.account.authEpoch, auth.sessionRevision, now, incoming.id);
