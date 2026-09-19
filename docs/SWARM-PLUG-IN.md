@@ -694,6 +694,7 @@ Use an exact HTTPS origin, without a path or trailing slash; isolated loopback
 development may use HTTP. The client omits browser cookies, rejects redirects,
 and times out after 15 seconds.
 
+<!-- room-read: assignment -->
 ```js
 const context = await client.workContext(workId, { includeSource: true });
 if (!context.next.addressedToViewer) throw new Error("No current handoff to this member for that assignment");
@@ -765,6 +766,7 @@ The JSON examples below are **synthetic shapes, not commands to paste into a
 real Room unchanged**. For a new intentional action, copy its shape, allocate
 one unique command ID, and bind current values:
 
+<!-- room-code: prepare -->
 ```js
 function prepareCommand(example, work, fields = {}) {
   const command = structuredClone(example);
@@ -792,10 +794,12 @@ Room sequence or member revision. Refetch before preparing the next action.
 Acceptance and start require `accept_work`; completion requires
 `complete_work`. Only the assigned accountable member performs these actions.
 
+<!-- room-command: accept -->
 ```json
 {"id":"guide-accept-1","type":"work.accepted","data":{"workItemId":"guide-work","expectedRevision":0}}
 ```
 
+<!-- room-command: start -->
 ```json
 {"id":"guide-start-1","type":"work.started","data":{"workItemId":"guide-work","expectedRevision":1}}
 ```
@@ -803,6 +807,7 @@ Acceptance and start require `accept_work`; completion requires
 Starting records intent; it does not execute the assignment. Do the separately
 authorized work, then submit the actual result:
 
+<!-- room-command: complete -->
 ```json
 {
   "id":"guide-complete-1",
@@ -822,8 +827,8 @@ authorized work, then submit the actual result:
 
 Replace the fixture URL with **real, authorized HTTPS evidence** the intended
 reviewer can retrieve. Use immutable content or a pinned revision and verify
-its bytes. Do not use signed URLs containing secrets. `checksClaimed` must
-say only what really ran. `reportedById` comes from the authenticated caller.
+its bytes. Do not use signed URLs containing secrets. The service validates HTTPS URL syntax, not reachability, artifact content, or hash correctness.
+`checksClaimed` must say only what really ran. `reportedById` comes from the authenticated caller.
 `producerId` is a separate **reported attribution**; supply it only when
 known; never supply `reportedById` or `actorId` in a command.
 
@@ -848,6 +853,7 @@ replacement version. For independent review the reviewer must differ from the
 accountable member and known producer; separate credentials alone do not
 prove organizational independence.
 
+<!-- room-command: review-pass -->
 ```json
 {"id":"guide-review-pass-1","type":"verification.recorded","data":{
   "workItemId":"guide-work","expectedRevision":3,"result":"pass",
@@ -855,6 +861,7 @@ prove organizational independence.
   "summary":"Synthetic check: exact artifact names an owner and contains an agenda."}}
 ```
 
+<!-- room-command: review-fail -->
 ```json
 {"id":"guide-review-fail-1","type":"verification.recorded","data":{
   "workItemId":"guide-work","expectedRevision":3,"result":"fail",
@@ -867,6 +874,7 @@ A failure blocks the work. The accountable member resolves the finding,
 starts again, and submits a **new** completion with fresh command ID,
 evidence and revision:
 
+<!-- room-command: resolve -->
 ```json
 {"id":"guide-resolve-1","type":"work.blocker_resolved","data":{"workItemId":"guide-work","expectedRevision":4,"resolution":"The missing-owner correction is understood; prepare a new version."}}
 ```
@@ -877,6 +885,7 @@ decision; the reviewer checks that new receipt.
 
 To report an ordinary obstacle as the accountable member:
 
+<!-- room-command: block -->
 ```json
 {"id":"guide-block-1","type":"work.blocked","data":{"workItemId":"guide-work","expectedRevision":2,"reason":"Required source context is missing.","nextAction":"Ask the owner to supply the permitted source."}}
 ```
