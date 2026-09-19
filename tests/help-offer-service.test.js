@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture, v13OfferBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { helpOfferContext } from "../src/help-offers.js";
@@ -195,7 +196,18 @@ test("genuine schema13 rejects offer commands and upgrades only collision-free r
         assert.deepEqual(f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all(), catalog);
       } else {
         const current = new RoomStore(filename);
-        try { assert.equal(auditRecovery(current).schemaVersion, 35); assert.deepEqual(current.room("commons"), row); }
+        try {
+          assert.equal(auditRecovery(current).schemaVersion, STORE_SCHEMA_VERSION);
+          // Upgrading a v13 room backfills the default channel, which is a
+          // change to the projection and the only one allowed here. Set it
+          // aside, assert it on its own, and compare everything else exactly.
+          const upgraded = current.room("commons");
+          assert.deepEqual(Object.keys(upgraded.state).filter(key => !(key in row.state)), ["channels"],
+            "the default channel is the only thing a v13 room gains");
+          assert.deepEqual(Object.keys(upgraded.state.channels), ["general"]);
+          const { channels, ...rest } = upgraded.state;
+          assert.deepEqual({ ...upgraded, state: rest }, row);
+        }
         finally { current.close(); }
       }
     } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }

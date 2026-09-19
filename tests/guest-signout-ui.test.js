@@ -1,6 +1,7 @@
 /* global document -- the fixture installs a stub `document` on globalThis for src/share-links.js */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { installShareLinks } from '../src/share-links.js';
 
 async function fixture(t) {
@@ -68,7 +69,15 @@ test('externally closed guest sign-out cannot log out a replacement identity aft
   accountClient.session = { authenticated: true, account: { id: 'replacement-account' } };
   held.resolve(accountClient.session); await pending;
   assert.equal(counts().logouts, 0);
-  assert.equal(document.activeElement, node('#access-key'));
+  // The point is that focus is not stranded: it lands on the first control of
+  // the signed-out panel. That control is now "Continue with Google", not the
+  // access-key field, and src/share-links.js falls back
+  // #google-signin -> #auth-title -> #access-key. The fixture's querySelector
+  // answers every selector with a node, so only the first is ever reached here;
+  // reading index.html keeps that first choice honest rather than assumed.
+  const page = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(page, /id="google-signin"/, 'the panel still leads with the Google button');
+  assert.equal(document.activeElement, node('#google-signin'));
 });
 
 for (const operation of ['restore', 'logout']) test(`unconfirmed guest ${operation} never claims sign-out succeeded`, async t => {
