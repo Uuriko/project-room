@@ -249,7 +249,8 @@ function presenceTree() {
 }
 
 test("composer placeholder names the room, the thread, or the work mode", () => {
-  assert.equal(composerPlaceholder({}), "Message #chat");
+  assert.equal(composerPlaceholder({}), "Message #general");
+  assert.equal(composerPlaceholder({ channelName: "design" }), "Message #design");
   assert.equal(composerPlaceholder({ inThread: true }), "Reply in thread");
   assert.equal(composerPlaceholder({ workKind: "request", inThread: true }), "What do you need?");
   assert.equal(composerPlaceholder({ workKind: "cancelled" }), "Reason…");

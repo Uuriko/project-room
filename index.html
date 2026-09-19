@@ -227,10 +227,8 @@
           </div>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
           <nav aria-label="Channels">
-            <p class="sidebar-label">Channels</p>
-            <ol id="channel-list" class="channel-list">
-              <li><button type="button" class="channel is-active" data-channel="chat" aria-current="page"><span aria-hidden="true">#</span> chat</button></li>
-            </ol>
+            <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
+            <ol id="channel-list" class="channel-list"></ol>
           </nav>
           <details id="people-panel" class="sidebar-panel" open>
             <summary id="presence-title" class="sidebar-label"><span>People</span><span id="presence-count" class="count-chip"></span></summary>
@@ -253,7 +251,7 @@
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
             <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu">&#9776;</button>
-            <h2 id="conversation-title" tabindex="-1"># chat</h2>
+            <h2 id="conversation-title" tabindex="-1"># general</h2>
             <span id="message-count" class="count-chip"></span>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search">&#8981;</button>
@@ -301,7 +299,7 @@
             </div>
             <div class="composer-row">
               <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work">+</button>
-              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #chat" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
+              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send">&uarr;</button>
             </div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
@@ -367,6 +365,15 @@
           </details>
         </dialog>
 
+        <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
+          <div class="dialog-head"><h2 id="channel-dialog-title">New channel</h2><button id="channel-dialog-close" class="button ghost" type="button">Close</button></div>
+          <form id="channel-form" method="dialog">
+            <label class="field"><span>Name</span><input id="channel-name-input" name="name" maxlength="48" autocomplete="off" placeholder="design" required></label>
+            <p class="form-hint">Lowercase letters, numbers, and dashes.</p>
+            <p id="channel-form-status" class="status form-status" role="status"></p>
+            <div class="dialog-actions"><button id="channel-save-button" class="button primary" value="default" type="submit">Create channel</button><button id="channel-archive-button" class="button secondary" type="button" hidden>Archive channel</button></div>
+          </form>
+        </dialog>
         <dialog id="settings-dialog" aria-labelledby="settings-title">
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
           <details id="room-about" class="room-about" open>

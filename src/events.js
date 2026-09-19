@@ -25,6 +25,9 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_REACTION_SET: "message.reaction_set",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
+  CHANNEL_CREATED: "channel.created",
+  CHANNEL_RENAMED: "channel.renamed",
+  CHANNEL_ARCHIVED: "channel.archived",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
   HELP_OFFER_OPENED,
@@ -49,6 +52,44 @@ export const EVENT_TYPES = Object.freeze({
   CAPABILITIES_ADVERTISED: "capabilities.advertised",
   OWNERSHIP_TRANSFERRED: "ownership.transferred"
 });
+
+// Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
+// one main channel for chat and work plus optional user-created channels.
+// Channels live on the projection (state.channels, keyed by id); messages
+// carry channelId. Rooms created before channels existed backfill #general
+// on replay via ensureDefaultChannel, so no data migration is needed.
+export const DEFAULT_CHANNEL_ID = "general";
+export const MAX_CHANNELS_PER_ROOM = 50;
+export const CHANNEL_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,47}$/;
+
+export function normalizeChannelName(name) {
+  const normalized = typeof name === "string" ? name.trim().toLowerCase().replace(/\s+/g, "-") : "";
+  if (!CHANNEL_NAME_PATTERN.test(normalized)) throw new Error("Channel name uses lowercase letters, numbers, dashes (1-48 chars)");
+  return normalized;
+}
+
+export function messageChannelId(message) {
+  return message?.channelId || DEFAULT_CHANNEL_ID;
+}
+
+export function channelList(state) {
+  return Object.values(state.channels ?? {})
+    .filter(channel => channel && typeof channel.id === "string")
+    .sort((a, b) => (a.id === DEFAULT_CHANNEL_ID ? -1 : b.id === DEFAULT_CHANNEL_ID ? 1 : 0)
+      || (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+
+function ensureDefaultChannel(state, at) {
+  if (!state.room) return;
+  state.channels ??= {};
+  state.channels[DEFAULT_CHANNEL_ID] ??= {
+    id: DEFAULT_CHANNEL_ID,
+    name: DEFAULT_CHANNEL_ID,
+    createdBy: state.room.ownerId,
+    createdAt: state.room.createdAt ?? at,
+    archivedAt: null
+  };
+}
 
 // Room policy (issue #6 A4): the owner can make independent review and/or an
 // owner decision mandatory for every work item proposed afterwards. The policy
@@ -175,6 +216,7 @@ export function emptyRoomState() {
   return {
     room: null,
     members: {},
+    channels: {},
     messages: [],
     workItems: {},
     eventLog: [],
@@ -244,6 +286,9 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
+    [EVENT_TYPES.CHANNEL_CREATED]: createChannel,
+    [EVENT_TYPES.CHANNEL_RENAMED]: renameChannel,
+    [EVENT_TYPES.CHANNEL_ARCHIVED]: archiveChannel,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
       const help = helpFromEvent(state, incoming);
@@ -272,8 +317,12 @@ export function applyEvent(current, incoming) {
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
+  // Legacy rooms (created before channels) gain #general here, before any
+  // handler reads state.channels. New rooms seed it in createRoom, so this
+  // is a no-op for them; createRoom itself runs with state.room unset, which
+  // the ensure skips.
+  ensureDefaultChannel(state, incoming.at);
   handler(state, incoming);
-
   state.eventLog.push(incoming);
   state.seenEvents[incoming.id] = fingerprint;
   state.seenIdempotencyKeys[incoming.idempotencyKey] = incoming.id;
@@ -315,6 +364,15 @@ function createRoom(state, incoming) {
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
+  state.channels = {
+    [DEFAULT_CHANNEL_ID]: {
+      id: DEFAULT_CHANNEL_ID,
+      name: DEFAULT_CHANNEL_ID,
+      createdBy: incoming.actorId,
+      createdAt: incoming.at,
+      archivedAt: null
+    }
+  };
 }
 
 function updateCharter(state, incoming) {
@@ -583,13 +641,29 @@ function postMessage(state, incoming) {
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
+  // Replies pin to their thread root's channel so a thread can't drift across
+  // channels, no matter what channelId the command carries.
+  let channelId = incoming.data.channelId || DEFAULT_CHANNEL_ID;
+  if (incoming.data.replyToId) {
+    let root = state.messages.find(m => m.id === incoming.data.replyToId);
+    if (!root) throw new Error("Reply must reference a message in this Room");
+    while (root.replyToId) {
+      const parent = state.messages.find(m => m.id === root.replyToId);
+      if (!parent) break;
+      root = parent;
+    }
+    channelId = messageChannelId(root);
+  }
+  const channel = state.channels[channelId];
+  if (!channel) throw new Error("Unknown channel");
+  if (channel.archivedAt) throw new Error("Channel is archived");
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
-  if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
     body: incoming.data.body,
+    channelId,
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
@@ -597,6 +671,43 @@ function postMessage(state, incoming) {
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
+}
+
+function requireChannelOwner(state, actor) {
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may manage channels");
+}
+
+function createChannel(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireFields(incoming.data, ["name"]);
+  const name = normalizeChannelName(incoming.data.name);
+  if (Object.keys(state.channels).length >= MAX_CHANNELS_PER_ROOM) throw new Error("Channel limit reached");
+  if (Object.values(state.channels).some(c => c.name === name)) throw new Error("Channel name is taken");
+  const id = incoming.data.channelId || incoming.id;
+  if (state.channels[id]) throw new Error("Channel already exists");
+  state.channels[id] = { id, name, createdBy: actor.id, createdAt: incoming.at, archivedAt: null };
+}
+
+function renameChannel(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireChannelOwner(state, actor);
+  requireFields(incoming.data, ["channelId", "name"]);
+  const channel = state.channels[incoming.data.channelId];
+  if (!channel) throw new Error("Unknown channel");
+  if (channel.archivedAt) throw new Error("Channel is archived");
+  const name = normalizeChannelName(incoming.data.name);
+  if (Object.values(state.channels).some(c => c.id !== channel.id && c.name === name)) throw new Error("Channel name is taken");
+  channel.name = name;
+}
+
+function archiveChannel(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireChannelOwner(state, actor);
+  requireFields(incoming.data, ["channelId"]);
+  const channel = state.channels[incoming.data.channelId];
+  if (!channel) throw new Error("Unknown channel");
+  if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be archived");
+  channel.archivedAt ??= incoming.at;
 }
 
 function findEditableMessage(state, incoming) {
