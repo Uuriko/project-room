@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T17:28:21Z · board: Uuriko/project-room#266 · watermark: 5743800789 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T17:58:56Z · board: Uuriko/project-room#266 · watermark: 5744021694 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -69,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1124 threshold=1500 rotation_due=no watcher=active open_claims=46 prose_open=0 unfenced_prose=62 watermark=5743800789
+board_comments=1126 threshold=1500 rotation_due=no watcher=active open_claims=46 prose_open=0 unfenced_prose=62 watermark=5744021694
 
