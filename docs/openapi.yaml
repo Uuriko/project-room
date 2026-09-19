@@ -2996,6 +2996,126 @@ paths:
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /api/account/profile:
+    get:
+      summary: Read the account's profile
+      description: |
+        RC-2026-09-19-078. Browser account-session route (account_session
+        cookie). Returns the caller's own account-level profile: display
+        name and avatar, plus whether first-run onboarding is complete.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ id, displayName, avatarUrl, onboardingComplete }" }
+        '401': { description: account_session_required or invalid_session }
+    post:
+      summary: Update the account's profile
+      description: |
+        RC-2026-09-19-078. Account-session write (X-CSRF-Token, Origin).
+        Updates the caller's display name (1..64 chars) and/or avatar
+        (https URL up to 2048 chars; empty string clears it). Partial
+        updates allowed; unknown fields 422. 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string, maxLength: 64 }
+                avatarUrl: { type: string, maxLength: 2048 }
+      responses:
+        '200': { description: "{ id, displayName, avatarUrl, onboardingComplete }" }
+        '401': { description: account_session_required or invalid_session }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_profile }
+        '429': { description: rate_limited }
+  /api/account/onboarding:
+    get:
+      summary: First-run onboarding state
+      description: |
+        RC-2026-09-19-078. Browser account-session route. New accounts are
+        created un-onboarded and land here until they complete onboarding:
+        `{ accountId, completed, steps: [{ id, title, detail, done }] }`.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Onboarding state for the caller's account }
+        '401': { description: account_session_required or invalid_session }
+  /api/account/onboarding/complete:
+    post:
+      summary: Mark first-run onboarding complete
+      description: |
+        RC-2026-09-19-078. Account-session write (X-CSRF-Token, Origin).
+        Marks the caller's account onboarded; idempotent. 30 per address
+        per minute.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Onboarding state with completed true }
+        '401': { description: account_session_required or invalid_session }
+        '403': { description: origin_denied or csrf_denied }
+        '429': { description: rate_limited }
+  /api/account/retention:
+    get:
+      summary: Account-deletion retention policy
+      description: |
+        RC-2026-09-19-078. Browser account-session route. Documents what
+        account deletion purges vs retains and why (audit rows under legal
+        hold, deactivated account tombstone, room-owned history).
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ policy: { version, summary, purged, retained } }" }
+        '401': { description: account_session_required or invalid_session }
+  /api/account/deletion/plan:
+    get:
+      summary: Plan account deletion (confirmation step)
+      description: |
+        RC-2026-09-19-078. Browser account-session route. Builds the
+        ordered purge plan for the caller's account (wired to
+        src/account-deletion.mjs) and returns the human-readable
+        confirmation summary plus a short-lived confirmationToken bound to
+        (account, plan). The token is redeemed at POST /api/account/delete.
+        10 per address per minute.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ plan, summary, confirmationToken, retention }" }
+        '401': { description: account_session_required or invalid_session }
+        '429': { description: rate_limited }
+  /api/account/delete:
+    post:
+      summary: Delete the account (confirm-then-delete)
+      description: |
+        RC-2026-09-19-078. Account-session write (X-CSRF-Token, Origin).
+        Body is `{ confirmationToken }` from GET /api/account/deletion/plan.
+        The plan is rebuilt from the live store and the token verified
+        against it: changed data 409s as plan_changed. On success the
+        account's credentials, sessions, login methods, passkeys, room
+        memberships, and profile data are purged, the account is
+        deactivated and scrubbed, and the account_session cookie is
+        cleared. Audit rows stay under legal hold. 5 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmationToken]
+              properties:
+                confirmationToken: { type: string }
+      responses:
+        '200': { description: "{ deleted: true, accountId, receipt: { purged, retained } }" }
+        '401': { description: account_session_required, invalid_session or invalid_confirmation }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: plan_changed }
+        '422': { description: invalid_deletion or invalid_purge_plan }
+        '429': { description: rate_limited }
   /api/inbox/connections:
     get:
       summary: List the account's channel connections

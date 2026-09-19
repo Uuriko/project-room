@@ -33,6 +33,7 @@ import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
+import { createDeletionSecret, executeAccountDeletion, inventoryFromStore, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
@@ -140,6 +141,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       throw new ServiceError(429, "rate_limited", checked.message, { "Retry-After": String(Math.ceil(checked.retryAfterMs / 1000)) });
     }
   };
+  // RC-2026-09-19-078: signs the confirm-then-delete confirmation tokens.
+  // Per server instance; tokens are only ever redeemed against the server
+  // that issued them.
+  const accountDeletionSecret = createDeletionSecret();
   const google = () => {
     if (!googleAuth) return null;
     // Persistent PKCE state: the Durable Object's SQLite survives Worker
@@ -1732,6 +1737,72 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();
+      }
+      // ---- Account management (RC-2026-09-19-078) ----
+      // Account-level profile (display name / avatar), first-run onboarding
+      // for new accounts, the deletion retention policy, and confirm-then-
+      // delete account deletion wired to src/account-deletion.mjs via
+      // server/account-deletion.mjs. All of these require the authenticated
+      // account session and act only on the caller's own account.
+      if (url.pathname === "/api/account/profile") {
+        if (req.method === "GET") {
+          const session = requireAccountSession();
+          return json(res, 200, store.accountProfile(session.account.id));
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`account-profile:${remoteAddress}`, 30);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        return json(res, 200, store.updateAccountProfile(session.account.id, await body(req)));
+      }
+      if (url.pathname === "/api/account/onboarding") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const session = requireAccountSession();
+        return json(res, 200, store.onboardingState(session.account.id));
+      }
+      if (url.pathname === "/api/account/onboarding/complete") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`account-onboarding:${remoteAddress}`, 30);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        return json(res, 200, store.completeOnboarding(session.account.id));
+      }
+      if (url.pathname === "/api/account/retention") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const session = requireAccountSession();
+        return json(res, 200, { policy: RETENTION_POLICY });
+      }
+      if (url.pathname === "/api/account/deletion/plan") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const session = requireAccountSession();
+        rate(`account-deletion-plan:${remoteAddress}`, 10);
+        const { plan, summary } = planAccountDeletion(store, session.account.id);
+        return json(res, 200, {
+          plan,
+          summary,
+          confirmationToken: issueDeletionToken(accountDeletionSecret, session.account.id, plan),
+          retention: RETENTION_POLICY,
+        });
+      }
+      if (url.pathname === "/api/account/delete") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`account-delete:${remoteAddress}`, 5);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        const data = await body(req);
+        if (!exact(data, ["confirmationToken"]) || typeof data.confirmationToken !== "string" || data.confirmationToken.length === 0) {
+          reject(422, "invalid_deletion", "A deletion confirmation token from GET /api/account/deletion/plan is required");
+        }
+        // Re-plan from the live store and verify the token against the fresh
+        // plan: data changed after confirmation 409s as plan_changed.
+        const { plan } = planAccountDeletion(store, session.account.id);
+        verifyDeletionToken(accountDeletionSecret, session.account.id, plan, data.confirmationToken);
+        const receipt = executeAccountDeletion(store, plan);
+        setCookie(res, accountCookieName, "", 0);
+        return json(res, 200, { deleted: true, accountId: session.account.id, receipt });
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");

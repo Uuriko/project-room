@@ -21,9 +21,12 @@
 //   - legalHoldReason: human-readable reason shown at confirmation time.
 //                     Defaults to DEFAULT_LEGAL_HOLD_REASON.
 //
-// Suggested wiring (follow-up slice): DELETE /api/account ->
-// planDeletion(account, inventoryFromStore(userId)) -> confirm with the
-// user using summarizePurge(plan) -> execute steps in order, then
+// Suggested wiring (implemented by server/account-deletion.mjs,
+// RC-2026-09-19-078): GET /api/account/deletion/plan ->
+// planDeletion(account, inventoryFromStore(store, accountId)) -> confirm
+// with the user using summarizePurge(plan) plus the returned
+// confirmationToken -> POST /api/account/delete { confirmationToken } ->
+// execute steps in order (executeAccountDeletion), then
 // validatePurgePlan(plan) as a post-run completeness check.
 
 export const PLAN_FORMAT_VERSION = "1.0.0";
