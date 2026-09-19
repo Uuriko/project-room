@@ -2330,6 +2330,46 @@ $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"))
 $("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
 $("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
 $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
+// Connecting an agent is the thing this room does that a chat app does not,
+// and the sign-in screen showed no sign of it: "Welcome.", one Google button,
+// and a More options disclosure hiding everything else. So the prompt sits
+// here, outside that disclosure, readable before anything is clicked, and the
+// explanation is what goes behind a summary instead.
+//
+// The address is built from location.origin rather than written down, so it
+// always names the host the reader is actually on. A hardcoded one goes stale
+// the first time this is served elsewhere, and a staging address in
+// agent-facing copy is already something live-audit fails the build for.
+const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and follow it to join my Project Room.`;
+function fillJoinAgent() {
+  const field = $("#join-agent-prompt");
+  if (!field) return;
+  field.value = joinAgentPrompt();
+  for (const [id, path] of [["#join-agent-packet", "/llms.txt"], ["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
+    const link = $(id);
+    if (link) link.href = `${location.origin}${path}`;
+  }
+}
+fillJoinAgent();
+$("#join-agent-copy")?.addEventListener("click", async () => {
+  const field = $("#join-agent-prompt"), status = $("#join-agent-status");
+  // .form-status is display:none until it carries .visible, so setting the
+  // text alone writes a message nobody sees.
+  const say = text => { if (status) { status.textContent = text; status.classList.add("visible"); } };
+  try {
+    const write = navigator.clipboard?.writeText?.(field.value);
+    if (!write) throw new Error("clipboard");
+    // The same bound the rest of the app uses: a clipboard promise that never
+    // settles must not leave the control looking stuck.
+    await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 800))]);
+    say("Copied. Paste it into your agent.");
+  } catch {
+    // This fallback works precisely because the prompt is visible: select it
+    // for them and say so, rather than failing with nothing to copy.
+    field.select?.();
+    say("Copy the selected text.");
+  }
+});
 $("#access-key-reveal")?.addEventListener("click", () => {
   const field = $("#access-key"), show = field.type === "password";
   field.type = show ? "text" : "password";
