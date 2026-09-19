@@ -204,8 +204,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 #people-panel > summary { list-style: none; }
 #people-panel > summary::-webkit-details-marker { display: none; }
 #people-panel > summary::before { display: none; }
-.people-actions { display: flex; gap: .4rem; margin: 0 0 .5rem; }
-.people-actions .button { min-height: 36px; padding: .35rem .7rem; font-size: .78rem; }
+.people-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0; }
+.people-actions .button { width: auto; min-height: 36px; padding: .35rem .7rem; font-size: .78rem; }
 .create-room-details { margin: 0 0 .5rem; font-size: .78rem; color: var(--muted); }
 .create-room-details summary { min-height: 36px; cursor: pointer; color: var(--text); font-weight: 600; }
 .room-main { display: flex; flex-direction: column; min-width: 0; min-height: calc(100vh - 4.5rem); max-height: calc(100vh - 4.5rem); }
@@ -400,7 +400,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .room-guide p { margin: 0; flex: 1 1 16rem; color: var(--muted); font-size: .95rem; line-height: 1.5; }
 #room-guide-dismiss { width: auto; }
 #people-hint:empty { display: none; }
-.people-actions { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0 .8rem .35rem; }
+.people-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0; padding: 0; }
 .people-actions .button { width: auto; }
 .create-room-details { margin: 0 .8rem .5rem; font-size: .9rem; }
 .create-room-details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }

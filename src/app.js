@@ -2692,6 +2692,14 @@ function ownsRoomActions(context = roomActionsContext) {
     && client.ownsAccountSession() && !$("#main").hidden && $("#inbox-panel").hidden
     && (!context || context.session === session && context.generation === client.generation));
 }
+function revealPeopleChrome() {
+  $("#people-panel").open = true;
+  const toggle = $("#sidebar-toggle");
+  if (toggle && getComputedStyle(toggle).display !== "none") {
+    $("#main").classList.add("sidebar-open");
+    toggle.setAttribute("aria-expanded", "true");
+  }
+}
 function roomActionEntries() {
   return [
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
@@ -2755,7 +2763,7 @@ function chooseRoomAction(id) {
     return;
   }
   if (id === "how-agent") {
-    $("#people-panel").open = true;
+    revealPeopleChrome();
     const button = $("#connect-agent-button");
     const target = button && !button.hidden ? button : $("#people-panel > summary");
     target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
@@ -2775,7 +2783,8 @@ function chooseRoomAction(id) {
   if (id === "search" || id === "mentions" || id === "pinned-search") {
     if ($("#search-form").hidden) $("#topbar-search-toggle").click();
   }
-  if (entry.reveal) $(entry.reveal).open = true;
+  if (entry.reveal === "#people-panel") revealPeopleChrome();
+  else if (entry.reveal) $(entry.reveal).open = true;
   const target = $(entry.target); target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
   if (entry.activate) target.click();
 }

@@ -28,13 +28,38 @@ async function setup(t, mobile = false) {
   });
   await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#people-panel > summary").click();
-  const open = async () => { await page.locator("#connect-agent-button").click(); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
+  const reveal = async () => {
+    if (!(await page.locator("#room-sidebar").isVisible())) {
+      await page.locator("#sidebar-toggle").click();
+      await page.locator("#room-sidebar").waitFor({ state: "visible" });
+    }
+    await page.locator("#connect-agent-button").waitFor({ state: "visible" });
+  };
+  await reveal();
+  const open = async () => { await reveal(); await page.locator("#connect-agent-button").click(); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
   const create = async () => { await page.locator("#agent-connect-name").fill("Synthetic Claude"); await page.locator("#agent-create").click(); };
   const config = async () => { await page.locator("#agent-private-details > summary").click(); await page.waitForFunction(() => document.querySelector("#agent-private-config").value.length > 0); return JSON.parse(await page.locator("#agent-private-config").inputValue()); };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/agent-connect-${name}.png` }); };
   return { ...f, page, origin, open, create, config, capture };
 }
+
+test("Add agent stays visible in the People rail when the disclosure is closed", { timeout: 20000 }, async t => {
+  const f = await setup(t);
+  assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true);
+  assert.equal(await f.page.locator("#people-panel").evaluate(node => node.contains(document.getElementById("connect-agent-button"))), false);
+  await f.page.locator("#people-panel").evaluate(node => { node.open = false; });
+  assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true, "Add agent must not live behind the People disclosure");
+  await f.capture("add-agent-visible");
+});
+
+test("Add agent is visible on mobile after the sidebar menu opens", { timeout: 20000 }, async t => {
+  const f = await setup(t, true);
+  assert.equal(await f.page.locator("#room-sidebar").isVisible(), true);
+  assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true);
+  await f.page.locator("#people-panel").evaluate(node => { node.open = false; });
+  assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true);
+  await f.capture("add-agent-visible-mobile");
+});
 
 test("browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access", { timeout: 30000 }, async t => {
   const f = await setup(t), requests = [];
