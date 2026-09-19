@@ -193,3 +193,18 @@ test("connection list surfaces the agent's first action so enrollment closes the
   assert.ok(!Number.isNaN(Date.parse(after.firstActionAt)));
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
+
+test("create stamps catalog agentType on the member and omits it when unset", t => {
+  const f = fixture(t);
+  const typed = f.apply({ ...f.request, agentType: "claude-code" });
+  assert.equal(typed.connection.status, "key_issued");
+  assert.equal(f.store.room("commons").state.members[f.request.memberId].agentType, "claude-code");
+  const other = f.secret();
+  const plain = f.apply({
+    action: "create", requestId: randomUUID(), memberId: `agent-${randomUUID()}`,
+    displayName: "Plain helper", access: "chat", keyHash: other.keyHash,
+    expiresAt: f.request.expiresAt, expectedOwnerRevision: 0
+  });
+  assert.equal("agentType" in f.store.room("commons").state.members[plain.connection.memberId], false);
+  assert.throws(() => f.apply({ ...f.request, memberId: `agent-${randomUUID()}`, requestId: randomUUID(), keyHash: f.secret().keyHash, agentType: "not a type" }), { code: "invalid_connection" });
+});
