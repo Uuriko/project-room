@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createOAuthProvider, OAuthProviderError, OAUTH_SCOPES } from "../server/oauth-provider.mjs";
 
-const sha256 = t => createHash("sha256").update(t).digest("hex");
 const base64url = b => Buffer.from(b).toString("base64url");
 const challengeFor = verifier => base64url(createHash("sha256").update(verifier).digest());
 
