@@ -1092,6 +1092,17 @@ paths:
                     type: array
                     items:
                       type: object
+                  next:
+                    type: array
+                    description: Machine-readable follow-ups — claim-session when sessions are listed (the workItemId is filled into the atomic claim body), start-session when none are open
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        description: { type: string }
     post:
       summary: Drive a work session
       description: |
