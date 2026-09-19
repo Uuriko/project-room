@@ -13,7 +13,7 @@ import { validAgentNext } from "../src/agent-error.mjs";
 import {
   SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType, attemptReceipts, cancellationState,
   listWorkItemSessions, workItemSessionContract, applySessionFields, sessionWorker,
-  SESSION_HEARTBEAT_STALE_MS
+  presentedSessionStatus, SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
 
 const PEOPLE = /@gmail|John |Potter |acct-|accountId|people-data/i;
@@ -106,6 +106,10 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
   assert.equal(next.workItems["work-spec-review"].status, "processing");
   assert.equal(next.workItems["work-spec-review"].state, "completed");
   assert.equal(next.workItems["work-spec-review"].revision, review.revision + 1);
+  assert.equal(presentedSessionStatus(review), "done");
+  assert.equal(listWorkItemSessions({ review })[0].status, "done");
+  assert.equal(listWorkItemSessions({ review }, "queued").length, 0);
+  assert.equal(listWorkItemSessions({ review }, "done")[0].workItemId, "work-spec-review");
 });
 
 test("HTTP lists by status, sets status, and Stop writes stop_requested_at plus Event", async t => {
@@ -196,7 +200,7 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 34);
+  assert.equal(store.storagePlatform.version(store.db), 35);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 

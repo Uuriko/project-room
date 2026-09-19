@@ -38,13 +38,23 @@ for (const touch of [false, true]) {
     const open = page.getByRole("link", { name: "Open", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
-    const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
     const people = page.getByRole("link", { name: "People", exact: true });
     assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
     assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
     assert.equal(await paste.getAttribute("href"), "#join-agent");
-    assert.equal(await connect.getAttribute("href"), "#connect");
     assert.equal(await people.getAttribute("href"), "#people");
+    assert.equal(await page.locator(".actions a").count(), 2, "first paint is Open + Join");
+    assert.equal(await page.locator(".actions .open").count(), 1);
+    assert.equal(await page.locator(".whispers .whisper").count(), 2, "People + Join with code are whispers");
+    assert.equal(await page.getByRole("heading", { name: "Connect", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", { name: "Connect an agent", exact: true }).count(), 0);
+    const mcp = page.getByRole("link", { name: "Add Room as MCP", exact: true });
+    assert.equal(await mcp.getAttribute("href"), "https://www.getdasha.com/room/mcp");
+    assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
+    assert.match(await page.locator("#connect").innerText(), /GET snippets\. No OAuth\. No keys\./);
+    assert.match(await page.locator("#connect").innerText(), /Invite-code \(RM-\)/);
+    assert.equal(await page.locator('a[href="/room/mcp"]').count(), 1, "#667 same-bytes link lives under the spine");
+    assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).getAttribute("href"), "#join-code");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
     assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
     assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
@@ -56,7 +66,8 @@ for (const touch of [false, true]) {
     assert.match(joinText, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
     assert.match(await page.locator("#join-prompt").inputValue(), /Join Project Room as an agent/);
     assert.match(await page.locator("#join-prompt").inputValue(), /No Room key in this chat/);
-    assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).getAttribute("href"), "/room/join.txt");
+    assert.ok((await page.getByRole("link", { name: "join.txt", exact: true }).count()) >= 1);
+    assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).first().getAttribute("href"), "/room/join.txt");
     const mcpJoin = page.locator("#mcp-join");
     await mcpJoin.waitFor();
     // Door h2s use text-transform:uppercase; match source text like join-agent.
@@ -67,7 +78,6 @@ for (const touch of [false, true]) {
     await joinCode.waitFor();
     assert.match(await page.locator("#join-code-title").textContent(), /Join with code/);
     assert.equal(await page.locator("#join-code").getAttribute("placeholder"), "ABC-DEF-GHJ");
-    await connect.click();
     await page.locator("#connect").waitFor();
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
     assert.match(await page.locator("body").innerText(), /Joining as a person or an agent is free/);
@@ -84,6 +94,10 @@ for (const touch of [false, true]) {
     assert.match(connectText, /that is not a shareable invite/);
     assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
     assert.match(connectText, /Wake, Pull, Desktop, and Takeover/);
+    assert.match(connectText, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
+    assert.match(connectText, /Add Room as MCP/);
+    assert.match(connectText, /GET snippets\. No OAuth\. No keys\./);
+    assert.match(connectText, /Invite-code \(RM-\)/);
     assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
     assert.match(connectText, /choose “Use my AI” and paste the agent packet/);

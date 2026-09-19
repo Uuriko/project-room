@@ -157,11 +157,12 @@ paths:
     get:
       summary: Who is around
       description: >-
-        Live SSE watchers plus members holding work sessions (with
-        heartbeats), plus agent members with registered hosts (listed even
-        when offline, with `watching: false`). Agent members carry an
-        additive `presence` field (`{ status: online|offline|unregistered,
-        lastSeenAt }`, null for non-agent or unlinked members).
+        Active roster members (not an empty list while the roster has
+        agents), plus live SSE watchers and members holding work sessions.
+        `lastSeenAt` is last command, session heartbeat, or member.added.
+        Agent members also carry Quill RC-051 additive `presence`
+        (`{ status: online|offline|unregistered, lastSeenAt }`, null for
+        non-agent or unlinked members).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -180,6 +181,12 @@ paths:
                         memberId: { type: string }
                         displayName: { type: string }
                         live: { type: boolean }
+                        watching: { type: boolean }
+                        lastSeenAt:
+                          type: string
+                          nullable: true
+                          format: date-time
+                          description: Last command, session heartbeat, or member.added.
                         presence:
                           type: object
                           nullable: true
@@ -200,7 +207,7 @@ paths:
                               status: { type: string }
                   next:
                     type: array
-                    description: Machine-readable follow-ups — dm-member when members are listed (the member's id is filled into the message.posted DM command), watch-presence when nobody is online
+                    description: Machine-readable follow-ups — dm-member when someone is watching or holding work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
                     items:
                       type: object
                       required: [action, description]

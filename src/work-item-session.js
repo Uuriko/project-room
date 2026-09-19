@@ -163,12 +163,21 @@ export function sessionWorker(item, nowMs = Date.now()) {
   return session.worker_member_id;
 }
 
+// Presentation only: completed work must not keep a never-started session
+// card on queued, or Done chips look stuck. The ledger status stays queued
+// on sessionRecord — this does not rewrite history.
+export function presentedSessionStatus(item) {
+  const session = sessionRecord(item);
+  if (session.status === SESSION_STATUSES.QUEUED && item?.state === "completed") return SESSION_STATUSES.DONE;
+  return session.status;
+}
+
 export function sessionCard(item, cancellation = null) {
   const session = sessionRecord(item);
   return {
     workItemId: item.id,
     title: item.title,
-    status: session.status,
+    status: presentedSessionStatus(item),
     stop_requested_at: session.stop_requested_at,
     heartbeat_at: session.heartbeat_at,
     worker_member_id: session.worker_member_id,

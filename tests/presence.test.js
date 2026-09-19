@@ -39,23 +39,26 @@ async function serve(t) {
 const presenceOf = async (request, token) =>
   (await (await request("/api/rooms/commons/presence", { token })).json()).members;
 
-test("presence shows session workers with their work items; idle members are absent", async t => {
+test("presence mirrors the active roster; claims add workingOn", async t => {
   const { request, agentKey, ownerKey } = await serve(t);
-  assert.deepEqual(await presenceOf(request, agentKey), []);
+  const idle = await presenceOf(request, agentKey);
+  assert.equal(idle.length, 2);
+  assert.deepEqual(idle.map(m => m.memberId).sort(), ["agent", "owner"]);
+  assert.ok(idle.every(m => m.watching === false && m.workingOn.length === 0));
+  assert.ok(idle.every(m => typeof m.lastSeenAt === "string"));
   const started = await request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey,
     data: { requestId: randomUUID(), workItemId: "presence-one", expectedRevision: 0, action: "set_status", status: "processing" } });
   assert.equal(started.status, 201);
   const members = await presenceOf(request, agentKey);
-  assert.equal(members.length, 1);
-  assert.equal(members[0].memberId, "agent");
-  assert.equal(members[0].displayName, "Test agent");
-  assert.equal(members[0].kind, "agent");
-  assert.equal(members[0].watching, false);
-  assert.equal(members[0].workingOn.length, 1);
-  assert.equal(members[0].workingOn[0].workItemId, "presence-one");
-  assert.equal(typeof members[0].workingOn[0].heartbeat_at, "string");
-  // owner holds no session and watches nothing: not on the roster
-  assert.ok(!members.some(m => m.memberId === "owner"));
+  assert.equal(members.length, 2);
+  const agent = members.find(m => m.memberId === "agent");
+  assert.equal(agent.displayName, "Test agent");
+  assert.equal(agent.kind, "agent");
+  assert.equal(agent.watching, false);
+  assert.equal(agent.workingOn.length, 1);
+  assert.equal(agent.workingOn[0].workItemId, "presence-one");
+  assert.equal(typeof agent.workingOn[0].heartbeat_at, "string");
+  assert.ok(members.some(m => m.memberId === "owner" && m.workingOn.length === 0));
   // strangers cannot read presence
   assert.equal((await request("/api/rooms/commons/presence")).status, 401);
   void ownerKey;

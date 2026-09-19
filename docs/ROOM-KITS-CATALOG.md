@@ -65,6 +65,7 @@ Pairs [#454](https://github.com/Uuriko/project-room/pull/454)
 | **Skillbox-shaped library** | Optional later. Not a live door. Steal versioned skill revisions + scoped keys; do not fork Skillbox into the Worker. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
 | **Harness bridge** | Optional later. Not a live door. Provider once · pick model · pick harness. When UI ships: **enrolled-agent config under Connect**, not a fourth Join path. Keys never on argv / never in chat. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
 | **Interlateral-aligned receipts / authority cards** | Optional later. Not a live door. Trust Handoff v0 + Agent Interaction Receipt fields. Visible authority cards = later face, **not People-rail HTML**. | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) · [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) |
+| **Connect Wake / Pull** | Chrome pointer only. `@mention` uses Connect Wake/Pull once Quill RC-051 lands. No second wake system. | [CONNECT-WAKE.md](CONNECT-WAKE.md) |
 
 ## Later: App Store
 

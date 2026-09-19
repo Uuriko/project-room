@@ -1893,8 +1893,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }
-  // Who is around right now: live SSE watchers plus members holding fresh
-  // session claims. Derived from existing data — no new tables, no migration.
+  // Who is around: the active roster, plus live SSE watchers and fresh
+  // session claims. lastSeenAt is last command `at` or session heartbeat.
+  // Derived from existing data — no new tables, no people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
@@ -1902,26 +1903,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       const now = this.now();
       const working = new Map();
+      const heartbeats = new Map();
       for (const item of Object.values(room.state.workItems ?? {})) {
+        const session = sessionRecord(item);
+        if (session.worker_member_id && session.heartbeat_at) {
+          const prev = heartbeats.get(session.worker_member_id);
+          if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+        }
         const worker = sessionWorker(item, now);
         if (!worker) continue;
         if (!working.has(worker)) working.set(worker, []);
         working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
       }
-      const online = new Map();
-      for (const memberId of watcherMemberIds ?? []) {
-        const m = members[memberId];
-        if (m && m.active !== false) online.set(memberId, { watching: true });
-      }
-      for (const [memberId, items] of working) {
-        const m = members[memberId];
-        if (!m || m.active === false) continue;
-        online.set(memberId, { watching: !!online.get(memberId)?.watching, workingOn: items });
-      }
-      // RC-2026-09-18-051: additive host presence for agent members. The
-      // member's linked agent identity (identity_links) resolves to its
-      // heartbeat status; offline agents with registered hosts are listed
-      // (watching:false) so clients can see wakeable agents that are away.
+      const lastCommandAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? GROUP BY actor`
+      ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+      const addedAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+      ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+      const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
+      // RC-2026-09-18-051: additive host presence for agent members.
       const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
       const agentPresence = memberId => {
         const m = members[memberId];
@@ -1929,24 +1932,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const link = identityLinkOf.get(roomId, memberId);
         if (!link) return null;
         const status = this.agentHeartbeats.statusOf(link.identityId);
+        // Unregistered (no host) stays null so RC-051 clients keep the
+        // "no presence field or absent" contract. Roster still lists the member.
+        if (status.status === "unregistered") return null;
         return { status: status.status, lastSeenAt: status.lastSeenAt };
       };
-      for (const memberId of Object.keys(members)) {
-        if (online.has(memberId)) continue;
-        const p = agentPresence(memberId);
-        if (p && p.status !== "unregistered") online.set(memberId, { watching: false, offline: true });
-      }
-      const listed = [...online.entries()].map(([memberId, info]) => ({
-        memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
-        watching: info.watching, workingOn: info.workingOn ?? [],
-        statusMessage: members[memberId].statusMessage ?? null,
-        presence: agentPresence(memberId), // null for non-agent/unlinked members
-      }));
+      const listed = Object.values(members)
+        .filter(m => m && m.active !== false)
+        .map(m => {
+          const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+          return {
+            memberId: m.id, displayName: m.displayName, kind: m.kind,
+            watching: watching.has(m.id), workingOn: working.get(m.id) ?? [],
+            lastSeenAt, statusMessage: m.statusMessage ?? null,
+            presence: agentPresence(m.id)
+          };
+        })
+        .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+      // RC-2026-09-18-054: next[] follows who is actually around (watching
+      // or holding work), not the idle roster Muse lists for honesty.
+      const onlineIds = listed.filter(m => m.watching || m.workingOn.length > 0).map(m => m.memberId);
       return {
         members: listed,
-        // RC-2026-09-18-054: presence answers "who's here" — name how to
-        // reach them. The first listed member is a concrete DM example.
-        next: Object.freeze(presenceNext(roomId, listed.map(m => m.memberId))),
+        next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
     });
   }

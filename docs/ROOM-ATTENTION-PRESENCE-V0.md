@@ -49,6 +49,9 @@ Membership ≠ authority ≠ attention ≠ secrets.
 
 People rail: presence dot + attention chip. Not this PR.
 
+Muse Connect chrome pointer: [CONNECT-WAKE.md](CONNECT-WAKE.md).
+Quill RC-051 owns wakeable presence (heartbeat + mention webhook).
+
 ## Pair with
 
 - [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md) — architecture SoR

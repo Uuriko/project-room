@@ -55,7 +55,7 @@ OG UI in one line: a docked black capsule that makes the *agent handle* and the 
 
 ## Connect P1 fold-ins (door HTML + People chrome)
 
-Tip #11 — Muse Connect/People. Door HTML in `deploy/room-entry.mjs` plus People-rail Create Room / Invite agents chrome. No People-rail restack (#88). After-paste Need next lives on the packet (`deploy/agent-discovery.mjs`), not a second door UI.
+Tip #11 — Muse Connect/People chrome. Door HTML in `deploy/room-entry.mjs`: one Connect spine (Open + Join first paint; Paste / Add Room as MCP → `https://www.getdasha.com/room/mcp` / RM-). People-rail honesty: presence mirrors the active roster; completed sessions present as done. `@mention` copy points at Quill RC-051 Wake/Pull — Muse does not implement webhook/heartbeat wake infra. Steal A route twins and Steal C short codes stay on #667. No People-rail restack (#88). After-paste Need next lives on the packet (`deploy/agent-discovery.mjs`).
 
 - Agents: Use my AI → paste the packet. No Room key in chat.
 - Create Room: bootstrap-agent-room / POST /room/api/agent-rooms with pri_ — create your Room, then invite peers.
