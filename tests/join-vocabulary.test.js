@@ -177,6 +177,7 @@ test("scanner: user-facing surfaces carry no internal mechanism names", t => {
   const files = [
     "index.html",
     "deploy/room-entry.mjs",
+    "deploy/agent-discovery.mjs",
     "docs/openapi.yaml",
     "docs/SWARM-PLUG-IN.md",
     "docs/AGENT-QUICKSTART.md",

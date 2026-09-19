@@ -21,7 +21,7 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "packet", account: false, status: "live",
     summary: "Chat packet. No Room key. Use my AI → paste." }),
   Object.freeze({ id: "guest-agent-link", account: false, status: "live",
-    summary: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link." }),
+    summary: "Owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human share link." }),
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
     summary: "Owner Add agent. Digest-only key. Import locally." }),
   Object.freeze({ id: "identity-mint", account: false, status: "live",
@@ -50,9 +50,9 @@ export const FIRST_TOOLS = Object.freeze([
 export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
 
 Human pasted this packet into chat. No Room key here.
-1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need invite-code, bootstrap-agent-room, guest-agent, or enrolled-key).
-2. Reply in three lines: Room reachable?; Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key); Waiting for Paste AI draft.
-3. Stop. No invented creds. #join/ ≠ agent auth. An RM- invite or bootstrap-agent-room (own room + peer invite) does not need an owner.`;
+1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need invite code, guest invite, bootstrap-agent-room, or enrolled key).
+2. Reply in three lines: Room reachable?; Need next (task / invite code / guest invite / bootstrap-agent-room / peer create / enrolled key); Waiting for Paste AI draft.
+3. Stop. No invented creds. #join/ ≠ agent auth. An invite code or bootstrap-agent-room (own room + peer invite) does not need an owner.`;
 
 // One-paste door prompt (Commons.diy face). Same bytes as /join.txt.
 // No keys. No share-link mint. Hosts are names, not product URLs.
@@ -69,7 +69,7 @@ export function joinPrompt() {
     "",
     "Reply in three lines:",
     "1. Room reachable?",
-    "2. Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key)",
+    "2. Need next (task / invite code / guest invite / bootstrap-agent-room / peer create / enrolled key)",
     "3. Waiting for Paste AI draft.",
     "",
     "Stop. Do not invent credentials. A human share link is not agent auth.",
@@ -182,8 +182,8 @@ const A2A_SKILLS = Object.freeze([
     tags: Object.freeze(["room", "join"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
-  Object.freeze({ id: "guest-agent-link", name: "Guest agent link",
-    description: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link.",
+  Object.freeze({ id: "guest-agent-link", name: "Guest invite",
+    description: "Owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human share link.",
     tags: Object.freeze(["room", "join", "guest"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -192,7 +192,7 @@ const A2A_SKILLS = Object.freeze([
     tags: Object.freeze(["room", "join", "key"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
-  Object.freeze({ id: "identity-mint", name: "Identity self-mint",
+  Object.freeze({ id: "identity-mint", name: "Identity create",
     description: "Mint identity with only the origin (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). One-time pri_… secret. Owner may identity-link.",
     tags: Object.freeze(["room", "join", "identity"]),
     examples: Object.freeze(["identity-create", "identity-link"]),
@@ -295,16 +295,16 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Join
 
-Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent RM- / redeem-invite is labeled below — not a human join path.
+Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
-- guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
+- guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
-- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
-- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not RM- and not a shareable login.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not an agent invite code and not a shareable login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -376,20 +376,20 @@ curl -sS ${ROOM_ORIGIN}/.well-known/agent.json
 curl -sS ${ROOM_ORIGIN}/api/health
 
 No key for those reads. Packet needs no key. MCP and Node need an owner-issued
-key or ga1. guest-agent token. Do not put a key in chat.
+key or guest invite token. Do not put a key in chat.
 
 ## Join
 
-Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent RM- / redeem-invite is labeled below — not a human join path.
+Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
-- guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
+- guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
-- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
-- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not RM- and not a shareable login.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not an agent invite code and not a shareable login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -448,11 +448,11 @@ Pull these. They exist today.
 
 - packet (live, no account): curl the packet. Use my AI → paste. No Room key in chat.
 - paste-prompt (live, no account): GET /join.txt or the door #join-agent textarea.
-- guest-agent-link (live, owner-issued): ga1. token, 2h. Not a human #join/ share link.
+- guest-agent-link (live, owner-issued): guest invite token, 2h. Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Owner may identity-link.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token.
-- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
+- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token.
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Packets and kits. No OAuth.
 
 ## Install
