@@ -1365,6 +1365,11 @@ function renderMessages() {
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
     replacement?.focus({ preventScroll: true });
+  } else if (focused && focused.isConnected && document.activeElement !== focused
+    && (document.activeElement === document.body || !list.contains(document.activeElement))) {
+    // Reordering the timeline (insertBefore) can drop focus even though the
+    // control itself was never replaced. Restore it so keyboard focus stays put.
+    focused.focus({ preventScroll: true });
   }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;

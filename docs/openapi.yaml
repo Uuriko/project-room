@@ -849,6 +849,7 @@ paths:
                         revision: { type: integer }
                         accountableHumanId: { type: string, nullable: true }
                         identityId: { type: string, nullable: true }
+                        agentType: { type: string, nullable: true, description: First-party Connect catalog type; present only on members created from the agent catalog }
                         accountBound: { type: boolean }
                         membershipOrigin: { type: string, enum: [bootstrap, added, invitation] }
                         joinedAt: { type: string, format: date-time, nullable: true }

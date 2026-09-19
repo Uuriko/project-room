@@ -49,3 +49,17 @@ test("saved result questions and unknown retries recover after a newer result wi
   memory.set(recovery.key, JSON.stringify(saved));
   assert.equal(recovery.read("scope", state).drafts.entries.has(key), false);
 });
+test("channel-bearing pending reply questions recover with the channel retained", () => {
+  const state = fixture(), q = creditQuestion(state, "work", "reviewer", "result"), key = replyDraftKey(q.mode);
+  const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k,v) => memory.set(k,v), removeItem: k => memory.delete(k) }, () => 1000);
+  const drafts = new ConversationDrafts();
+  // The pending command was built with a channel; the draft entry retains it so recovery recomputes identical contents.
+  const data = replyDraftData(q.mode, { ...q, messageId: "question", channelId: "general" });
+  assert.equal(data.channelId, "general");
+  const pending = draftCommand(null, "message.posted", data);
+  drafts.save(key, { ...q, threadId: "text", channelId: "general", pending });
+  recovery.write("scope", drafts, "text", key);
+  const restored = recovery.read("scope", state);
+  assert.equal(restored.activeKey, key, "the channel-bearing pending question is not dropped");
+  assert.deepEqual(restored.drafts.get(key).pending, pending);
+});

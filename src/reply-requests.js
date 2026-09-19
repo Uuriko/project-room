@@ -115,7 +115,7 @@ export function prepareReplyPost(state, incoming) {
   const mode = replyPostMode(incoming.data);
   requireValid(mode, "Reply request policy requires explicit request fields");
   const data = incoming.data;
-  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "channelId", "requestPolicyVersion", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");
