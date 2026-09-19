@@ -190,6 +190,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.keyboard.press("Control+Enter");
     await intercepted.promise;
     assert.equal(await page.locator("#message-form").getAttribute("aria-busy"), "true");
+    await page.locator("#topbar-search-toggle").click();
     await page.locator("#message-search").fill("short story");
     release.resolve();
     await waitForSaved();
