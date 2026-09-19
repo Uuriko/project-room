@@ -148,7 +148,7 @@ test("store: a seeded history that ends archived stores the column, and one that
     event({ type: T.MESSAGE_POSTED, actorId: owner, roomId: "s", data: { messageId: "late", body: "Too late" } })]), /Room is archived/);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 1, "the failed seed wrote nothing");
   verifyRoomLifecycle(store);
-  assert.equal(auditRecovery(store).schemaVersion, 35);
+  assert.equal(auditRecovery(store).schemaVersion, STORE_SCHEMA_VERSION);
 });
 
 test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps every room, and the migration is idempotent", { timeout: 120000 }, async t => {
@@ -165,16 +165,36 @@ test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps ev
   assert.doesNotMatch(tableSql(f.store.db), /archived_at/, "the baseline predates the column");
   const rooms = f.store.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
   assert.ok(rooms.length >= 2);
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v34/, "read-only never migrates an older backup");
+  // The refusal names the current schema, so pin the behaviour and not the
+  // number: at v35 this still said v34 and the assertion passed only because
+  // assert.throws matched nothing it was asked to match.
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), new RegExp(`requires schema v${STORE_SCHEMA_VERSION}`), "read-only never migrates an older backup");
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 27, "the refused read-only open changed nothing");
   const current = new RoomStore(f.filename, { now: f.now });
   t.after(() => current.close());
-  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 34);
+  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
   assert.match(tableSql(current.db), /archived_at TEXT/);
-  assert.deepEqual(current.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all(), rooms, "no room row changed beyond the new column");
+  // Opening a v27 database runs every migration up to the current schema, not
+  // only v28, and one of the later ones backfills the default channel into
+  // rooms.projection. So this compares the projections with that key set aside
+  // and then asserts the backfill itself, rather than either failing on a
+  // legitimate change or being loosened until it checks nothing.
+  const migrated = current.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
+  assert.deepEqual(migrated.map(row => row.id), rooms.map(row => row.id), "every room survives the migration");
+  assert.deepEqual(migrated.map(row => row.sequence), rooms.map(row => row.sequence), "no room's sequence moves");
+  for (const [index, row] of migrated.entries()) {
+    const after = JSON.parse(row.projection), before = JSON.parse(rooms[index].projection);
+    assert.deepEqual(Object.keys(after).filter(key => !(key in before)), ["channels"],
+      `${row.id}: the default channel is the only projection key a v27 room gains`);
+    assert.deepEqual(Object.keys(after.channels), ["general"]);
+    assert.equal(after.channels.general.name, "general");
+    assert.equal(after.channels.general.archivedAt, null);
+    delete after.channels;
+    assert.deepEqual(after, before, `${row.id}: no other part of the projection changed`);
+  }
   assert.deepEqual(current.db.prepare("SELECT id FROM rooms WHERE archived_at IS NOT NULL").all(), [], "pre-v28 rooms are not archived");
   const audit = auditRecovery(current);
-  assert.equal(audit.schemaVersion, 35);
+  assert.equal(audit.schemaVersion, STORE_SCHEMA_VERSION);
   const catalog = () => current.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const schema = catalog(), data = current.db.prepare("SELECT * FROM rooms ORDER BY id").all();
   migrateRoomLifecycleV28(current);
