@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
-import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { reportedProducer, verifyWorkResult } from "../src/work-packet.js";
@@ -16,7 +15,7 @@ import { workStatus, nextWorkStep } from "../src/workflow.js";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
-import { WRITER_FUNCTION } from "../server/writer-fence.mjs";
+import { WRITER_FUNCTION, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 
 test("outside credit is strict, mutually exclusive, and never a member identity", () => {
   assert.deepEqual(reportedProducer({ externalProducer: "Writer with AI assistance" }), {
@@ -102,16 +101,27 @@ async function previousFixture(t) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const runtime = join(directory, "runtime"); createRuntimePackage({ repository: process.cwd(), commit: previousCommit, destination: runtime });
   const { RoomStore: OldStore } = await import(pathToFileURL(join(runtime, "server/store.mjs")));
+  // The seed has to come from the packaged runtime, not from the checkout. The
+  // current initialRoom() grants the owner invite_member, a permission minted
+  // after this baseline, and the old reducer refuses the whole room with
+  // "Invalid permissions" - so the fixture stopped being buildable at all, in a
+  // test about outside credit.
+  const { initialRoom: olderInitialRoom } = await import(pathToFileURL(join(runtime, "server/bootstrap.mjs")));
   const filename = join(directory, "room.sqlite"), old = new OldStore(filename); t.after(() => old.close());
-  old.initialize(initialRoom()); const key = old.issueAccessKey("commons", "owner");
+  old.initialize(olderInitialRoom()); const key = old.issueAccessKey("commons", "owner");
   return { old, key, filename, OldStore };
 }
 test("real v25 database upgrades unchanged and retires its already-open writer", async t => {
   const f = await previousFixture(t), before = f.old.room("commons");
   const cached = f.old.db.prepare("UPDATE rooms SET sequence=sequence WHERE id=?"); cached.run("commons");
   const current = new RoomStore(f.filename); t.after(() => current.close());
-  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 34);
-  assert.deepEqual(current.room("commons"), before);
+  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
+  // The upgrade backfills the default channel; nothing else about the room may move.
+  const upgraded = current.room("commons");
+  assert.deepEqual(Object.keys(upgraded.state).filter(key => !(key in before.state)), ["channels"]);
+  assert.deepEqual(Object.keys(upgraded.state.channels), ["general"]);
+  const { channels, ...rest } = upgraded.state;
+  assert.deepEqual({ ...upgraded, state: rest }, before);
   assert.throws(() => cached.run("commons"), new RegExp(`${WRITER_FUNCTION}|unsupported database writer`));
   assert.throws(() => new f.OldStore(f.filename), /schema is newer/);
 });

@@ -39,6 +39,8 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   const before = oldAudit(f.store), catalog = () => f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const oldCatalog = catalog(), cached = f.store.db.prepare("UPDATE accounts SET revision=revision WHERE id=?");
   const roomsBefore = f.store.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
+  const hasAccounts = Boolean(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'").get());
+  const accountsBefore = hasAccounts ? f.store.db.prepare("SELECT * FROM accounts ORDER BY id").all() : [];
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const verify = AgentConnections.prototype.verifyHistory;
   let observedVersion;
@@ -68,6 +70,36 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
       `${row.id}: nothing but the default channel may change in a stored projection`);
   });
   assert.deepEqual(current.db.prepare("SELECT id FROM rooms WHERE archived_at IS NOT NULL").all(), []);
+  // accounts gained display_name, avatar_url and onboarded, so its digest
+  // differs by construction exactly as the rooms digest does. Both are left out
+  // of the blanket digest comparison below and compared row by row here, which
+  // is the stronger statement: a column the baseline had must survive an
+  // upgrade untouched, and a column the upgrade adds must carry the value the
+  // migration promises rather than whatever SQLite defaulted to.
+  if (hasAccounts) {
+    const accountsAfter = current.db.prepare("SELECT * FROM accounts ORDER BY id").all();
+    const memberAccounts = new Set(current.db.prepare("SELECT account_id FROM member_accounts").all().map(row => row.account_id));
+    // What a row that predates each added column must carry. A function rather
+    // than a value because ever_had_room is backfilled from existing
+    // memberships instead of taking its declared default. A column with no
+    // entry here fails on purpose and says so: a migration writing into rows
+    // that already existed is the thing this test is here to notice.
+    const promised = {
+      display_name: () => null,
+      avatar_url: () => null,
+      onboarded: () => 1, // already been through whatever onboarding existed
+      ever_had_room: row => memberAccounts.has(row.id) ? 1 : 0,
+    };
+    assert.deepEqual(accountsAfter.map(row => row.id), accountsBefore.map(row => row.id), "an upgrade neither adds nor drops accounts");
+    accountsAfter.forEach((row, index) => {
+      const original = accountsBefore[index];
+      for (const column of Object.keys(row).filter(column => !Object.hasOwn(original, column))) {
+        assert.ok(promised[column], `accounts.${column} is new since v${version}; say here what a row older than it must carry`);
+        assert.deepEqual(row[column], promised[column](row), `${row.id}.${column}`);
+      }
+      for (const column of Object.keys(original)) assert.deepEqual(row[column], original[column], `${row.id}.${column} changed during the upgrade`);
+    });
+  }
   // A table the baseline never had has nothing to compare against, so the set
   // is derived from the baseline rather than listed. The hand-maintained list
   // below is kept for a different reason - those tables exist in the baseline
@@ -76,7 +108,7 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   // agent_webhook_deliveries) had landed without being added, failing all
   // twenty versions on that alone. Deriving existence cannot rot the same way.
   const baselineTables = new Set(before.tables.map(entry => entry.table));
-  const comparable = row => row.table !== "rooms" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
+  const comparable = row => row.table !== "rooms" && row.table !== "accounts" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
