@@ -2303,7 +2303,9 @@ paths:
         request sits in a pending queue for the owner to approve or deny;
         nothing is auto-approved. Idempotent on the client-supplied
         requestId. Unknown identities and rooms answer with a bare 404.
-        5 requests per identity per hour.
+        5 requests per identity per hour. A new request appends an
+        `access.requested` room event (timeline-visible) and raises an
+        `access_request` notification for the room owner (RC-2026-09-19-071).
       security: []
       requestBody:
         required: true

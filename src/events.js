@@ -50,7 +50,13 @@ export const EVENT_TYPES = Object.freeze({
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
   SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
   CAPABILITIES_ADVERTISED: "capabilities.advertised",
-  OWNERSHIP_TRANSFERRED: "ownership.transferred"
+  OWNERSHIP_TRANSFERRED: "ownership.transferred",
+  // RC-2026-09-19-071 (QAJ-006): a self-serve access request arrived. The
+  // access_requests table stays the source of truth; this event is the
+  // timeline-visible, notification-driving record. The handler validates the
+  // envelope and records nothing in the projection — decisions mutate the
+  // table, never the projection, so a projection copy would go stale.
+  ACCESS_REQUESTED: "access.requested"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -313,7 +319,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
     [EVENT_TYPES.SESSION_STOPPED]: applySession,
-    [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities
+    [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities,
+    [EVENT_TYPES.ACCESS_REQUESTED]: recordAccessRequest
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -889,6 +896,23 @@ function advertiseCapabilities(state, incoming) {
   // Advertising capabilities is self-description, not an authority change, so it
   // leaves member.revision alone (open help invitations/offers are pinned to it).
   member.updatedAt = incoming.at;
+}
+
+// RC-2026-09-19-071 (QAJ-006): an access request arrived. Validates the
+// envelope and records nothing in the projection — the access_requests table
+// is the source of truth and decisions never touch the projection, so a
+// stored copy would go stale. The event still lands in state.eventLog (done
+// by applyEvent itself), which is what the timeline renders and the
+// notification feed derives from.
+function recordAccessRequest(state, incoming) {
+  requireFields(incoming.data, ["requestId", "identityId", "displayName"]);
+  // The ask, not the grant: the owner chooses the final permissions at
+  // decision time. The envelope already bounds the array shape; here it
+  // must simply be non-empty.
+  const permissions = incoming.data.permissions;
+  if (!Array.isArray(permissions) || permissions.length === 0) {
+    throw new Error("Event data missing permissions");
+  }
 }
 
 function recordHandoff(state, incoming) {

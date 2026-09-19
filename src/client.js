@@ -163,6 +163,17 @@ export class AccountClient {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
   }
+  // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
+  // dead invitation mints a self-serve identity (an identity alone grants
+  // nothing) and files an access request the room owner can approve or
+  // deny. Both calls are unauthenticated by design; credentials omitted.
+  mintAccessIdentity(displayName) {
+    return this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName } });
+  }
+  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, requestId }) {
+    return this.request("/api/access-requests", { method: "POST", credentials: "omit",
+      data: { roomId, identityId, displayName, requestedPermissions, note, requestId } });
+  }
   async joinShareLink({ linkToken, displayName, redemptionId }) {
     const session = this.currentSession("joining a room");
     // An authenticated join adds membership, not a new browser identity. Keep

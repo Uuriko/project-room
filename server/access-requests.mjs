@@ -12,8 +12,15 @@
 // transactions, auth, and the identities helper) and exports its schema for
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+// RC-2026-09-19-071 (QAJ-006): a new access request appends an
+// access.requested room event so the request is timeline-visible and drives
+// an owner notification. These imports follow the agent-invites.mjs
+// precedent (same Workers bundle, same optional list in
+// scripts/runtime-package.mjs).
+import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -24,8 +31,7 @@ class ServiceError extends Error {
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// Minimal permission check (avoids importing src/events.js, which is not
-// Workers-bundle-safe). Mirrors memberCan() from src/events.js.
+// Local permission check mirroring memberCan() from src/events.js.
 const memberCan = (authority, memberId, permission) => {
   const member = authority?.members?.[memberId];
   return Array.isArray(member?.permissions) && member.permissions.includes(permission);
@@ -77,6 +83,14 @@ const rowToRequest = row => row ? Object.freeze({
   decidedBy: row.decided_by,
   decisionNote: row.decision_note
 }) : null;
+
+// Mirrors the projection compaction in store.mjs / agent-invites.mjs: strip
+// replay-only caches before persisting the projection.
+const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// Bounded pilot capacity, mirroring agent-invites.mjs (PILOT_LIMITS in
+// store.mjs cannot be imported here without a circular dependency).
+const MAX_ROOM_EVENTS = 10000;
+const MAX_PROJECTION_BYTES = 4 * 1024 * 1024;
 
 export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {
@@ -146,8 +160,54 @@ export class AccessRequests {
           note, status, created_at) VALUES(?,?,?,?,?,?, 'pending', ?)`)
         .run(rid, roomId, identityId, name, JSON.stringify(requestedPermissions),
           note?.trim() || null, now);
+      // RC-2026-09-19-071 (QAJ-006): the arrival is timeline-visible and
+      // drives the owner's notification feed. Same transaction as the
+      // insert, so a request is never recorded without its event. The
+      // idempotent-retry branch above returns before this point, so a
+      // retry never emits a duplicate.
+      this.emitAccessRequested(roomId, {
+        requestId: rid, identityId, displayName: name,
+        requestedPermissions, note: note?.trim() || null, at: now,
+      });
       return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid));
     });
+  }
+
+  // Append the access.requested room event. The requester is not a member,
+  // so they are the actorId as their identity. Archived rooms keep the old
+  // behavior (request recorded, no timeline event — there is no live
+  // timeline audience to notify).
+  emitAccessRequested(roomId, { requestId, identityId, displayName, requestedPermissions, note, at }) {
+    const room = this.store.room(roomId);
+    if (isRoomArchived(room.state)) return;
+    if (room.sequence >= MAX_ROOM_EVENTS) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: createHash("sha256").update(`access-request:${requestId}`).digest("hex"),
+      type: T.ACCESS_REQUESTED,
+      roomId,
+      actorId: identityId,
+      at: new Date(at).toISOString(),
+      data: {
+        requestId,
+        identityId,
+        displayName,
+        // The permissions the requester asked for (the owner chooses the
+        // final grant at decision time). Keyed `permissions` — not
+        // `requestedPermissions` — because validateEnvelope only allows
+        // array values for a fixed set of data keys.
+        permissions: [...requestedPermissions],
+        note,
+      },
+    });
+    let state;
+    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    catch (error) { fail(409, "access_rejected", error.message); }
+    const projection = JSON.stringify(state);
+    if (Buffer.byteLength(projection) > MAX_PROJECTION_BYTES) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    const sequence = room.sequence + 1;
+    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }
 
   // Identity-scoped read: the requesting identity checks its own request.

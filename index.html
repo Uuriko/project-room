@@ -564,6 +564,24 @@
         </form>
         <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite"></p>
         <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
+        <!-- RC-2026-09-19-071 (QAJ-001): the request-access door. Shown only
+             for dead invitations that still name the room (expired / revoked /
+             stale), so a stranger with a dead link can ask to join instead of
+             bouncing. -->
+        <div id="invitation-request-door" hidden>
+          <button id="invitation-request-access" class="button secondary" type="button">Request access</button>
+          <form id="invitation-request-form" hidden>
+            <p class="form-hint">Ask the room owner to let you in. They see your name, your note, and nothing else.</p>
+            <label for="invitation-request-name">Display name</label>
+            <input id="invitation-request-name" type="text" autocomplete="off" spellcheck="false" required maxlength="80">
+            <label for="invitation-request-note">Note for the owner (optional)</label>
+            <textarea id="invitation-request-note" rows="3" maxlength="500" spellcheck="true"></textarea>
+            <div class="form-actions">
+              <button id="invitation-request-submit" class="button primary" type="submit">Send request</button>
+            </div>
+          </form>
+          <p id="invitation-request-status" class="invitation-feedback" role="status" aria-live="polite"></p>
+        </div>
         <div class="form-actions invitation-actions">
           <button id="invitation-dismiss" class="button ghost" type="button">Not now</button>
           <button id="invitation-retry" class="button primary" type="button" hidden>Retry</button>
