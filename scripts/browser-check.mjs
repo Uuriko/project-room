@@ -10,7 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUp } from "./room-chrome.mjs";
+import { openCatchUp, openCatchUpNoLoad } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -284,7 +284,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await historyMessage.click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), "catch-up-55", "history drill-through focuses the message");
     // The history drill-through closes Catch up; re-open it for the attention item.
-    await openCatchUp(page);
+    // Use the no-load variant to avoid refreshing the brief (the test waits for
+    // "New changes available" after a late event).
+    await openCatchUpNoLoad(page);
     await page.locator('#rb-attention-list [data-open-work="w-brief"]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), "w-brief", "current action drill-through focuses the work card");
     mkdirSync("test-results", { recursive: true });

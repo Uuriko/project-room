@@ -23,6 +23,18 @@ export async function openCatchUp(page) {
   await page.locator("#return-brief-panel").evaluate(node => { node.open = true; });
 }
 
+// Open the dialog without triggering the app's loadReturnBrief (for tests
+// that need the dialog open but must not refresh the brief).
+export async function openCatchUpNoLoad(page) {
+  await page.evaluate(() => {
+    const dialog = document.querySelector("#catchup-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+    const panel = document.querySelector("#return-brief-panel");
+    if (panel) panel.open = true;
+  });
+  await page.locator("#catchup-dialog").waitFor({ state: "visible" });
+}
+
 export async function closeCatchUp(page) {
   const dialog = page.locator("#catchup-dialog");
   if (await dialog.evaluate(node => node.open)) {
