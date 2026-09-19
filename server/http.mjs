@@ -1503,6 +1503,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const result = store.createAccountRoom(token, binding, await body(req));
         return json(res, result.duplicate ? 200 : 201, result);
       }
+      if (url.pathname === "/api/account/ensure-default-room" && req.method === "POST") {
+        // RC-2026-09-19-088: first sign-in must never land in an empty void.
+        // Idempotent: an account that already has rooms gets its first room
+        // back with created=false and nothing is created.
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        protectWrite(req, auth, false); rate(`account-default-room:${auth.account.id}`, 10);
+        const existing = store.db.prepare(
+          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
+        if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
+        // Only fresh accounts (created within the last hour) get a default
+        // room — never resurrect one for someone who deliberately left all
+        // of their rooms.
+        const row = store.db.prepare("SELECT created_at, display_name FROM accounts WHERE id=?").get(auth.account.id);
+        if (!row || store.now() - row.created_at > 3600000) return json(res, 200, { room: null, created: false });
+        const roomId = `personal-${randomBytes(9).toString("base64url")}`;
+        const displayName = (typeof row.display_name === "string" && row.display_name.trim()) || "Owner";
+        const created = store.createAccountRoom(token, binding, {
+          roomId, title: "My first room", purpose: "A personal starting room.", kind: "personal", displayName });
+        return json(res, created.duplicate ? 200 : 201, { room: { id: roomId }, created: !created.duplicate });
+      }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {
