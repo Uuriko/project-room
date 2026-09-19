@@ -65,9 +65,10 @@ export const accountRoomEntry = (row, memberId) => ({
 const accountViewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionRevision: auth.sessionRevision, sessionBinding: auth.sessionBinding });
 const text = (value, max, multiline = false) => typeof value === "string" && value.trim().length > 0 && value.length <= max && !(multiline ? controlExceptBreaks : control).test(value);
 
-// An account may create a room when it already administers membership
+// An account may create a room when it has no rooms yet — a stranger becomes
+// owner of their first room — or when it already administers membership
 // somewhere (room owner, or `manage_members` in an active human membership):
-// conversation-only guests and rooms-less accounts cannot spawn rooms in the
+// conversation-only guests and plain members cannot spawn further rooms in the
 // pilot. The creator becomes member "owner" with every permission and is
 // bound to the account like any other human membership. The client-chosen
 // roomId is the idempotency key: the same request returns the same room with
@@ -103,7 +104,10 @@ export function createAccountRoom(store, token, binding, request) {
     if (memberships.length >= ACCOUNT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
     // The same per-room check discovery uses (active human membership with its
     // invitation evidence intact), then owner or manage_members in that room.
-    const administers = memberships.some(({ room_id }) => {
+    // Zero memberships means a stranger's first room: always allowed, they
+    // become its owner. An account that already belongs to rooms keeps the
+    // administration requirement for additional rooms.
+    const administers = memberships.length === 0 || memberships.some(({ room_id }) => {
       let member;
       try { member = store.authenticateAccountSession(token, room_id, binding).member; }
       catch (error) { if (error.status === 403) return false; throw error; }

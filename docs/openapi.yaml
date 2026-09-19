@@ -2965,11 +2965,12 @@ paths:
       summary: Create a room for the signed-in account
       description: |
         Issue #6 A2. Account-session write (X-CSRF-Token, Origin,
-        X-Session-Binding), 10 per minute per account. The account must hold
-        an active human membership that owns a room or carries manage_members
-        (403 room_creation_denied otherwise; provisional room-key accounts are
-        bound to one room). The caller becomes member `owner` of the new
-        room with every permission. The client-chosen `roomId` is the
+        X-Session-Binding), 10 per minute per account. An account with no
+        memberships may always create its first room; otherwise the account
+        must hold an active human membership that owns a room or carries
+        manage_members (403 room_creation_denied otherwise; provisional
+        room-key accounts are bound to one room). The caller becomes member
+        `owner` of the new room with every permission. The client-chosen `roomId` is the
         idempotency key: the same request returns the same room with
         `duplicate: true`; a different room under that id is 409
         room_exists. 409 pilot_limit at 100 memberships.
