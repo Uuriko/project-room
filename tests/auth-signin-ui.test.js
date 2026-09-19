@@ -203,6 +203,43 @@ test("passkey flow drives navigator.credentials.get and the finish route", async
   assert.equal(signins.length, 1);
 });
 
+test("magic request panel asks for a link, not a code", async () => {
+  const { container } = mount();
+  container.fire("click", clickOnDataset("method", { method: "magic" }));
+  assert.ok(container.innerHTML.includes("Email me a sign-in link"), "request button offers a link");
+  assert.ok(!container.innerHTML.includes("Email me a sign-in code"), "no code-first wording remains");
+});
+
+test("magic code phase is link-first with manual code as an opt-in fallback", async () => {
+  const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  container.fire("click", clickOnDataset("method", { method: "magic" }));
+  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  const html = container.innerHTML;
+  assert.ok(html.includes("sign-in link"), "panel tells the user to click the link");
+  assert.ok(html.includes("no typing needed"), "panel promises zero typing");
+  assert.ok(!html.includes('name="code"'), "code input hidden by default");
+  assert.ok(html.includes("data-magic-manual-code"), "manual-code toggle offered");
+  assert.ok(html.includes("Or enter the code manually instead"), "fallback framed as secondary");
+});
+
+test("magic manual-code toggle reveals and hides the code field", async () => {
+  const view = { authenticated: true, account: { id: "acct-magic" } };
+  const { client, signins, container } = mount({
+    "/api/auth/magic/request": { status: "sent" },
+    "/api/auth/magic/consume": view
+  });
+  container.fire("click", clickOnDataset("method", { method: "magic" }));
+  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  container.fire("click", clickOnDataset("magic-manual-code"));
+  assert.ok(container.innerHTML.includes('name="code"'), "toggle reveals the code field");
+  assert.ok(container.innerHTML.includes("Hide the code field"), "toggle label flips");
+  await container.listeners.submit[0](submitForm("magic-code", { code: "12345678" }));
+  assert.equal(client.calls[1].path, "/api/auth/magic/consume");
+  assert.equal(signins.length, 1);
+  container.fire("click", clickOnDataset("magic-manual-code"));
+  assert.ok(!container.innerHTML.includes('name="code"'), "toggle hides the code field again");
+});
+
 test("sign-in failure does not call onSignedIn", async () => {
   const { signins, container } = mount({
     "/api/auth/password/signup": { throw: { code: "email_in_use", message: "That email is already on an account." } }

@@ -50,6 +50,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let passwordFields = { email: "", password: "" };
   let magicPhase = "request"; // or "code"
   let magicEmail = "";
+  let magicManualCode = false; // link-first: code entry is an opt-in fallback
   let busy = false;
 
   const statusNode = () => container?.querySelector("[data-signin-status]") ?? null;
@@ -97,14 +98,17 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   function magicHtml() {
     if (magicPhase === "code") return `<form data-signin-form="magic-code" autocomplete="on">
-      <p class="form-hint">We emailed a sign-in code to ${escapeHtml(magicEmail)}. It expires in 15 minutes.</p>
-      <label>Sign-in code <input name="code" type="text" required autocomplete="one-time-code" inputmode="text" maxlength="128" placeholder="Paste the code"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>
+      <p class="form-hint">We emailed a <strong>sign-in link</strong> to ${escapeHtml(magicEmail)}. Click the link in the email — no typing needed. It expires in 15 minutes.</p>
+      ${magicManualCode
+        ? `<label>Sign-in code <input name="code" type="text" required autocomplete="one-time-code" inputmode="text" maxlength="128" placeholder="Paste the code"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>`
+        : ``}
+      <button type="button" class="text-button" data-magic-manual-code>${magicManualCode ? "Hide the code field" : "Or enter the code manually instead"}</button>
       <button type="button" class="text-button" data-magic-restart>Use a different email</button>
     </form>`;
     return `<form data-signin-form="magic-request" autocomplete="on">
       <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(magicEmail)}"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Email me a sign-in code</button>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Email me a sign-in link</button>
     </form>`;
   }
   function passkeyHtml() {
@@ -169,6 +173,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     if (event.target?.closest?.("[data-magic-restart]")) {
       magicPhase = "request";
+      magicManualCode = false;
+      renderPanel();
+      return;
+    }
+    if (event.target?.closest?.("[data-magic-manual-code]")) {
+      magicManualCode = !magicManualCode;
       renderPanel();
       return;
     }
@@ -208,6 +218,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         if (reply?.status === "unavailable") { setStatus(reply.message || "Email delivery isn\u2019t configured on this Room.", true); return; }
         magicEmail = email.trim();
         magicPhase = "code";
+        magicManualCode = false;
         renderPanel();
         setStatus("");
       });
