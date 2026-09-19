@@ -97,6 +97,7 @@ const messages = Object.freeze({
   ambiguous_config: "Choose a saved connection OR environment credentials, not both.",
   config_exists: "That directory already exists. No existing connection was replaced.",
   config_save_failed: "Connection was not confirmed saved. Inspect the new private directory before retrying.",
+  invite_already_used: "This invite was already used — ask the room owner for a fresh one.",
   member_required: "Set the expected ROOM_AGENT_MEMBER before checking or saving agent access.",
   access_ended: "Access was not accepted. Ask the operator for the correct active agent key.",
   identity_mismatch: "Access does not match the configured room and agent. No identity was adopted.",
@@ -116,6 +117,7 @@ export function connectionDiagnostic(error) {
   else if (error instanceof RoomClientError) {
     code = error.status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code) ? "invalid_config"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
+      : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";

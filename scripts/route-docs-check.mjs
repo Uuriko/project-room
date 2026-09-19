@@ -17,6 +17,18 @@ import { openapiOperations, routeCandidates } from "./open-routes.mjs";
 
 export const templateKey = path => path.replace(/\{[^}]+\}|:[A-Za-z]+/g, "{}");
 
+// One shared route set for the CLI gate and the test suite: every source
+// the gate compares lives here, so a new source can never be visible to the
+// gate and invisible to the tests (or vice versa).
+export function routeSources(root) {
+  const read = path => readFileSync(join(root, path), "utf8");
+  return {
+    http: read("server/http.mjs"),
+    pluginRoutes: read("server/agent-plugin-routes.mjs"),
+    openapi: read("docs/openapi.yaml"),
+  };
+}
+
 // Agent plug-in routes live in server/agent-plugin-routes.mjs as exact
 // pathname literals ("pathname === \"/api/agent-keys\"") and anchored route
 // regexes (/^\/api\/agent-keys\/(...)\/(...)$/). Both forms reduce to
@@ -58,8 +70,7 @@ export function routeDocsDrift({ http, pluginRoutes, openapi }) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const root = fileURLToPath(new URL("..", import.meta.url));
-  const read = path => readFileSync(join(root, path), "utf8");
-  const result = routeDocsDrift({ http: read("server/http.mjs"), pluginRoutes: read("server/agent-plugin-routes.mjs"), openapi: read("docs/openapi.yaml") });
+  const result = routeDocsDrift(routeSources(root));
   if (result.failures.length) {
     console.error("Route documentation drift:\n" + result.failures.map(f => `  ${f}`).join("\n"));
     process.exit(1);
