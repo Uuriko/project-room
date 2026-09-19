@@ -388,6 +388,24 @@ const presenceNext = (roomId, memberIds) => {
   })];
 };
 
+// RC-2026-09-18-055: capabilities guidance — who can do the work and how
+// to hand it over (thread assignment to a member).
+const capabilitiesNext = (roomId, assignees) => {
+  if (assignees.length > 0) {
+    const first = assignees[0];
+    return [Object.freeze({
+      action: "delegate-work",
+      method: "POST",
+      path: `/api/rooms/${roomId}/collab/assignments`,
+      description: `Assign a thread to ${first.id}: send { threadId: "<thread>", assignee: { kind: "${first.kind}", id: "${first.id}" } }. Send your identity secret as the Bearer token.`,
+    })];
+  }
+  return [Object.freeze({
+    action: "advertise-capabilities",
+    description: "No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.",
+  })];
+};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
@@ -1965,12 +1983,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const status = this.agentHeartbeats.statusOf(link.identityId);
         return { status: status.status, lastSeenAt: status.lastSeenAt };
       };
-      return { members: Object.values(members)
+      const listed = Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
-        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities,
-          presence: agentPresence(m) }))
         .filter(m => !needle || m.capabilities.some(c => c.toLowerCase().includes(needle)))
-        .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
+        .sort((a, b) => a.id < b.id ? -1 : 1);
+      return { members: listed.map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind,
+          capabilities: m.capabilities, presence: agentPresence(m) })),
+        // RC-2026-09-18-055: finding who can do the work is half the
+        // delegation loop — name how to hand it over. The first listed
+        // member is a concrete assignee example.
+        next: Object.freeze(capabilitiesNext(roomId, listed.map(m => ({ id: m.id, kind: m.kind })))),
+      };
     });
   }
   // Round-2 #105: onboarding funnel metrics. provisionedAt = member.added,
