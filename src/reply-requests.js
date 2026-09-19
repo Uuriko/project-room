@@ -51,16 +51,19 @@ export function validReplyDraft(mode, state) {
     && mode.requesterId === request.requesterId && mode.workItemId === request.workItemId
     && id(mode.contextEventId) && Number.isSafeInteger(mode.contextSequence) && mode.contextSequence > 0;
 }
-export function replyDraftData(mode, { body, toMemberId, replyToId, messageId }) {
-  if (!mode) return { ...(messageId === undefined ? {} : { messageId }), body, toMemberId, replyToId };
+export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, channelId }) {
+  if (!mode) return { ...(messageId === undefined ? {} : { messageId }), body, toMemberId, replyToId,
+    ...(channelId === undefined ? {} : { channelId }) };
   if (mode.kind === "cancelled") return { requestMessageId: mode.requestMessageId,
     expectedRequestRevision: mode.expectedRequestRevision, reason: body };
   const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
+      ...(channelId === undefined ? {} : { channelId }),
       ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
-      contextEventId: mode.contextEventId, contextSequence: mode.contextSequence };
+      contextEventId: mode.contextEventId, contextSequence: mode.contextSequence,
+      ...(channelId === undefined ? {} : { channelId }) };
   replyPostMode(data);
   return data;
 }

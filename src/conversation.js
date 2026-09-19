@@ -201,13 +201,13 @@ export function mentionHtml(body, members, esc) {
   return out + esc(text.slice(last));
 }
 
-export function composerPlaceholder({ workKind = null, inThread = false } = {}) {
+export function composerPlaceholder({ workKind = null, inThread = false, channelName = "general" } = {}) {
   if (workKind === "request") return "What do you need?";
   if (workKind === "cancelled") return "Reason…";
   if (workKind) return "Your reply…";
   return inThread
     ? "Reply in thread"
-    : "Message #chat";
+    : `Message #${channelName}`;
 }
 
 export function removeMention(text, member) {

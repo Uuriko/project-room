@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -111,6 +111,8 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
+let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
@@ -161,9 +163,9 @@ const client = new RoomClient({
     roomCursor = snapshot.cursor;
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
+    if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
     $("#room-title").textContent = state.room?.title ?? roomId;
     $(".room-purpose").textContent = state.room?.purpose ?? "";
-    $("#conversation-title").textContent = `# ${roomId}`;
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#account-rooms-panel").hidden = true;
     $(".connection-bar").hidden = false;
@@ -1179,6 +1181,7 @@ function render() {
     $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
   }
   syncComposerChrome();
+  syncChannelChrome();
   renderMessages();
   syncRequestComposer();
   renderSpendAllowance();
@@ -1194,10 +1197,55 @@ function render() {
     `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
+// Phase 2 channels: one main channel plus user-created channels. Chat and work
+// share the timeline of the selected channel; work cards follow the channel of
+// their proposal message (the main channel when there is none).
+function channelStorageKey() { return `pr-channel:${activeChannelRoomId ?? "none"}`; }
+function restoreActiveChannel() {
+  activeChannelId = DEFAULT_CHANNEL_ID;
+  try {
+    const saved = localStorage.getItem(channelStorageKey());
+    if (saved && state?.channels?.[saved] && !state.channels[saved].archivedAt) activeChannelId = saved;
+  } catch { /* private mode: stay on the main channel */ }
+}
+function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
+function setActiveChannel(id) {
+  if (!state) return;
+  const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
+  activeChannelId = next;
+  try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
+  syncChannelChrome();
+  renderMessages();
+  $("#message-list")?.scrollTo({ top: 0 });
+}
+function syncChannelChrome() {
+  // If the active channel was archived elsewhere, fall back to the main channel.
+  if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt) {
+    activeChannelId = DEFAULT_CHANNEL_ID;
+    try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
+  }
+  const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
+  setText("#conversation-title", `# ${name}`);
+  const input = $("#message-input");
+  if (input) input.placeholder = `Message #${name}`;
+  renderChannels();
+}
+function renderChannels() {
+  const list = $("#channel-list");
+  if (!list || !state) return;
+  const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
+  const html = channelList(state).filter(c => !c.archivedAt).map(c => {
+    const active = c.id === activeChannelId;
+    const manage = ownerView && c.id !== DEFAULT_CHANNEL_ID
+      ? `<button type="button" class="icon-button channel-manage" data-channel-manage="${esc(c.id)}" aria-label="Channel settings, ${esc(c.name)}" title="Channel settings">⋯</button>` : "";
+    return `<li class="channel-row"><button type="button" class="channel${active ? " is-active" : ""}" data-channel="${esc(c.id)}"${active ? ' aria-current="page"' : ""}><span aria-hidden="true">#</span><span class="channel-name">${esc(c.name)}</span></button>${manage}</li>`;
+  }).join("");
+  if (list._html !== html) { list.innerHTML = html; list._html = html; }
+}
 function renderMessages() {
-  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : "room";
+  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots;
+  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
   const anchor = [...list.children].find(e => e.getBoundingClientRect().bottom > list.getBoundingClientRect().top);
@@ -1214,7 +1262,8 @@ function renderMessages() {
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
-  setText("#message-count", `${state.messages.length} ${state.messages.length === 1 ? "message" : "messages"}`);
+  const channelMessages = state.messages.filter(m => messageChannelId(m) === activeChannelId);
+  setText("#message-count", `${channelMessages.length} ${channelMessages.length === 1 ? "message" : "messages"}`);
   $("#thread-bar").hidden = !currentThreadId;
   $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
   if (currentThreadId) {
@@ -1226,7 +1275,7 @@ function renderMessages() {
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
   const keep = new Set(messages.map(m => m.id));
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries();
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   messages.forEach((message, index) => {
     const node = previous.get(message.id) || document.createElement("li");
@@ -1419,7 +1468,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || archived || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId) });
+  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -1798,8 +1847,8 @@ function releaseSubmission(ticket, { restoreFocus = false } = {}) {
   }
 }
 // Unified timeline: work items render inline in #message-list, interleaved
-// chronologically with messages (Discord/Slack-style single channel). Phase 1
-// keeps the #chat channel only; user-created channels are Phase 2.
+// chronologically with messages (Discord/Slack-style). Work cards follow the
+// active channel: a card shows when its proposal message is in the channel.
 function timelineWorkEntries() {
   const now = Date.now();
   const draftsByWork = new Map();
@@ -1810,8 +1859,14 @@ function timelineWorkEntries() {
     draftsByWork.get(message.workItemId).push(message);
   }
   return Object.values(state.workItems)
-    .map(item => ({ item, ts: Date.parse(item.updatedAt) || 0,
-      html: workCard(item, now, draftsByWork.get(item.id) ?? [], state.messages) }))
+    .map(item => {
+      const proposals = draftsByWork.get(item.id) ?? [];
+      // proposals is built newest-first via reverse iteration; the most recent
+      // proposal determines the work card's channel.
+      const mostRecent = proposals[0];
+      return { item, channelId: mostRecent ? messageChannelId(mostRecent) : DEFAULT_CHANNEL_ID,
+        ts: Date.parse(item.updatedAt) || 0, html: workCard(item, now, proposals, state.messages) };
+    })
     .sort((a, b) => a.ts - b.ts);
 }
 function makeTimelineWorkNode(entry) {
@@ -1833,7 +1888,7 @@ function syncTimelineWork() {
   const list = $("#message-list");
   if (!list || !state) return;
   if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
-  const entries = timelineWorkEntries();
+  const entries = timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const byId = new Map(entries.map(e => [e.item.id, e]));
   const stale = [];
   list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => {
@@ -2254,8 +2309,9 @@ $("#refresh-button").addEventListener("click", async () => {
 $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
+  if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
-  const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
+  const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
   const previous = pendingMessage?.command?.data;
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId;
@@ -2275,6 +2331,82 @@ $("#message-form").addEventListener("submit", e => {
     dismissRoomGuide();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
+// Channel creation and management: any member can create a channel; only the
+// room owner renames or archives. Archive is a two-click arm, never a native dialog.
+let channelDialogMode = null, channelArchiveArmed = false;
+function openChannelDialog(mode, channelId = null) {
+  if (!state) return;
+  channelDialogMode = { mode, channelId };
+  channelArchiveArmed = false;
+  const channel = channelId ? state.channels[channelId] : null;
+  $("#channel-dialog-title").textContent = mode === "create" ? "New channel" : "Channel settings";
+  $("#channel-save-button").textContent = mode === "create" ? "Create channel" : "Rename channel";
+  $("#channel-name-input").value = channel?.name ?? "";
+  const archiveButton = $("#channel-archive-button");
+  archiveButton.hidden = !(mode === "manage" && channelId !== DEFAULT_CHANNEL_ID);
+  archiveButton.textContent = "Archive channel";
+  setFormStatus($("#channel-form-status"), "");
+  if (!$("#channel-dialog").open) $("#channel-dialog").showModal();
+  $("#channel-name-input").focus();
+  $("#channel-name-input").select();
+}
+async function waitForChannel(id, timeoutMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (state?.channels?.[id] && !state.channels[id].archivedAt) return true;
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return Boolean(state?.channels?.[id]);
+}
+$("#create-channel-button").addEventListener("click", () => openChannelDialog("create"));
+$("#channel-dialog-close").addEventListener("click", () => $("#channel-dialog").close());
+$("#channel-list").addEventListener("click", e => {
+  const manage = e.target.closest("[data-channel-manage]");
+  if (manage) { e.stopPropagation(); openChannelDialog("manage", manage.dataset.channelManage); return; }
+  const button = e.target.closest("[data-channel]");
+  if (button) setActiveChannel(button.dataset.channel);
+});
+$("#channel-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const mode = channelDialogMode;
+  const name = $("#channel-name-input").value.trim();
+  if (!mode || !name || !state) return;
+  const status = $("#channel-form-status");
+  setFormStatus(status, mode.mode === "create" ? "Creating…" : "Saving…");
+  try {
+    const pending = mode.mode === "create"
+      ? draftCommand(null, T.CHANNEL_CREATED, { channelId: crypto.randomUUID(), name })
+      : draftCommand(null, T.CHANNEL_RENAMED, { channelId: mode.channelId, name });
+    const newChannelId = pending.command.data.channelId;
+    await client.send(pending.command);
+    $("#channel-dialog").close();
+    if (mode.mode === "create") {
+      if (newChannelId && await waitForChannel(newChannelId)) setActiveChannel(newChannelId);
+      notice(`Channel #${name} created.`);
+    } else notice("Channel renamed.");
+  } catch (error) { setFormStatus(status, `${error.message}`, true); }
+});
+$("#channel-archive-button").addEventListener("click", async e => {
+  const mode = channelDialogMode;
+  if (!mode || mode.mode !== "manage" || !mode.channelId || !state) return;
+  const button = e.currentTarget;
+  if (!channelArchiveArmed) {
+    channelArchiveArmed = true;
+    button.textContent = "Confirm archive";
+    setFormStatus($("#channel-form-status"), "Archived channels stay searchable but accept no new messages.");
+    return;
+  }
+  setFormStatus($("#channel-form-status"), "Archiving…");
+  try {
+    await client.send(draftCommand(null, T.CHANNEL_ARCHIVED, { channelId: mode.channelId }).command);
+    $("#channel-dialog").close();
+    if (activeChannelId === mode.channelId) setActiveChannel(DEFAULT_CHANNEL_ID);
+    notice("Channel archived.");
+  } catch (error) {
+    setFormStatus($("#channel-form-status"), `${error.message}`, true);
+    channelArchiveArmed = false; button.textContent = "Archive channel";
+  }
+});
 function submitRequest(form) {
   if (!state || busy || requestReading) return;
   const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
@@ -2283,7 +2415,8 @@ function submitRequest(form) {
   try {
     if (!pendingMessage) {
       const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
-        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID() });
+        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID(),
+        channelId: activeChannelId });
       pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
     }
   } catch (error) { setComposerError(error.message); return; }

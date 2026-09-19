@@ -194,6 +194,12 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .channel { display: flex; align-items: center; gap: .45rem; width: 100%; min-height: 40px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; }
 .channel:hover { background: rgb(255 255 255 / 4%); }
 .channel.is-active { background: rgb(255 255 255 / 8%); }
+.channels-label { display: flex; align-items: center; justify-content: space-between; }
+.channel-row { display: flex; align-items: center; gap: .15rem; }
+.channel-row .channel { flex: 1 1 auto; width: auto; min-width: 0; }
+.channel .channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-manage { opacity: 0; flex: none; }
+.channel-row:hover .channel-manage, .channel-row:focus-within .channel-manage { opacity: 1; }
 #people-panel { border: 0; background: transparent; box-shadow: none; padding: 0; }
 #people-panel > summary { list-style: none; }
 #people-panel > summary::-webkit-details-marker { display: none; }

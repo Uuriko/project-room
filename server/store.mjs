@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -261,12 +261,15 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   ...PIN_COMMAND_SHAPES,
+  [T.CHANNEL_CREATED]: "channelId name",
+  [T.CHANNEL_RENAMED]: "channelId name",
+  [T.CHANNEL_ARCHIVED]: "channelId",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
@@ -918,6 +921,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
         }
         let changed = false;
+        // Phase 2 channels: legacy projections (stored before channels existed)
+        // gain #general so the stored projection matches a replay. Mirrors
+        // ensureDefaultChannel in src/events.js.
+        if (state.room) {
+          state.channels ??= {};
+          if (!state.channels[DEFAULT_CHANNEL_ID]) {
+            state.channels[DEFAULT_CHANNEL_ID] = {
+              id: DEFAULT_CHANNEL_ID,
+              name: DEFAULT_CHANNEL_ID,
+              createdBy: state.room.ownerId,
+              createdAt: state.room.createdAt ?? null,
+              archivedAt: null
+            };
+            changed = true;
+          }
+        }
         for (const item of missing) {
           const proposer = proposers.get(item.id);
           if (proposer) { item.proposedById = proposer; changed = true; }
