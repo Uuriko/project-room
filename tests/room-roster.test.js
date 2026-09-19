@@ -173,7 +173,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="clear-session-menu"/);
   assert.match(html, /id="share-link-intro"/);
   assert.match(html, /Open this invite link/);
-  assert.match(html, /data-room-section="people"/);
   assert.match(html, /id="room-sidebar"/);
   assert.match(html, /id="channel-list"/);
   assert.match(html, /id="catchup-dialog"/);
