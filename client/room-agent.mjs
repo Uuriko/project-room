@@ -743,6 +743,41 @@ export class RoomAgentClient {
   revokeAgentInvite(inviteId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { inviteId }, signal);
   }
+  // Scoped agent API keys (RC-2026-09-18-050). Key management is owner-only:
+  // the caller's credential must be the pri_ identity secret — a rak_ key
+  // can never mint, rotate, or revoke keys (the server rejects with 403).
+  // create/rotate return the secret exactly once; the caller must store it
+  // now. list never returns secrets.
+  async createAgentKey({ scopes, label, expiresAt } = {}, { signal } = {}) {
+    const value = await this.#fetchPath("/api/agent-keys", {
+      scopes,
+      ...(label === undefined ? {} : { label }),
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+    }, signal);
+    if (typeof value?.keyId !== "string" || typeof value?.secret !== "string"
+      || typeof value?.credential !== "string" || !Array.isArray(value?.scopes)) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid API key");
+    }
+    return value;
+  }
+  async listAgentKeys({ signal } = {}) {
+    const value = await this.#fetchPath("/api/agent-keys", undefined, signal);
+    if (!Array.isArray(value?.keys)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid key list");
+    return value;
+  }
+  async rotateAgentKey(keyId, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/rotate`, {}, signal);
+    if (typeof value?.keyId !== "string" || typeof value?.secret !== "string"
+      || typeof value?.credential !== "string") {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid rotated key");
+    }
+    return value;
+  }
+  async revokeAgentKey(keyId, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/agent-keys/${encodeURIComponent(keyId)}/revoke`, {}, signal);
+    if (value?.revoked !== true) throw new RoomClientError(200, "invalid_response", "Room returned an invalid revocation");
+    return value;
+  }
   // Self-serve access requests. Listing and deciding are owner-only (the
   // server enforces manage_members); the request itself is unauthenticated
   // via the standalone requestAccess() below.
