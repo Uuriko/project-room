@@ -1,18 +1,19 @@
 // Slice 4 (RC-2026-09-17-013) — GitHub OAuth sign-in (Clerk-free).
 //
 // Mirrors server/google-oauth.mjs's state+PKCE discipline: the browser's
-// account-session slot is bound into a single-use pending state; the
-// callback consumes the state, exchanges the code with PKCE S256, reads the
-// GitHub user plus their /user/emails, and the HTTP layer links the
-// verified subject into the multi-method login model
-// (server/account-login-methods.mjs).
+// account-session slot is bound into a stateless AES-GCM-sealed state blob
+// carried through the `state` param (no per-isolate memory); the callback
+// unseals it, exchanges the code with PKCE S256, reads the GitHub user
+// plus their /user/emails, and the HTTP layer links the verified subject
+// into the multi-method login model (server/account-login-methods.mjs).
 //
 // This module is pure OAuth mechanics: no store, no HTTP routing. Time and
 // randomness are injectable, and every network call goes through an
 // injected fetchFn, so tests never touch the real network. Error responses
 // never carry tokens.
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { OAuthStateError, OAUTH_STATE_TTL_MS, isSealedOAuthState, sealOAuthState, unsealOAuthState } from "./oauth-state-seal.mjs";
 
 export const GITHUB_START_PATH = "/api/auth/github/start";
 export const GITHUB_CALLBACK_PATH = "/api/auth/github/callback";
@@ -21,8 +22,54 @@ export const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 export const GITHUB_USER_URL = "https://api.github.com/user";
 export const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
 export const GITHUB_SCOPES = "read:user user:email";
-export const GITHUB_PENDING_TTL_MS = 10 * 60 * 1000;
-export const GITHUB_PENDING_MAX = 1000;
+
+// Stateless pending state (RC-2026-09-19-076, QAX-003): the browser slot
+// binding and PKCE verifier are AES-GCM-sealed into the `state` param
+// itself (key derived from the client secret via HKDF), so a callback
+// after a server restart or isolate migration still completes. Single-use
+// is enforced provider-side — authorization codes are single-use at
+// GitHub, so a replayed callback re-exchanges a consumed code and the
+// grant is rejected. issueGitHubOAuthState mints a fresh sealed state
+// (returning the verifier so the caller can derive the code challenge);
+// consumeGitHubOAuthState opens it on the callback.
+export function issueGitHubOAuthState({ clientSecret, sessionToken, sessionRevision, link = false,
+  redirectUri, ttlMs = OAUTH_STATE_TTL_MS, now = Date.now } = {}) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(sessionToken || "")
+    || !Number.isSafeInteger(sessionRevision) || sessionRevision < 0) fail("github_session_required");
+  // The redirect is bound into the sealed blob and re-checked on consume;
+  // it must be the configured callback URL (mirrors the GoogleSignIn
+  // constructor validation).
+  try {
+    const parsed = new URL(redirectUri);
+    if (parsed.pathname !== GITHUB_CALLBACK_PATH || parsed.search || parsed.hash
+      || parsed.username || parsed.password) fail("github_state_invalid");
+  } catch (error) {
+    if (error instanceof GitHubOAuthError) throw error;
+    fail("github_state_invalid");
+  }
+  const codeVerifier = createCodeVerifier();
+  let state;
+  try {
+    state = sealOAuthState({ clientSecret, provider: "github", codeVerifier,
+      slotToken: sessionToken, sessionRevision, link: link === true, redirectUri, ttlMs, now });
+  } catch (error) {
+    if (error instanceof OAuthStateError) fail("github_state_invalid");
+    throw error;
+  }
+  return { state, codeVerifier };
+}
+
+export function consumeGitHubOAuthState({ clientSecret, state, redirectUri, now = Date.now } = {}) {
+  let entry;
+  try {
+    entry = unsealOAuthState({ clientSecret, provider: "github", state, redirectUri, now });
+  } catch (error) {
+    if (error instanceof OAuthStateError) fail(error.kind === "expired" ? "github_state_expired" : "github_state_invalid");
+    throw error;
+  }
+  return { codeVerifier: entry.codeVerifier, sessionToken: entry.slotToken,
+    sessionRevision: entry.sessionRevision, link: entry.link === true };
+}
 
 // Post-login landing page for browser OAuth navigations (slice 7): the
 // GitHub callback content-negotiates — API clients keep the JSON body,
@@ -46,7 +93,6 @@ export class GitHubOAuthError extends Error {
 }
 const fail = code => { throw new GitHubOAuthError(code); };
 
-const digest = value => createHash("sha256").update(value, "utf8").digest("hex");
 const opaque = value => typeof value === "string" && value.length > 0 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);
 const base64urlToken = bytes => bytes.toString("base64url");
 
@@ -76,9 +122,10 @@ export function buildGitHubAuthUrl({ clientId, redirectUri, state, codeChallenge
   try { redirect = new URL(redirectUri); } catch { fail("github_configuration_invalid"); }
   if (redirect.pathname !== GITHUB_CALLBACK_PATH || redirect.search || redirect.hash
     || redirect.username || redirect.password) fail("github_configuration_invalid");
-  if (!/^[A-Za-z0-9_-]{43}$/.test(state || "") || !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge || "")) {
-    fail("github_configuration_invalid");
-  }
+  if (!/^[A-Za-z0-9_-]{43}$/.test(codeChallenge || "")) fail("github_configuration_invalid");
+  // The state is the sealed stateless blob (see issueGitHubOAuthState) —
+  // it authenticates itself, so the caller never needs a 43-char nonce.
+  if (!isSealedOAuthState(state)) fail("github_configuration_invalid");
   const url = new URL(GITHUB_AUTHORIZE_URL);
   url.search = new URLSearchParams({
     client_id: clientId,
@@ -89,60 +136,6 @@ export function buildGitHubAuthUrl({ clientId, redirectUri, state, codeChallenge
     code_challenge_method: "S256"
   }).toString();
   return url.href;
-}
-
-// Single-use pending states binding a browser slot to its PKCE verifier.
-// States are stored under sha256 digests and compared in constant time;
-// entries expire after ttlMs and the table is bounded (oldest entries are
-// evicted past max, so a flood of starts cannot grow memory without bound).
-export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_MS, random = randomBytes, max = GITHUB_PENDING_MAX } = {}) {
-  if (!Number.isSafeInteger(ttlMs) || ttlMs < 0 || !Number.isSafeInteger(max) || max < 1) {
-    throw new GitHubOAuthError("github_pending_invalid");
-  }
-  const pending = new Map(); // digest(state) -> { codeVerifier, sessionToken, sessionRevision, createdAt }
-  const sweep = () => {
-    const at = now();
-    for (const [key, entry] of pending) {
-      if (entry.createdAt + ttlMs <= at) pending.delete(key);
-    }
-  };
-  return {
-    size: () => pending.size,
-    create({ sessionToken, sessionRevision, link = false }) {
-      if (!/^[A-Za-z0-9_-]{43}$/.test(sessionToken || "")
-        || !Number.isSafeInteger(sessionRevision) || sessionRevision < 0) fail("github_session_required");
-      sweep();
-      while (pending.size >= max) {
-        const oldest = pending.keys().next().value; // Map preserves insertion order
-        if (oldest === undefined) break;
-        pending.delete(oldest);
-      }
-      const state = base64urlToken(random(32));
-      const codeVerifier = createCodeVerifier(random);
-      // Slice 7: the settings "connect GitHub" flow carries a link intent so
-      // the callback attaches the subject to the authenticated account.
-      pending.set(digest(state), { codeVerifier, sessionToken, sessionRevision, link: link === true, createdAt: now() });
-      return { state, codeVerifier };
-    },
-    consume(state) {
-      if (typeof state !== "string" || state.length === 0 || state.length > 256) fail("github_state_invalid");
-      const key = digest(state);
-      let foundKey = null, entry = null;
-      for (const candidate of pending.keys()) {
-        // Fixed-length hex digests: timingSafeEqual is exact here.
-        if (candidate.length === key.length
-          && timingSafeEqual(Buffer.from(candidate, "utf8"), Buffer.from(key, "utf8"))) {
-          foundKey = candidate;
-          entry = pending.get(candidate);
-        }
-      }
-      if (!entry) fail("github_state_invalid");
-      pending.delete(foundKey); // single-use: any replay of the state fails
-      if (entry.createdAt + ttlMs <= now()) fail("github_state_expired");
-      return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision,
-        link: entry.link === true };
-    }
-  };
 }
 
 // Bounded JSON fetch mirroring google-oauth.mjs: 64 KiB cap, no redirects.

@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { OAuthStateError, isSealedOAuthState, sealOAuthState, unsealOAuthState } from './oauth-state-seal.mjs';
 
 export const GOOGLE_ISSUER = 'https://accounts.google.com';
 export const GOOGLE_START_PATH = '/api/auth/google/start';
@@ -9,7 +10,6 @@ const jwksEndpoint = 'https://www.googleapis.com/oauth2/v3/certs';
 const clientIdPattern = /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const opaque = value => typeof value === 'string' && value.length > 0 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);
-const digest = value => createHash('sha256').update(value).digest('hex');
 
 export class GoogleOAuthError extends Error {
   constructor(code) { super(code); this.name = 'GoogleOAuthError'; this.code = code; }
@@ -53,7 +53,7 @@ function decodeJwtPart(part) {
 }
 
 export class GoogleSignIn {
-  #clientId; #clientSecret; #redirectUri; #fetch; #now; #pending = new Map(); #keys = new Map(); #keysFetchedAt = 0;
+  #clientId; #clientSecret; #redirectUri; #fetch; #now; #keys = new Map(); #keysFetchedAt = 0;
   constructor({ clientId, clientSecret, redirectUri, fetchImpl = fetch, now = Date.now }) {
     let redirect;
     try { redirect = new URL(redirectUri); } catch { fail('google_configuration_invalid'); }
@@ -71,17 +71,16 @@ export class GoogleSignIn {
   begin({ slotToken, expectedRevision, link = false }) {
     if (!tokenPattern.test(slotToken || '') || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       fail('google_session_required');
-    for (const [key, entry] of this.#pending) {
-      if (entry.expiresAt <= this.#now() || entry.slotToken === slotToken) this.#pending.delete(key);
-    }
-    if (this.#pending.size >= 100) fail('google_connection_busy');
-    const state = randomBytes(32).toString('base64url');
+    // Stateless pending state (RC-2026-09-19-076): the slot binding and
+    // PKCE verifier are AES-GCM-sealed into the `state` param itself, so a
+    // callback after a restart or isolate migration still completes — no
+    // per-isolate Map. Rate limiting lives on the HTTP start route.
     const verifier = randomBytes(32).toString('base64url');
     const expiresAt = this.#now() + 10 * 60 * 1000;
-    // Link intent: the settings "connect Google" flow carries link=true so the
-    // callback attaches the Google subject to the signed-in account instead of
-    // the sign-in find-or-provision order.
-    this.#pending.set(digest(state), { slotToken, expectedRevision, verifier, expiresAt, link: link === true });
+    const state = sealOAuthState({ clientSecret: this.#clientSecret, provider: 'google',
+      codeVerifier: verifier, slotToken, sessionRevision: expectedRevision,
+      link: link === true, redirectUri: this.#redirectUri, now: this.#now });
+    if (!isSealedOAuthState(state)) fail('google_configuration_invalid');
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({
       client_id: this.#clientId, redirect_uri: this.#redirectUri, response_type: 'code',
@@ -176,15 +175,17 @@ export class GoogleSignIn {
       fail('google_callback_invalid');
     for (const key of ['state', 'code', 'error']) if (url.searchParams.getAll(key).length > 1) fail('google_callback_invalid');
     const state = url.searchParams.get('state');
-    if (!state || !/^[A-Za-z0-9_-]{43}$/.test(state)) fail('google_state_invalid');
-    const key = digest(state);
-    const entry = this.#pending.get(key);
-    if (!entry || entry.used || entry.expiresAt <= this.#now()) {
-      if (entry?.expiresAt <= this.#now()) this.#pending.delete(key);
-      fail('google_state_invalid');
+    // Stateless state: the blob authenticates itself (AES-GCM under a key
+    // derived from the client secret), so no per-isolate lookup. An
+    // expired blob, a rotated secret, or any tamper fails closed.
+    let entry;
+    try {
+      entry = unsealOAuthState({ clientSecret: this.#clientSecret, provider: 'google',
+        state, redirectUri: this.#redirectUri, now: this.#now });
+    } catch (error) {
+      if (error instanceof OAuthStateError) fail('google_state_invalid');
+      throw error;
     }
-    if (entry.used) fail('google_state_invalid');
-    entry.used = true;
     if (url.searchParams.has('error')) fail('google_consent_denied');
     const code = url.searchParams.get('code');
     if (!opaque(code)) fail('google_callback_invalid');
@@ -192,14 +193,13 @@ export class GoogleSignIn {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: this.#clientId, client_secret: this.#clientSecret, code,
-        code_verifier: entry.verifier, grant_type: 'authorization_code', redirect_uri: this.#redirectUri
+        code_verifier: entry.codeVerifier, grant_type: 'authorization_code', redirect_uri: this.#redirectUri
       }).toString()
     });
     const scopes = typeof tokens.scope === 'string' ? tokens.scope.trim().split(/\s+/) : [];
     if (!scopes.includes('openid')) fail('google_scope_mismatch');
     const claims = await this.verifyIdToken(tokens.id_token);
-    this.#pending.delete(key);
-    return { claims, idToken: tokens.id_token, slotToken: entry.slotToken, expectedRevision: entry.expectedRevision,
+    return { claims, idToken: tokens.id_token, slotToken: entry.slotToken, expectedRevision: entry.sessionRevision,
       link: entry.link === true };
   }
 }

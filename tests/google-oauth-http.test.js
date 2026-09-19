@@ -9,6 +9,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { GOOGLE_ISSUER, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPES } from "../server/google-oauth.mjs";
+import { isSealedOAuthState } from "../server/oauth-state-seal.mjs";
 import * as T from "../src/events.js";
 
 const clientId = "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com";
@@ -79,7 +80,7 @@ async function beginFlow(origin, cookieHeader) {
   assert.equal(authorize.searchParams.get("redirect_uri"), origin + GOOGLE_CALLBACK_PATH);
   assert.equal(authorize.searchParams.get("scope"), GOOGLE_SCOPES);
   assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
-  assert.match(authorize.searchParams.get("state") || "", /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(isSealedOAuthState(authorize.searchParams.get("state")), "state is the sealed stateless blob");
   return { authorize, slotCookie: accountCookie(start) };
 }
 

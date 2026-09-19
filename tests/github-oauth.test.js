@@ -1,7 +1,8 @@
 // Unit tests for server/github-oauth.mjs (slice 4, RC-2026-09-17-013):
-// PKCE S256, the authorize URL, the single-use pending-state store, the
-// token exchange and user fetch against a stubbed fetch (no real network),
-// and the honest unconfigured state. node:test + node:assert/strict.
+// PKCE S256, the authorize URL, the stateless sealed pending state
+// (RC-2026-09-19-076), the token exchange and user fetch against a stubbed
+// fetch (no real network), and the honest unconfigured state.
+// node:test + node:assert/strict.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
@@ -9,12 +10,14 @@ import {
   GITHUB_START_PATH, GITHUB_CALLBACK_PATH, GITHUB_AUTHORIZE_URL, GITHUB_TOKEN_URL,
   GITHUB_USER_URL, GITHUB_EMAILS_URL, GITHUB_SCOPES,
   GitHubOAuthError, isGitHubConfigured, createCodeVerifier, codeChallengeFor,
-  buildGitHubAuthUrl, createPendingStore, exchangeCodeForToken, fetchGitHubUser
+  buildGitHubAuthUrl, issueGitHubOAuthState, consumeGitHubOAuthState,
+  exchangeCodeForToken, fetchGitHubUser
 } from "../server/github-oauth.mjs";
+import { isSealedOAuthState } from "../server/oauth-state-seal.mjs";
 
 const clientId = "Iv1.fixtureclientid0000";
+const clientSecret = "fixture-secret-never-real";
 const redirectUri = "https://room.example" + GITHUB_CALLBACK_PATH;
-const state = randomBytes(32).toString("base64url");
 assert.equal(GITHUB_START_PATH, "/api/auth/github/start");
 assert.equal(GITHUB_CALLBACK_PATH, "/api/auth/github/callback");
 
@@ -35,8 +38,13 @@ test("PKCE S256: verifier is 43-128 chars and the challenge is base64url(sha256(
   assert.throws(() => codeChallengeFor("short"), error => error instanceof GitHubOAuthError && error.code === "github_verifier_invalid");
 });
 
+const issueState = (overrides = {}) => issueGitHubOAuthState({ clientSecret,
+  sessionToken: randomBytes(32).toString("base64url"), sessionRevision: 0,
+  redirectUri, ...overrides });
+
 test("authorize URL carries the GitHub endpoint, scope, state and PKCE", () => {
   const verifier = createCodeVerifier();
+  const { state } = issueState();
   const url = new URL(buildGitHubAuthUrl({ clientId, redirectUri, state, codeChallenge: codeChallengeFor(verifier) }));
   assert.equal(url.origin + url.pathname, GITHUB_AUTHORIZE_URL);
   assert.equal(url.searchParams.get("client_id"), clientId);
@@ -44,73 +52,78 @@ test("authorize URL carries the GitHub endpoint, scope, state and PKCE", () => {
   assert.equal(url.searchParams.get("scope"), GITHUB_SCOPES);
   assert.equal(url.searchParams.get("scope"), "read:user user:email");
   assert.equal(url.searchParams.get("state"), state);
+  assert.ok(isSealedOAuthState(state), "state is the sealed stateless blob");
   assert.equal(url.searchParams.get("code_challenge"), codeChallengeFor(verifier));
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
 });
 
 test("authorize URL rejects bad config", () => {
   const verifier = createCodeVerifier();
+  const { state } = issueState();
   assert.throws(() => buildGitHubAuthUrl({ clientId: "", redirectUri, state, codeChallenge: codeChallengeFor(verifier) }),
     error => error.code === "github_configuration_invalid");
   assert.throws(() => buildGitHubAuthUrl({ clientId, redirectUri: "https://room.example/wrong", state, codeChallenge: codeChallengeFor(verifier) }),
     error => error.code === "github_configuration_invalid");
+  // A raw nonce is no longer acceptable state — only the sealed blob is.
+  assert.throws(() => buildGitHubAuthUrl({ clientId, redirectUri,
+    state: randomBytes(32).toString("base64url"), codeChallenge: codeChallengeFor(verifier) }),
+    error => error.code === "github_configuration_invalid");
 });
 
-test("pending store: create then single-use consume", () => {
-  const store = createPendingStore();
+test("stateless state: issue then consume round-trips the slot binding", () => {
   const slotToken = randomBytes(32).toString("base64url");
-  const created = store.create({ sessionToken: slotToken, sessionRevision: 3 });
-  assert.match(created.state, /^[A-Za-z0-9_-]{43}$/);
-  assert.match(created.codeVerifier, /^[A-Za-z0-9_-]{43}$/);
-  const consumed = store.consume(created.state);
-  assert.equal(consumed.codeVerifier, created.codeVerifier);
+  const issued = issueGitHubOAuthState({ clientSecret, sessionToken: slotToken, sessionRevision: 3,
+    link: true, redirectUri });
+  assert.ok(isSealedOAuthState(issued.state));
+  assert.match(issued.codeVerifier, /^[A-Za-z0-9_-]{43}$/);
+  // No shared memory: consume with only the secret.
+  const consumed = consumeGitHubOAuthState({ clientSecret, state: issued.state, redirectUri });
+  assert.equal(consumed.codeVerifier, issued.codeVerifier);
   assert.equal(consumed.sessionToken, slotToken);
   assert.equal(consumed.sessionRevision, 3);
+  assert.equal(consumed.link, true);
 });
 
-test("pending store: replay of a consumed state is rejected", async () => {
-  const store = createPendingStore();
-  const slotToken = randomBytes(32).toString("base64url");
-  const created = store.create({ sessionToken: slotToken, sessionRevision: 0 });
-  store.consume(created.state);
-  await throwsCode(() => store.consume(created.state), "github_state_invalid");
+test("stateless state: a blob is single-issuance — re-issue differs, replay is the provider's job", () => {
+  const first = issueState();
+  const second = issueState();
+  assert.notEqual(first.state, second.state, "fresh nonce per issuance");
 });
 
-test("pending store: unknown and malformed states are rejected", async () => {
-  const store = createPendingStore();
-  await throwsCode(() => store.consume(randomBytes(32).toString("base64url")), "github_state_invalid");
-  await throwsCode(() => store.consume(""), "github_state_invalid");
-  await throwsCode(() => store.consume(null), "github_state_invalid");
+test("stateless state: unknown and malformed states are rejected", async () => {
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret, state: randomBytes(32).toString("base64url"),
+    redirectUri }), "github_state_invalid");
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret, state: "", redirectUri }), "github_state_invalid");
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret, state: null, redirectUri }), "github_state_invalid");
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret, state: issueState().state,
+    redirectUri: "https://room.example/api/auth/github/callback-evil" }), "github_state_invalid");
 });
 
-test("pending store: expired states are rejected and dropped", async () => {
+test("stateless state: expired states are rejected", async () => {
   let at = 1_000_000;
-  const store = createPendingStore({ now: () => at, ttlMs: 60_000 });
-  const slotToken = randomBytes(32).toString("base64url");
-  const created = store.create({ sessionToken: slotToken, sessionRevision: 0 });
+  const issued = issueGitHubOAuthState({ clientSecret, sessionToken: randomBytes(32).toString("base64url"),
+    sessionRevision: 0, redirectUri, now: () => at, ttlMs: 60_000 });
   at += 60_001;
-  await throwsCode(() => store.consume(created.state), "github_state_expired");
-  assert.equal(store.size(), 0, "expired entries are dropped on consume");
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret, state: issued.state, redirectUri, now: () => at }),
+    "github_state_expired");
 });
 
-test("pending store: the table is bounded and evicts the oldest entries", () => {
-  const store = createPendingStore({ max: 3 });
-  const slotToken = () => randomBytes(32).toString("base64url");
-  const first = store.create({ sessionToken: slotToken(), sessionRevision: 0 });
-  store.create({ sessionToken: slotToken(), sessionRevision: 0 });
-  store.create({ sessionToken: slotToken(), sessionRevision: 0 });
-  store.create({ sessionToken: slotToken(), sessionRevision: 0 });
-  assert.equal(store.size(), 3);
-  // The oldest entry was evicted to make room.
-  return throwsCode(() => store.consume(first.state), "github_state_invalid");
+test("stateless state: a rotated client secret fails closed", async () => {
+  const issued = issueState();
+  await throwsCode(() => consumeGitHubOAuthState({ clientSecret: "a-different-secret", state: issued.state,
+    redirectUri }), "github_state_invalid");
 });
 
-test("pending store: rejects invalid slot bindings at create time", () => {
-  const store = createPendingStore();
-  assert.throws(() => store.create({ sessionToken: "bad", sessionRevision: 0 }),
+test("stateless state: rejects invalid slot bindings at issue time", () => {
+  assert.throws(() => issueGitHubOAuthState({ clientSecret, sessionToken: "bad", sessionRevision: 0, redirectUri }),
     error => error.code === "github_session_required");
-  assert.throws(() => store.create({ sessionToken: randomBytes(32).toString("base64url"), sessionRevision: -1 }),
+  assert.throws(() => issueGitHubOAuthState({ clientSecret,
+    sessionToken: randomBytes(32).toString("base64url"), sessionRevision: -1, redirectUri }),
     error => error.code === "github_session_required");
+  assert.throws(() => issueGitHubOAuthState({ clientSecret,
+    sessionToken: randomBytes(32).toString("base64url"), sessionRevision: 0,
+    redirectUri: "https://room.example/wrong" }),
+    error => error.code === "github_state_invalid");
 });
 
 const stubFetch = handler => {
@@ -201,11 +214,8 @@ test("user fetch: bad subjects and provider failures are rejected", async () => 
   await throwsCode(() => fetchGitHubUser("t", notArray), "github_user_invalid");
 });
 
-test("pending store: invalid bounds are rejected at construction", () => {
-  assert.throws(() => createPendingStore({ max: 0 }), error => error.code === "github_pending_invalid");
-  assert.throws(() => createPendingStore({ max: -2 }), error => error.code === "github_pending_invalid");
-  assert.throws(() => createPendingStore({ ttlMs: -1 }), error => error.code === "github_pending_invalid");
-});
+// No construction-time bounds anymore: there is no table to bound.
+// Stateless state expiry is carried inside each sealed blob.
 
 test("isGitHubConfigured needs both the client id and the client secret", () => {
   assert.equal(isGitHubConfigured({ GITHUB_OAUTH_CLIENT_ID: "id", GITHUB_OAUTH_CLIENT_SECRET: "secret" }), true);

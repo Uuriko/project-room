@@ -34,7 +34,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
-import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
+import { buildGitHubAuthUrl, codeChallengeFor, issueGitHubOAuthState, consumeGitHubOAuthState, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 
@@ -170,9 +170,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const passkeys = () => passkeyService
     ?? (passkeyAuthService ??= createPasskeyAuth({ store }));
   // GitHub sign-in is off unless the caller passes githubAuth
-  // ({ clientId, clientSecret, redirectUri?, fetchImpl? }). The pending
-  // state/PKCE table lives as long as this server instance, mirroring the
-  // Google helper above (one per Durable Object in production).
+  // ({ clientId, clientSecret, redirectUri?, fetchImpl? }). Pending state is
+  // stateless (AES-GCM-sealed into the `state` param via
+  // server/oauth-state-seal.mjs), so no per-isolate table is needed here.
   let githubOAuth = null;
   const github = () => {
     if (!githubAuth) return null;
@@ -191,8 +191,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (typeof clientId !== "string" || !clientId || typeof clientSecret !== "string" || !clientSecret) {
         throw new Error("Invalid GitHub authentication configuration");
       }
-      githubOAuth = { clientId, clientSecret, redirectUri, fetchImpl: githubAuth.fetchImpl ?? fetch,
-        pending: createPendingStore({ now: () => store.now() }) };
+      githubOAuth = { clientId, clientSecret, redirectUri, fetchImpl: githubAuth.fetchImpl ?? fetch };
     }
     return githubOAuth;
   };
@@ -893,7 +892,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const startSlot = store.accountSessionSlot(startToken);
         if (!paramToken) protectWrite(req, startSlot, false);
         const expectedRevision = startSlot.sessionRevision;
-        const { state, codeVerifier } = oauth.pending.create({ sessionToken: startToken, sessionRevision: expectedRevision });
+        const { state, codeVerifier } = issueGitHubOAuthState({ clientSecret: oauth.clientSecret,
+          sessionToken: startToken, sessionRevision: expectedRevision, redirectUri: oauth.redirectUri,
+          now: () => store.now() });
         const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
           state, codeChallenge: codeChallengeFor(codeVerifier) });
         res.statusCode = 302;
@@ -926,13 +927,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             throw new GitHubOAuthError("github_callback_invalid");
           }
           const state = url.searchParams.get("state");
+          // Stateless state: the blob authenticates itself, so there is no
+          // server-side state to burn on a provider denial — the flow just
+          // fails closed. Single-use is enforced by GitHub rejecting the
+          // already-exchanged authorization code on any replay.
           if (url.searchParams.get("error")) {
-            if (state) { try { oauth.pending.consume(state); } catch { /* burn what we can */ } }
             throw new GitHubOAuthError("github_consent_denied");
           }
           const code = url.searchParams.get("code");
           if (!code) throw new GitHubOAuthError("github_callback_invalid");
-          const pending = oauth.pending.consume(state); // 401 on replay, expiry, or mismatch
+          const pending = consumeGitHubOAuthState({ clientSecret: oauth.clientSecret, state,
+            redirectUri: oauth.redirectUri, now: () => store.now() }); // 401 on expiry or mismatch
           const accessToken = await exchangeCodeForToken({ code, codeVerifier: pending.codeVerifier,
             clientId: oauth.clientId, clientSecret: oauth.clientSecret, redirectUri: oauth.redirectUri,
             fetchFn: oauth.fetchImpl });
@@ -1697,7 +1702,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`github-link-start:${remoteAddress}`, 10);
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
+        const { state, codeVerifier } = issueGitHubOAuthState({ clientSecret: oauth.clientSecret,
+          sessionToken: slotToken, sessionRevision: expectedRevision, link: true,
+          redirectUri: oauth.redirectUri, now: () => store.now() });
         const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
           state, codeChallenge: codeChallengeFor(codeVerifier) });
         res.statusCode = 302;

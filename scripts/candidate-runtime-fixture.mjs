@@ -65,6 +65,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/resend-mailer.mjs'); // Resend-backed magic-link sender (imported by server/boot-options.mjs)
   paths.add('server/webhook-dispatch.mjs'); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs)
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
+  paths.add('server/oauth-state-seal.mjs'); // Stateless OAuth state (imported by server/github-oauth.mjs and server/google-oauth.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)

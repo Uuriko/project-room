@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { GITHUB_START_PATH, GITHUB_CALLBACK_PATH, GITHUB_SCOPES, codeChallengeFor } from "../server/github-oauth.mjs";
+import { isSealedOAuthState } from "../server/oauth-state-seal.mjs";
 
 const clientId = "Iv1.fixtureclientid0000";
 const clientSecret = "fixture-secret-never-real";
@@ -17,19 +18,29 @@ const verifiedEmail = "gh-user@example.com";
 
 // Stub GitHub: token exchange, /user and /user/emails. The `code` sent to
 // the token endpoint selects the scenario: "pkce-fixture" simulates a
-// provider rejection of the grant (e.g. a PKCE/code mismatch).
+// provider rejection of the grant (e.g. a PKCE/code mismatch). Like the
+// real provider, authorization codes are single-use: exchanging the same
+// code twice yields invalid_grant, which is what enforces replay
+// protection now that pending state is stateless (RC-2026-09-19-076).
 function githubFetch({ id = userId, emails } = {}) {
   const captured = {};
+  const usedCodes = new Set();
   const fetchFn = async (url, init) => {
     if (url === "https://github.com/login/oauth/access_token") {
       assert.equal(init.method, "POST");
       assert.equal(init.headers.Accept, "application/json");
       const body = new URLSearchParams(init.body);
       captured.codeVerifier = body.get("code_verifier");
-      if (body.get("code") === "pkce-fixture") {
+      const presentedCode = body.get("code");
+      if (presentedCode === "pkce-fixture") {
         return new Response(JSON.stringify({ error: "incorrect_code_verifier" }),
           { status: 400, headers: { "content-type": "application/json" } });
       }
+      if (usedCodes.has(presentedCode)) {
+        return new Response(JSON.stringify({ error: "invalid_grant" }),
+          { status: 400, headers: { "content-type": "application/json" } });
+      }
+      usedCodes.add(presentedCode);
       return Response.json({ access_token: "gho_fixturetoken", token_type: "bearer", scope: GITHUB_SCOPES });
     }
     if (url === "https://api.github.com/user") return Response.json({ id, login: "octofixture" });
@@ -84,7 +95,7 @@ async function beginFlow(origin, slotToken) {
   assert.equal(authorize.searchParams.get("scope"), GITHUB_SCOPES);
   assert.equal(authorize.searchParams.get("scope"), "read:user user:email");
   assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
-  assert.match(authorize.searchParams.get("state") || "", /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(isSealedOAuthState(authorize.searchParams.get("state")), "state is the sealed stateless blob");
   assert.match(authorize.searchParams.get("code_challenge") || "", /^[A-Za-z0-9_-]{43}$/);
   return authorize;
 }
@@ -198,7 +209,10 @@ test("second login with the same GitHub subject reuses the account", async t => 
   assert.equal(f.store.accountLogins.listMethods(`github:${userId}`).filter(m => m.type === "oauth").length, 1);
 });
 
-test("replaying a consumed state is 401 and provisions nothing new", async t => {
+test("replaying a completed callback is rejected by the provider (single-use codes)", async t => {
+  // Stateless state (RC-2026-09-19-076): replay protection comes from the
+  // provider rejecting the already-exchanged authorization code, not from
+  // a server-side used-state table.
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { githubAuth: githubAuth() });
   const slot = f.store.createAccountSessionSlot();
@@ -208,8 +222,10 @@ test("replaying a consumed state is 401 and provisions nothing new", async t => 
   const replay = await callback(origin, authorize);
   assert.equal(replay.status, 401);
   const body = await replay.json();
-  assert.equal(body.error.code, "github_state_invalid");
+  assert.equal(body.error.code, "github_token_rejected");
   noSecrets(body);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'github:%'").get().n, 1,
+    "the replay provisions nothing new");
 });
 
 test("an unknown state is 401", async t => {
@@ -311,7 +327,7 @@ test("callback rejects non-GET methods", async t => {
   assert.equal(res.status, 405);
 });
 
-test("callback with a provider denial is 401 and burns the state", async t => {
+test("callback with a provider denial is 401 and provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { githubAuth: githubAuth() });
   const slot = f.store.createAccountSessionSlot();
@@ -320,7 +336,9 @@ test("callback with a provider denial is 401 and burns the state", async t => {
     `${origin}${GITHUB_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&error=access_denied`, { redirect: "manual" });
   assert.equal(denied.status, 401);
   assert.equal((await denied.json()).error.code, "github_consent_denied");
-  // The burned state cannot be reused afterwards.
-  const replay = await callback(origin, authorize);
-  assert.equal(replay.status, 401);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'github:%'").get().n, 0);
+  // Stateless state is not burned by the denial: the real callback with
+  // the same state still completes.
+  const res = await callback(origin, authorize);
+  assert.equal(res.status, 200);
 });
