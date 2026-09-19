@@ -27,13 +27,17 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { openapiOperations, routeCandidates } from "./open-routes.mjs";
+import { openapiOperations, pathParameterSamples, routeCandidates } from "./open-routes.mjs";
 
-// "{roomId}" under /api/rooms/ becomes the seeded room; every other path
-// parameter becomes a dummy value (route matching is by shape, not value).
-export const concrete = template => template
+// "{roomId}" under /api/rooms/ becomes the seeded room. Every other path
+// parameter becomes a dummy value, because route matching is by shape - except
+// where the server constrains the segment and the spec says what it allows
+// (an `enum` or an `example`), in which case the probe uses that. Without it a
+// constrained segment 404s on every method and the check reports a served
+// route as unserved.
+export const concrete = (template, samples = {}) => template
   .replace(/^\/api\/rooms\/\{[^}]*\}/, "/api/rooms/commons")
-  .replace(/\{[^}]*\}/g, "probe-id");
+  .replace(/\{([^}]*)\}/g, (_, name) => encodeURIComponent(samples[name] ?? "probe-id"));
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const alternateMethod = method => METHODS.find(m => m !== method) ?? "GET";
@@ -89,7 +93,7 @@ export async function probeMethodAccuracy({ openapi }) {
   const results = [];
   try {
     for (const op of operations) {
-      const path = concrete(op.path);
+      const path = concrete(op.path, pathParameterSamples(op.parameterLines));
       const first = await raw(origin, path, { method: op.method });
       let verdict = classify({ status: first.status, code: first.code, other404: false });
       if (first.status === 404 && first.code === "not_found") {
