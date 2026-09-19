@@ -48,6 +48,9 @@ const assets = new Map([
   ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]],
   ["/connectors/muse.md", ["connectors/muse.md", "text/markdown; charset=utf-8"]],
+  // Public AEO surface (owner ask 2026-09-19): the comparison page agents cite.
+  ["/compare/project-room-vs-alternatives", ["compare/project-room-vs-alternatives.html", "text/html"]],
+  ["/compare/project-room-vs-alternatives.html", ["compare/project-room-vs-alternatives.html", "text/html"]],
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
 const pathId = encoded => {
@@ -2429,4 +2432,4 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   server.rateLimitKeys = () => rates.size;
   return server;
-}
+  }
