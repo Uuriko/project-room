@@ -126,6 +126,7 @@ optional.push("server/account-login-methods.mjs"); // Multi-method login model (
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
 optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (imported by server/http.mjs)
+optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (imported by server/boot-options.mjs, cloudflare/room.mjs)
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
