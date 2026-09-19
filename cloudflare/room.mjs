@@ -101,6 +101,15 @@ export class ProjectRoom {
     const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     return drainer.tick();
   }
+  // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
+  // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
+  // now), POSTs each with a fresh timestamped HMAC signature, and advances
+  // the pending -> delivered | failed -> dead_letter lifecycle with
+  // exponential backoff. Runs in the DO so signing secrets never leave it.
+  async drainWebhookDeliveries() {
+    if (this.paused) throw new Error('Room paused');
+    return this.store.agentPlugin.drainWebhookDeliveries();
+  }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
   // the owner's next sync imports it. Returns { accepted, duplicate }.
@@ -177,9 +186,14 @@ export default {
   // Task 9 — Worker cron (see triggers.crons in wrangler.jsonc): drain the
   // Telegram webhook journal on a schedule. The tick runs inside the Durable
   // Object via RPC; a failing tick is logged, never retried by the cron.
+  // RC-2026-09-19-064: the same tick also sweeps due signed-webhook
+  // deliveries (pending -> delivered | failed -> dead_letter).
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    ctx.waitUntil(env.ROOM.getByName('invite-only-pilot').drainChannelBacklog()
+    const room = env.ROOM.getByName('invite-only-pilot');
+    ctx.waitUntil(room.drainChannelBacklog()
       .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
+    ctx.waitUntil(room.drainWebhookDeliveries()
+      .catch(error => console.warn(`[webhook-dispatch] cron tick failed: ${error?.message ?? error}`)));
   }
 };

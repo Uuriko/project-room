@@ -2500,6 +2500,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+      // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
+      // event is offered to enabled webhook subscriptions whose event
+      // filter matches. Journaled in the same transaction as the event
+      // insert (a delivery is never created without its triggering
+      // event); the idempotency key makes double-apply safe, and the
+      // actual HTTP dispatch runs outside the transaction in the
+      // Cloudflare cron sweep. Never throws — fan-out must not fail the
+      // command that triggered it.
+      try {
+        if (this.agentPlugin) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+      } catch (error) {
+        console.error("webhook fan-out failed:", error?.message ?? error);
+      }
       return { sequence, event: incoming, duplicate: false };
     });
   }

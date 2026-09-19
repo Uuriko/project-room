@@ -24,6 +24,10 @@ import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import {
+  signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
+  backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS,
+} from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
@@ -68,6 +72,31 @@ export const agentPluginSchema = `
     journal_json TEXT NOT NULL DEFAULT '[]'
   );
   CREATE INDEX IF NOT EXISTS agent_webhook_sub_agent ON agent_webhook_subs(agent_id);
+  -- RC-2026-09-19-064: durable per-delivery journal for signed dispatch.
+  -- One row per (event, subscription) delivery; the idempotency_key makes
+  -- fan-out double-delivery impossible even if an event is applied twice.
+  -- state: pending -> delivered | failed (-> retry) -> dead_letter.
+  CREATE TABLE IF NOT EXISTS agent_webhook_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    subscription_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    event_id TEXT,
+    event_type TEXT NOT NULL,
+    room_id TEXT,
+    payload_json TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','delivered','failed','dead_letter')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_due
+    ON agent_webhook_deliveries(state, next_attempt_at);
+  CREATE INDEX IF NOT EXISTS agent_webhook_deliveries_agent
+    ON agent_webhook_deliveries(agent_id, state, created_at);
   -- RC-2026-09-18-049: agent verification tiers. A row attests that a room
   -- owner vouches for the identity (verifiedBy = attesting owner's member
   -- id); absence of a row means the identity is unverified. A second table
@@ -148,9 +177,9 @@ export class AgentPluginStore {
   // open path after the schema is exec'd.
   load() {
     // RC-2026-09-18-014: idempotent additive migration for the signed-card
-    // key envelope. CREATE TABLE IF NOT EXISTS cannot add columns to an
-    // existing table, so backfill them here (same pragma/ALTER pattern as
-    // the credentials migration in server/store.mjs). Legacy rows keep NULL
+    // key envelope. The IF NOT EXISTS form leaves existing tables untouched,
+    // so backfill new columns here (same pragma/ALTER pattern as the
+    // credentials migration in server/store.mjs). Legacy rows keep NULL
     // and pin a key on their next owner-signed republish.
     const cardColumns = new Set(this.db.prepare("PRAGMA table_info(agent_directory_cards)").all().map(c => c.name));
     if (!cardColumns.has("public_key")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN public_key TEXT");
@@ -187,6 +216,36 @@ export class AgentPluginStore {
         withdrawn: row.withdrawn === 1,
       });
     }
+    // RC-2026-09-19-064: the durable delivery journal now lives in
+    // agent_webhook_deliveries (restart-safe); the in-memory journal is a
+    // bounded cache hydrated from it so the pure module stays consistent.
+    const hasDeliveriesTable = this.db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_webhook_deliveries'").get();
+    const deliveriesBySub = new Map();
+    if (hasDeliveriesTable) {
+      for (const row of this.db.prepare(
+        `SELECT * FROM agent_webhook_deliveries WHERE delivery_id IN (
+           SELECT delivery_id FROM agent_webhook_deliveries d2
+           WHERE d2.subscription_id = agent_webhook_deliveries.subscription_id
+           ORDER BY created_at DESC LIMIT 100
+         ) ORDER BY created_at ASC`).all()) {
+        const list = deliveriesBySub.get(row.subscription_id) ?? [];
+        list.push({
+          deliveryId: row.delivery_id,
+          subscriptionId: row.subscription_id,
+          agentId: row.agent_id,
+          url: null, // never hydrated: journal views are secret-safe
+          eventType: row.event_type,
+          data: JSON.parse(row.payload_json).data ?? {},
+          signature: null, // never hydrated: signatures stay in the table
+          state: row.state,
+          attempts: row.attempts,
+          error: row.last_error,
+          createdAt: row.created_at,
+        });
+        deliveriesBySub.set(row.subscription_id, list);
+      }
+    }
     for (const row of this.db.prepare("SELECT * FROM agent_webhook_subs").all()) {
       this.subs.set(row.subscription_id, {
         subscriptionId: row.subscription_id,
@@ -196,7 +255,8 @@ export class AgentPluginStore {
         secret: row.secret,
         enabled: row.enabled === 1,
         createdAt: row.created_at,
-        deliveries: JSON.parse(row.journal_json),
+        deliveries: deliveriesBySub.get(row.subscription_id)
+          ?? JSON.parse(row.journal_json ?? "[]"),
       });
     }
     // RC-2026-09-18-049: verification attestations and per-room gate policy.
@@ -222,6 +282,7 @@ export class AgentPluginStore {
   // the other additive journals (read-only never migrates).
   verifySchema({ allowAbsent = false } = {}) {
     const tables = ["agent_api_keys", "agent_directory_cards", "agent_webhook_subs",
+      "agent_webhook_deliveries",
       "agent_identity_verification", "room_verification_policy"];
     const missing = tables.filter(name =>
       !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
@@ -618,7 +679,8 @@ export class AgentPluginStore {
         try { events = JSON.parse(row.eventsJson); } catch { continue; }
         if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
         deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
-          { eventType: WAKE_PING_EVENT, data: buildWakePing({ agentId: identityId, signal }) }));
+          { eventType: WAKE_PING_EVENT, data: buildWakePing({ agentId: identityId, signal }),
+            eventId: signal?.signalId ?? null, roomId: null }));
       }
       return Object.freeze({ deliveries: Object.freeze(deliveries) });
     });
@@ -657,11 +719,59 @@ export class AgentPluginStore {
     });
   }
 
-  // ---- Delivery journal (server-side dispatch calls these; no HTTP routes yet) ----
+  // ---- Delivery journal (RC-2026-09-19-064: durable signed dispatch) ----
+  //
+  // The agent_webhook_deliveries table is the durable delivery journal:
+  // pending -> delivered | failed (-> retry w/ backoff) -> dead_letter.
+  // The pure module's in-memory journal is kept as a bounded cache so
+  // recordAttempt-style callers keep working; the table is the source of
+  // truth for reads, sweeps, and restarts.
 
-  buildWebhookDelivery(subscriptionId, { eventType, data }) {
+  deliveryView(row) {
+    return Object.freeze({
+      deliveryId: row.delivery_id,
+      subscriptionId: row.subscription_id,
+      eventType: row.event_type,
+      state: row.state,
+      attempts: row.attempts,
+      error: row.last_error,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      nextAttemptAt: row.next_attempt_at,
+    });
+  }
+
+  deliveryViews(rows) {
+    return Object.freeze(rows.map(row => this.deliveryView(row)));
+  }
+
+  buildWebhookDelivery(subscriptionId, { eventType, data, eventId = null, roomId = null }) {
     return this.mutate(() => {
+      // Idempotency: the same event fanned out twice to the same
+      // subscription yields one delivery. The UNIQUE idempotency_key
+      // enforces this even across restarts; the SELECT first keeps the
+      // pure module's counter from burning ids on replays.
+      const idempotencyKey = eventId ? `${eventId}:${subscriptionId}` : null;
+      if (idempotencyKey) {
+        const existing = this.db.prepare(
+          "SELECT * FROM agent_webhook_deliveries WHERE idempotency_key=?").get(idempotencyKey);
+        if (existing) return Object.freeze({ ...this.deliveryView(existing), duplicate: true });
+      }
       const delivery = this.webhooks.buildDelivery(subscriptionId, { eventType, data });
+      const sub = this.subs.get(subscriptionId);
+      const now = this.store.now();
+      const issuedAt = now;
+      const signature = signDelivery(sub.secret,
+        { deliveryId: delivery.deliveryId, eventType, issuedAt, data });
+      const envelope = deliveryEnvelope(
+        { deliveryId: delivery.deliveryId, subscriptionId, eventType, issuedAt, roomId, data });
+      this.db.prepare(`INSERT OR IGNORE INTO agent_webhook_deliveries
+        (delivery_id, idempotency_key, subscription_id, agent_id, event_id, event_type, room_id,
+         payload_json, signature, state, attempts, next_attempt_at, last_error, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?)`)
+        .run(delivery.deliveryId, idempotencyKey ?? `manual:${delivery.deliveryId}`,
+          subscriptionId, sub.agentId, eventId, eventType, roomId,
+          JSON.stringify(envelope), signature, now, now, now);
       this.persistJournal(subscriptionId);
       return delivery;
     });
@@ -670,15 +780,18 @@ export class AgentPluginStore {
   recordWebhookAttempt(deliveryId, { ok, error = null }) {
     return this.mutate(() => {
       const result = this.webhooks.recordAttempt(deliveryId, { ok, error });
-      for (const sub of this.subs.values()) {
-        if (sub.deliveries.some(d => d.deliveryId === deliveryId)) { this.persistJournal(sub.subscriptionId); break; }
-      }
+      const now = this.store.now();
+      this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state=?, attempts=attempts+1, last_error=?, updated_at=? WHERE delivery_id=?`)
+        .run(ok ? "delivered" : "failed", ok ? null : String(error ?? "delivery failed"), now, deliveryId);
       return result;
     });
   }
 
   webhookJournal(subscriptionId) {
-    return this.store.readTransaction(() => this.webhooks.journal(subscriptionId));
+    return this.store.readTransaction(() => this.deliveryViews(
+      this.db.prepare(`SELECT * FROM agent_webhook_deliveries
+        WHERE subscription_id=? ORDER BY created_at DESC LIMIT 100`).all(subscriptionId)));
   }
 
   // RC-2026-09-18-038: identity-scoped journal read. Cross-identity reads
@@ -689,7 +802,7 @@ export class AgentPluginStore {
       if (!row || row.agent_id !== identityId) {
         throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
       }
-      return this.webhooks.journal(subscriptionId);
+      return this.webhookJournal(subscriptionId);
     });
   }
 
@@ -698,6 +811,177 @@ export class AgentPluginStore {
     if (!sub) return;
     this.db.prepare("UPDATE agent_webhook_subs SET journal_json=? WHERE subscription_id=?")
       .run(JSON.stringify(sub.deliveries), subscriptionId);
+  }
+
+  // RC-2026-09-19-064: fan out a persisted room event to every enabled
+  // subscription whose event filter matches. Called from the room store's
+  // command() inside the same transaction as the event insert, so a
+  // delivery is never journaled without its triggering event.
+  fanoutRoomEvent({ roomId, event }) {
+    const rows = this.db.prepare(
+      "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE enabled=1").all();
+    let created = 0;
+    for (const row of rows) {
+      let events = [];
+      try { events = JSON.parse(row.eventsJson); } catch { continue; }
+      if (!events.includes(event.type) && !events.includes("*")) continue;
+      const delivery = this.buildWebhookDelivery(row.subscriptionId,
+        { eventType: event.type, data: event.data ?? {}, eventId: event.id, roomId });
+      if (!delivery.duplicate) created++;
+    }
+    return Object.freeze({ deliveries: created });
+  }
+
+  markDelivered(deliveryId, { signature, issuedAt, envelope, now }) {
+    this.db.prepare(`UPDATE agent_webhook_deliveries
+      SET state='delivered', attempts=attempts+1, last_error=NULL,
+          signature=?, payload_json=?, updated_at=? WHERE delivery_id=?`)
+      .run(signature, JSON.stringify(envelope), now, deliveryId);
+  }
+
+  markDeadLetter(deliveryId, reason, now, attempts = null) {
+    if (attempts === null) {
+      this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='dead_letter', last_error=?, updated_at=? WHERE delivery_id=?`)
+        .run(String(reason).slice(0, 500), now, deliveryId);
+    } else {
+      this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='dead_letter', attempts=?, last_error=?, updated_at=? WHERE delivery_id=?`)
+        .run(attempts, String(reason).slice(0, 500), now, deliveryId);
+    }
+  }
+
+  // Attempt one stored delivery: recompute the signature with a fresh
+  // issuedAt (replay resistance), POST, and advance the lifecycle.
+  async attemptStoredDelivery(row, { fetchImpl, now }) {
+    const sub = this.subs.get(row.subscription_id);
+    if (!sub) {
+      this.mutate(() => this.markDeadLetter(row.delivery_id, "subscription removed", now));
+      return "deadLettered";
+    }
+    if (!sub.enabled) return "skipped";
+    const payload = JSON.parse(row.payload_json);
+    const issuedAt = now;
+    const signature = signDelivery(sub.secret,
+      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload.data });
+    const envelope = deliveryEnvelope({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
+      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
+    const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
+      eventType: row.event_type, issuedAt, signature });
+    const result = await postDelivery({ fetchImpl, url: sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS });
+    return this.mutate(() => {
+      try { this.webhooks.recordAttempt(row.delivery_id, { ok: result.ok, error: result.error }); } catch { /* cache may lag; the table is authoritative */ }
+      if (result.ok) {
+        this.markDelivered(row.delivery_id, { signature, issuedAt, envelope, now });
+        return "delivered";
+      }
+      const attempts = row.attempts + 1;
+      if (result.classification === "dead" || attempts >= MAX_DELIVERY_ATTEMPTS) {
+        const reason = result.classification === "dead"
+          ? `receiver rejected the delivery (HTTP ${result.status}); not retried`
+          : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${result.error}`;
+        this.markDeadLetter(row.delivery_id, reason, now, attempts);
+        return "deadLettered";
+      }
+      this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
+            signature=?, payload_json=?, updated_at=? WHERE delivery_id=?`)
+        .run(attempts, result.error, now + backoffDelayMs(attempts), signature, JSON.stringify(envelope), now, row.delivery_id);
+      return "retried";
+    });
+  }
+
+  // Sweep due deliveries (pending/failed with next_attempt_at <= now).
+  // Called by the Cloudflare cron tick and by the agent-triggered process
+  // endpoint (agentId scopes it to one identity's deliveries). Each
+  // delivery mutates in its own transaction so one poison row cannot roll
+  // back the rest of the sweep.
+  async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null } = {}) {
+    const due = this.db.prepare(
+      `SELECT * FROM agent_webhook_deliveries
+       WHERE state IN ('pending','failed') AND next_attempt_at <= ?
+       ${agentId ? "AND agent_id = ?" : ""}
+       ORDER BY next_attempt_at ASC LIMIT ?`)
+      .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+    const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
+    for (const row of due) {
+      summary.processed++;
+      summary[await this.attemptStoredDelivery(row, { fetchImpl, now })]++;
+    }
+    return Object.freeze(summary);
+  }
+
+  // Manual redrive of a dead-lettered delivery: back to pending with a
+  // clean attempt counter. Identity-scoped; cross-identity reads 404.
+  redriveDeadLetter({ identityId, deliveryId }) {
+    return this.mutate(() => {
+      const row = this.db.prepare(
+        `SELECT d.* FROM agent_webhook_deliveries d
+         JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
+         WHERE d.delivery_id = ? AND s.agent_id = ?`).get(deliveryId, identityId);
+      if (!row) throw new AgentPluginError(404, "unknown_delivery", `Unknown delivery "${deliveryId}"`);
+      if (row.state !== "dead_letter") {
+        throw new AgentPluginError(422, "not_dead_letter", `Delivery "${deliveryId}" is ${row.state}, not dead_letter`);
+      }
+      const now = this.store.now();
+      this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='pending', attempts=0, last_error=NULL, next_attempt_at=?, updated_at=?
+        WHERE delivery_id=?`).run(now, now, deliveryId);
+      const sub = this.subs.get(row.subscription_id);
+      const cached = sub?.deliveries.find(d => d.deliveryId === deliveryId);
+      if (cached) { cached.state = "pending"; cached.attempts = 0; cached.error = null; }
+      this.persistJournal(row.subscription_id);
+      return this.deliveryView({ ...row, state: "pending", attempts: 0,
+        last_error: null, next_attempt_at: now, updated_at: now });
+    });
+  }
+
+  // All of one identity's deliveries across subscriptions, newest first.
+  deliveryLogFor({ identityId, state = null, limit = 100 }) {
+    const states = ["pending", "delivered", "failed", "dead_letter"];
+    if (state !== null && !states.includes(state)) {
+      throw new AgentPluginError(422, "invalid_state", `state must be one of ${states.join(", ")}`);
+    }
+    const boundedLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    return this.store.readTransaction(() => this.deliveryViews(
+      this.db.prepare(`SELECT * FROM agent_webhook_deliveries WHERE agent_id = ?
+        ${state ? "AND state = ?" : ""} ORDER BY created_at DESC LIMIT ?`)
+        .all(...(state ? [identityId, state, boundedLimit] : [identityId, boundedLimit]))));
+  }
+
+  deadLettersFor({ identityId, limit = 100 }) {
+    return this.deliveryLogFor({ identityId, state: "dead_letter", limit });
+  }
+
+  // The falsifiable-claim metric: share of terminal deliveries that
+  // reached delivered within 3 attempts. Null until the first terminal
+  // delivery — an honest zero-sample baseline, not an invented rate.
+  deliveryMetricsFor({ identityId }) {
+    return this.store.readTransaction(() => {
+      const rows = this.db.prepare(
+        `SELECT state, COUNT(*) AS n,
+           SUM(CASE WHEN state = 'delivered' AND attempts <= 3 THEN 1 ELSE 0 END) AS within3
+         FROM agent_webhook_deliveries WHERE agent_id = ? GROUP BY state`).all(identityId);
+      const byState = { pending: 0, delivered: 0, failed: 0, dead_letter: 0 };
+      let within3 = 0;
+      for (const row of rows) {
+        if (row.state in byState) byState[row.state] = row.n;
+        within3 += row.within3 ?? 0;
+      }
+      const terminal = byState.delivered + byState.dead_letter;
+      return Object.freeze({
+        claim: "signed webhook dispatch delivers \u226599% of events within 3 attempts",
+        totalTerminal: terminal,
+        delivered: byState.delivered,
+        deliveredWithin3Attempts: within3,
+        deliveryRateWithin3Attempts: terminal > 0 ? within3 / terminal : null,
+        deadLettered: byState.dead_letter,
+        pending: byState.pending,
+        failedAwaitingRetry: byState.failed,
+        maxAttempts: MAX_DELIVERY_ATTEMPTS,
+        byState: Object.freeze({ ...byState }),
+      });
+    });
   }
 
   // ---- Plug-in manifest (derived, unauthenticated) ----
