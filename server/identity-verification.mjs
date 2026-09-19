@@ -19,8 +19,6 @@ class VerificationError extends Error {
 const fail = (code, message) => { throw new VerificationError(code, message); };
 const check = (condition, code, message) => { if (!condition) fail(code, message); };
 
-const IDENTITY_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
-
 const checkIdentityId = identityId => check(
   typeof identityId === "string" && identityId.length > 0 && identityId.length <= 128,
   "invalid_identity", "identityId must be a non-empty string of at most 128 chars");
