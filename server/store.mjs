@@ -125,12 +125,12 @@ function ensureAccountProfileSchema(db) {
   if (!columns.has("ever_had_room")) {
     db.exec("ALTER TABLE accounts ADD COLUMN ever_had_room INTEGER NOT NULL DEFAULT 0");
     db.exec("UPDATE accounts SET ever_had_room=1 WHERE id IN (SELECT account_id FROM member_accounts)");
+    db.exec(`CREATE TRIGGER IF NOT EXISTS member_accounts_ever_had_room
+      AFTER INSERT ON member_accounts
+      BEGIN
+        UPDATE accounts SET ever_had_room=1 WHERE id=NEW.account_id;
+      END`);
   }
-  db.exec(`CREATE TRIGGER IF NOT EXISTS member_accounts_ever_had_room
-    AFTER INSERT ON member_accounts
-    BEGIN
-      UPDATE accounts SET ever_had_room=1 WHERE id=NEW.account_id;
-    END`);
 }
 const DISPLAY_NAME_LIMIT = 64;
 const AVATAR_URL_LIMIT = 2048;
