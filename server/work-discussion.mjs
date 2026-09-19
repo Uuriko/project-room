@@ -47,6 +47,12 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
       : !message.workItemId && included.has(message.replyToId) ? "reply" : null;
     if (!relation) continue;
     included.add(message.id);
+    // RC-2026-09-19-070: targeted DMs are private to sender and recipient.
+    // Exclude them from the visible selection BEFORE paging, so page
+    // boundaries, hasMore, cursors, rowBytes and the participant roster
+    // cannot reveal their existence, count, or metadata. They stay in
+    // `included` so public descendants of a hidden DM remain selected.
+    if (message.toMemberId && message.toMemberId !== viewerId && message.authorId !== viewerId) continue;
     selected.push({ sequence: post.sequence, eventId: post.id, relation, message });
   }
   if (cursor !== null && !selected.some(row => row.sequence === window.after)) fail("invalid_discussion", "Continuation must follow a selected message");

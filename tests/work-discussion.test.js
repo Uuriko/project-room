@@ -40,7 +40,7 @@ test("focused discussion selects exact anchors and descendants without importing
   const f = await fixture(t);
   f.post("parent"); f.post("nested", { replyToId: "parent" }); f.post("sibling", { replyToId: "parent", body: "UNRELATED SIBLING" });
   f.propose("nested-work", "nested"); f.propose("other", "nested");
-  f.post("child", { replyToId: "nested", toMemberId: "reviewer", body: "Room-visible attention, not a private message" }, "guest");
+  f.post("child", { replyToId: "nested", toMemberId: "producer", body: "Targeted reply, private to the producer" }, "guest");
   f.post("other-branch", { replyToId: "nested", workItemId: "other", body: "UNRELATED BRANCH" });
   f.post("other-reply", { replyToId: "other-branch", body: "UNRELATED DESCENDANT" });
   f.post("draft", { workItemId: "nested-work", packetId: "shared-packet", basisRevision: 0, body: "One\nexact draft ☀" }, "producer");
@@ -50,7 +50,7 @@ test("focused discussion selects exact anchors and descendants without importing
   const before = auditRecovery(f.store), snapshot = f.store.snapshot(f.keys.owner, "commons"), result = await f.client.workDiscussion("nested-work");
   assert.deepEqual(ids(result), ["nested", "child", "draft", "draft-reply", "reseed"]);
   assert.deepEqual(result.discussion.items.map(row => row.relation), ["source", "reply", "linked", "reply", "linked"]);
-  assert.equal(result.discussion.items[1].message.toMemberId, "reviewer");
+  assert.equal(result.discussion.items[1].message.toMemberId, "producer");
   assert.equal(result.current.participants.find(p => p.id === "guest").active, false);
   assert.equal(result.discussion.items[2].message.proposal.attribution, "manual-unverified");
   assert.equal(result.discussion.items[2].message.body, "One\nexact draft ☀");
