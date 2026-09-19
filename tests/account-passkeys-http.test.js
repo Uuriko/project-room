@@ -94,6 +94,10 @@ const post = (origin, path, headers, body) => fetch(origin + path, {
 
 const errorCode = async res => (await res.json()).error.code;
 
+// QAS-702: passkey login rotates the slot token — the fresh token arrives in
+// the Set-Cookie header (the route previously relied on the in-place upgrade).
+const freshSlotCookie = res => /account_session=([A-Za-z0-9_-]{43})/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? null;
+
 test("register options requires an authenticated account session", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { passkeyService: fakePasskeyService() });
@@ -176,9 +180,12 @@ test("authenticate finish upgrades the slot with the passkey method", async t =>
   const [, args] = service.calls.find(([name]) => name === "finishAuthentication");
   assert.equal(args.expectedOrigin, origin);
   assert.equal(args.rpId, "127.0.0.1");
-  // The slot is really upgraded: the session now authenticates.
-  const auth = f.store.authenticateAccountSession(slot.token);
-  assert.equal(auth.account.id, "passkey-user");
+  // The login minted a fresh slot token: the pre-login token is dead and the
+  // fresh cookie token carries the session (QAS-702 session-fixation fix).
+  const fresh = freshSlotCookie(res);
+  assert.ok(fresh && fresh !== slot.token, "passkey login rotates the slot token");
+  assert.throws(() => f.store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+  assert.equal(f.store.authenticateAccountSession(fresh).account.id, "passkey-user");
 });
 
 test("authenticate finish rejects stale revisions and malformed bodies", async t => {
@@ -189,9 +196,16 @@ test("authenticate finish rejects stale revisions and malformed bodies", async t
   const headers = { ...jsonHeaders, Origin: origin };
   let res = await post(origin, "/api/auth/passkey/authenticate/finish", headers,
     { challengeId: "ch-auth-1", response: {}, sessionToken: slot.token, sessionRevision: 0 });
-  assert.equal(res.status, 200); // stub verifies; slot upgrades
+  assert.equal(res.status, 200); // stub verifies; slot upgrades and the token rotates
+  const fresh = freshSlotCookie(res);
+  assert.ok(fresh && fresh !== slot.token, "login rotated the slot token");
+  // The pre-login token is dead: presenting it again is 401, not a revision fight.
   res = await post(origin, "/api/auth/passkey/authenticate/finish", headers,
     { challengeId: "ch-auth-1", response: {}, sessionToken: slot.token, sessionRevision: 0 });
+  assert.equal(res.status, 401);
+  // The rotated token with a stale revision is still a 409.
+  res = await post(origin, "/api/auth/passkey/authenticate/finish", headers,
+    { challengeId: "ch-auth-1", response: {}, sessionToken: fresh, sessionRevision: 0 });
   assert.equal(res.status, 409, "revision moved on after the first upgrade");
   res = await post(origin, "/api/auth/passkey/authenticate/finish", headers,
     { challengeId: "ch-auth-1", response: {} });
@@ -297,7 +311,10 @@ test("register and authenticate round-trip through the real model (stubbed crypt
       sessionToken: upgrade.token, sessionRevision: 0 });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).account.id, "passkey-user");
-  assert.equal(f.store.authenticateAccountSession(upgrade.token).account.id, "passkey-user");
+  const fresh = freshSlotCookie(res);
+  assert.ok(fresh && fresh !== upgrade.token, "passkey login rotates the slot token");
+  assert.throws(() => f.store.authenticateAccountSession(upgrade.token), { code: "unauthenticated" });
+  assert.equal(f.store.authenticateAccountSession(fresh).account.id, "passkey-user");
   assert.equal(f.store.accountLogins.listPasskeyCredentials("passkey-user")[0].signCount, 1,
     "sign count advanced in the real model");
 });

@@ -135,7 +135,10 @@ test("callback success establishes the session and returns the same-origin page"
   const html = await callback.text();
   assert.match(html, /content="0;url=\/\?room=commons"/);
   const sessionCookie = accountCookie(callback);
-  assert.equal(sessionCookie, slotCookie, "the callback retains the same session slot");
+  // QAS-702: the callback mints a fresh slot token — the pre-login token is
+  // dead and the fresh cookie token carries the Google session.
+  assert.ok(sessionCookie && sessionCookie !== slotCookie, "the callback rotates the session slot");
+  assert.throws(() => f.store.authenticateAccountSession(slotCookie), { code: "unauthenticated" });
   const session = f.store.authenticateAccountSession(sessionCookie);
   assert.equal(session.account.id, `google:${sub}`);
   assert.doesNotMatch(session.account.id, /@/);

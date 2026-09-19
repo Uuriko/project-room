@@ -1987,7 +1987,9 @@ paths:
         /api/account-session` plus `Origin` and `X-CSRF-Token` are required.
         When a mail provider is configured, a single-use 15-minute code is
         issued and handed to the mailer (the code is never in the response);
-        when no provider is configured the route answers honestly with
+        issuing a new code burns every prior unconsumed code for the email,
+        so only the newest code is ever live. When no provider is configured
+        the route answers honestly with
         `mail_not_configured` and issues nothing. The response shape is
         identical whether or not the email already has an account, so nothing
         reveals account existence. 5 per address per minute, 3 per email per
@@ -2017,7 +2019,11 @@ paths:
         invalid_magic_code. On success the account is found-or-created by
         verified email (`email:<sha256hex>`), the magic method is linked, and
         the slot is compare-and-swapped to the account exactly like `POST
-        /api/account-session` (method `{ kind: "magic" }`); a `room_session`
+        /api/account-session` (method `{ kind: "magic" }`); the login mints a
+        FRESH `account_session` slot token and invalidates the pre-login one
+        (session-fixation rotation). A slot already signed in to a DIFFERENT
+        account is refused with 409 magic_account_mismatch before any code
+        burns — the foreign link stays live for its real owner. A `room_session`
         cookie for the same browser is revoked. 10 per address per minute,
         10 per email per hour.
       security:
@@ -2038,7 +2044,7 @@ paths:
         '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil } — Set-Cookie account_session" }
         '401': { description: account_session_required (no slot cookie) or invalid_magic_code }
         '403': { description: origin_denied or csrf_denied }
-        '409': { description: Stale expectedSessionRevision }
+        '409': { description: Stale expectedSessionRevision, or magic_account_mismatch (slot already signed in to a different account — the code is not burned) }
         '422': { description: invalid_magic_login or invalid_session_revision or invalid_email }
         '429': { description: rate_limited }
   /api/auth/passkey/register/options:

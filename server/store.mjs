@@ -1273,7 +1273,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // authenticated account session once its own verification has passed. `method`
   // is a short audit descriptor: { kind, ref } (ref is a public handle such as
   // the login-methods row id, never a secret).
-  loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null } = {}) {
+  loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null, rotateSlot = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     if (method == null || typeof method !== "object" || typeof method.kind !== "string" || method.kind.trim() === "") fail(422, "invalid_login_method", "A verified login method is required");
     if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
@@ -1291,7 +1291,33 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
       }
+      // QAS-702 (RC-2026-09-19-069): session-fixation rotation. The login
+      // and the rotation commit atomically: either the fresh token carries
+      // the authenticated session and the old token is dead, or the login
+      // fails and nothing is upgraded.
+      if (rotateSlot) return this.rotateAccountSessionSlot(slotToken);
       return this.authenticateAccountSession(slotToken);
+    });
+  }
+  // QAS-702 (RC-2026-09-19-069): mint a fresh account-session slot token
+  // carrying the slot's current state and invalidate the old token, so a
+  // token planted before login can never authenticate afterwards. Only an
+  // authenticated slot rotates; the revision, account, credential link,
+  // and lifetimes carry over unchanged, so the client sees no state jump.
+  // Safe to call inside an outer transaction (login) or standalone.
+  rotateAccountSessionSlot(slotToken) {
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken); // 401 on unknown/expired token
+      const row = this.db.prepare("SELECT * FROM account_session_slots WHERE hash=?").get(slot.credentialHash);
+      if (!row || row.account_id === null) fail(409, "slot_not_authenticated", "Only an authenticated session slot can rotate its token");
+      const token = key();
+      this.db.prepare(`INSERT INTO account_session_slots
+        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at)
+        VALUES(?,?,?,?,?,?,?,?)`)
+        .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
+          row.expires_at, row.authenticated_until, this.now());
+      this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
+      return { token, session: this.authenticateAccountSession(token) };
     });
   }
   // Google sign-in upgrades an account session slot the same way an access-key

@@ -621,10 +621,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             : linkGoogleSubject({ subject, email });
           store.accountLogins.touchMethodByOAuth("google", subject);
           const oldRoomToken = cookie(req, roomCookieName);
-          const loggedIn = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
+          // QAS-702 (RC-2026-09-19-069): the login mints a fresh slot token
+          // and invalidates the pre-login one — a planted token can never
+          // authenticate after the victim signs in.
+          const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
             completed.expectedRevision, { method: { kind: "oauth", ref: linked.methodRef },
-              revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
-          setCookie(res, accountCookieName, completed.slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+              revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+              rotateSlot: true });
+          setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
             .get(linked.accountId);
           // A fresh account has no rooms yet: land on the account home, where
@@ -675,6 +679,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // named account-session slot (same login call as the /api/account-session
       // POST, with method { kind: "magic" }). The slot is verified before any
       // code is burned so a CSRF failure cannot consume a one-time code.
+      // QAS-702: the login mints a FRESH slot token and invalidates the
+      // pre-login one, so a planted token never authenticates after sign-in.
+      // QAX-007: a slot already signed in to a different account refuses the
+      // consume (409 magic_account_mismatch) before the code burns.
       //
       // Codes are never returned in API responses — only through the
       // mailer. When no mail provider is configured the request route says
@@ -711,6 +719,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!normalized) reject(422, "invalid_email", "A valid email address is required");
         rate(`magic-consume:${remoteAddress}`, 10);
         magicEmailLimit(magicConsumeEmailLimiter, normalized);
+        // QAX-007 (RC-2026-09-19-074): never silently switch accounts. A slot
+        // already authenticated to a DIFFERENT account refuses the consume
+        // BEFORE any code burns, so a foreign link stays live for its real
+        // owner. Same-account re-auth (the link's email belongs to the
+        // signed-in account) is unaffected.
+        const alreadySignedIn = (() => {
+          try { return store.authenticateAccountSession(consumeToken); }
+          catch (error) { if (error?.status === 401) return null; throw error; }
+        })();
+        if (alreadySignedIn?.account) {
+          const targetAccountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+          if (targetAccountId !== alreadySignedIn.account.id) {
+            reject(409, "magic_account_mismatch",
+              "This browser is already signed in to a different account; sign out before using a magic link for another email");
+          }
+        }
         // The slot is verified before any code is burned so a CSRF failure
         // cannot consume a one-time code.
         // The model burns the code window on failure (401 invalid_magic_code)
@@ -730,11 +754,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
         store.accountLogins.touchMethod(accountId, method.id);
         const oldRoomToken = cookie(req, roomCookieName);
-        const loggedIn = store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
+        // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
+        // invalidate the pre-login one — see the Google path above.
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
           method: { kind: "magic", ref: method.id },
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+          rotateSlot: true
         });
-        setCookie(res, accountCookieName, consumeToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, accountView(loggedIn));
       }
       // ---- Password auth (slice 2, RC-2026-09-17-011) ----
@@ -746,10 +773,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // an authenticated session. Plaintext passwords never reach the store.
       const passwordAccountId = normalized => `email:${createHash("sha256").update(normalized).digest("hex")}`;
       const finishPasswordSlot = (slotToken, accountId, expectedRevision, methodRef) => {
-        const loggedIn = store.loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, {
-          method: { kind: "password", ref: methodRef }
+        // QAS-702 (RC-2026-09-19-069): every password login mints a fresh
+        // slot token and invalidates the pre-login one.
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, {
+          method: { kind: "password", ref: methodRef },
+          rotateSlot: true
         });
-        setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return loggedIn;
       };
       if (url.pathname === "/api/auth/password/signup") {
@@ -912,9 +942,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             ? linkGitHubSubjectToAccount({ subject, email: ghUser.email, slotToken: pending.sessionToken })
             : linkGitHubSubject({ subject, email: ghUser.email });
           store.accountLogins.touchMethodByOAuth("github", subject);
-          const loggedIn = store.loginAccountSessionWithMethod(pending.sessionToken, linked.accountId,
-            pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef } });
-          setCookie(res, accountCookieName, pending.sessionToken,
+          // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
+          // invalidate the pre-login one — see the Google path above.
+          const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(pending.sessionToken, linked.accountId,
+            pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef }, rotateSlot: true });
+          setCookie(res, accountCookieName, freshSlotToken,
             Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           if (githubWantsHtml) return githubHtml(githubLanding(linked.accountId));
           return json(res, 200, {
@@ -1145,10 +1177,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const verified = passkeys().finishAuthentication({ challengeId: data.challengeId, response: data.response,
           expectedOrigin: params.origin, rpId: params.rpId });
         const oldRoomToken = cookie(req, roomCookieName);
-        const loggedIn = store.loginAccountSessionWithMethod(passkeyToken, verified.accountId, data.sessionRevision, {
+        // QAS-702 (RC-2026-09-19-069): mint a fresh slot token on login and
+        // invalidate the pre-login one — the new token is set as the cookie
+        // here (this route previously relied on the in-place slot upgrade).
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(passkeyToken, verified.accountId, data.sessionRevision, {
           method: { kind: "passkey", ref: verified.methodRef },
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+          rotateSlot: true
         });
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, accountView(loggedIn));
       }
       // Track C C14 — read-only growth analytics surface. The handler is a

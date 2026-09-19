@@ -84,8 +84,12 @@ async function passwordAccount(t, n) {
     { email, password: password(n), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
   assert.equal(res.status, 201);
   const body = await res.json();
+  // QAS-702: signup rotates the slot token — the fresh cookie (and the
+  // response's csrf) is the session; the presented token is dead.
+  const fresh = /account_session=([A-Za-z0-9_-]{43})/.exec(res.headers.get("set-cookie") ?? "")?.[1];
+  assert.ok(fresh, "signup sets the rotated slot cookie");
   return { f, origin, accountId: body.account.id, email,
-    creds: { cookie: `account_session=${slot.token}`, csrf: f.store.accountSessionSlot(slot.token).csrf } };
+    creds: { cookie: `account_session=${fresh}`, csrf: body.csrf } };
 }
 
 const errBody = async res => (await res.json()).error;
