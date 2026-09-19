@@ -13,7 +13,7 @@ import { AccountClient } from "../src/client.js";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-share-contract-")), filename = join(directory, "room.sqlite");
-  const now = Date.now();
+  let now = Date.now();
   const store = new RoomStore(filename, { now: () => now }); store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -154,6 +154,32 @@ test("link creation retries preserve scope and guests cannot administer invitati
   const guest = f.guest(), accepted = guest.accept();
   assert.throws(() => f.store.shareLinks.list(guest.slot.token, "commons", accepted.session.sessionBinding), { code: "access_denied" });
   assert.throws(() => f.store.shareLinks.cancel(guest.slot.token, "commons", f.result.link.id, accepted.session.sessionBinding), { code: "access_denied" });
+});
+
+test("#657: a lost join response is recoverable with the same redemption id after restoring the session", t => {
+  const f = fixture(t), guest = f.guest("UX Probe");
+  const stale = f.store.accountSessionSlot(guest.slot.token);
+  const committed = guest.accept();
+  assert.equal(committed.duplicate, false);
+  // The naive retry with the stale pre-join session cannot work: the committed
+  // join bumped the slot revision and binding.
+  assert.throws(() => f.store.shareLinks.join(guest.slot.token, f.linkToken, { displayName: "UX Probe", redemptionId: guest.redemptionId,
+    expectedSessionRevision: stale.sessionRevision, expectedSessionBinding: stale.sessionBinding }),
+    { code: "session_binding_changed" });
+  // Restore first, then re-issue the same redemption id: the server resolves it
+  // idempotently and returns the credential instead of double-joining.
+  const restored = f.store.accountSessionSlot(guest.slot.token);
+  assert.equal(restored.sessionRevision, stale.sessionRevision + 1);
+  const recovered = f.store.shareLinks.join(guest.slot.token, f.linkToken, { displayName: "UX Probe", redemptionId: guest.redemptionId,
+    expectedSessionRevision: restored.sessionRevision, expectedSessionBinding: restored.sessionBinding });
+  assert.equal(recovered.duplicate, true);
+  assert.equal(recovered.roomId, "commons");
+  assert.equal(recovered.session.member.kind, "human");
+  assert.equal(recovered.session.account.id, committed.session.account.id);
+  const joins = f.store.db.prepare("SELECT COUNT(*) c FROM share_link_joins WHERE redemption_id=?").get(guest.redemptionId).c;
+  assert.equal(joins, 1, "the recovery must not double-join");
+  assert.equal(Object.keys(f.store.room("commons").state.members).filter(m => m.startsWith("guest-")).length, 1);
+  assert.doesNotThrow(() => f.store.shareLinks.verify());
 });
 
 test("HTTP share-link administration refuses non-owner bearer keys; owner identity bearer, room-key and account browser sessions still work", async t => {
