@@ -2107,6 +2107,12 @@ function syncTimelineWork() {
   if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
   const entries = timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const byId = new Map(entries.map(e => [e.item.id, e]));
+  // Same reason as renderMessages: setTimelineWorkNode restores focus inside a
+  // card it re-renders, and the reorder below can then move that card, which
+  // drops focus from whatever is inside it. Remembered across the whole sync
+  // and restored once, at the end.
+  const focusedBefore = list.contains(document.activeElement) ? document.activeElement : null;
+  const focusedKey = focusedBefore?.closest("[data-focus-key]")?.dataset.focusKey ?? null;
   const stale = [];
   list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => {
     const id = n.getAttribute("data-work-timeline");
@@ -2131,6 +2137,9 @@ function syncTimelineWork() {
   }
   const emptyNote = list.querySelector(":scope > .empty-note");
   if (emptyNote && (entries.length || list.querySelector(":scope > [data-message-record-id]"))) emptyNote.remove();
+  if (focusedKey && document.activeElement === document.body) {
+    [...list.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusedKey)?.focus({ preventScroll: true });
+  }
 }
 async function submit(form, fn, { failureHint } = {}) {
   if (busy) return;
