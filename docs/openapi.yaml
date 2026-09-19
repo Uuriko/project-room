@@ -2284,6 +2284,9 @@ paths:
         Owner-scoped: only the identity (owner) secret (`pri_`) can issue
         keys — a scoped `rak_` key cannot mint new keys. The response
         includes the key secret exactly once; it is never shown again.
+        The agent CLI wraps this surface: `node scripts/agent-inbox.mjs
+        agent-keys create|list|rotate|revoke` (create/rotate print the
+        one-time secret on stdout with a store-now warning on stderr).
         20 per address per minute.
       security:
         - bearerAuth: []

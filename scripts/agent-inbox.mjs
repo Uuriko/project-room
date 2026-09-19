@@ -72,6 +72,66 @@ function parseWorkActionFlags(action, extra) {
   return flags;
 }
 
+// Token management (RC-2026-09-18-050): agent-keys create|list|rotate|revoke
+// over /api/agent-keys. create takes a comma-separated scope list plus
+// --label, --expires-in <N m|h|d> or --expires-at <ms epoch>. Returns the
+// parsed options, or null when the arguments are invalid.
+function parseAgentKeysDuration(text) {
+  const match = /^(\d+)(m|h|d)$/.exec(text ?? "");
+  if (!match) return null;
+  const ms = Number(match[1]) * { m: 60000, h: 3600000, d: 86400000 }[match[2]];
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+}
+function parseAgentKeysArgs(subaction, args) {
+  if (!["create", "list", "rotate", "revoke"].includes(subaction)) return null;
+  if (subaction === "list") return args.length === 0 ? { subaction } : null;
+  if (subaction === "rotate" || subaction === "revoke") {
+    return args.length === 1 && /^rak_[A-Za-z0-9_-]{1,64}$/.test(args[0])
+      ? { subaction, keyId: args[0] } : null;
+  }
+  const [scopesCsv, ...flags] = args;
+  if (typeof scopesCsv !== "string" || scopesCsv.startsWith("--")) return null;
+  const scopes = scopesCsv.split(",").map(scope => scope.trim()).filter(Boolean);
+  if (scopes.length === 0 || !scopes.every(scope => /^[a-z0-9:_*-]+$/.test(scope))) return null;
+  const options = { subaction, scopes };
+  for (let index = 0; index < flags.length; index += 2) {
+    const name = flags[index], value = flags[index + 1];
+    if (name === "--label") {
+      if (value === undefined || value.length === 0 || value.length > 80 || options.label !== undefined) return null;
+      options.label = value;
+    } else if (name === "--expires-in") {
+      const ms = parseAgentKeysDuration(value);
+      if (ms === null || options.expiresAt !== undefined) return null;
+      options.expiresAt = Date.now() + ms;
+    } else if (name === "--expires-at") {
+      if (!/^\d+$/.test(value ?? "") || !Number.isSafeInteger(Number(value))
+        || Number(value) <= Date.now() || options.expiresAt !== undefined) return null;
+      options.expiresAt = Number(value);
+    } else return null;
+  }
+  return options;
+}
+
+// Runs the agent-keys verb. create/rotate print the one-time secret warning
+// to stderr (stdout stays machine-readable JSON); the secret is shown here
+// exactly once and never again.
+async function agentKeysMain(client, subaction, args) {
+  const parsed = parseAgentKeysArgs(subaction, args);
+  if (parsed === null) throw new ConnectionError("usage_error");
+  if (parsed.subaction === "list") return client.listAgentKeys();
+  if (parsed.subaction === "revoke") return client.revokeAgentKey(parsed.keyId);
+  const issued = parsed.subaction === "create"
+    ? await client.createAgentKey({ scopes: parsed.scopes,
+      ...(parsed.label === undefined ? {} : { label: parsed.label }),
+      ...(parsed.expiresAt === undefined ? {} : { expiresAt: parsed.expiresAt }) })
+    : await client.rotateAgentKey(parsed.keyId);
+  console.error([
+    "ONE-TIME SECRET — copy it now: the `secret` (and `credential`) below is shown exactly once and never again.",
+    "Store it in your secret manager. Never paste it into a prompt, a commit, or a URL.",
+  ].join("\n"));
+  return issued;
+}
+
 async function promptYesNo(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -197,6 +257,10 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
+  node scripts/agent-inbox.mjs agent-keys create SCOPES_CSV [--label LABEL] [--expires-in 24h|7d] [--expires-at MS_EPOCH]
+  node scripts/agent-inbox.mjs agent-keys list
+  node scripts/agent-inbox.mjs agent-keys rotate KEY_ID
+  node scripts/agent-inbox.mjs agent-keys revoke KEY_ID
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME [--yes|--no]
   node scripts/agent-inbox.mjs request-access ROOM_ID IDENTITY_ID DISPLAY_NAME PERM1,PERM2 [NOTE]
   node scripts/agent-inbox.mjs access-requests [STATUS]
@@ -272,7 +336,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -286,7 +350,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create"].includes(action) ? false
+        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
@@ -298,6 +362,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review", "collaborate"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
+      || (action === "agent-keys" && parseAgentKeysArgs(checkpoint, extra) === null)
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !redeemArgs.length || redeemArgs.join(" ").length > 80 || (redeemAutoYes && redeemAutoNo)))
       || (action === "request-access" && (checkpoint === undefined || extra.length < 3 || extra.length > 4))
       || (action === "access-requests" && (checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint) || extra.length))
@@ -348,6 +413,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
           ...(extra[1] === undefined ? {} : { displayName: extra.slice(1).join(" ") }) })
       : action === "invite-codes" ? await client.agentInvites()
       : action === "invite-code-revoke" ? await client.revokeAgentInvite(checkpoint)
+      : action === "agent-keys" ? await agentKeysMain(client, checkpoint, extra)
       : action === "redeem-invite" ? await redeemInviteWithConsent(process.env.ROOM_AGENT_ORIGIN, checkpoint, redeemArgs.join(" "), { autoYes: redeemAutoYes, autoNo: redeemAutoNo })
       : action === "request-access" ? await requestAccess(process.env.ROOM_AGENT_ORIGIN, {
           roomId: checkpoint, identityId: extra[0], displayName: extra[1],
