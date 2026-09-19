@@ -390,3 +390,62 @@ test("identity-create returns machine-readable next steps for a cold agent (RC-2
     assert.ok((step.method && step.path) || step.doc, "each step has a method+path or a doc pointer");
   }
 });
+
+test("identity secret is shown once: no read path returns it afterwards (RC-2026-09-18-042)", async t => {
+  const { store, origin, ownerLab } = await serve(t);
+  const created = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Once Bot" })
+  });
+  assert.equal(created.status, 201);
+  const { identityId, secret } = await created.json();
+  assert.match(secret, /^pri_/);
+  // The public identity read carries no secret.
+  const gotten = store.identities.get(identityId);
+  assert.ok(gotten && !("secret" in gotten), "get() must never return the secret");
+  assert.ok(!JSON.stringify(gotten).includes(secret), "secret must not appear in the identity record");
+  // Owner-side link audit carries no secret either.
+  const link = await fetch(`${origin}/api/rooms/lab/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerLab}` },
+    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+  });
+  assert.equal(link.status, 201);
+  const list = await (await fetch(`${origin}/api/rooms/lab/identity-links`, {
+    headers: { Origin: origin, Authorization: `Bearer ${ownerLab}` }
+  })).json();
+  assert.ok(!JSON.stringify(list).includes(secret), "secret must not appear in the owner link audit");
+  assert.ok(!/"secret"/.test(JSON.stringify(list)), "no secret field anywhere in the audit list");
+  // The database holds only the SHA-256 hash: the plaintext secret is unrecoverable server-side.
+  const row = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
+  assert.ok(row && /^[a-f0-9]{64}$/.test(row.secret_hash), "only the hash is stored");
+  assert.ok(!row.secret_hash.includes(secret.slice(4, 12)), "no plaintext fragment in the stored hash");
+});
+
+test("agent-visible surfaces never return owner tokens or session cookies (RC-2026-09-18-042)", async t => {
+  const { origin, ownerLab } = await serve(t);
+  const { identityId, secret } = await createAgentIdentity(origin, "Surface Bot");
+  // Owner links with the owner credential (never shared with the agent).
+  const link = await fetch(`${origin}/api/rooms/lab/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerLab}` },
+    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+  });
+  assert.equal(link.status, 201);
+  // As the agent: the room snapshot carries no credential material.
+  const snapshot = await (await fetch(`${origin}/api/rooms/lab`, {
+    headers: { Origin: origin, Authorization: `Bearer ${secret}` }
+  })).json();
+  assert.equal(snapshot.viewerId, identityId);
+  for (const field of ["viewerAccountId", "viewerAuthEpoch", "viewerSessionBinding", "viewerSessionRevision"]) {
+    assert.equal(snapshot[field], null, `${field} must be null for identity auth`);
+  }
+  const serialized = JSON.stringify(snapshot);
+  assert.ok(!serialized.includes(ownerLab), "the owner credential must never reach the agent");
+  assert.ok(!serialized.includes(secret), "the agent's own secret is never echoed back");
+  assert.ok(!/"csrf"|"credentialHash"|"sessionBinding"|"Set-Cookie"/.test(serialized),
+    "no session or cookie material in the snapshot");
+  // Presence, also agent-readable, leaks nothing either.
+  const presence = await (await fetch(`${origin}/api/rooms/lab/presence`, {
+    headers: { Origin: origin, Authorization: `Bearer ${secret}` }
+  })).json();
+  assert.ok(!JSON.stringify(presence).includes(ownerLab), "presence must not carry the owner credential");
+});
