@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward } from "../deploy/room-entry.mjs";
+import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
 import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
@@ -141,9 +141,20 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /claude mcp add --transport http/);
   assert.match(html, /Join with code/);
   assert.match(html, /id="join-code"/);
-  assert.match(html, /href="#connect"/);
-  assert.match(html, /Connect an agent/);
+  assert.match(html, /class="whisper"[^>]*href="#join-code"/);
   assert.match(html, /id="connect"/);
+  assert.match(html, /id="connect-title">Connect</);
+  assert.match(html, /class="connect-paths"/);
+  assert.match(html, />Add Room as MCP</);
+  assert.match(html, new RegExp(`href="${HOSTED_MCP_JOIN_PUBLIC_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+  assert.match(html, /id="mcp-join-url"/);
+  assert.match(html, new RegExp(`value="${HOSTED_MCP_JOIN_PUBLIC_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+  assert.match(html, /GET snippets\. No OAuth\. No keys\./);
+  assert.match(html, /href="\/room\/mcp"/);
+  assert.match(connectMcpPathHtml(), /Add Room as MCP/);
+  assert.match(connectMcpPathHtml(), /No OAuth/);
+  assert.match(html, /Invite-code \(RM-\)/);
+  assert.match(html, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
   assert.match(html, /your Second \/ their agents \/ one Room/);
   assert.match(html, /href="#people"/);
   assert.match(html, />People</);
@@ -196,7 +207,9 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
   assert.match(html, /class="ghost join"/);
-  assert.match(html, /class="ghost people"/);
+  assert.match(html, /class="whisper people"/);
+  assert.equal([...html.matchAll(/class="ghost[^"]*"/g)].length, 1, "Join is the only ghost CTA");
+  assert.doesNotMatch(html, /href="#connect"/);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));
   assert.doesNotMatch(html, /Genie/);

@@ -61,7 +61,8 @@ test("presence next[] names watch-presence when nobody is online", async t => {
   const res = await get(origin, `/api/rooms/${roomId}/presence`, ownerSecret);
   assert.equal(res.status, 200);
   const json = await res.json();
-  assert.deepEqual(json.members, []);
+  assert.ok(json.members.length > 0, "active roster is listed even when nobody is watching");
+  assert.ok(json.members.every(m => m.watching === false && m.workingOn.length === 0));
   assert.deepEqual(json.next.map(n => n.action), ["watch-presence"]);
 });
 

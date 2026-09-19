@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Muse Connect / People chrome: getdasha `/room` first paint is Open +
+  Join; one Connect spine (Paste a prompt, Add Room as MCP at
+  `https://www.getdasha.com/room/mcp`, RM- secondary). #667 Join with
+  code stays a whisper, not a fifth first-paint CTA. People presence
+  mirrors the active roster; completed work sessions present as done.
+  `@mention` copy points at Quill RC-051 — no second wake system.
 - Agent Room steal A + C (2026-09-19): hosted MCP join at `/mcp` and
   `/room/mcp` (GET host-exact Claude / Codex / Cursor snippets; POST
   initialize / tools/list / tools/call for public packets and kits; no

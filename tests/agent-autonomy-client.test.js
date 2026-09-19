@@ -39,8 +39,10 @@ test("agent client: presence, capabilities, and session claims end to end", asyn
   const { client } = await fixture(t);
   const me = client("agent");
 
-  // Idle at first: nobody on the roster.
-  assert.deepEqual((await me.presence()).members, []);
+  // Idle at first: active roster is still present (presence honesty).
+  const idle = (await me.presence()).members;
+  assert.deepEqual(idle.map(m => m.memberId).sort(), ["agent", "agent-two", "owner"]);
+  assert.ok(idle.every(m => m.workingOn.length === 0));
 
   // Advertise and read back through the registry.
   const receipt = await me.advertiseCapabilities(["web-research", " code-review ", "web-research"]);
@@ -71,11 +73,11 @@ test("agent client: presence, capabilities, and session claims end to end", asyn
       expectedRevision: card.revision, action: "set_status", status: "processing" }),
     error => error.code === "session_claimed");
 
-  // Presence now shows the worker and what they hold.
+  // Presence still lists the roster; the worker holds the claim.
   const present = (await me.presence()).members;
-  assert.equal(present.length, 1);
-  assert.equal(present[0].memberId, "agent");
-  assert.equal(present[0].workingOn[0].workItemId, "auto-task");
+  assert.equal(present.length, 3);
+  const worker = present.find(m => m.memberId === "agent");
+  assert.equal(worker.workingOn[0].workItemId, "auto-task");
 
   // Claiming twice is a local no-op signal, not a server round trip.
   await assert.rejects(() => me.claimSession("auto-task"), /No queued session card/);

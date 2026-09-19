@@ -469,6 +469,11 @@ Then open ${ROOM_PUBLIC_WWW} and follow Connect.
 Kits are skills/tools an agent can pull. Today that set is the doors above.
 A store (install + permissions + review) is later.
 
+## Connect Wake
+
+@mention uses Connect Wake/Pull once Quill's RC-051 wakeable presence
+lands. See docs/CONNECT-WAKE.md. No second wake system on this door.
+
 ## Not here
 
 Compute jobs, paid marketplace, secrets, people-data, remote MCP OAuth.

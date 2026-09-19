@@ -139,6 +139,16 @@ export function publicRoomDoorHtml() {
   return PUBLIC_ROOM_DOOR_HTML;
 }
 
+// #667 (2015af9a) owns host twins + GET snippets at /room/mcp and short codes.
+// This door links the public URL on the Connect spine and nests those
+// sections — do not re-implement Steal A/C.
+export const HOSTED_MCP_JOIN_PATH = "/room/mcp";
+export const HOSTED_MCP_JOIN_PUBLIC_URL = ROOM_MCP_PUBLIC_URL;
+
+export function connectMcpPathHtml() {
+  return `<li id="connect-mcp"><strong><a href="${ROOM_MCP_PUBLIC_URL}">Add Room as MCP</a></strong> — <a href="#mcp-join">GET snippets. No OAuth. No keys.</a></li>`;
+}
+
 // Import in the existing Demigod edge Worker, before its generic page routing.
 // Returns null for every unrelated host/path so existing routes stay owned there.
 // getdasha www / lobby / apex /room is served by the Room Worker (http.mjs),
@@ -274,7 +284,10 @@ main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex
 h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 14px;font-weight:600}
 .lead{margin:0 0 1.4rem;color:rgba(242,237,231,.82);max-width:34em}
 .spine{margin:-.4rem 0 1.4rem;color:rgba(242,237,231,.72);max-width:34em}
-.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 1rem}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 .55rem}
+.whispers{display:flex;flex-wrap:wrap;gap:.75rem 1.15rem;margin:0 0 1.2rem;font-size:14px}
+.whisper{color:rgba(242,237,231,.52);text-decoration:none}
+.whisper:hover{color:var(--acid)}
 .join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
 .open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
 .open{background:var(--acid);color:var(--ink)}
@@ -285,18 +298,24 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .connect h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .connect h2#people{margin-top:1.4rem;scroll-margin-top:1.5rem}
 .connect p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
-.connect ol{margin:0 0 .85rem;padding:0;list-style:none}
-.connect li{margin:0 0 .45rem}
+.connect ol.connect-paths{margin:0 0 1rem;padding-left:1.2rem;list-style:decimal}
+.connect li{margin:0 0 .55rem}
+.connect li.connect-secondary{color:rgba(242,237,231,.58)}
 .connect strong{color:var(--paper);font-weight:650}
 .connect a{color:var(--acid);text-decoration:none}
+.connect-more{margin:1rem 0 0;padding-top:1rem;border-top:1px solid rgba(242,237,231,.08)}
+.connect-more p,.connect-more li{font-size:14px;color:rgba(242,237,231,.58)}
+.connect-more ol{margin:0 0 .75rem;padding:0;list-style:none}
 .works-with{margin:.15rem 0 0;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--acid)}
 .connect code{font-size:.9em;color:var(--paper)}
+.mcp-join-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.mcp-join-url{display:block;width:100%;box-sizing:border-box;margin:.4rem 0;padding:.5rem .7rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
 .compute{margin:2.2rem 0 0;font-size:13px;color:var(--mute)}
 .compute+.compute{margin-top:.5rem}
 .compute a{color:var(--acid);text-decoration:none}
-.join-agent{margin:0 0 1.6rem;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
+.join-agent{margin:.85rem 0 1.1rem;padding-top:.85rem;max-width:34em}
 .join-agent h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .join-agent p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
 .join-agent a{color:var(--acid);text-decoration:none}
@@ -322,39 +341,46 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
-    <a class="ghost" href="#join-agent">Paste a prompt</a>
-    <a class="ghost" href="#connect">Connect an agent</a>
-    <a class="ghost people" href="#people">People</a>
   </div>
-  <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free.</p>
-  <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
-    <h2 id="join-agent-title">Join from your favorite agent app</h2>
-    <p>Just paste a prompt.</p>
-    <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
-    <label for="join-prompt">Copy this into a new chat</label>
-    <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
-    <p>Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
-  </section>
-  ${mcpJoinDoorHtml()}
-  ${joinCodeDoorHtml()}
-  <section class="connect" id="connect" aria-labelledby="connect-agent">
-    <h2 id="connect-agent">Connect an agent</h2>
-    <p>Invite teammates and AI agents to work on the same items together.</p>
-    <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
-    <p>Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
-    <ol>
-      <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
-      <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
-      <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
-      <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
-      <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
-      <li><strong>Kits</strong> — Members can attach a kit: a ready-made set of tools an agent brings along.</li>
+  <p class="whispers"><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
+  <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
+  <section class="connect" id="connect" aria-labelledby="connect-title">
+    <h2 id="connect-title">Connect</h2>
+    <p>One spine for agents. Wake, Pull, Desktop, and Takeover share this door — they are not four equal CTAs.</p>
+    <ol class="connect-paths">
+      <li><strong><a href="#join-agent">Paste a prompt</a></strong> — Join from your favorite agent app. Same bytes: <a href="/room/join.txt">join.txt</a>.</li>
+      ${connectMcpPathHtml()}
+      <li class="connect-secondary"><strong>Invite-code (RM-)</strong> — Agents redeem via CLI. Not a human join path. Not a first-paint CTA.</li>
     </ol>
-    <p>Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
-    <p>Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
-    <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
+      <h2 id="join-agent-title">Join from your favorite agent app</h2>
+      <p>Just paste a prompt.</p>
+      <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
+      <label for="join-prompt">Copy this into a new chat</label>
+      <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
+      <p>Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
+    </section>
+    ${mcpJoinDoorHtml()}
+    ${joinCodeDoorHtml()}
+    <p>@mention uses Connect Wake/Pull once Quill's RC-051 lands.</p>
+    <div class="connect-more">
+      <p>Invite teammates and AI agents to work on the same items together.</p>
+      <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
+      <p>Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
+      <ol>
+        <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
+        <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
+        <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
+        <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
+        <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
+        <li><strong>Kits</strong> — Members can attach a kit: a ready-made set of tools an agent brings along.</li>
+      </ol>
+      <p>Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
+      <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    </div>
     <h2 id="people">People</h2>
     <p>your Second / their agents / one Room</p>
+    <p>@mention uses Connect Wake/Pull once RC-051 lands. Presence mirrors the active roster.</p>
     <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
     <p>Agents use an invite-code (RM-).</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>

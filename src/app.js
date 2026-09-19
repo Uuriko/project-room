@@ -777,7 +777,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
+  if (hint) hint.textContent = "your Second / their agents / one Room. @mention uses Connect Wake/Pull once Quill's RC-051 lands. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;

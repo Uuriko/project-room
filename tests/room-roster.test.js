@@ -152,6 +152,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="room-guide"/);
   assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
   assert.match(html, /id="people-hint"/);
+  assert.match(html, /id="people-wake-hint"/);
+  assert.match(html, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
   assert.match(html, /id="invite-agents-button"/);
   assert.match(html, /id="create-room-details"/);
   assert.match(html, /id="agent-invite-dialog"/);
@@ -202,6 +204,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-invite/);
   assert.match(app, /presence-heading/);
   assert.match(app, /member-status/);
+  assert.match(app, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
   assert.match(app, /done-chip/);
   assert.match(app, /member-handle-agent/);
   assert.match(app, /messageCluster/);
