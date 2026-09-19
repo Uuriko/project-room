@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
+import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
+import { isRoomMcpPath, roomMcpFetchResponse } from "../server/mcp-http.mjs";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
@@ -10,6 +12,11 @@ export function publicDoorHashForward() {
   function id() {
     var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
     return m && m[1];
+  }
+  function formatCode(value) {
+    var s = String(value || "").toUpperCase().replace(/[\s_-]/g, "").replace(/I/g, "1").replace(/L/g, "1").replace(/O/g, "0");
+    if (!/^[0-9A-HJKMNP-TV-Z]{9}$/.test(s)) return "";
+    return s.slice(0, 3) + "-" + s.slice(3, 6) + "-" + s.slice(6, 9);
   }
   function handoff(href) {
     var room = id();
@@ -35,6 +42,15 @@ export function publicDoorHashForward() {
       joinUrl.hash = hash;
       join.setAttribute("href", joinUrl.href);
       globalThis.location.replace(joinUrl.href);
+      return;
+    }
+    if (hash.indexOf("#code/") === 0 && join) {
+      var formatted = formatCode(hash.slice(6).split("/")[0]);
+      if (!formatted) return;
+      var codeUrl = new URL(join.getAttribute("href"), globalThis.location.href);
+      codeUrl.hash = "#code/" + formatted;
+      join.setAttribute("href", codeUrl.href);
+      globalThis.location.replace(codeUrl.href);
     }
   }
   apply();
@@ -49,6 +65,16 @@ export function publicDoorHashForward() {
         globalThis.location.assign(next);
       }
     }, true);
+    globalThis.document.addEventListener("submit", function (e) {
+      var form = e.target && e.target.id === "join-code-form" ? e.target : null;
+      if (!form) return;
+      e.preventDefault();
+      var input = globalThis.document.querySelector("#join-code");
+      var formatted = formatCode(input && input.value);
+      var origin = form.getAttribute("data-room-origin");
+      if (!formatted || !origin) return;
+      globalThis.location.assign(origin.replace(/\/$/, "") + "/#code/" + formatted);
+    });
   }
 }
 export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
@@ -70,6 +96,38 @@ export function isPublicRoomDoorPath(pathname) {
 
 // Browsers (Accept: text/html) and default curl (*/*) get the door.
 // Explicit text/plain without text/html still returns the short packet.
+function mcpJoinDoorHtml() {
+  const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL);
+  return `<section class="mcp-join" id="mcp-join" aria-labelledby="mcp-join-title">
+    <h2 id="mcp-join-title">Add Room as MCP</h2>
+    <p>Paste this URL into Claude, Codex, or Cursor. Public packets and kits. No keys. Room tools still use local stdio plus an enrolled key or ga1. token.</p>
+    <label for="mcp-join-url">Hosted MCP join URL</label>
+    <input id="mcp-join-url" type="text" readonly value="${snippets.url}" autocomplete="off" spellcheck="false">
+    <p class="join-hosts">Claude · Codex · Cursor</p>
+    <pre><code>Claude:
+${snippets.claude}
+
+Cursor (~/.cursor/mcp.json):
+${JSON.stringify(snippets.cursor, null, 2)}
+
+Codex:
+${snippets.codex}</code></pre>
+    <p>Same bytes: <a href="/room/mcp">/room/mcp</a>. Host-exact <code>/room/mcp/claude</code>, <code>/room/mcp/codex</code>, <code>/room/mcp/cursor</code> are the same join endpoint.</p>
+  </section>`;
+}
+
+function joinCodeDoorHtml() {
+  return `<form class="join-code" id="join-code-form" data-room-origin="${ROOM_ORIGIN}" aria-labelledby="join-code-title">
+    <h2 id="join-code-title">Join with code</h2>
+    <p>Short human invite code (ABC-DEF-GHJ). Same guest join as the full #join/ link. Not an RM- agent invite.</p>
+    <label for="join-code">Join code</label>
+    <div class="invite-row">
+      <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ">
+      <button type="submit">Join with code</button>
+    </div>
+  </form>`;
+}
+
 export function wantsPublicDoorHtml(accept) {
   const value = String(accept ?? "");
   if (/text\/html/i.test(value)) return true;
@@ -88,6 +146,16 @@ export function publicRoomDoorHtml() {
 export function roomEntry(request) {
   const url = new URL(request.url);
   if (url.hostname !== "www.trydemigod.com") return null;
+  const mcp = roomMcpFetchResponse(request);
+  if (mcp) return mcp;
+  if (isRoomMcpPath(url.pathname)) {
+    const headers = discoveryHeaders("application/json; charset=utf-8");
+    if (request.method === "POST") {
+      return new Response("Use the getdasha Room Worker MCP URL for tools/call.", {
+        status: 405, headers: { ...headers, Allow: "GET, HEAD, OPTIONS" }
+      });
+    }
+  }
   // The human door page wins at the door root on this host; discovery docs
   // still resolve at /room/llms.txt etc. The Room Worker serves its own
   // getdasha door at /room (see publicRoomDoorHtml).
@@ -137,6 +205,15 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .join-agent h2{margin:0 0 10px;font:650 11px/1.3 "Hanken Grotesk",system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .join-hosts{margin:0 0 .75rem;font-size:13px;color:var(--mute)}
 .join-agent textarea{width:100%;box-sizing:border-box;min-height:12rem;margin:.4rem 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(228,222,210,.22);border-radius:.4rem;background:#0a100e;color:#E4DED2;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+.mcp-join,.join-code{margin:1.6rem 0 0;padding-top:1.35rem;border-top:1px solid rgba(228,222,210,.12);max-width:34em}
+.mcp-join h2,.join-code h2{margin:0 0 10px;font:650 11px/1.3 "Hanken Grotesk",system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.mcp-join p,.join-code p{margin:0 0 .75rem;font-size:15px}
+.mcp-join label,.join-code label{display:block;margin:0 0 .4rem;font-size:13px;color:var(--mute)}
+.mcp-join input,.join-code input{width:100%;box-sizing:border-box;margin:0 0 .75rem;padding:.65rem .85rem;border:1px solid rgba(228,222,210,.22);border-radius:.4rem;background:#0a100e;color:#E4DED2;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+.mcp-join pre{margin:0 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(228,222,210,.22);border-radius:.4rem;background:#0a100e;color:#E4DED2;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}
+.join-code .invite-row{display:flex;gap:.6rem;align-items:center}
+.join-code .invite-row input{margin:0;flex:1}
+.join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--clay);color:var(--ink);border:0;font-weight:650}
 .help a{color:var(--clay);text-decoration:none}
 footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
 footer a{color:var(--clay);text-decoration:none}
@@ -159,6 +236,8 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
     <p class="help">Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
   </section>
+  ${mcpJoinDoorHtml()}
+  ${joinCodeDoorHtml()}
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p class="help">Invite teammates and AI agents to work on the same items together.</p>
@@ -224,6 +303,16 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .join-hosts{margin:0 0 .75rem;font-size:13px;color:var(--mute)}
 .join-agent label{display:block;margin:0 0 .4rem;font-size:13px;color:var(--mute)}
 .join-agent textarea{width:100%;box-sizing:border-box;min-height:12rem;margin:0 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+.mcp-join,.join-code{margin:0 0 1.6rem;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
+.mcp-join h2,.join-code h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.mcp-join p,.join-code p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
+.mcp-join a,.join-code a{color:var(--acid);text-decoration:none}
+.mcp-join label,.join-code label{display:block;margin:0 0 .4rem;font-size:13px;color:var(--mute)}
+.mcp-join input,.join-code input{width:100%;box-sizing:border-box;margin:0 0 .75rem;padding:.65rem .85rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+.mcp-join pre{margin:0 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}
+.join-code .invite-row{display:flex;gap:.6rem;align-items:center}
+.join-code .invite-row input{margin:0;flex:1}
+.join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--acid);color:var(--ink);border:0;font-weight:650}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
@@ -246,6 +335,8 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
     <p>Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
   </section>
+  ${mcpJoinDoorHtml()}
+  ${joinCodeDoorHtml()}
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p>Invite teammates and AI agents to work on the same items together.</p>

@@ -31,6 +31,7 @@ const ALLOWLIST = [
   /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
   /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
   /LEGACY_CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
+  /SHARE_CODE_ALPHABET\s*=\s*"/, // Crockford 9-char human join-code alphabet demo, not a credential
   /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
   /password:\s*form\.querySelector/, // src/auth-signin-ui.js: reads the user's typed password back from the DOM to preserve it across signup/login mode toggles — not a hardcoded secret
   /webhookSecret:\s*"TELEGRAM_WEBHOOK_SECRET"/, // env var NAME as string

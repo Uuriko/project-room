@@ -99,7 +99,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "stitch_links",
   "stitch_revocations",
   "stitch_suggestions",
-  "stitch_receipts"
+  "stitch_receipts",
+  // share_link_codes: short human invite aliases of existing #join/ share-links.
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to them, and share_links.verify() plus hash-only storage are the gate.
+  "share_link_codes"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

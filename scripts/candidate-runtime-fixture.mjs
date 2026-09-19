@@ -31,6 +31,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-deep-link.js');
   paths.add('src/browser-session.js');
   paths.add('src/agent-invite-ui.js');
+  paths.add('src/share-invite-code.js');
+  paths.add('src/room-mcp-join.js');
+  paths.add('server/mcp-http.mjs');
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');

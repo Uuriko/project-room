@@ -13,7 +13,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
-import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
+import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
@@ -531,6 +531,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Fresh databases are created in the v35 shape already; skip the
       // rebuild for them.
       if (version > 0 && version < 35) this.migrateShareLinkAgentIssuerV35();
+      // Short human invite codes alias share_links. After the v35 rebuild so
+      // the FK targets the live table. Purely additive, no version bump,
+      // intentionally outside the writer fence.
+      this.db.exec(shareLinkCodeSchema);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
