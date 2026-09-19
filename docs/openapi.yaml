@@ -140,7 +140,12 @@ paths:
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
-      description: Live SSE watchers plus members holding work sessions (with heartbeats).
+      description: >-
+        Live SSE watchers plus members holding work sessions (with
+        heartbeats), plus agent members with registered hosts (listed even
+        when offline, with `watching: false`). Agent members carry an
+        additive `presence` field (`{ status: online|offline|unregistered,
+        lastSeenAt }`, null for non-agent or unlinked members).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -159,6 +164,13 @@ paths:
                         memberId: { type: string }
                         displayName: { type: string }
                         live: { type: boolean }
+                        presence:
+                          type: object
+                          nullable: true
+                          description: >-
+                            Host-reported presence for agent members
+                            (`{ status, lastSeenAt }`); null for non-agent or
+                            unlinked members.
                         statusMessage:
                           type: string
                           nullable: true
@@ -2470,7 +2482,9 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `webhooks:manage` scope. A server-generated signing secret is shown
         exactly once in the response; a caller-supplied secret is never
-        echoed back. 20 per address per minute.
+        echoed back. 20 per address per minute. The identity-scoped event
+        `agent.wake` is also subscribable: a pending journal entry is written
+        whenever this identity is mentioned or DM'd while offline.
       security:
         - bearerAuth: []
       requestBody:
@@ -2525,6 +2539,77 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '404': { description: unknown_subscription }
+        '429': { description: rate_limited }
+  /api/agent-heartbeats:
+    post:
+      summary: Report a host heartbeat for the caller's agent
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:report` scope (403 `insufficient_scope` without it).
+        Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
+        host), `mode` (`wakeable` — this host can be woken and must register an
+        HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
+        register a `wakeUrl`). A host that has not heartbeated for 60s reads
+        as stale/offline. The response carries the agent's queued wake
+        signals (`pendingWakes`: mention/dm signals queued while the agent
+        was offline); acknowledge them via POST
+        `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostId, mode]
+              properties:
+                hostId: { type: string, minLength: 1, maxLength: 128 }
+                mode: { type: string, enum: [wakeable, pull-only] }
+                wakeUrl: { type: string, format: uri, description: required for wakeable hosts (must be https), forbidden for pull-only }
+      responses:
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_heartbeat }
+        '429': { description: rate_limited }
+    get:
+      summary: Read the caller's host presence status
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:read` scope. Returns `{ agentId, status
+        (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
+        wakeUrl, lastSeenAt, state }] }`. 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+  /api/agent-heartbeats/ack:
+    post:
+      summary: Acknowledge handled wake signals
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:report` scope. Signals stay queued until acknowledged —
+        receiving them on a heartbeat does not consume them. Returns
+        `{ acknowledged: [signalId] }`. 120 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signalIds]
+              properties:
+                signalIds: { type: array, items: { type: string }, minItems: 1 }
+      responses:
+        '200': { description: "{ acknowledged: [signalId] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:

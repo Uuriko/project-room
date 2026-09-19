@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 65 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 67 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -58,6 +58,11 @@ test("online capture preserves all 65 tables, identity boundaries and exact retr
   // Seed one agent-room ownership record so the capture covers agent_room_ownership.
   f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
     .run(identityId, "commons", f.now());
+  // Seed wakeable-presence rows so the capture covers agent_hosts and agent_wake_signals (RC-2026-09-18-051).
+  f.store.db.prepare(`INSERT INTO agent_hosts(agent_id,host_id,mode,wake_url,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
+    .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO agent_wake_signals(signal_id,agent_id,kind,room_id,message_id,created_at,delivered_at) VALUES(?,?,?,?,?,?,?)`)
+    .run("recovery-signal", identityId, "mention", "commons", "recovery-message", f.now(), null);
   // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
   // agent_directory_cards and agent_webhook_subs.
   f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
@@ -135,7 +140,7 @@ test("online capture preserves all 65 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 65); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 67); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
