@@ -66,6 +66,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // each store verifies its own schema on open.
   "agent_identity_verification",
   "room_verification_policy",
+  // Wakeable agent presence (RC-2026-09-18-051): agent_hosts and
+  // agent_wake_signals. Purely additive and intentionally NOT fenced:
+  // older writers have no code path to them, every row is scoped to an
+  // agent identity, and AgentHeartbeats.verifySchema() is read-only-safe.
+  "agent_hosts",
+  "agent_wake_signals",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
