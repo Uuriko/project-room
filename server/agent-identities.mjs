@@ -90,6 +90,9 @@ export class AgentIdentities {
   create(displayName) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
+    // RC-2026-09-19-086: reject C0 control chars like share-link join does
+    // (422 there) — storing them raw corrupts logs, exports, and renders.
+    if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
     return this.store.transaction(() => {
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");

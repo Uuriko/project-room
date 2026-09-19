@@ -403,7 +403,7 @@ paths:
               type: object
               required: [displayName]
               properties:
-                displayName: { type: string, maxLength: 80 }
+                displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity)' }
       responses:
         '201':
           description: Identity created
@@ -451,7 +451,7 @@ paths:
               type: object
               required: [displayName]
               properties:
-                displayName: { type: string, maxLength: 80 }
+                displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity)' }
       responses:
         '201':
           description: Identity created (same body as POST /api/agent-identities)
@@ -2578,7 +2578,7 @@ paths:
               type: object
               required: [url, events]
               properties:
-                url: { type: string, format: uri }
+                url: { type: string, format: uri, description: 'https only, public hosts only — IP literals, localhost, and private/link-local/reserved ranges are rejected (SSRF guard, 422)' }
                 events: { type: array, items: { type: string }, minItems: 1 }
                 secret: { type: string, description: "optional caller-supplied signing secret" }
       responses:
