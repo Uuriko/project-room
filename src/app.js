@@ -1860,7 +1860,10 @@ function timelineWorkEntries() {
   return Object.values(state.workItems)
     .map(item => {
       const proposals = draftsByWork.get(item.id) ?? [];
-      return { item, channelId: proposals.length ? messageChannelId(proposals[0]) : DEFAULT_CHANNEL_ID,
+      // proposals is built newest-first via reverse iteration; the most recent
+      // proposal determines the work card's channel.
+      const mostRecent = proposals[0];
+      return { item, channelId: mostRecent ? messageChannelId(mostRecent) : DEFAULT_CHANNEL_ID,
         ts: Date.parse(item.updatedAt) || 0, html: workCard(item, now, proposals, state.messages) };
     })
     .sort((a, b) => a.ts - b.ts);
