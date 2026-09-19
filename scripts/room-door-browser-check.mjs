@@ -144,9 +144,9 @@ for (const touch of [false, true]) {
     await page.goto(`${origin}/room#code/abc-def-ghj`);
     await page.waitForURL(url => url.hash === "#code/ABC-DEF-GHJ" && url.origin === new URL(ROOM_ORIGIN).origin);
     assert.equal(page.url(), `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
-    const mcp = await page.request.get(`${origin}/room/mcp`);
-    assert.match(mcp.headers()["content-type"], /text\/plain/);
-    const mcpText = await mcp.text();
+    const mcpDoc = await page.request.get(`${origin}/room/mcp`);
+    assert.match(mcpDoc.headers()["content-type"], /text\/plain/);
+    const mcpText = await mcpDoc.text();
     assert.match(mcpText, /claude mcp add --transport http/);
     // Local Room Worker is host-exact; edge/Demigod advertise the public URL.
     assert.ok(mcpText.includes(`${origin}/mcp`));
