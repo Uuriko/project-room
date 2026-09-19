@@ -46,32 +46,45 @@ using the `next` cursor from the previous response.
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "message.posted", "data": { "body": "...", "replyTo": "<messageId>" } }
+{ "id": "<uuid>", "type": "message.posted", "data": { "body": "...", "replyToId": "<messageId>" } }
 ```
+
+`replyToId` is the id of the message you're answering. (`replyTo` is not a real field — the server rejects it with 422.)
 
 ### 5. Propose work
 
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "work.proposed", "data": { "title": "...", "body": "..." } }
+{ "id": "<uuid>", "type": "work.proposed", "data": { "workItemId": "<workItemId>", "title": "...", "definitionOfDone": "...", "accountableMemberId": "<memberId>" } }
 ```
+
+`workItemId` is a client-generated id for the new work item; `definitionOfDone`
+is required; `accountableMemberId` must be a room member (only they can later
+accept/complete it).
 
 ### 6. Accept work
 
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "work.accepted", "data": { "workId": "<id>" } }
+{ "id": "<uuid>", "type": "work.accepted", "data": { "workItemId": "<workItemId>", "expectedRevision": 0 } }
 ```
+
+`expectedRevision` is the work item's current revision (0 right after proposing;
+read it from the item or the events log — a stale revision is rejected).
 
 ### 7. Complete work
 
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "work.completed", "data": { "workId": "<id>" } }
+{ "id": "<uuid>", "type": "work.completed", "data": { "workItemId": "<workItemId>", "expectedRevision": 1, "summary": "...", "evidenceUrl": "https://...", "evidenceVersion": "v1", "nextAction": "..." } }
 ```
+
+Again: `expectedRevision` is the item's current revision (1 after accepting it
+in the previous step). Completion also records a receipt — `summary`,
+`evidenceUrl` (HTTPS), `evidenceVersion`, and `nextAction` are all required.
 
 ### 8. Read a message thread
 
@@ -92,14 +105,16 @@ using the `next` cursor from the previous response.
 
 ### "What's the status of work in room X?"
 
-1. `GET /api/rooms/{roomId}/search?q=&kind=work` — or scan recent events for `work.*` types.
+1. `GET /api/rooms/{roomId}/events?after=0&limit=100` and filter for `work.*`
+   event types (the search endpoint needs a non-empty query, so it can't
+   list all work).
 2. Group by status: proposed, accepted, completed.
 
 ## Rules of the road
 
 - **Read before writing.** Always fetch recent events before posting, so replies land in the right thread and channel.
 - **One write per user request.** Never post, accept, or complete work unless the user explicitly asked for that action.
-- **Replies stay in their thread's channel.** Use `replyTo`, not a new top-level message, when answering something.
+- **Replies stay in their thread's channel.** Use `replyToId`, not a new top-level message, when answering something.
 - **Idempotency keys are UUIDs you generate.** If a request fails ambiguously, retry with the same `id` — the server dedupes.
 - **Respect the key's scopes.** A read-only key cannot post; say so instead of failing silently.
 - **Keep messages concise.** Project Room values short, plain messages over long ones.
