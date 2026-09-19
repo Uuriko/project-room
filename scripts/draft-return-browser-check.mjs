@@ -130,6 +130,11 @@ test("posted draft returns to its exact conversation record and work link preser
   await page.locator("#message-input").fill("Private root composer draft");
   await welcome.locator('[data-message-action="thread"]').click();
   await page.locator("#message-input").fill("Private unrelated thread draft");
+  // The portable work dialog opens from a timeline work card, which is not
+  // rendered inside the thread view. Return to the room timeline first; the
+  // unrelated thread draft is saved by the composer and verified later.
+  await page.locator('#thread-back').click();
+  await page.waitForFunction(() => document.querySelector('#thread-bar').hidden);
   await f.open(); await f.input.fill(f.answer());
   // An already-open draft cannot be replaced by another opening event.
   await f.card.locator('[data-portable-work]').first().evaluate(node => node.click());
@@ -157,6 +162,10 @@ test("posted draft returns to its exact conversation record and work link preser
   assert.equal(await choices.evaluate(node => node.open), false);
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator("#message-input").inputValue(), "Private unrelated thread draft");
+  // The work-draft choices live on the room timeline card, not in the thread
+  // view. Return to the room; the verified thread draft is preserved.
+  await page.locator('#thread-back').click();
+  await page.waitForFunction(() => document.querySelector('#thread-bar').hidden);
   await choices.locator('summary').click();
   await choices.locator('[data-open-message="later-work-draft"]').click();
   await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "later-work-draft");

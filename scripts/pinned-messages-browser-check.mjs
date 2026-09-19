@@ -81,9 +81,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#pinned-count").textContent(), "3 of 50");
     assert.match(await f.items.nth(1).locator(".pinned-meta").textContent(), /Test producer/);
 
-    // "Pinned only" search: pins alone with no term, narrowed by the term, no work results; the toggle clears with the search.
+    // "Pinned" search: pins alone with no term, narrowed by the term, no work results; the toggle clears with the search.
     await openSearch(page);
-    const pinnedToggle = page.getByRole("button", { name: "Pinned only", exact: true }), results = page.locator("#search-list li");
+    const pinnedToggle = page.getByRole("button", { name: "Pinned", exact: true }), results = page.locator("#search-list li");
     assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "false");
     await pinnedToggle.focus(); await page.keyboard.press("Enter");
     assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "true");

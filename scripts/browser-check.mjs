@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp, openCatchUpNoLoad } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -282,6 +283,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await historyMessage.count(), 1, "history exposes the underlying message");
     await historyMessage.click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), "catch-up-55", "history drill-through focuses the message");
+    // The history drill-through closes Catch up; re-open it for the attention item.
+    // Use the no-load variant to avoid refreshing the brief (the test waits for
+    // "New changes available" after a late event).
+    await openCatchUpNoLoad(page);
     await page.locator('#rb-attention-list [data-open-work="w-brief"]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), "w-brief", "current action drill-through focuses the work card");
     mkdirSync("test-results", { recursive: true });
@@ -291,7 +296,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // A late event stays out of the frozen history while current stays live on the next fetch.
     await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("New changes available"));
     assert.match(await page.locator("#rb-history-boundary").textContent(), /through 59/);
-    await panel.evaluate(e => { e.open = false; }); await panel.locator(":scope > summary").click(); // reopen: fresh horizon
+    // The attention drill-through above closed Catch up again, so the panel
+    // summary is hidden. Reopen Catch up normally for a fresh horizon.
+    await openCatchUp(page);
     await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through 60"));
     assert.equal(await page.locator("#rb-history-list").textContent().then(t => t.includes("arrived while reading")), false); // still paged out
     await page.locator("#rb-more-button").click(); // the continuation keeps the SAME frozen horizon
@@ -396,6 +403,8 @@ for (const outcome of ["success", "failure"]) {
       await new Promise(resolve => { release = resolve; arrived(); });
       await route.fulfill({ status: outcome === "success" ? 200 : 401, headers: { "x-test-held": "brief" }, contentType: "application/json", body: JSON.stringify(outcome === "success" ? body : { error: { message: "Obsolete failure" } }) });
     });
+    // The catch-up dialog must be open for the refresh button to be visible.
+    await openCatchUp(page);
     await page.locator("#rb-refresh-button").click(); await held;
     key = store.issueAccessKey("commons", "owner"); await enter();
     release();
