@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T20:59:05Z · board: Uuriko/project-room#266 · watermark: 5745074955 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T21:27:55Z · board: Uuriko/project-room#266 · watermark: 5745074955 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,7 @@ RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-(none)
+RC-2026-09-19-068 | quill | working | 2026-09-20T03:06:39Z | docs/openapi.yaml, index.html, scripts/browser-check.mjs, scripts/calm-return-browser-check.mjs, scripts/credit-question-browser-check.mjs, scripts/notification-feed-browser-check.mjs, scripts/pinned-messages-browser-check.mjs, scripts/room-chrome.mjs, server/store.mjs, src/app.js, src/conversation.js, src/reply-requests.js, tests/credit-question.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
