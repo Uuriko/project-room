@@ -702,6 +702,15 @@ summary { overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
 .agent-roster { display: flex; flex-wrap: wrap; gap: .45rem; margin: .45rem 0 .2rem; }
 .agent-roster .button { width: auto; min-height: 44px; padding: 0 .7rem; }
+.agent-type-catalog { margin: .45rem 0 .2rem; }
+.agent-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: .45rem; }
+.agent-type-card { display: flex; gap: .5rem; align-items: flex-start; width: 100%; margin: 0; padding: .55rem .6rem; min-height: 44px; text-align: left; border: 1px solid var(--room-rule); border-radius: .5rem; background: var(--room-paper); color: inherit; cursor: pointer; }
+.agent-type-card:hover, .agent-type-card:focus-visible { border-color: var(--room-ink); }
+.agent-type-icon { flex: 0 0 1.75rem; height: 1.75rem; font: 650 .7rem/1.75rem ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; border-radius: .35rem; background: color-mix(in srgb, var(--room-ink) 8%, var(--room-paper)); }
+.agent-type-copy { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.agent-type-copy strong { font-size: .9rem; line-height: 1.25; }
+.agent-type-copy span { font-size: .75rem; line-height: 1.35; color: var(--room-quiet); }
+.agent-type-chip { display: inline-block; margin-left: .35rem; padding: 0 .35rem; font-size: .7rem; line-height: 1.4; color: var(--room-quiet); border: 1px solid var(--room-rule); border-radius: .3rem; }
 .agent-capabilities { margin: .2rem 0 .6rem; padding-left: 1.1rem; }
 .agent-capabilities li { margin: .15rem 0; }
 #agent-host-snippets pre { overflow-x: auto; font-size: .78rem; }

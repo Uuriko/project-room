@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -26,6 +26,9 @@ export function installAgentConnections({ client, getState }) {
     if (setup) expiryTimer = setTimeout(() => { if (checkExpiry()) armExpiry(); else render(); }, Math.max(1, Math.min(2e9, setupMeta.expiresAt - Date.now() + 1)));
   }
   const accessDenied = error => [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
+  const catalogButtons = () => $("#agent-type-catalog")?.querySelectorAll("[data-agent-type], [data-roster]")
+    ?? $("#agent-roster")?.querySelectorAll("[data-agent-type], [data-roster]")
+    ?? [];
   const ACCESS_HINT = {
     chat: "Can read this room’s history and post messages.",
     contribute: "Can read this room, post messages, and contribute work.",
@@ -111,7 +114,7 @@ export function installAgentConnections({ client, getState }) {
     $("#agent-retry").hidden = !pending || pending.request.action === "create";
     $("#agent-retry").disabled = busy;
     for (const button of list.querySelectorAll("button")) button.disabled = busy || Boolean(pending) || Boolean(setup);
-    for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
+    for (const button of catalogButtons()) {
       button.disabled = busy || Boolean(pending) || Boolean(setup);
     }
   }
@@ -235,7 +238,8 @@ export function installAgentConnections({ client, getState }) {
     try {
       const token = action === "disconnect" ? null : newToken();
       const request = { action, requestId: crypto.randomUUID(), memberId: row?.memberId ?? `agent-${crypto.randomUUID()}`, expectedOwnerRevision: member().revision,
-        ...(action === "create" ? { displayName: $("#agent-connect-name").value.trim(), access: $("#agent-connect-access").value }
+        ...(action === "create" ? { displayName: $("#agent-connect-name").value.trim(), access: $("#agent-connect-access").value,
+          ...(rosterId ? { agentType: rosterId } : {}) }
           : { expectedGeneration: row.generation, expectedMemberRevision: row.memberRevision }),
         ...(token ? { keyHash: await digest(token), expiresAt: Date.now() + Number($("#agent-connect-expiry").value) * 86400000 - 60000 } : {}) };
       if (!owns() || owner !== identity || generation !== epoch || flow !== currentFlow) return;
@@ -265,21 +269,26 @@ export function installAgentConnections({ client, getState }) {
       describeRoute(); status(""); render();
     }
   });
-  for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
+  function applyCatalogChoice(id) {
+    if (busy || pending || setup) return;
+    const row = catalogSelection(id) || rosterSelection(id);
+    if (!row) return;
+    $("#agent-connect-name").value = row.name;
+    $("#agent-connect-access").value = row.access;
+    if ($("#agent-connect-route")) $("#agent-connect-route").value = row.route;
+    rosterId = row.agentType || id;
+    describeRoute();
+    if ($("#agent-roster-hint")) {
+      const taken = rosterNameTaken(getState()?.members, row.name)
+        ? ` A member with this name already exists. Create access only if you want a second identity.`
+        : "";
+      const best = row.bestFor ? `${row.bestFor}. ` : "";
+      $("#agent-roster-hint").textContent = `${best}${row.hint}${taken}`;
+    }
+  }
+  for (const button of catalogButtons()) {
     button.addEventListener("click", () => {
-      if (busy || pending || setup) return;
-      const row = rosterSelection(button.dataset.roster);
-      if (!row) return;
-      $("#agent-connect-name").value = row.name;
-      $("#agent-connect-access").value = row.access;
-      if ($("#agent-connect-route")) $("#agent-connect-route").value = row.route;
-      rosterId = button.dataset.roster;
-      describeRoute();
-      if ($("#agent-roster-hint")) {
-        $("#agent-roster-hint").textContent = rosterNameTaken(getState()?.members, row.name)
-          ? `${row.hint} A member with this name already exists. Create access only if you want a second identity.`
-          : row.hint;
-      }
+      applyCatalogChoice(button.dataset.agentType || button.dataset.roster);
     });
   }
   $("#agent-private-details").addEventListener("toggle", () => {

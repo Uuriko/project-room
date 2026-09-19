@@ -477,6 +477,10 @@ function addMember(state, incoming) {
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
+  if (incoming.data.agentType != null
+    && (typeof incoming.data.agentType !== "string" || !/^[a-z][a-z0-9-]{0,31}$/.test(incoming.data.agentType))) {
+    throw new Error("agentType must be a short catalog id");
+  }
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
@@ -485,6 +489,9 @@ function addMember(state, incoming) {
     // identity; kept conditional so stored projections from before this field
     // rebuild byte-identically.
     ...(incoming.data.identityId === undefined ? {} : { identityId: incoming.data.identityId }),
+    // First-party Connect catalog type. Omitted on older members so replay stays
+    // byte-identical. Not a marketplace listing.
+    ...(incoming.data.agentType ? { agentType: incoming.data.agentType } : {}),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
     availability: incoming.data.availability || "unknown",

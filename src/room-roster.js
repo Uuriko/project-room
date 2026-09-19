@@ -75,7 +75,118 @@ export function rosterSelection(id) {
   return { name: row.connectName, access: row.access, hint: row.dialogHint, route: row.route };
 }
 
+export const JOIN_PATHS = Object.freeze(["packet", "paste-prompt", "invite-code", "mcp-url"]);
+export const JOIN_PATH_ANCHORS = Object.freeze({
+  packet: "#join-agent",
+  "paste-prompt": "#join-agent",
+  "invite-code": "#join-code",
+  "mcp-url": "#mcp-join"
+});
+
+// First-party harness/type catalog for in-room Add agent. Discovery UX inside
+// *this* Room only — not a public marketplace or paid store. Each type fills
+// the existing Connect join path (packet / short invite code / paste prompt /
+// MCP URL). Named ROOM_ROSTER assistants stay the four product recipes.
+export const AGENT_TYPE_CATALOG = Object.freeze([
+  Object.freeze({
+    id: "claude-code", label: "Claude Code", icon: "CC",
+    bestFor: "Local coding sessions with MCP tools",
+    route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Claude Code",
+    dialogHint: "After Create access, import the private setup, then merge Claude MCP. First tool is room_check_access. No key in a prompt."
+  }),
+  Object.freeze({
+    id: "codex", label: "Codex", icon: "CX",
+    bestFor: "OpenAI coding agent on this Mac",
+    route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Codex",
+    dialogHint: "After Create access, import the private setup, then merge the Codex MCP snippet. First tool is room_check_access. No key in a prompt."
+  }),
+  Object.freeze({
+    id: "cursor", label: "Cursor", icon: "CR",
+    bestFor: "IDE agent — paste a prompt or add Room as MCP",
+    route: "mcp", access: "contribute", joinPath: "paste-prompt", connectName: "Cursor",
+    dialogHint: "Today: paste the Join prompt, or Add Room as MCP. Create access if Cursor will hold a local stdio key. No key in chat."
+  }),
+  Object.freeze({
+    id: "hermes", label: "Hermes", icon: "HM",
+    bestFor: "Nous research harness on the same Join spine",
+    route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Hermes",
+    dialogHint: "After Create access, import the private setup and merge MCP. Same Room identity model as any other type. No key in a prompt."
+  }),
+  Object.freeze({
+    id: "opencode", label: "OpenCode", icon: "OC",
+    bestFor: "Open-source coding agent, MCP on this Mac",
+    route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "OpenCode",
+    dialogHint: "After Create access, import the private setup, then merge MCP. First tool is room_check_access. No key in a prompt."
+  }),
+  Object.freeze({
+    id: "pi", label: "Pi", icon: "π",
+    bestFor: "Lightweight harness — same invite or MCP path",
+    route: "mcp", access: "contribute", joinPath: "invite-code", connectName: "Pi",
+    dialogHint: "Peer redeem uses an RM- invite, or Create access and import MCP. Same Join spine. No key in chat."
+  }),
+  Object.freeze({
+    id: "grok-bot", label: "Grok Bot", icon: "GB", rosterId: "grok-bot",
+    bestFor: "Hosted Bot computer — Node client there",
+    route: "direct", access: "contribute", joinPath: "paste-prompt", connectName: "Grok Bot"
+  }),
+  Object.freeze({
+    id: "grok-build", label: "Grok Build", icon: "GK", rosterId: "grok-build",
+    bestFor: "Local TUI with stdio MCP on this Mac",
+    route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Grok Build"
+  }),
+  Object.freeze({
+    id: "instinct", label: "Instinct", icon: "IN", rosterId: "instinct",
+    bestFor: "iMessage thread — Use my AI, no key in chat",
+    route: "packet", access: "review", joinPath: "packet", connectName: "Instinct"
+  }),
+  Object.freeze({
+    id: "muse", label: "Muse", icon: "MU", rosterId: "muse",
+    bestFor: "Muse app or WhatsApp packet, no key in chat",
+    route: "packet", access: "chat", joinPath: "paste-prompt", connectName: "Muse"
+  })
+]);
+
+export function catalogById(id) {
+  return AGENT_TYPE_CATALOG.find(row => row.id === id) ?? null;
+}
+
+export function isCatalogAgentType(id) {
+  return Boolean(catalogById(id));
+}
+
+export function catalogSelection(id) {
+  const row = catalogById(id);
+  if (!row) return rosterSelection(id);
+  const roster = row.rosterId ? rosterSelection(row.rosterId) : null;
+  return {
+    name: row.connectName,
+    access: row.access,
+    hint: roster?.hint || row.dialogHint,
+    route: row.route,
+    agentType: row.id,
+    joinPath: row.joinPath,
+    bestFor: row.bestFor,
+    icon: row.icon,
+    label: row.label
+  };
+}
+
+export function catalogJoinAnchor(joinPath) {
+  return JOIN_PATH_ANCHORS[joinPath] || JOIN_PATH_ANCHORS["paste-prompt"];
+}
+
+export function catalogDoorHtml() {
+  const cards = AGENT_TYPE_CATALOG.map(row => {
+    const href = catalogJoinAnchor(row.joinPath);
+    return `<a class="agent-type-card" href="${href}" data-agent-type="${htmlText(row.id)}" data-join-path="${htmlText(row.joinPath)}"><span class="agent-type-icon" aria-hidden="true">${htmlText(row.icon)}</span><span class="agent-type-copy"><strong>${htmlText(row.label)}</strong><span>${htmlText(row.bestFor)}</span></span></a>`;
+  }).join("");
+  return `<div class="agent-type-catalog" id="agent-type-catalog"><p>Types for this Room only. Each uses the same Join path — packet, short invite code, paste prompt, or MCP URL. Not a public agent store.</p><div class="agent-type-grid">${cards}</div></div>`;
+}
+
 export function suggestedConfigDir(id) {
+  const catalog = catalogById(id);
+  if (catalog?.rosterId) return `/absolute/private/room-agent-${catalog.rosterId}`;
+  if (catalog) return `/absolute/private/room-agent-${catalog.id}`;
   const row = rosterById(id);
   if (!row) return null;
   return `/absolute/private/room-agent-${row.id}`;
@@ -185,6 +296,8 @@ export function routeHint(route) {
 export function routeFromDisplayName(name) {
   const needle = String(name ?? "").trim().toLocaleLowerCase();
   if (!needle) return "mcp";
+  const catalog = AGENT_TYPE_CATALOG.find(r => r.connectName.toLocaleLowerCase() === needle || r.label.toLocaleLowerCase() === needle);
+  if (catalog) return catalog.route;
   const row = ROOM_ROSTER.find(r => r.connectName.toLocaleLowerCase() === needle || r.displayName.toLocaleLowerCase() === needle);
   return row?.route || "mcp";
 }
@@ -335,6 +448,10 @@ function footer() {
   return `Enrollment is owner-browser: a signed-in owner with a bound account. Guest links are not agent credentials.
 Never put a key in a prompt, URL, or repository. Clear the clipboard after each import.
 `;
+}
+
+function htmlText(value) {
+  return String(value).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
 }
 
 function tomlString(value) {

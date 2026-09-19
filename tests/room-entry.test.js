@@ -53,6 +53,12 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
   assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
   assert.match(html, /Works with Claude Code, Codex, OpenCode, Cursor/);
+  assert.match(html, /id="agent-type-catalog"/);
+  assert.match(html, /Types for this Room only/);
+  assert.match(html, /Not a public agent store/);
+  assert.match(html, /data-agent-type="claude-code"/);
+  assert.match(html, /data-agent-type="hermes"/);
+  assert.match(html, /data-join-path="mcp-url"/);
   // One packet link plus the distinct discovery documents; no duplicate labels for the same URL.
   assert.match(html, /<a href="\/room\/llms.txt">Read the agent packet \(llms\.txt\)<\/a>/);
   assert.equal([...html.matchAll(/href="\/room\/llms\.txt"/g)].length, 1, "llms.txt is linked once");
@@ -195,6 +201,11 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.doesNotMatch(html, /ChatGPT Sites|chatgpt\.com/i);
   assert.doesNotMatch(html, /pricing|per month|\$\d/i);
   assert.match(html, /Works with Claude Code, Codex, OpenCode, Cursor/);
+  assert.match(html, /id="agent-type-catalog"/);
+  assert.match(html, /Types for this Room only/);
+  assert.match(html, /Not a public agent store/);
+  assert.match(html, /data-agent-type="claude-code"/);
+  assert.match(html, /href="#mcp-join"/);
   assert.match(html, /<a href="https:\/\/github\.com\/Uuriko\/project-room" rel="noopener noreferrer">github\.com\/Uuriko\/project-room<\/a>/, "source line is a real link");
   assert.match(html, new RegExp(COMPUTE_DOOR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(html, /Compute stays separate/);

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { isCatalogAgentType } from "../src/room-roster.js";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -105,16 +106,18 @@ export class AgentConnections {
   }
   validate(details) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
-    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt } = details;
+    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
-    const fields = action === "create" ? [...common, "displayName", "access", "keyHash", "expiresAt"]
+    const createFields = [...common, "displayName", "access", "keyHash", "expiresAt", ...(agentType !== undefined ? ["agentType"] : [])];
+    const fields = action === "create" ? createFields
       : [...common, "expectedGeneration", "expectedMemberRevision", ...(action === "rotate" ? ["keyHash", "expiresAt"] : [])];
     if (!["create", "rotate", "disconnect"].includes(action) || Object.keys(details).some(k => !fields.includes(k))
       || !validId(requestId) || !validId(memberId) || !integer(expectedOwnerRevision)
       || (action !== "create" && (!integer(expectedGeneration) || expectedGeneration < 1 || !integer(expectedMemberRevision)))
       || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
-        || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)))) fail(422, "invalid_connection", "Choose a name, access and expiry");
+        || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
+        || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
     // A fixed field order makes request identity independent of JSON key order.
     return Object.fromEntries(fields.map(k => [k, details[k]]));
   }
@@ -145,7 +148,8 @@ export class AgentConnections {
       }
       let membership = null;
       if (action === "create") membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ADDED,
-        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: access[request.access], accountableHumanId: auth.member.id } }, binding);
+        data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: access[request.access], accountableHumanId: auth.member.id,
+          ...(request.agentType ? { agentType: request.agentType } : {}) } }, binding);
       if (action === "disconnect" && this.store.room(roomId).state.members[memberId].active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
         data: { memberId, expectedMemberRevision, active: false, permissions: this.store.room(roomId).state.members[memberId].permissions } }, binding);
       const member = this.store.room(roomId).state.members[memberId];
