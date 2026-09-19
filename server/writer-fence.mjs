@@ -60,6 +60,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_api_keys",
   "agent_directory_cards",
   "agent_webhook_subs",
+  // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
+  // room_verification_policy (per-room gate). Purely additive and
+  // intentionally NOT fenced: older writers have no code path to them, and
+  // each store verifies its own schema on open.
+  "agent_identity_verification",
+  "room_verification_policy",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
