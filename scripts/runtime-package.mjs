@@ -119,6 +119,7 @@ optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable age
 optional.push("server/mentions.mjs"); // RC-2026-09-18-051: mention parser (imported by server/store.mjs for wake-on-mention; pure, no imports)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
+optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)
 optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; imported by server/http.mjs)
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)

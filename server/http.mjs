@@ -36,6 +36,7 @@ import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs"
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -114,6 +115,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
+  connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
@@ -193,6 +195,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
     return githubOAuth;
   };
+  // OAuth2 authorization server for third-party connectors (e.g. Meta Muse).
+  // Unlike the Google/GitHub helpers above (OAuth CLIENTS for sign-in), this
+  // is the PROVIDER side: external clients redirect users here to obtain
+  // scoped tokens for the Project Room API. One instance per server (one per
+  // Durable Object in production); client registry comes from config.
+  const oauthProvider = createOAuthProvider({ clock: () => store.now() });
+  for (const c of connectorClients) {
+    oauthProvider.registerClient(c);
+  }
   // GitHub subject -> account linking order (slice 4): an existing OAuth
   // link wins; otherwise a primary verified email links to the account that
   // already owns it; otherwise a github:<id> account is provisioned (with
@@ -922,6 +933,147 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           throw error;
         }
+      }
+      // OAuth2 authorization server for third-party connectors (RFC 6749).
+      // GET /.well-known/oauth-authorization-server — server metadata (RFC 8414).
+      if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
+        const issuer = expectedOrigin();
+        return json(res, 200, {
+          issuer,
+          authorization_endpoint: issuer + "/oauth/authorize",
+          token_endpoint: issuer + "/oauth/token",
+          revocation_endpoint: issuer + "/oauth/revoke",
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
+          code_challenge_methods_supported: ["S256"],
+          scopes_supported: [...OAUTH_SCOPES],
+          token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
+        });
+      }
+      // GET /oauth/authorize — validate the request and show the consent screen.
+      // The user must be logged in (account session cookie); otherwise redirect
+      // to the login page with a return URL.
+      if (url.pathname === "/oauth/authorize" && req.method === "GET") {
+        rate(`oauth-authorize:${remoteAddress}`, 30);
+        const slotToken = cookie(req, accountCookieName);
+        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
+        const accountId = slot?.session?.account?.id;
+        if (!accountId) {
+          res.statusCode = 302;
+          res.setHeader("Location", "/?oauth=login&return=" + encodeURIComponent(url.pathname + url.search));
+          return res.end();
+        }
+        let validated;
+        try {
+          validated = oauthProvider.validateAuthorizationRequest({
+            clientId: url.searchParams.get("client_id"),
+            redirectUri: url.searchParams.get("redirect_uri"),
+            scopes: (url.searchParams.get("scope") || "").split(" ").filter(Boolean),
+            state: url.searchParams.get("state"),
+            codeChallenge: url.searchParams.get("code_challenge"),
+          });
+          if (url.searchParams.get("code_challenge_method") !== "S256") {
+            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+          }
+        } catch (error) {
+          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          return json(res, 400, { error: code, error_description: error.message });
+        }
+        const scopeLabels = {
+          "rooms:read": "See your rooms",
+          "chat:read": "Read messages",
+          "chat:write": "Post messages",
+          "work:read": "See work items",
+          "work:write": "Accept and complete work",
+        };
+        const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const scopeItems = validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const bytes = Buffer.from(html, "utf8");
+        res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+        return res.end(bytes);
+      }
+      // POST /oauth/authorize — process the consent decision.
+      if (url.pathname === "/oauth/authorize" && req.method === "POST") {
+        rate(`oauth-authorize:${remoteAddress}`, 30);
+        const slotToken = cookie(req, accountCookieName);
+        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
+        const accountId = slot?.session?.account?.id;
+        if (!accountId) reject(401, "account_session_required", "Log in to Project Room first");
+        protectWrite(req, slot, false);
+        const data = await body(req);
+        const decision = data.decision;
+        const redirectUri = data.redirect_uri;
+        const state = data.state;
+        const failRedirect = (error, description) => {
+          const u = new URL(redirectUri);
+          u.searchParams.set("error", error);
+          if (description) u.searchParams.set("error_description", description);
+          if (state) u.searchParams.set("state", state);
+          res.statusCode = 302;
+          res.setHeader("Location", u.href);
+          return res.end();
+        };
+        if (decision !== "allow") return failRedirect("access_denied", "The user denied the request");
+        try {
+          const { code } = oauthProvider.issueCode({
+            clientId: data.client_id,
+            userId: accountId,
+            redirectUri,
+            scopes: String(data.scope || "").split(" ").filter(Boolean),
+            codeChallenge: data.code_challenge,
+          });
+          const u = new URL(redirectUri);
+          u.searchParams.set("code", code);
+          if (state) u.searchParams.set("state", state);
+          res.statusCode = 302;
+          res.setHeader("Location", u.href);
+          return res.end();
+        } catch (error) {
+          return failRedirect("invalid_request", error.message);
+        }
+      }
+      // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
+      if (url.pathname === "/oauth/token" && req.method === "POST") {
+        rate(`oauth-token:${remoteAddress}`, 60);
+        const data = await body(req);
+        const grantType = data.grant_type;
+        try {
+          let tokens;
+          if (grantType === "authorization_code") {
+            tokens = oauthProvider.exchangeCode({
+              code: data.code,
+              clientId: data.client_id,
+              redirectUri: data.redirect_uri,
+              codeVerifier: data.code_verifier,
+            });
+          } else if (grantType === "refresh_token") {
+            tokens = oauthProvider.refresh({
+              refreshToken: data.refresh_token,
+              clientId: data.client_id,
+            });
+          } else {
+            return json(res, 400, { error: "unsupported_grant_type" });
+          }
+          return json(res, 200, {
+            access_token: tokens.accessToken,
+            refresh_token: tokens.refreshToken,
+            token_type: tokens.tokenType,
+            expires_in: tokens.expiresIn,
+            scope: tokens.scopes.join(" "),
+          });
+        } catch (error) {
+          const code = error.code === "invalid_request" ? "invalid_request" : "invalid_grant";
+          return json(res, 400, { error: code, error_description: error.message });
+        }
+      }
+      // POST /oauth/revoke — revoke an access or refresh token (RFC 7009).
+      if (url.pathname === "/oauth/revoke" && req.method === "POST") {
+        rate(`oauth-revoke:${remoteAddress}`, 60);
+        const data = await body(req);
+        oauthProvider.revoke(data.token);
+        return json(res, 200, {});
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
