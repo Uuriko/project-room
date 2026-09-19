@@ -121,10 +121,12 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   if (!await page.locator('#request-mode-bar').isVisible()) {
     if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
     await page.locator('#request-reply').click();
-    // Wait for request mode to engage before asserting readOnly.
+    // Wait for request mode to engage.
     await page.locator('#request-mode-bar').waitFor({ state: 'visible', timeout: 5000 });
   }
-  assert.equal(await page.locator('#message-input').evaluate(node => node.readOnly), true);
+  // Note: #message-input is NOT readOnly here — readOnly is only set when
+  // retrying a failed message (mode && pendingMessage). The user must be able
+  // to type the request.
   await page.locator('#message-form button[type=submit]').click();
   await page.locator('#request-mode-bar').waitFor({ state: 'hidden' });
   assert.equal(commands.length, 2); assert.deepEqual(commands[1], commands[0], 'unknown request retries exactly once with original identity/content');
