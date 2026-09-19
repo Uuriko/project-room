@@ -180,7 +180,7 @@ test("replies pin to their thread root's channel and can't drift across channels
     /Reply must reference a message in this Room/);
 });
 
-test("upgrade repair backfills #general into legacy stored projections", async () => {
+test("legacy stored projections gain #general in memory on load", async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -195,13 +195,14 @@ test("upgrade repair backfills #general into legacy stored projections", async (
     const legacy = JSON.parse(row.projection);
     delete legacy.channels;
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
-    store.repairProjectionProvenance();
-    const repaired = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
-    assert.ok(repaired.channels?.[DEFAULT_CHANNEL_ID], "repair backfills #general");
-    assert.equal(repaired.channels[DEFAULT_CHANNEL_ID].name, "general");
-    // The repaired stored projection must match a full replay.
+    // The stored bytes stay untouched...
+    const stored = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+    assert.ok(!stored.channels, "stored projection unchanged");
+    // ...but loads backfill #general in memory, matching a full replay.
+    const loaded = store.room("commons").state;
+    assert.ok(loaded.channels?.[DEFAULT_CHANNEL_ID], "load backfills #general");
     const rebuilt = store.rebuildProjection("commons").state;
-    assert.deepEqual(repaired.channels, rebuilt.channels, "stored and rebuilt channels match");
+    assert.deepEqual(loaded.channels, rebuilt.channels, "loaded and rebuilt channels match");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
