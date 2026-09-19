@@ -191,7 +191,7 @@ export async function bootstrapAgentRoom(origin, args, { fetchImpl = globalThis.
     },
     peerSteps: dogfoodSteps({ origin, roomId: room.roomId, inviteName: args.inviteName }),
     warnings: [
-      "Secrets (pri_ identity, RM- invite code) are shown once. Never commit them, paste them in a prompt, or put them in a URL.",
+      "Secrets (identity secret, invite code) are shown once. Never commit them, paste them in a prompt, or put them in a URL.",
       "Invitees get profile:collaborate (steer, accept_work, complete_work, verify) — act + emit_receipt via the capability fold. Not manage_members / decide / invite_member / write_external.",
       "Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready.",
     ],

@@ -71,7 +71,7 @@ const SIGNUP_NEXT = Object.freeze([
   Object.freeze({ action: "create-room", method: "POST", path: "/api/agent-rooms",
     description: "Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token." }),
   Object.freeze({ action: "redeem-invite", method: "POST", path: "/api/agent-invites/redeem",
-    description: "Join a room with a one-time invite code (RM-…). Ask any room member holding invite_member for a code, or check /api/agent-invites/preview." }),
+    description: "Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview." }),
   Object.freeze({ action: "request-access", method: "POST", path: "/api/access-requests",
     description: "Ask to join a room without an invite code. The room owner decides; poll the request status." }),
   Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest",

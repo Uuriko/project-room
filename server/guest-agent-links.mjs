@@ -64,13 +64,13 @@ export function guestAgentLinkContract() {
 function assertGuestAgentToken(token) {
   const kind = classifyJoinToken(token);
   if (kind === "human-share") fail(422, "wrong_link_kind", "Human invitation links are not agent credentials.");
-  if (kind !== "guest-agent") fail(410, "link_unavailable", "This guest-agent link is not valid.");
+  if (kind !== "guest-agent") fail(410, "link_unavailable", "This guest invite is not valid.");
 }
 
 function displayNameOf(value) {
   const name = value === undefined ? GUEST_AGENT_DEFAULT_NAME : value;
   if (typeof name !== "string" || !name.trim() || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
-    fail(422, "invalid_link", "Choose a short guest-agent name");
+    fail(422, "invalid_link", "Choose a short guest name");
   }
   return name.trim();
 }
@@ -85,7 +85,7 @@ export class GuestAgentLinks {
     if (!auth.account || auth.member.kind !== "human"
       || auth.member.id !== this.store.room(roomId).state.room.ownerId
       || !auth.member.permissions.includes("manage_members")) {
-      fail(403, "owner_required", "Only the room owner can mint a guest-agent credential. Use Add agent for a durable key.");
+      fail(403, "owner_required", "Only the room owner can mint a guest invite. Use Add agent for a durable key.");
     }
     return auth;
   }
@@ -120,7 +120,7 @@ export class GuestAgentLinks {
   conflict(tokenHash) {
     for (const [table, column] of [["credentials", "hash"], ["account_credentials", "hash"], ["account_session_slots", "hash"],
       ["membership_invitations", "token_hash"], ["share_links", "token_hash"]]) {
-      if (this.db.prepare(`SELECT 1 FROM ${table} WHERE ${column}=?`).get(tokenHash)) fail(409, "token_conflict", "Generate a new guest-agent token");
+      if (this.db.prepare(`SELECT 1 FROM ${table} WHERE ${column}=?`).get(tokenHash)) fail(409, "token_conflict", "Generate a new guest invite token");
     }
   }
 
@@ -150,13 +150,13 @@ export class GuestAgentLinks {
   }
 
   mint(token, roomId, details, binding) {
-    if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_link", "Supply the guest-agent mint fields");
+    if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_link", "Supply the guest invite mint fields");
     const allowed = ["requestId", "linkToken", "expectedOwnerRevision", "displayName", "roomId"];
-    if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_link", "Supply the guest-agent mint fields");
+    if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_link", "Supply the guest invite mint fields");
     const { requestId, linkToken, expectedOwnerRevision } = details;
     if (!validId(requestId) || classifyJoinToken(linkToken) !== "guest-agent"
       || !Number.isSafeInteger(expectedOwnerRevision) || expectedOwnerRevision < 0) {
-      fail(422, "invalid_link", "Supply a ga1. token, requestId and current owner revision");
+      fail(422, "invalid_link", "Supply a guest invite token, requestId and current owner revision");
     }
     if (details.roomId !== undefined && details.roomId !== roomId) fail(422, "invalid_link", "Room does not match this mint");
     const displayName = displayNameOf(details.displayName);
@@ -169,7 +169,7 @@ export class GuestAgentLinks {
       const prior = this.credential(linkToken);
       if (existing) {
         if (existing.kind !== GUEST_AGENT_KIND || existing.active === false) {
-          fail(409, "membership_ended", "This guest-agent membership ended; use a new requestId");
+          fail(409, "membership_ended", "This guest membership ended; use a new requestId");
         }
         if (!prior || prior.room_id !== roomId || prior.member_id !== memberId || !this.liveCredential(prior, existing)
           || existing.displayName !== displayName) {
@@ -211,7 +211,7 @@ export class GuestAgentLinks {
     return this.store.readTransaction(() => {
       const row = this.credential(linkToken);
       const member = row && this.store.room(row.room_id).state.members[row.member_id];
-      if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest-agent link is not valid.");
+      if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest invite is not valid.");
       return this.previewPublic(row, member);
     });
   }
@@ -221,7 +221,7 @@ export class GuestAgentLinks {
     return this.store.transaction(() => {
       const row = this.credential(linkToken);
       const member = row && this.store.room(row.room_id).state.members[row.member_id];
-      if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest-agent link is not valid.");
+      if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest invite is not valid.");
       const preview = this.previewPublic(row, member);
       return { ...preview, memberId: member.id, access: "read_chat" };
     });

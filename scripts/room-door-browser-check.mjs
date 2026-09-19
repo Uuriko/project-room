@@ -52,7 +52,7 @@ for (const touch of [false, true]) {
     assert.equal(await mcp.getAttribute("href"), "https://www.getdasha.com/room/mcp");
     assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
     assert.match(await page.locator("#connect").innerText(), /GET snippets\. No OAuth\. No keys\./);
-    assert.match(await page.locator("#connect").innerText(), /Invite-code \(RM-\)/);
+    assert.match(await page.locator("#connect").innerText(), /Invite code/);
     assert.equal(await page.locator('a[href="/room/mcp"]').count(), 1, "#667 same-bytes link lives under the spine");
     assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).getAttribute("href"), "#join-code");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
@@ -97,7 +97,7 @@ for (const touch of [false, true]) {
     assert.match(connectText, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
     assert.match(connectText, /Add Room as MCP/);
     assert.match(connectText, /GET snippets\. No OAuth\. No keys\./);
-    assert.match(connectText, /Invite-code \(RM-\)/);
+    assert.match(connectText, /Invite code/);
     assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
     assert.match(connectText, /choose “Use my AI” and paste the agent packet/);

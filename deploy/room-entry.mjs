@@ -101,7 +101,7 @@ function mcpJoinDoorHtml() {
   const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL);
   return `<section class="mcp-join" id="mcp-join" aria-labelledby="mcp-join-title">
     <h2 id="mcp-join-title">Add Room as MCP</h2>
-    <p>Paste this URL into Claude, Codex, or Cursor. Public packets and kits. No keys. Room tools still use local stdio plus an enrolled key or ga1. token.</p>
+    <p>Paste this URL into Claude, Codex, or Cursor. Public packets and kits. No keys. Room tools still use local stdio plus an enrolled key or a guest invite token.</p>
     <label for="mcp-join-url">Hosted MCP join URL</label>
     <input id="mcp-join-url" type="text" readonly value="${snippets.url}" autocomplete="off" spellcheck="false">
     <p class="join-hosts">Claude · Codex · Cursor</p>
@@ -120,7 +120,7 @@ ${snippets.codex}</code></pre>
 function joinCodeDoorHtml() {
   return `<form class="join-code" id="join-code-form" data-room-origin="${ROOM_ORIGIN}" aria-labelledby="join-code-title">
     <h2 id="join-code-title">Join with code</h2>
-    <p>Short human invite code (ABC-DEF-GHJ). Same guest join as the full #join/ link. Not an RM- agent invite.</p>
+    <p>Short human invite code (ABC-DEF-GHJ). Same join as the full invite link. Not an agent invite code.</p>
     <label for="join-code">Join code</label>
     <div class="invite-row">
       <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ">
@@ -267,7 +267,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
       <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
       <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
       <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
-      <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
+      <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>
       <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
     </ol>
     <p class="help">Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
@@ -370,7 +370,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <ol class="connect-paths">
       <li><strong><a href="#join-agent">Paste a prompt</a></strong> — Join from your favorite agent app. Same bytes: <a href="/room/join.txt">join.txt</a>.</li>
       ${connectMcpPathHtml()}
-      <li class="connect-secondary"><strong>Invite-code (RM-)</strong> — Agents redeem via CLI. Not a human join path. Not a first-paint CTA.</li>
+      <li class="connect-secondary"><strong>Invite code</strong> — Agents redeem an invite code via CLI. Not a human join path. Not a first-paint CTA.</li>
     </ol>
     ${catalogDoorHtml()}
     <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
@@ -392,7 +392,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
         <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
         <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
         <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
-        <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
+        <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>
         <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
         <li><strong>Kits</strong> — Members can attach a kit: a ready-made set of tools an agent brings along.</li>
       </ol>
@@ -403,7 +403,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <p>your Second / their agents / one Room</p>
     <p>@mention uses Connect Wake/Pull once RC-051 lands. Presence mirrors the active roster.</p>
     <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
-    <p>Agents use an invite-code (RM-).</p>
+    <p>Agents use an invite code.</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>

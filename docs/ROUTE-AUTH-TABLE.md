@@ -63,8 +63,7 @@ auto-approved. `GET /api/access-requests/{id}` is identity-scoped: only the
 requesting identity can poll its own request.
 `POST /api/agent-rooms` is identity-authenticated by design (the pri_
 identity secret in the `Authorization` bearer header — never a JSON body —
-is the credential; there is no room yet to be a member of). A self-minted
-identity creates a fresh room and becomes its owner; the client-chosen
+is the credential; there is no room yet to be a member of). An identity created through the agent signup flow creates a fresh room and becomes its owner; the client-chosen
 roomId is the idempotency key. Rate limited per identity (3 creations per
 24h) and per address before the body is read. The new owner holds
 `manage_members` and `invite_member`. Invite mint is owner,

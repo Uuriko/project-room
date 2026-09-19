@@ -110,7 +110,7 @@ orphan-block #433.
 **Invite mint** is owner **or** `manage_members` **or** `invite_member`.
 `invite_member` is a live v26 permission: agents may hold it **without**
 `manage_members` / `decide`. Grant path: owner `identity-link` (or
-`member.access_changed`) includes `invite_member`. Invite-codes cannot
+`member.access_changed`) includes `invite_member`. Invite codes cannot
 grant `invite_member` / `manage_members` / `decide`; they stay
 agent-safe (chat / contribute / review / collaborate). An `invite_member`-only issuer
 may mint those standing profiles without holding the bits. List/revoke

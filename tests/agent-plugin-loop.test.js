@@ -34,8 +34,8 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
   // --- Step 1: the agent fetches the manifest and self-configures ---
   const manifest = buildPluginManifest({ serviceOrigin: ORIGIN, roomId: "commons", clock: now });
   assert.equal(validatePluginManifest(manifest), true);
-  assert.ok(manifest.enrollment.flows.some(f => f.id === "access-request"),
-    "manifest names the self-serve access-request flow");
+  assert.ok(manifest.enrollment.flows.some(f => f.id === "join-request"),
+    "manifest names the self-serve join-request flow");
   assert.equal(manifest.directory.url, `${ORIGIN}/api/agents/directory`);
   assert.equal(WELL_KNOWN_PATH, "/.well-known/agent-plugin-manifest.json");
 

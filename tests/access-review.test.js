@@ -190,7 +190,7 @@ test("non-owners are refused: agent key, manage_members human, guest session, an
 
 test("expired guests, guest agents and links are shown as expired", async t => {
   const f = await fixture(t);
-  f.advance(9 * 3600000); // past the 8 h guest key, the 2 h guest-agent credential and the 1 h link
+  f.advance(9 * 3600000); // past the 8 h guest key, the 2 h guest invite and the 1 h link
   const report = assembleAccessReview(f.store, "commons");
   assert.deepEqual(report.guests.map(g => [g.displayName, g.status]).sort(), [["Alice", "expired"], ["Scout", "expired"]]);
   for (const guest of report.guests) assert.ok(Date.parse(guest.expiresAt) <= Date.parse(report.generatedAt));

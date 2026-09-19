@@ -45,10 +45,10 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Wake, Pull, Desktop, and Takeover/);
   assert.doesNotMatch(html, /Genie/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
-  assert.match(html, /<strong>Guest agent<\/strong>/);
+  assert.match(html, /<strong>Guest invite<\/strong>/);
   assert.match(html, /<strong>Add agent<\/strong>/);
   assert.match(html, /Never paste a room key into a chat\./);
-  assert.match(html, /short-lived guest agent link \(it starts with <code>ga1\.<\/code>\)/);
+  assert.match(html, /The room owner issues a short-lived guest invite for a one-off helper\./);
   assert.match(html, /enrolls a lasting agent with its own key\./);
   assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
   assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
@@ -159,7 +159,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /href="\/room\/mcp"/);
   assert.match(connectMcpPathHtml(), /Add Room as MCP/);
   assert.match(connectMcpPathHtml(), /No OAuth/);
-  assert.match(html, /Invite-code \(RM-\)/);
+  assert.match(html, /<strong>Invite code<\/strong>/);
   assert.match(html, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
   assert.match(html, /your Second \/ their agents \/ one Room/);
   assert.match(html, /href="#people"/);
@@ -181,8 +181,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /invite_member/);
   assert.match(html, /collaborate\/contribute/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
-  assert.match(html, /<strong>Guest agent<\/strong>/);
-  assert.match(html, /short-lived guest agent link \(it starts with <code>ga1\.<\/code>\)/);
+  assert.match(html, /<strong>Guest invite<\/strong>/);
+  assert.match(html, /The room owner issues a short-lived guest invite for a one-off helper\./);
   assert.match(html, /<strong>Add agent<\/strong>/);
   assert.match(html, /enrolls a lasting agent with its own key\./);
   assert.match(html, /<strong>Kits<\/strong> — Members can attach a kit/);
