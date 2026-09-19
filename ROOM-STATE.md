@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T10:28:09Z · board: Uuriko/project-room#266 · watermark: 5740563696 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T11:28:18Z · board: Uuriko/project-room#266 · watermark: 5741382257 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -27,8 +27,8 @@ RC-2026-09-18-020 | (none) | submitted | 2026-09-19T02:13:56Z | server/agent-inv
 RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
-RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +5 more
+RC-2026-09-18-031 | (none) | submitted | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
+… +7 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -69,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1054 threshold=1500 rotation_due=no watcher=active open_claims=30 prose_open=0 unfenced_prose=62 watermark=5740563696
+board_comments=1064 threshold=1500 rotation_due=no watcher=active open_claims=32 prose_open=0 unfenced_prose=62 watermark=5741382257
 
