@@ -250,7 +250,8 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs bootstrap-agent-room DISPLAY_NAME [ROOM_ID] [TITLE] [PURPOSE]
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs account-link ROOM_ID IDENTITY_ID DISPLAY_NAME [PERM1,PERM2] [NOTE]
-  node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs identity-link IDENTITY_ID [PERM1,PERM2] [MEMBER_ID] [DISPLAY_NAME]
+  (omit permissions for a read/chat-only link)
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
@@ -357,7 +358,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
       || (action === "room-create" && !parseRoomCreate(checkpoint, extra))
-      || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
+      || (action === "identity-link" && (checkpoint === undefined || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
         || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review", "collaborate"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
