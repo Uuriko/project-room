@@ -186,6 +186,9 @@ test("sign-in UI: magic-link happy path with a configured mailer, password login
   await magic.getByRole("button", { name: "Magic link" }).click();
   await magic.locator('[data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
   await magic.locator('[data-signin-form="magic-request"] button[type="submit"]').click();
+  await magic.locator('[data-signin-form="magic-code"]').waitFor();
+  // Link-first UI: manual code entry is opt-in behind a toggle.
+  await magic.locator('[data-magic-manual-code]').click();
   await magic.locator('[data-signin-form="magic-code"] [name="code"]').waitFor();
   assert.equal(sent.length, 1);
   assert.ok(typeof sent[0].code === "string" && sent[0].code.length > 0);
