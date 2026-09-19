@@ -6,6 +6,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { AccessRequests } from "../server/access-requests.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -127,6 +128,27 @@ function sweep() {
   step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W2, expectedRevision: item(W2).revision }));
   step(T.WORK_SUPERSEDED, "owner", () => ({ workItemId: W2, expectedRevision: item(W2).revision, supersededByWorkItemId: W, reason: "folded in" }));
 
+  // access.requested is appended by server/access-requests.mjs, not by
+  // store.command, so the step() helper above cannot reach it - and an event
+  // type no auditor has ever seen is exactly what this sweep is for. Driven
+  // through the real path instead, with a real identity, because the point is
+  // the event that lands in the log.
+  try {
+    const identity = fixture.store.identities.create("Sweep asker");
+    new AccessRequests(fixture.store).request("commons", {
+      identityId: identity.identityId, displayName: "Sweep asker",
+      requestedPermissions: ["steer"], note: "let me in", requestId: "sweep-access-request"
+    });
+    exercised.add(T.ACCESS_REQUESTED);
+    try { auditRecovery(fixture.store); }
+    catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }
+  } catch { /* reported below, from the log, rather than swallowed here */ }
+  // A step that quietly stopped working would leave this sweep passing because
+  // it audited nothing, which is the failure mode the whole file is written
+  // against. Read it back out of the log.
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.ACCESS_REQUESTED))
+    broke.push(`${T.ACCESS_REQUESTED}: the sweep never got this event into the log, so nothing was audited`);
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -158,6 +180,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 44,
+  assert.equal(Object.values(T).length, 45,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
