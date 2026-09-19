@@ -1,7 +1,7 @@
 // Streamable HTTP MCP join surface. Public packets / kits / snippets only.
 // Room mutation tools stay on local stdio (scripts/agent-mcp.mjs).
 
-import { MCP_VERSION, MCP_PREVIOUS_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
+import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME
