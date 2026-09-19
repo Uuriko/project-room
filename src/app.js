@@ -24,6 +24,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./in
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
+import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -219,6 +220,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     accessPreviews.clear();
+    handoffEnvelopes.receipts = null; handoffEnvelopes.loading = false;
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
@@ -1812,6 +1814,31 @@ function shareDraftButton(item, key = "task") {
 // roster for names, and kept across snapshot re-renders until closed. It shows
 // exactly the omissions the server reports; opening it starts and grants nothing.
 const accessPreviews = new Map();
+// Typed handoff envelopes (RC-2026-09-19-072): the room's envelope journal
+// lists delegations that name a work item (input ref, acceptance check, or
+// authority scope). Fetched once per room visit and cached; work cards
+// render the linked envelopes through src/handoff-envelope-ui.js so the
+// seven sections and the lifecycle badge show in the work view.
+const handoffEnvelopes = { receipts: null, loading: false };
+function envelopesForWorkItem(workId) { return envelopesForWork(handoffEnvelopes.receipts ?? [], workId); }
+function handoffEnvelopeSection(item) {
+  const linked = envelopesForWorkItem(item.id);
+  if (!linked.length) return "";
+  return `<section class="handoff-envelopes" aria-label="Handoffs for this work"><h4>Handoffs (${linked.length})</h4>${handoffEnvelopeListHtml(linked)}</section>`;
+}
+function ensureHandoffEnvelopes() {
+  if (!client || !state || handoffEnvelopes.receipts || handoffEnvelopes.loading) return;
+  handoffEnvelopes.loading = true;
+  const generation = client.generation;
+  client.request(client.path("/collab/envelopes"))
+    .then(body => {
+      if (client.generation !== generation) return;
+      handoffEnvelopes.receipts = Array.isArray(body.envelopes) ? body.envelopes : [];
+      syncTimelineWork();
+    })
+    .catch(() => { if (client.generation === generation) handoffEnvelopes.receipts = []; syncTimelineWork(); })
+    .finally(() => { handoffEnvelopes.loading = false; });
+}
 const BUDGET_LABELS = Object.freeze({ maxRuntimeMs: "Runtime", maxAttempts: "Attempts", maxConcurrent: "Concurrent sessions", maxSpendCents: "Spend cap", spendCents: "Reported spend" });
 const budgetValue = (key, value) => value === "unknown" ? "unknown" : key === "maxRuntimeMs" ? (value < 60000 ? `${Math.round(value / 1000)} s` : `${Math.round(value / 60000)} min`) : /Cents$/.test(key) ? `$${(value / 100).toFixed(2)}` : String(value);
 function accessPreviewHtml(i) {
@@ -1860,7 +1887,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -1922,6 +1949,7 @@ function setTimelineWorkNode(wnode, html) {
 function syncTimelineWork() {
   const list = $("#message-list");
   if (!list || !state) return;
+  ensureHandoffEnvelopes();
   if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
   const entries = timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const byId = new Map(entries.map(e => [e.item.id, e]));

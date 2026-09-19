@@ -926,6 +926,32 @@ summary { overflow-wrap: anywhere; }
 .access-preview .work-facts { margin: .5rem 0 0; }
 .access-preview .work-facts > div { grid-template-columns: 7rem 1fr; }
 .access-preview .source-link { display: inline; }
+/* Typed handoff envelopes (RC-2026-09-19-072): lifecycle badges, the
+   status trail, and the seven-section card rendered in the work view. */
+.handoff-envelopes { margin-top: .9rem; padding: .85rem; border: 1px solid #4a3f2e; background: #201a10; }
+.handoff-envelopes > h4 { margin: 0 0 .6rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #e8cf9a; }
+.handoff-envelope-list { display: grid; gap: .7rem; }
+.handoff-envelope { padding: .75rem; border: 1px solid var(--line); background: #151d2a; }
+.handoff-envelope-header { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.handoff-badge { padding: .2rem .5rem; border: 1px solid #3c526f; border-radius: 999px; background: #172335; color: #bcd5ff; font-size: .65rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.handoff-badge-warn { border-color: #855a35; background: #2d2015; color: #ffbe7c; }
+.handoff-badge-info { border-color: #2f5a85; background: #14202e; color: #9cc8ff; }
+.handoff-badge-done { border-color: #2e795e; background: #112b23; color: #7ce2b7; }
+.handoff-badge-alert { border-color: #85352f; background: #2e1414; color: #ff9c9c; }
+.handoff-badge-muted { border-color: #3c526f; background: #172335; color: #8a94a3; }
+.handoff-route { font-size: .75rem; color: var(--muted); }
+.handoff-objective { margin: .6rem 0; font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
+.handoff-trail { list-style: none; margin: .6rem 0; padding: 0; display: grid; gap: .3rem; }
+.handoff-trail li { display: flex; align-items: baseline; gap: .5rem; font-size: .75rem; }
+.handoff-trail-meta { color: var(--muted); overflow-wrap: anywhere; }
+.handoff-details { margin-top: .6rem; }
+.handoff-section { margin-top: .6rem; }
+.handoff-section > h5 { margin: 0 0 .35rem; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: #9fb3c8; }
+.handoff-inputs, .handoff-checks { margin: .3rem 0; padding-left: 1.1rem; font-size: .78rem; line-height: 1.6; overflow-wrap: anywhere; }
+.handoff-inputs li, .handoff-checks li { margin-bottom: .25rem; }
+.handoff-chip { display: inline-block; padding: .1rem .4rem; border: 1px solid var(--line); border-radius: .35rem; background: #0f1622; font-size: .68rem; color: #c9d4e2; }
+.handoff-note { margin: .25rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.5; overflow-wrap: anywhere; }
+.handoff-pass { color: var(--green); font-size: .68rem; font-weight: 800; }
 
 /* F5: read-only usage summary card */
 .usage-panel { box-shadow: none; }
