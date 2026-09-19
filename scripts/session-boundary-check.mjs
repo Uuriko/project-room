@@ -84,7 +84,6 @@ async function openReadyBrief(page) {
     ]);
     await page.locator("#catchup-dialog").waitFor({ state: "visible" });
   }
-  await panel.evaluate(element => { element.open = true; });
   await ready();
 }
 
