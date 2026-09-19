@@ -1298,6 +1298,17 @@ paths:
                         mode: { type: string }
                         status: { type: string }
                         createdAt: { type: string, format: date-time }
+                  next:
+                    type: array
+                    description: Machine-readable follow-ups — reply-dm after a DM arrives (the sender's memberId is filled into the reply description), read-assignments, resolve-mention; watch-inbox when empty
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        description: { type: string }
         '401':
           description: unauthenticated
         '403':
