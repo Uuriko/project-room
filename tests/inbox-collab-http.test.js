@@ -347,6 +347,67 @@ test("handoffs: room-scoped journal writes with account resolution", async t => 
   assert.equal(await codeOf(scopedList), "handoff_no_account_scope");
 });
 
+test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const agentToken = f.agent.secret;
+  const future = new Date(Date.now() + 86400000).toISOString();
+  const envelope = {
+    to: agentIdOf(f),
+    objective: "Summarize the thread and draft a reply",
+    inputs: [{ kind: "message", ref: "msg-1", label: "the thread" }],
+    authority: { permissions: ["accept_work", "complete_work"], scope: { rooms: ["commons"] }, expiresAt: future },
+    expectedOutput: { kind: "text_result", description: "A draft reply of at most 500 words" },
+    acceptanceTest: { checks: [{ kind: "result_submitted", workId: "work-1" }] },
+    termination: { expiresAt: future, onExpiry: "release" },
+  };
+  // A malformed envelope is 422: missing fields fail the shape check, and a
+  // full-shaped but invalid envelope fails the journal validator.
+  const bad = await post(f, `${base}/envelopes`, f.humanKey, { to: agentIdOf(f) });
+  assert.equal(bad.status, 422);
+  assert.equal(await codeOf(bad), "invalid_input");
+  const bad2 = await post(f, `${base}/envelopes`, f.humanKey,
+    { ...envelope, authority: { ...envelope.authority, permissions: ["manage_members"] } });
+  assert.equal(bad2.status, 422);
+  assert.equal(await codeOf(bad2), "invalid_handoff_envelope");
+  const created = await post(f, `${base}/envelopes`, f.humanKey, envelope);
+  assert.equal(created.status, 201);
+  const { envelopeId, status, envelope: env } = await created.json();
+  assert.ok(envelopeId.startsWith("he_"));
+  assert.equal(status, "proposed");
+  assert.equal(env.objective, envelope.objective);
+  assert.equal(env.provenance.createdBy, "owner");
+  // The recipient accepts; the sender cannot accept its own envelope.
+  const selfAccept = await post(f, `${base}/envelopes/${envelopeId}/transition`, f.humanKey,
+    { status: "accepted" });
+  assert.equal(selfAccept.status, 403);
+  assert.equal(await codeOf(selfAccept), "envelope_recipient_only");
+  const accepted = await post(f, `${base}/envelopes/${envelopeId}/transition`, agentToken,
+    { status: "accepted" });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).envelope.status, "accepted");
+  // Completing without naming checks is 422; with the declared check it lands.
+  const noChecks = await post(f, `${base}/envelopes/${envelopeId}/transition`, agentToken,
+    { status: "completed" });
+  assert.equal(noChecks.status, 422);
+  assert.equal(await codeOf(noChecks), "envelope_checks_required");
+  const done = await post(f, `${base}/envelopes/${envelopeId}/transition`, agentToken,
+    { status: "completed", checksPassed: ["result_submitted"] });
+  assert.equal(done.status, 200);
+  assert.equal((await done.json()).envelope.status, "completed");
+  // List filters; metrics names the escalation rate.
+  const listed = await (await get(f, `${base}/envelopes?status=completed`, f.humanKey)).json();
+  assert.equal(listed.envelopes.length, 1);
+  assert.equal(listed.envelopes[0].envelopeId, envelopeId);
+  const metrics = await (await get(f, `${base}/envelopes/metrics`, f.humanKey)).json();
+  assert.equal(metrics.total, 1);
+  assert.equal(metrics.closed, 1);
+  assert.equal(metrics.escalationRate, 0);
+  // The sweep is idempotent and returns what it moved.
+  const swept = await (await post(f, `${base}/envelopes/sweep`, f.humanKey, {})).json();
+  assert.deepEqual(swept.swept, { expired: [], escalated: [] });
+});
+
 test("restart persistence: every journal replays from SQLite", async t => {
   const f = setup(t); await f.serve();
   const base = "/api/rooms/commons/collab";

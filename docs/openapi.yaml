@@ -3729,6 +3729,119 @@ paths:
         '404': { description: handoff_not_found }
         '409': { description: handoff_no_account_scope or invalid_handoff_transition }
         '422': { description: invalid_handoff_status }
+  /api/rooms/{roomId}/collab/envelopes:
+    post:
+      summary: Open a typed handoff envelope delegating work to an agent
+      description: >-
+        Room-token write (CSRF + rate limit). The envelope carries the seven
+        typed sections: objective, inputs (references, never blobs),
+        authority (permission bits, room/work resource scope, expiry),
+        expectedOutput, acceptanceTest (machine-checkable checks),
+        termination (expiry plus the on-expiry behaviour), and provenance
+        (creator, claim id, task id, parent envelope, full ancestor chain).
+        Authority bits are confined to the collab vocabulary — manage_members
+        and decide are rejected so a handoff can never escalate privilege.
+        The sender becomes the envelope's provenance creator; the envelope
+        opens in the proposed state.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, objective, inputs, authority, expectedOutput, acceptanceTest, termination]
+              properties:
+                to: { type: string, description: "recipient agent id" }
+                objective: { type: string, maxLength: 2000 }
+                inputs: { type: array, items: { type: object }, description: "[{ kind: work|message|file|url|note, ref, label?, sha? }]" }
+                authority: { type: object, description: "{ permissions, scope: { rooms, workIds }, expiresAt, note? }" }
+                expectedOutput: { type: object, description: "{ kind: text_result|verification|decision|artifact|report, description }" }
+                acceptanceTest: { type: object, description: "{ checks: [{ kind, ... }] } — at least one check" }
+                termination: { type: object, description: "{ expiresAt, onExpiry: escalate|release, escalateTo?, maxRounds? }" }
+                provenance: { type: object, description: "{ claimId?, taskId?, parentEnvelopeId?, chain? } — createdBy is stamped from the sender" }
+      responses:
+        '201': { description: "{ envelopeId, status: proposed, roomId, envelope, history }" }
+        '422': { description: invalid_handoff_envelope or invalid_input }
+    get:
+      summary: List typed handoff envelopes in the room
+      description: >-
+        Room-token read. Envelopes newest first, optionally filtered with
+        `?status=` (proposed, accepted, completed, rejected, expired,
+        escalated, cancelled) and `?to=` (recipient agent id).
+      security:
+        - roomToken: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [proposed, accepted, completed, rejected, expired, escalated, cancelled] }
+        - name: to
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: "{ envelopes: [{ envelopeId, status, roomId, envelope, history }] }" }
+        '422': { description: invalid_envelope_status }
+  /api/rooms/{roomId}/collab/envelopes/{id}/transition:
+    post:
+      summary: Move a handoff envelope along its lifecycle
+      description: >-
+        Room-token write (CSRF + rate limit). Legal edges: proposed →
+        accepted | rejected | cancelled, accepted → completed | rejected |
+        escalated | cancelled. Only the recipient may accept, reject, or
+        complete; only the sender may cancel; either party may escalate.
+        Completing requires naming the declared acceptance checks that
+        passed (checksPassed). Expiry to expired is system-only — the sweep
+        owns it.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [accepted, completed, rejected, escalated, cancelled] }
+                note: { type: string, maxLength: 500 }
+                checksPassed: { type: array, items: { type: string }, description: "kinds from the envelope's acceptanceTest.checks" }
+      responses:
+        '200': { description: "{ envelope: { envelopeId, status, roomId, envelope, history } }" }
+        '404': { description: envelope_not_found }
+        '403': { description: envelope_recipient_only or envelope_sender_only or envelope_party_only }
+        '409': { description: invalid_envelope_transition }
+        '422': { description: envelope_checks_required or envelope_unknown_check or envelope_expiry_system_only }
+  /api/rooms/{roomId}/collab/envelopes/sweep:
+    post:
+      summary: Expire past-due handoff envelopes
+      description: >-
+        Room-token write (CSRF + rate limit). Idempotent: every proposed or
+        accepted envelope whose termination expiry has passed moves to
+        expired, or to escalated (recording escalateTo) when its termination
+        says onExpiry is escalate. Returns what moved.
+      security:
+        - roomToken: []
+      responses:
+        '200': { description: "{ swept: { expired: [envelopeId], escalated: [envelopeId] } }" }
+  /api/rooms/{roomId}/collab/envelopes/metrics:
+    get:
+      summary: Escalation-rate metrics for the room's handoff envelopes
+      description: >-
+        Room-token read. Counts envelopes by status and reports
+        escalationRate = escalated / closed, where closed is completed +
+        rejected + expired + escalated + cancelled (null until anything has
+        closed). The falsifiable claim for typed handoffs is that they
+        reduce this rate versus the pre-envelope baseline.
+      security:
+        - roomToken: []
+      responses:
+        '200': { description: "{ total, closed, byStatus, escalationRate }" }
   /api/inbox/quarantine:
     get:
       summary: Held-message quarantine review listing
