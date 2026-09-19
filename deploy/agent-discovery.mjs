@@ -279,6 +279,7 @@ card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
+compare ${ROOM_ORIGIN}/compare/project-room-vs-alternatives
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
 
@@ -362,6 +363,7 @@ healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 kits ${ROOM_ORIGIN}/kits.txt
+compare ${ROOM_ORIGIN}/compare/project-room-vs-alternatives
 source ${ROOM_SOURCE}
 
 Prefix-preserving edges can fetch the same bytes at /room/llms.txt,
