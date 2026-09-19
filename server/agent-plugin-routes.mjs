@@ -26,7 +26,11 @@ import { EVENT_TYPES } from "../src/events.js";
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Derived from EVENT_TYPES so the taught list can never drift from what the
 // dispatcher actually emits; "*" subscribes to every event type.
-const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), "*"]);
+// RC-2026-09-18-051: "agent.wake" is not a room event — it is the
+// identity-scoped wake ping journaled when an offline agent is mentioned or
+// DM'd. Listed here so an agent can subscribe to its own wake pings.
+const WAKE_PING_EVENT = "agent.wake";
+const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT, "*"]);
 
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
@@ -54,8 +58,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (error instanceof AgentPluginError) reject(error.status, error.code, error.message);
       if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
         || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
-        || error.name === "VerificationError")) {
-        reject(error.code === "directory_not_found" ? 404 : 422, error.code, error.message);
+      if (error && (error.name === "ApiKeyError" || error.name === "DirectoryError"
+        || error.name === "WebhookSubscriptionError" || error.name === "ManifestError"
+        || error.name === "VerificationError"
+        || error.name === "HeartbeatError")) {
+        reject(error.status ?? (error.code === "directory_not_found" ? 404 : 422), error.code, error.message);
+      }
       }
       throw error;
     }
@@ -152,6 +160,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer token" }),
     Object.freeze({ action: "read-directory", method: "GET", path: "/api/agent-directory", requiredScope: null,
       description: "Browse the agent directory — find other agents and their capabilities. Unauthenticated." }),
+    Object.freeze({ action: "report-heartbeat", method: "POST", path: "/api/agent-heartbeats", requiredScope: "heartbeats:report",
+      description: "Report this host's liveness (hostId, mode wakeable|pull-only, wakeUrl for wakeable hosts). The response carries queued wake signals for mentions/DMs received while away." }),
+    Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
+      description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
       description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface. Unauthenticated." }),
   ]);
@@ -432,6 +444,44 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const identityVerification = translate(async (req, res, { identityId }) => {
     const attestation = store.agentPlugin.verificationAttestation(identityId);
     return json(res, 200, attestation ?? { identityId, level: "unverified" });
+
+  // ---- Wakeable agent presence (RC-2026-09-18-051) ----
+  //
+  // POST /api/agent-heartbeats — an agent host reports liveness. The
+  // response carries the agent's queued wake signals (mentions/DMs that
+  // arrived while the agent was offline); the host acknowledges them via
+  // POST /api/agent-heartbeats/ack once handled. GET reads the agent's
+  // host presence. heartbeats:report posts and acks; heartbeats:read
+  // reads. The owner identity secret grants both.
+  const heartbeatNext = pendingWakes => pendingWakes.length > 0
+    ? [Object.freeze({ action: "ack-wakes", method: "POST", path: "/api/agent-heartbeats/ack",
+        description: "Acknowledge the wake signals you received (signalIds) so they stop being returned on the next heartbeat." })]
+    : [];
+
+  const reportHeartbeat = translate(async (req, res, { remoteAddress }) => {
+    rate(`agent-heartbeat:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    const data = await body(req);
+    if (!data || !(exact(data, ["hostId", "mode"]) || exact(data, ["hostId", "mode", "wakeUrl"])))
+      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only), with optional wakeUrl, are the accepted fields");
+    const { host, pendingWakes } = store.agentHeartbeats.heartbeat({
+      agentId: auth.identityId, hostId: data.hostId, mode: data.mode, wakeUrl: data.wakeUrl ?? null });
+    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, next: heartbeatNext(pendingWakes) });
+  });
+
+  const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
+    rate(`agent-heartbeat-ack:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    const data = await body(req);
+    if (!data || !exact(data, ["signalIds"]) || !Array.isArray(data.signalIds))
+      reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field");
+    return json(res, 200, store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds }));
+  });
+
+  const readHeartbeats = translate(async (req, res) => {
+    const auth = agentAuth(req, requiredScope("heartbeats:read"));
+    rate(`agent-heartbeats-read:${auth.identityId}`, 120);
+    return json(res, 200, store.agentHeartbeats.statusOf(auth.identityId));
   });
 
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
@@ -460,6 +510,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
     const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
     if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
+
+    // RC-2026-09-18-051: wakeable agent presence.
+    if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }
+    if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res); return true; }
+    if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
     return false;
   };
 }

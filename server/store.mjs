@@ -39,6 +39,8 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -408,6 +410,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
+    this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,
@@ -447,6 +450,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
         this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
+        this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
@@ -538,6 +542,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueuePauseSchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
+      // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
+      // wake-signal queue are purely additive as well: IF NOT EXISTS is
+      // idempotent, no schema version bump.
+      this.db.exec(agentHeartbeatSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
       // The spam-guard quarantine journal is purely additive as well:
@@ -2318,7 +2326,51 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
+      // RC-2026-09-18-051: wake-on-mention. An @-mention or DM addressed to
+      // an offline wakeable agent enqueues a wake signal (delivered on the
+      // agent's next heartbeat) and journals an agent.wake webhook delivery
+      // for any subscription the agent registered. Runs in the same
+      // transaction as the message event, so a wake is never recorded
+      // without its triggering message.
+      if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
       return { sequence, event: incoming, duplicate: false };
     });
+  }
+
+  // Wake-on-mention for message.posted: resolve @mentions and the DM target
+  // to agent members, then wake the offline ones via their registered
+  // agent identity. Never throws for unparseable input — a mention that
+  // resolves to nobody (or to an online agent) is simply not woken.
+  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
+    const members = state?.members ?? {};
+    const targets = new Map(); // memberId -> "mention" | "dm"
+    let names = [];
+    try { names = extractMentions(typeof data.body === "string" ? data.body : ""); }
+    catch { names = []; }
+    const memberIdForName = name => {
+      const lower = name.toLowerCase();
+      for (const [memberId, member] of Object.entries(members)) {
+        if (!member || member.active === false || member.kind !== "agent" || memberId === senderMemberId) continue;
+        const display = typeof member.displayName === "string" ? member.displayName.toLowerCase() : "";
+        if (memberId.toLowerCase() === lower || (display !== "" && display === lower)) return memberId;
+      }
+      return null;
+    };
+    for (const name of names) {
+      const memberId = memberIdForName(name);
+      if (memberId && !targets.has(memberId)) targets.set(memberId, "mention");
+    }
+    const dm = typeof data.toMemberId === "string" ? members[data.toMemberId] : null;
+    if (dm && dm.active !== false && dm.kind === "agent" && data.toMemberId !== senderMemberId
+      && !targets.has(data.toMemberId)) targets.set(data.toMemberId, "dm");
+    if (targets.size === 0) return;
+    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    for (const [memberId, kind] of targets) {
+      const link = linkOf.get(roomId, memberId);
+      if (!link) continue;
+      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+      if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+    }
   }
 }

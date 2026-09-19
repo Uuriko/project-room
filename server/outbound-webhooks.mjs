@@ -14,6 +14,17 @@ export function validateWebhookUrl(url) {
   check(URL_PATTERN.test(url), "url must be a valid https URL");
   return url;
 }
+// The canonical wake-ping event name. An agent.wake delivery is journaled
+// pending when an offline wakeable agent is @-mentioned or DM'd; the same
+// payload shape is returned on the agent's next heartbeat and is the shape
+// a future HTTP dispatch would POST to the host's registered wake URL.
+export const WAKE_PING_EVENT = "agent.wake";
+export function buildWakePing({ agentId, signal }) {
+  check(typeof agentId === "string" && agentId.length > 0, "agentId must be a non-empty string");
+  check(signal !== null && typeof signal === "object", "signal must be an object");
+  check(typeof signal.signalId === "string" && signal.signalId.length > 0, "signal.signalId must be a non-empty string");
+  return Object.freeze({ event: WAKE_PING_EVENT, agentId, signal: Object.freeze({ ...signal }) });
+}
 // Create a webhook manager. store is a caller-owned Map (webhookId -> webhook).
 export function createWebhooks({ store } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");

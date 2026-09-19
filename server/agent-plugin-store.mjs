@@ -23,6 +23,7 @@ import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs"
 import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
 } from "./agent-webhook-subscriptions.mjs";
+import { buildWakePing, WAKE_PING_EVENT } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
@@ -126,7 +127,9 @@ export class AgentPluginStore {
         verification: attestation ? VERIFIED : UNVERIFIED,
       };
     };
-    this.directory = createAgentDirectory({ store: this.cards, clock, trust: verificationTrust });
+    this.directory = createAgentDirectory({ store: this.cards, clock,
+      trust: verificationTrust,
+      presence: agentId => this.presenceForCard(agentId) });
     this.webhooks = createAgentWebhookSubscriptions({
       store: this.subs,
       clock,
@@ -565,6 +568,41 @@ export class AgentPluginStore {
         throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
       }
       return this.directory.get(agentId);
+    });
+  }
+
+  // RC-2026-09-18-051: host-supplied presence for a directory card. The card
+  // is keyed by public agentId; heartbeats are keyed by the owning identity,
+  // so resolve through the card's owner_identity_id. Returns null when the
+  // heartbeat tables are absent (read-only on an older database) or the
+  // agent never registered a host.
+  presenceForCard(agentId) {
+    const heartbeats = this.store.agentHeartbeats;
+    if (!heartbeats) return null;
+    const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+    if (!row) return null;
+    const status = heartbeats.statusOf(row.ownerIdentityId);
+    return { status: status.status, lastSeenAt: status.lastSeenAt, hosts: status.hosts.length };
+  }
+
+  // RC-2026-09-18-051: journal an agent.wake delivery for every enabled
+  // subscription of the identity that listens for wake pings. Delivery is
+  // pending (actual HTTP dispatch is a later slice); the agent sees the
+  // pending entry in its delivery journal. No subscription, no delivery —
+  // the heartbeat queue alone carries the wake.
+  deliverWakePing({ identityId, signal }) {
+    return this.mutate(() => {
+      const rows = this.db.prepare(
+        "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
+      const deliveries = [];
+      for (const row of rows) {
+        let events = [];
+        try { events = JSON.parse(row.eventsJson); } catch { continue; }
+        if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
+        deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
+          { eventType: WAKE_PING_EVENT, data: buildWakePing({ agentId: identityId, signal }) }));
+      }
+      return Object.freeze({ deliveries: Object.freeze(deliveries) });
     });
   }
 
