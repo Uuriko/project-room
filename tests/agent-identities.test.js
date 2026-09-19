@@ -481,3 +481,25 @@ test("agent-visible surfaces never return owner tokens or session cookies (RC-20
   })).json();
   assert.ok(!JSON.stringify(presence).includes(ownerLab), "presence must not carry the owner credential");
 });
+
+test("identity create rejects C0 control chars in displayName (RC-2026-09-19-086)", async t => {
+  const { store, origin } = await serve(t);
+  const count = () => store.db.prepare("SELECT COUNT(*) AS n FROM agent_identities").get().n;
+  // Same rejection as share-link join (422 there): control chars must never
+  // be stored raw in a display name.
+  for (const bad of ["evil\u0000bot", "tab\u0009here", "newline\u000aXbot", "cr\u000dXbot", "del\u007fbot", "bell\u0007bot", "fs\u001cbot"]) {
+    assert.throws(() => store.identities.create(bad),
+      error => error.status === 422 && error.code === "invalid_identity" && /control characters/.test(error.message));
+    const res = await fetch(`${origin}/api/agent-identities`, {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ displayName: bad })
+    });
+    assert.equal(res.status, 422);
+    assert.equal((await res.json()).error.code, "invalid_identity");
+  }
+  assert.equal(count(), 0, "refused creates write no rows");
+  // Clean names — including unicode and punctuation — still work.
+  const ok = store.identities.create("Relay Bot 🤖 v2.0");
+  assert.equal(ok.displayName, "Relay Bot 🤖 v2.0");
+  assert.equal(count(), 1);
+});
