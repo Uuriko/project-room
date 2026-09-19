@@ -5,6 +5,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
+import { verifyWorkResult } from "../src/work-packet.js";
 import { auditRecovery } from "../server/recovery.mjs";
 
 // When work completes with room_text evidence, the receipt names a message and
@@ -55,16 +56,82 @@ test("a message recorded as a work result cannot be edited", t => {
   assert.equal(room.message("draft-1").body, "The agenda is owned by Potter.", "the artifact is unchanged");
 });
 
-test("nor deleted, including by the room owner", t => {
+// Deletion is a different question from editing. Refusing it too would leave
+// the room with no way at all to take down text that names a private person or
+// is otherwise harmful, for as long as a work item points at it - and there is
+// no other removal path: moderation reports and mutes, it does not remove. So
+// deletion stays available and carries the consequence with it.
+test("but it can be deleted, and the receipt says its text was withdrawn", t => {
   const room = completedWithRoomText(t);
-  for (const actor of ["producer", "owner"]) {
-    const error = refusal(() => room.send(actor, T.MESSAGE_DELETED, {
-      messageId: "draft-1", expectedMessageRevision: room.message("draft-1").revision ?? 0, reason: "oops"
-    }));
-    assert.ok(error, `${actor} must be refused`);
-    assert.match(error.message, /recorded result/);
-  }
-  assert.equal(room.message("draft-1").deletedAt, undefined, "no tombstone was written");
+  const before = structuredClone(room.item().receipt);
+
+  room.send("owner", T.MESSAGE_DELETED, {
+    messageId: "draft-1", expectedMessageRevision: room.message("draft-1").revision ?? 0, reason: "names a private person"
+  });
+
+  assert.equal(room.message("draft-1").body, null, "the room no longer shows the text");
+  const receipt = room.item().receipt;
+  assert.equal(receipt.nativeText.withdrawnBy, "owner");
+  assert.equal(receipt.nativeText.withdrawnAt, room.message("draft-1").deletedAt);
+  const { withdrawnAt, withdrawnBy, ...nativeText } = receipt.nativeText;
+  assert.deepEqual({ ...receipt, nativeText }, before,
+    "a withdrawal adds a fact; it never rewrites what the receipt already claimed");
+  assert.equal(receipt.evidenceVersion, before.evidenceVersion,
+    "including the hash a verifier signed off against, which is what makes the withdrawal legible");
+});
+
+test("a withdrawal leaves the work item readable and the database backup-able", t => {
+  const room = completedWithRoomText(t);
+  room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
+
+  const { result } = room.store.workResult(room.keys.producer, "commons", WORK_ITEM);
+  assert.equal(result.text.body, null, "the withdrawn text is served to nobody");
+  assert.equal(result.text.withdrawnBy, "owner");
+  assert.equal(result.text.evidenceVersion, result.receipt.evidenceVersion,
+    "the hash still describes exactly what was reported and verified");
+  assert.equal(room.item().state, "completed", "withdrawing the text does not un-complete the work");
+  // Both of these are the failure this file exists for: a read path that
+  // answers 422 forever, and an audit that takes backupRoom down for every
+  // room in the database rather than only this one.
+  assert.doesNotThrow(() => auditRecovery(room.store), "recovery survives a withdrawal");
+});
+
+test("the audit replays the withdrawal instead of believing the projection", t => {
+  // The bug class: an auditor that does not implement an event compares its
+  // replay against the live projection, disagrees, and fails permanently. The
+  // mirror image is an auditor that accepts whatever is stored, which checks
+  // nothing. A stored withdrawal that the log does not justify must be caught.
+  const room = completedWithRoomText(t);
+  room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
+  assert.doesNotThrow(() => auditRecovery(room.store));
+
+  const row = room.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+  const state = JSON.parse(row.projection);
+  state.workItems[WORK_ITEM].receipt.nativeText.withdrawnBy = "reviewer";
+  room.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(state));
+  assert.throws(() => auditRecovery(room.store), "a withdrawal attributed to the wrong member is not a replay of the log");
+});
+
+test("withdrawn text cannot be chosen as evidence for a new completion", t => {
+  const room = completedWithRoomText(t);
+  const first = room.item().receipt;
+  room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
+  room.send("reviewer", T.VERIFICATION_RECORDED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, result: "fail",
+    completionEventId: first.eventId, evidenceVersion: first.evidenceVersion,
+    summary: "The text was withdrawn.", nextAction: "Repost"
+  });
+  room.send("producer", T.WORK_BLOCKER_RESOLVED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, resolution: "Reposting."
+  });
+  const error = refusal(() => room.send("producer", T.WORK_COMPLETED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, evidenceKind: "room_text",
+    evidenceMessageId: "draft-1", evidenceMessageEventId: room.item().receipt?.nativeText?.messageEventId ?? first.nativeText.messageEventId,
+    evidenceVersion: first.evidenceVersion, previousCompletionEventId: first.eventId,
+    producerId: "producer", summary: "Reusing withdrawn text", nextAction: "Review"
+  }));
+  assert.ok(error, "a tombstone is not a result");
+  assert.match(error.message, /well-formed message/);
 });
 
 test("the result stays readable and the room stays backup-able after a refused edit", t => {
@@ -132,4 +199,61 @@ test("evidence from a superseded receipt is protected too", t => {
     assert.match(error.message, /recorded result/);
   }
   assert.doesNotThrow(() => auditRecovery(room.store));
+});
+
+test("a superseded receipt's text can be withdrawn too, and the audit follows it", t => {
+  const room = completedWithRoomText(t);
+  const first = room.item().receipt;
+  room.send("reviewer", T.VERIFICATION_RECORDED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, result: "fail",
+    completionEventId: first.eventId, evidenceVersion: first.evidenceVersion,
+    summary: "The agenda names the wrong owner.", nextAction: "Repost the agenda"
+  });
+  room.send("producer", T.WORK_BLOCKER_RESOLVED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, resolution: "Reposted with the right owner."
+  });
+  const second = room.send("producer", T.MESSAGE_POSTED, { messageId: "draft-3", workItemId: WORK_ITEM, body: "A corrected agenda." });
+  room.send("producer", T.WORK_COMPLETED, {
+    workItemId: WORK_ITEM, expectedRevision: room.item().revision, evidenceKind: "room_text",
+    evidenceMessageId: "draft-3", evidenceMessageEventId: second.event.id,
+    evidenceVersion: textVersion(second.event.data.body), previousCompletionEventId: first.eventId,
+    producerId: "producer", summary: "Corrected room result", nextAction: "Review the stored text"
+  });
+
+  // The harmful text is in the superseded receipt, which is exactly the case
+  // where nobody is looking: the work item has moved on and the room still
+  // shows the message.
+  room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "names a private person" });
+
+  const historical = room.item().receiptHistory.find(receipt => receipt?.nativeText?.messageId === "draft-1");
+  assert.equal(historical.nativeText.withdrawnBy, "owner");
+  assert.equal(room.item().receipt.nativeText.withdrawnAt, undefined, "the current result is untouched");
+  assert.equal(room.store.workResult(room.keys.producer, "commons", WORK_ITEM).result.text.body, "A corrected agenda.");
+  assert.equal(room.store.workResult(room.keys.producer, "commons", WORK_ITEM, { completionEventId: first.eventId }).result.text.body, null);
+  assert.doesNotThrow(() => auditRecovery(room.store));
+});
+
+test("the client verifier reads a withdrawal as a withdrawal, not as a tampered answer", async t => {
+  const room = completedWithRoomText(t);
+  const receipt = room.item().receipt;
+  room.send("owner", T.MESSAGE_DELETED, { messageId: "draft-1", expectedMessageRevision: 0, reason: "harmful" });
+
+  const value = room.store.workResult(room.keys.producer, "commons", WORK_ITEM, { completionEventId: receipt.eventId });
+  const verified = await verifyWorkResult(value, { roomId: "commons", workItemId: WORK_ITEM, completionEventId: receipt.eventId });
+  assert.equal(verified.result.text.body, null);
+  assert.equal(verified.result.text.withdrawnBy, "owner");
+
+  // And it is still a verifier: a served answer that claims the text is intact
+  // while the receipt says it was withdrawn, or the reverse, is refused.
+  const halfWithdrawn = structuredClone(value);
+  delete halfWithdrawn.result.receipt.nativeText.withdrawnAt;
+  delete halfWithdrawn.result.receipt.nativeText.withdrawnBy;
+  await assert.rejects(verifyWorkResult(halfWithdrawn, { roomId: "commons", workItemId: WORK_ITEM, completionEventId: receipt.eventId }));
+
+  const forged = structuredClone(value);
+  forged.result.text.body = "The agenda is owned by Potter.";
+  delete forged.result.text.withdrawnAt;
+  delete forged.result.text.withdrawnBy;
+  await assert.rejects(verifyWorkResult(forged, { roomId: "commons", workItemId: WORK_ITEM, completionEventId: receipt.eventId }),
+    "putting the text back does not make it un-withdrawn");
 });

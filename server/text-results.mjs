@@ -17,9 +17,13 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     : db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND coalesce(json_extract(body,'$.data.messageId'),id)=?").get(state.room.id, messageId);
   check(row);
   const post = JSON.parse(row.body), message = state.messages.find(message => message.id === messageId);
+  // A withdrawn message is a tombstone in the projection and unchanged in the
+  // log. Everything below still has to line up; the body is the one thing the
+  // room no longer shows, so it is compared against null and never returned.
+  const withdrawn = Boolean(message?.deletedAt);
   check(message && post.type === "message.posted" && post.roomId === state.room.id && post.id === row.id
     && (post.data.messageId || post.id) === messageId && post.data.workItemId === workItemId && message.workItemId === workItemId
-    && post.data.body === message.body && post.actorId === message.authorId && post.at === message.createdAt
+    && (withdrawn ? message.body === null : post.data.body === message.body) && post.actorId === message.authorId && post.at === message.createdAt
     && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId);
   let proposal = null;
   if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
@@ -30,12 +34,13 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
   }
   check(isDeepStrictEqual(message.proposal ?? null, proposal));
   return { messageId, messageEventId: post.id, postedById: post.actorId, createdAt: post.at,
-    body: message.body, byteLength: Buffer.byteLength(message.body, "utf8"), evidenceVersion: textVersion(message.body), proposal,
-    postSequence: row.sequence };
+    body: withdrawn ? null : post.data.body, byteLength: Buffer.byteLength(post.data.body, "utf8"),
+    evidenceVersion: textVersion(post.data.body), proposal, postSequence: row.sequence,
+    ...(withdrawn ? { withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy } : {}) };
 }
 
-export function verifyTextCompletion(db, state, work, data) {
-  const nativeText = nativeTextEvidence(state, work, data);
+export function verifyTextCompletion(db, state, work, data, { allowWithdrawn = false } = {}) {
+  const nativeText = nativeTextEvidence(state, work, data, { allowWithdrawn });
   const text = storedText(db, state, work.id, data.evidenceMessageId, data.evidenceMessageEventId);
   check(text.evidenceVersion === data.evidenceVersion);
   return { nativeText, text };
@@ -72,7 +77,12 @@ export function auditTextResults(db, state, history) {
     const data = event.data, work = state.workItems[data.workItemId], parent = previous.get(data.workItemId) ?? null;
     if (data.evidenceKind === "room_text") {
       check(work && projected.get(event.id) === work.id && !audited.has(event.id)); audited.add(event.id);
-      const { nativeText, text } = verifyTextCompletion(db, state, { ...work, receipt: parent ? { eventId: parent } : null }, data);
+      // allowWithdrawn: the state itself says whether the text was later taken
+      // out of the room. A completion recorded before that still has to
+      // reconstruct exactly, including the withdrawal the deletion wrote onto
+      // it - the whole point of this audit is that the stored receipt is
+      // nothing but a replay of the log.
+      const { nativeText, text } = verifyTextCompletion(db, state, { ...work, receipt: parent ? { eventId: parent } : null }, data, { allowWithdrawn: true });
       const receipt = [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === event.id);
       // Legacy stored receipts predate result segments; treat a missing
       // segments field as the null backfill the new applier writes.

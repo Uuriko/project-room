@@ -760,11 +760,32 @@ const evidenceReceipt = (state, messageId) => {
   return null;
 };
 
-function findEditableMessage(state, incoming) {
+// Withdrawing text a work item recorded as its result. The receipt keeps
+// everything it ever claimed - who reported it, the hash a verifier signed off
+// against - and gains the fact that the text behind it is gone, so a reader
+// finds a withdrawal instead of a reference to a message the room no longer
+// shows. Every auditor that reconstructs a receipt has to replay this; see
+// auditTextResults in server/text-results.mjs.
+function withdrawTextEvidence(state, messageId, incoming) {
+  for (const work of Object.values(state.workItems ?? {})) {
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId !== messageId) continue;
+      receipt.nativeText.withdrawnAt = incoming.at;
+      receipt.nativeText.withdrawnBy = incoming.actorId;
+    }
+  }
+}
+
+// `evidence: "refuse"` is for an edit, which would move the text behind a hash
+// somebody already verified, leaving the work item claiming a result that no
+// longer says what it said. `evidence: "withdraw"` is for a deletion, which
+// must stay available to whoever has to take harmful text out of a room: it
+// removes the text and records the withdrawal on the receipt.
+function findEditableMessage(state, incoming, { evidence = "refuse" } = {}) {
   const message = state.messages.find(m => m.id === incoming.data.messageId);
   if (!message) throw new Error("Message not found");
   if (message.deletedAt) throw new Error("Message was deleted");
-  const evidenceFor = evidenceReceipt(state, message.id);
+  const evidenceFor = evidence === "refuse" ? evidenceReceipt(state, message.id) : null;
   if (evidenceFor) throw new Error(`This message is the recorded result of ${evidenceFor.id} and cannot be changed`);
   const actor = requireMember(state, incoming.actorId);
   if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
@@ -782,13 +803,14 @@ function editMessage(state, incoming) {
 }
 
 function deleteMessage(state, incoming) {
-  const { message } = findEditableMessage(state, incoming);
+  const { message } = findEditableMessage(state, incoming, { evidence: "withdraw" });
   message.body = null;
   // Deletion hides every earlier version too; the tombstone keeps only who/when.
   message.editHistory = [];
   message.deletedAt = incoming.at;
   message.deletedBy = incoming.actorId;
   dropPinsForMessage(state, message.id); // issue #6 B2: the tombstone drops the pin too
+  withdrawTextEvidence(state, message.id, incoming);
   message.revision = (message.revision ?? 0) + 1;
 }
 

@@ -3541,12 +3541,13 @@ function resultStatus() {
   const item = state.workItems[view.workItemId];
   const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
   $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
+    : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
 }
 function closeResult(restore = true) {
   const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
-  $("#result-status").textContent = ""; $("#result-body").textContent = "";
+  $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true;
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
@@ -3575,7 +3576,7 @@ function readResult(e) {
     if (fromResults && !currentResult(item)) return;
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
       fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
+    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
     $("#result-original").hidden = true;
     const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
     $("#result-dialog").showModal();
@@ -3583,7 +3584,12 @@ function readResult(e) {
     client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
       if (!owns() || !value) return;
       if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
-      $("#result-body").textContent = value.result.text.body;
+      // Text taken out of the room is served as an absence, so say so rather
+      // than showing an empty box: the result was still reported and verified,
+      // and the receipt still names what it was verified against.
+      view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
+      $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+      $("#result-body").hidden = Boolean(view.withdrawn);
       const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === item.id
         && message.body === value.result.text.body);
       const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
@@ -3597,6 +3603,14 @@ function readResult(e) {
           if (!owns() || !previous) return;
           if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
           const before = previous.result?.text?.body;
+          if (previous.result?.text?.withdrawnAt || view.withdrawn) {
+            diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
+              previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
+                : "This version's text has been withdrawn, so the two cannot be compared."
+            } Previous approval never carries over.</p>`;
+            diffBox.hidden = false;
+            return;
+          }
           if (typeof before !== "string") throw new Error("Previous version has no exact text");
           const rows = diffResultLines(before, value.result.text.body);
           const note = "Previous approval never carries over; review the exact new text.";
