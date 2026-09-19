@@ -182,6 +182,17 @@ paths:
                             properties:
                               workItemId: { type: string }
                               status: { type: string }
+                  next:
+                    type: array
+                    description: Machine-readable follow-ups — dm-member when members are listed (the member's id is filled into the message.posted DM command), watch-presence when nobody is online
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        description: { type: string }
   /api/rooms/{roomId}/export:
     get:
       summary: Export the event log as JSONL, or as a readable HTML page
