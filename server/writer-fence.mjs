@@ -103,6 +103,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's immutable receipts plus the per-produced-
   // record idempotency key are the gate.
   "sla_breach_alerts",
+  // oauth_pending_states (OAuth PKCE pending states for Google/GitHub
+  // sign-in) is purely additive and intentionally NOT fenced: older writers
+  // have no code path to it, rows are short-lived (10min TTL, pruned on
+  // write), and single-use consumption is the integrity gate.
+  "oauth_pending_states",
   // Cross-channel thread stitching (task #19): stitch_identities,
   // stitch_links, stitch_revocations, stitch_suggestions, stitch_receipts.
   // Hash-only, purely additive, intentionally NOT fenced — older writers
