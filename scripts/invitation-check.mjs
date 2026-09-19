@@ -245,7 +245,8 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   await page.waitForURL(`${origin}/?room=studio`);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.match(await page.locator("#identity-label").textContent(), /^Target human/);
-  assert.equal(await page.locator("#conversation-title").textContent(), "# studio");
+  assert.equal(await page.locator("#room-title").textContent(), "Studio");
+  assert.equal(await page.locator("#conversation-title").textContent(), "# general");
   assert.equal(await composer.inputValue(), "", "private drafts clear only after the confirmed account/Room switch");
   assert.deepEqual(counts(store, invitationId), afterCommit, "the exact lost-response replay is a no-write receipt");
   const cookiesAfterAccept = new Map((await context.cookies()).map(cookie => [cookie.name, cookie.value]));
