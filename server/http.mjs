@@ -49,7 +49,7 @@ const assets = new Map([
   ["/src/styles.css", ["src/styles.css", "text/css"]],
   ["/connectors/muse.md", ["connectors/muse.md", "text/markdown; charset=utf-8"]],
 ]);
-const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 const pathId = encoded => {
   let id;
   try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
@@ -1769,6 +1769,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // returns true when it served the request, false to fall through.
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
+      // POST-only enrollment: GET (and other methods) must not look like "not found".
+      if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create"
+        || url.pathname === "/api/agent-rooms" || url.pathname === "/api/agent-invites/redeem")
+        && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");
         const authMode = selectedRoom !== null || req.headers["x-project-room-auth"] === "account" ? "account" : "room";

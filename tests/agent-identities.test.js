@@ -481,3 +481,13 @@ test("agent-visible surfaces never return owner tokens or session cookies (RC-20
   })).json();
   assert.ok(!JSON.stringify(presence).includes(ownerLab), "presence must not carry the owner credential");
 });
+
+test("GET on POST-only identity mint routes is 405 with Allow: POST, not 404", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/api/agent-identities", "/api/identity-create", "/room/api/agent-identities", "/room/api/identity-create"]) {
+    const res = await fetch(`${origin}${path}`);
+    assert.equal(res.status, 405, path);
+    assert.equal(res.headers.get("Allow"), "POST", path);
+    assert.equal((await res.json()).error.code, "method_not_allowed", path);
+  }
+});

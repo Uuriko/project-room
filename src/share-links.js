@@ -413,12 +413,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (resume) redemptionId = resume.redemptionId;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#join-link-retry").hidden = true;
+    $("#join-link-recover").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
     $("#join-link-title").textContent = "Join this room"; $("#join-link-scope").textContent = "Checking your invitation…";
     joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
-    if (!joinSecret) { $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link."; return; }
+    if (!joinSecret) {
+      $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link.";
+      $("#join-link-recover").hidden = false;
+      return;
+    }
     try {
       const { preview, session: account } = await accountClient.prepareShareLink(joinSecret);
       if (version !== joinVersion || !account) return;
@@ -438,6 +443,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     } catch (error) {
       if (version !== joinVersion) return;
       $("#join-link-scope").textContent = "Unable to open this invitation.";
+      $("#join-link-recover").hidden = false;
       const retryable = canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
       joinStatus(interrupted(error) ? "Connection interrupted. Try again." : invitationFailureMessage(error));
@@ -541,6 +547,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joinAttempted = false; joinLanded = false;
     $("#join-link-form").reset();
     $("#join-link-retry").hidden = true;
+    $("#join-link-recover").hidden = true;
     if (pendingToken && attempted && !landed) {
       // #657 defect 4: never strand the guest on an unrelated page. The address
       // bar keeps the invitation, so reopening it (or reloading) resumes the

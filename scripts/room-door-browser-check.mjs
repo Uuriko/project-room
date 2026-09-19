@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR } from "../deploy/agent-discovery.mjs";
+import { COMPUTE_DOOR, BROWSER_ROOM_PATH } from "../deploy/agent-discovery.mjs";
 
 for (const touch of [false, true]) {
   test(`public /room door ${touch ? "mobile" : "desktop"}: Join + Connect, not the llms packet`, { timeout: 60000 }, async t => {
@@ -39,8 +39,11 @@ for (const touch of [false, true]) {
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
     const people = page.getByRole("link", { name: "People", exact: true });
-    assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
-    assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
+    assert.equal(await open.getAttribute("href"), BROWSER_ROOM_PATH);
+    assert.equal(await joinLink.getAttribute("href"), `${BROWSER_ROOM_PATH}/#join/`);
+    assert.doesNotMatch(await page.content(), /project-room-staging\.getdasha\.workers\.dev/);
+    assert.equal(await page.locator("#join-code-form").getAttribute("data-room-origin"), BROWSER_ROOM_PATH);
+    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), "");
     assert.equal(await paste.getAttribute("href"), "#join-agent");
     assert.equal(await people.getAttribute("href"), "#people");
     assert.equal(await page.locator(".actions a").count(), 2, "first paint is Open + Join");
@@ -56,8 +59,8 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator('a[href="/room/mcp"]').count(), 1, "#667 same-bytes link lives under the spine");
     assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).getAttribute("href"), "#join-code");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${origin}/room?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${origin}/room?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
     await paste.click();
     await page.locator("#join-agent").waitFor();
     const joinText = await page.locator("#join-agent").innerText();
@@ -143,17 +146,36 @@ for (const touch of [false, true]) {
     assert.match(await joinPacket.text(), /Join Project Room as an agent/);
     assert.match(await joinPacket.text(), /After paste/);
     const joinToken = "J".repeat(43);
-    await page.route(url => {
-      try { return new URL(url).origin === new URL(ROOM_ORIGIN).origin; } catch { return false; }
-    }, async route => {
-      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Room app</title><p>app</p>" });
-    });
     await page.goto(`${origin}/room#join/${joinToken}`);
-    await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
-    assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
+    await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.pathname === "/room/");
+    assert.equal(page.url(), `${origin}/room/#join/${joinToken}`);
     await page.goto(`${origin}/room#code/abc-def-ghj`);
-    await page.waitForURL(url => url.hash === "#code/ABC-DEF-GHJ" && url.origin === new URL(ROOM_ORIGIN).origin);
-    assert.equal(page.url(), `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
+    await page.locator("#join-empty").waitFor();
+    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
+    assert.match(await page.locator("#join-empty-message").innerText(), /isn't a live invite/i);
+    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
+    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
+    assert.equal(new URL(page.url()).origin, origin, "fake #code/ stays on the door");
+    await page.goto(`${origin}/room`);
+    await page.locator("#join-code").fill("ABC-DEF-GHJ");
+    await page.locator("#join-code-form button").click();
+    await page.locator("#join-code-status").waitFor();
+    assert.match(await page.locator("#join-code-status").innerText(), /isn't a live invite/i);
+    assert.equal(await page.locator("#join-code").getAttribute("aria-invalid"), "true");
+    assert.match(await page.locator("#join-empty-message").innerText(), /isn't a live invite/i);
+    await page.goto(`${origin}/room#join/`);
+    await page.locator("#join-empty").waitFor();
+    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
+    assert.match(await page.locator("#join-empty").innerText(), /incomplete/i);
+    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
+    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
+    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
+    await page.locator("#join-empty-recover a[href='#join-code']").click();
+    await page.locator("#join-code-form").waitFor();
+    assert.equal(new URL(page.url()).origin, origin, "incomplete #join/ stays on the door");
     const mcpDoc = await page.request.get(`${origin}/room/mcp`);
     assert.match(mcpDoc.headers()["content-type"], /text\/plain/);
     const mcpText = await mcpDoc.text();

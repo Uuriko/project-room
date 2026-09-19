@@ -41,6 +41,10 @@ export class ProjectRoom {
     let googleAuth = null;
     try { googleAuth = googleConfig(env, env.ROOM_ORIGIN); }
     catch (error) { console.warn(`room google auth disabled: ${error.message}`); }
+    // Mode is the Worker env, not the browser Host. www/lobby/custom domains
+    // hit this same DO after Host rewrite, so a single ROOM_SERVICE_MODE flag
+    // cannot say "cloudflare" on getdasha.com without lying on workers.dev.
+    // Leave cloudflare-staging until per-host mode is plumbed through the rewrite.
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
       googleAuth,
       // Verified provider webhook updates are journaled in the Durable Object's

@@ -75,6 +75,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await a2aCard.json(), await (await call('/.well-known/agent.json')).json());
     const leftoverHealth = await json(await call('/room/health'));
     assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
+    assert.deepEqual(await json(await call('/api/healthz')), leftoverHealth);
+    assert.deepEqual(await json(await call('/healthz')), leftoverHealth);
     const kits = await call('/room/kits');
     assert.equal(kits.status, 200);
     assert.match(kits.headers.get('content-type'), /text\/plain/);

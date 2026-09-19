@@ -169,6 +169,11 @@ for (const failure of ['malformed', 'expired']) {
     await page.waitForFunction(() => /incomplete|Unable to open/.test(document.querySelector('#join-link-scope').textContent));
     assert.equal(await page.locator('#join-link-retry').isVisible(), false);
     assert.equal(await page.locator('#join-link-form').isVisible(), false);
+    assert.equal(await page.locator('#join-link-recover').isVisible(), true);
+    assert.equal(await page.locator('#join-link-recover a[href="/room"]').getAttribute('href'), '/room');
+    assert.equal(await page.locator('#join-link-recover a[href="/room#join-code"]').count(), 1);
+    assert.equal(await page.locator('#join-link-recover a[href="/room#join-agent"]').count(), 1);
+    assert.equal(await page.locator('#join-link-recover a[href="/room#mcp-join"]').count(), 1);
     assert.equal(new URL(page.url()).hash, '');
     assert.equal(previews, failure === 'malformed' ? 0 : 1);
     assert.equal(joins, 0);
