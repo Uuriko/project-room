@@ -38,6 +38,8 @@ const ALLOWLIST = [
   /insertCredential\(/, // `token = this.insertCredential(...)` — credential store API
   /base64url\(randomBytes\(/, // runtime-generated random values
   /generateSecret\(\)/, // runtime-generated secrets in fixtures
+  /secret = stashed\?\.secret/, // src/app.js: reads the stashed access-request identity secret back from sessionStorage — variable reference, not a hardcoded secret
+  /secret = minted\?\.secret/, // src/app.js: reads the freshly minted access-request identity secret — variable reference, not a hardcoded secret
   /process\.env\.[A-Z_]+/, // env var NAMES (not values)
   /^\|.*\|$/, // markdown table rows
   /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
