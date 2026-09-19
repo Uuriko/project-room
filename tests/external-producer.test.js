@@ -16,6 +16,7 @@ import { workStatus, nextWorkStep } from "../src/workflow.js";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { WRITER_FUNCTION } from "../server/writer-fence.mjs";
 
 test("outside credit is strict, mutually exclusive, and never a member identity", () => {
   assert.deepEqual(reportedProducer({ externalProducer: "Writer with AI assistance" }), {
@@ -111,7 +112,7 @@ test("real v25 database upgrades unchanged and retires its already-open writer",
   const current = new RoomStore(f.filename); t.after(() => current.close());
   assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 34);
   assert.deepEqual(current.room("commons"), before);
-  assert.throws(() => cached.run("commons"), /project_room_writer_v34|unsupported database writer/);
+  assert.throws(() => cached.run("commons"), new RegExp(`${WRITER_FUNCTION}|unsupported database writer`));
   assert.throws(() => new f.OldStore(f.filename), /schema is newer/);
 });
 test("v25 ignored outside-credit data cannot be reinterpreted during upgrade", async t => {
