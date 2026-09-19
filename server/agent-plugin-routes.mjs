@@ -443,6 +443,35 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, attestation ?? { identityId, level: "unverified" });
   });
 
+  // ---- Identity-secret rotate/revoke (RC-2026-09-19-055) ----
+  //
+  // The live-dogfood gap: identity pri_ secrets could never be invalidated.
+  // The caller proves ownership by presenting the identity's OWN pri_
+  // secret (ownerAuth rejects rak_ keys — a scoped credential must never
+  // manage the master secret), and the path identity must equal the
+  // authenticated identity: one identity can never rotate or revoke
+  // another's. Rotate issues the new secret once and retires the old one
+  // atomically; revoke is final — the secret stops authenticating
+  // everywhere, the identity row stays for audit, and any scoped API keys
+  // the identity minted are revoked too. Neither response ever carries the
+  // old secret.
+  const SECRET_ROTATE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/rotate$/;
+  const SECRET_REVOKE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/revoke$/;
+
+  const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-identity-rotate:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
+    return json(res, 200, store.identities.rotate(identityId, bearer(req)));
+  });
+
+  const revokeIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-identity-revoke:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only revoke its own secret");
+    return json(res, 200, store.identities.revoke(identityId, bearer(req)));
+  });
+
   // ---- Wakeable agent presence (RC-2026-09-18-051) ----
   //
   // POST /api/agent-heartbeats — an agent host reports liveness. The
@@ -508,6 +537,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
     const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
     if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
+    const secretRotateMatch = method === "POST" ? SECRET_ROTATE_ROUTE.exec(pathname) : null;
+    if (secretRotateMatch) { await rotateIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRotateMatch[1]) }); return true; }
+    const secretRevokeMatch = method === "POST" ? SECRET_REVOKE_ROUTE.exec(pathname) : null;
+    if (secretRevokeMatch) { await revokeIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRevokeMatch[1]) }); return true; }
 
     // RC-2026-09-18-051: wakeable agent presence.
     if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }

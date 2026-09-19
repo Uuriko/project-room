@@ -298,6 +298,24 @@ export class AgentPluginStore {
     });
   }
 
+  // Server-side bulk revoke (RC-2026-09-19-055): when an identity's primary
+  // secret is revoked, every scoped key it minted is revoked too — a
+  // revoked identity must not keep operating through an earlier key. No
+  // owner check here: the caller (AgentIdentities#revoke) already proved
+  // ownership with the identity's own secret. Returns the count revoked.
+  revokeApiKeysForIdentity(identityId) {
+    return this.mutate(() => {
+      let revoked = 0;
+      for (const record of this.apiKeys.keysForIdentity(identityId)) {
+        if (record.revoked) continue;
+        this.apiKeys.revoke(record.keyId);
+        this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(record.keyId);
+        revoked += 1;
+      }
+      return revoked;
+    });
+  }
+
   // Authenticate a presented API-key secret (for future scoped use); updates
   // lastUsedAt on success. Returns the public record or null.
   verifyApiKeySecret(secret) {
