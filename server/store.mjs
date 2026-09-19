@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -867,6 +867,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
         }
         let changed = false;
+        // Phase 2 channels: legacy projections (stored before channels existed)
+        // gain #general so the stored projection matches a replay. Mirrors
+        // ensureDefaultChannel in src/events.js.
+        if (state.room) {
+          state.channels ??= {};
+          if (!state.channels[DEFAULT_CHANNEL_ID]) {
+            state.channels[DEFAULT_CHANNEL_ID] = {
+              id: DEFAULT_CHANNEL_ID,
+              name: DEFAULT_CHANNEL_ID,
+              createdBy: state.room.ownerId,
+              createdAt: state.room.createdAt ?? null,
+              archivedAt: null
+            };
+            changed = true;
+          }
+        }
         for (const item of missing) {
           const proposer = proposers.get(item.id);
           if (proposer) { item.proposedById = proposer; changed = true; }
