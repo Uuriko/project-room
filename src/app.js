@@ -268,7 +268,8 @@ const client = new RoomClient({
     }
     $("#work-dialog").close();
     if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    $("#people-panel").open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
     agentPauses = new Map(); armedRemoval = null;
@@ -3622,6 +3623,8 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
         : '<p class="form-hint">Coordination only. No work starts or permissions change.</p>');
   }
   renderActionContext(item, action);
+  if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+  if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   $("#action-dialog").showModal();
   syncActionForm();
 }

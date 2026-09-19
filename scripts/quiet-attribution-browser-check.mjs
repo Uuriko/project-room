@@ -34,13 +34,15 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
   const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
   const directed = record('naming-directed').locator('.audience-chip');
-  assert.equal(await directed.textContent(), 'To Jordan · room-visible');
+  assert.equal(await directed.textContent(), 'To Jordan · private');
   assert.match(await next.textContent(), /Jordan —/); assert.equal((await next.textContent()).includes(jordan), false);
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
   assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
   await ensurePeopleOpen(page);
   assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan));
+  // Dismiss the overlay drawer before using the topbar search, as a user would.
+  await page.keyboard.press("Escape");
   await openSearch(page);
   await page.locator('#message-search').fill('I can help');
   assert.equal(await page.locator('#search-list strong').textContent(), 'Jordan');

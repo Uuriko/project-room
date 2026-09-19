@@ -53,6 +53,10 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   assert.equal(await details.evaluate(d => d.open), false, "keyboard closes the disclosure");
   assert.equal(await page.evaluate(() => document.activeElement.tagName), "SUMMARY", "closing does not strand focus");
 
+  // Dismiss the overlay drawer as a keyboard user would before using the composer.
+  await page.keyboard.press("Escape");
+  await page.locator("#room-sidebar").waitFor({ state: "hidden" });
+
   // A3 narrow: composer usable at 390px - multiline via Enter, send via Ctrl+Enter.
   const input = page.locator("#message-input");
   await input.click();

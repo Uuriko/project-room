@@ -110,6 +110,9 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
     if (i === 2) assert.match(result.page.items.at(-1).message.body, /^Friday\./);
   }
   assert.equal(auditRecovery(f.store).dataSha256, beforeAgentRead);
+  // Entering the request thread closed the catch-up dialog; reopen it before
+  // inspecting the brief queue again.
+  await openCatchUp(page);
   await page.locator('#return-brief-panel > summary').scrollIntoViewIfNeeded();
   assert.equal(await page.locator('#rb-attention-list a').count(), 8);
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });

@@ -86,6 +86,10 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#message-input').inputValue(), 'Private request draft');
   await switchTo('fallback');
+  // Wait for the app to finish restoring drafts after the reload; the
+  // request-mode bar and request-reply button are only meaningful once state
+  // and the persisted composer are back.
+  await page.waitForFunction(() => document.querySelector('#message-input').value !== '');
   if (await page.locator('#request-mode-bar').isVisible()) await page.locator('#request-exit').click();
   if (await page.locator('#message-input').inputValue() !== 'Private ordinary draft') issues.push('ordinary draft unavailable on fallback');
   await remember(); await page.locator('#message-input').fill('Ordinary draft edited on fallback');
@@ -110,6 +114,11 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await switchTo('fallback');
   assert.equal(fixture.store.room('commons').sequence, sequence + 1, 'fallback never converts a request retry into ordinary chat');
   await switchTo('candidate');
+  // Same reload-restore wait as above: the request-reply click below must run
+  // against a booted app with the persisted drafts, or request mode never
+  // engages and the readOnly assertion below flakes. The ordinary draft edited
+  // on fallback is the restored value once the app is ready.
+  await page.waitForFunction(() => document.querySelector('#message-input').value === 'Ordinary draft edited on fallback');
   if (!await page.locator('#request-mode-bar').isVisible()) {
     if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
     await page.locator('#request-reply').click();
