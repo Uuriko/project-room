@@ -1037,7 +1037,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
       if (url.pathname === "/oauth/token" && req.method === "POST") {
-        rate(`oauth-token:${remoteAddress}`, 60);
+        rate(`oauth-token-exchange:${remoteAddress}`, 60);
         const data = await body(req);
         const grantType = data.grant_type;
         try {
