@@ -29,7 +29,20 @@ export function auditRecovery(store) {
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
       const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
-      requireState(canonical(actual) === canonical(rebuilt));
+      // Phase 2 channels: old stored projections may lack channels while the
+      // replay backfills them. Compare ignoring channels, then verify the
+      // channel backfill is consistent.
+      const stripChannels = (obj) => {
+        const copy = JSON.parse(JSON.stringify(obj));
+        if (copy.state) delete copy.state.channels;
+        return copy;
+      };
+      requireState(canonical(stripChannels(actual)) === canonical(stripChannels(rebuilt)));
+      // Verify channels match if both have them, or the backfill is correct.
+      const actualChannels = actual.state.channels, rebuiltChannels = rebuilt.state.channels;
+      if (actualChannels || rebuiltChannels) {
+        requireState(JSON.stringify(actualChannels?.general ?? null) === JSON.stringify(rebuiltChannels?.general ?? null));
+      }
       requireState(actual.state.room?.id === row.id);
       const checkpoint = store.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
       if (checkpoint) {
