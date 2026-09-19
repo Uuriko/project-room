@@ -104,7 +104,15 @@ export class LiveTelegramPoller {
       if (this.#closed) fail(503, "channel_poller_closed", "The Telegram poller is closed.");
       const controller = new AbortController();
       this.#inflight = controller;
-      const signals = [AbortSignal.timeout(timeoutMs), controller.signal];
+      // A referenced timer, deliberately. AbortSignal.timeout() schedules an
+      // unreferenced one, so in a process with nothing else pending - a
+      // standalone poller daemon, or this module's own tests - the event loop
+      // empties and the timeout never fires at all: a hanging long-poll hangs
+      // forever instead of being retried and reported. Cleared below so a
+      // settled request never holds the process open for the timeout's sake.
+      const deadline = new AbortController();
+      const timer = setTimeout(() => deadline.abort(new DOMException("The long-poll timed out.", "TimeoutError")), timeoutMs);
+      const signals = [deadline.signal, controller.signal];
       if (signal) signals.push(signal);
       let response, value = null;
       try {
@@ -116,7 +124,7 @@ export class LiveTelegramPoller {
         // (signal) is a shutdown, not a network failure: never retried.
         if (error?.name === "AbortError" && (this.#closed || signal?.aborted)) fail(503, "channel_poller_closed", "The Telegram poller was stopped.");
         lastStatus = "network"; retryAfter = null; continue;
-      }
+      } finally { clearTimeout(timer); }
       this.#inflight = null;
       lastStatus = response.status; retryAfter = Number(value?.parameters?.retry_after) || null;
       if (response.ok && value?.ok === true) return value;
