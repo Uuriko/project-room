@@ -66,7 +66,9 @@ async function login(page, origin, accessKey, expectedIdentity) {
 }
 
 async function openReadyBrief(page) {
-  const panel = page.locator("#return-brief-panel");
+  // The return-brief panel now lives inside the Catch up dialog. The login
+  // snapshot auto-fetches the brief; wait for it to settle, then open the
+  // dialog (which refreshes the brief) and wait for the fresh horizon.
   const ready = () => page.waitForFunction(() => {
     const button = document.querySelector("#rb-ack-button");
     return button && !button.disabled && /^\d+$/.test(button.dataset.horizon);
@@ -80,9 +82,26 @@ async function openReadyBrief(page) {
       page.waitForResponse(response => response.url().endsWith("/return-brief")),
       page.locator("#topbar-catchup").click()
     ]);
+    await page.locator("#catchup-dialog").waitFor({ state: "visible" });
   }
-  await panel.evaluate(element => { element.open = true; });
   await ready();
+}
+
+// The Catch up dialog is modal: close it before clicking controls behind it.
+// Idempotent: some flows (e.g. revealRoom) already close it.
+async function closeCatchup(page) {
+  if (await page.locator("#catchup-dialog").evaluate(node => node.open)) {
+    await page.locator("#catchup-close").click();
+  }
+  await page.locator("#catchup-dialog").waitFor({ state: "hidden" });
+}
+
+// The room redesign hides the search form behind its topbar toggle; reveal it
+// before focusing or filling the search input.
+async function revealSearch(page) {
+  if (await page.locator("#search-form").evaluate(node => node.hidden)) {
+    await page.locator("#topbar-search-toggle").click();
+  }
 }
 
 test("late caught-up success and access error cannot cross an account switch", { timeout: 90000 }, async t => {
@@ -144,6 +163,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.locator("#rb-ack-button").click();
   await successCaptured.promise;
   assert.equal(store.snapshot(owner, "commons").cursor, ownerHorizon, "the old account's committed marker remains its own");
+  await closeCatchup(page);
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, maya, "Maya");
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya return item"));
@@ -163,6 +183,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.evaluate(() => { window.boundaryNotices = []; });
   await page.locator("#rb-ack-button").click();
   await errorCaptured.promise;
+  await closeCatchup(page);
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, owner, "Room owner");
   releaseError.resolve();
@@ -375,6 +396,7 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   await input.focus();
   await input.press("Control+Enter");
   await captured.promise;
+  await revealSearch(page);
   await page.locator("#message-search").focus();
   release.resolve();
   await page.getByText(deliberateFocusBody, { exact: true }).waitFor();
@@ -434,6 +456,7 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   await input.press("Control+Enter");
   await captured.promise;
   assert.equal(await form.getAttribute("aria-busy"), "true");
+  await revealSearch(page);
   await page.locator("#message-search").focus();
   release.resolve();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -486,6 +509,7 @@ test("a late successful composer result cannot cross into a replacement session"
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await enterRoom(page, maya, "Maya");
   await input.fill(replacementDraft);
+  await revealSearch(page);
   await page.locator("#message-search").focus();
   await page.evaluate(() => {
     window.replacementNotices = [];
@@ -805,6 +829,7 @@ test("record identities and fragments remain collision-safe and legacy work link
 
   // Reply addressing (#57) leaves an @-mention draft; accept the draft-guard confirm so sign-out proceeds.
   page.once("dialog", dialog => dialog.accept());
+  await closeCatchup(page);
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");

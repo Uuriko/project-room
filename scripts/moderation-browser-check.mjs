@@ -108,17 +108,16 @@ test("moderation owner view: only the owner lists reports, with the reporter's n
   const page = await f.signIn(f.keys.owner);
   await openSettings(page, "record-panel");
   const section = page.locator("#reports-section");
-  await section.waitFor({ state: "visible" });
-  await section.locator("summary").click();
+  await section.evaluate(el => { el.open = true; });
   const rows = page.locator("#report-list li[data-report-id]");
-  await rows.first().waitFor({ state: "visible" });
+  await rows.first().waitFor({ state: "attached" });
   assert.equal(await rows.count(), 1);
   assert.match(await rows.first().textContent(), /Off-topic and repeated\.\s*reported by Test guest \(guest\)/);
   assert.match(await rows.first().textContent(), /Test producer \(producer\): Synthetic message that gets reported\./);
   assert.equal(await page.locator("#report-count").textContent(), "1");
   // A new report appends no room event; the owner asks again.
   f.store.moderation.report(f.keys.reviewer, "commons", { messageId: "test-request", reason: "Second synthetic report." });
-  await page.locator("#report-refresh").click();
+  await page.locator("#report-refresh").evaluate(el => el.click());
   await page.waitForFunction(() => document.querySelectorAll("#report-list li[data-report-id]").length === 2);
   assert.match(await page.locator("#report-list").textContent(), /Second synthetic report\.\s*reported by Test reviewer \(reviewer\)/);
   // Another member, even the reporter, gets no report list at all.

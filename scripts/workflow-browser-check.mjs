@@ -137,12 +137,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await page.evaluate(() => document.documentElement.style.fontSize = "200%");
       assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize), `${parseFloat(originalFontSize) * 2}px`);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-      assert.deepEqual(await page.locator(".check-option span").evaluateAll(labels => labels.map(label => label.scrollWidth <= label.clientWidth + 1)), [true, true]);
+      assert.deepEqual(await page.locator("#work-options .check").evaluateAll(labels => labels.map(label => label.scrollWidth <= label.clientWidth + 1)), [true, true]);
       const rect = await form.locator('button[type="submit"]').boundingBox();
       assert.ok(rect.x >= 0 && rect.x + rect.width <= viewport.width + 1);
       await capture("enlarged-options");
       await page.waitForFunction(() => !document.querySelector("#status").classList.contains("visible"));
-      await page.locator(".work-checks").scrollIntoViewIfNeeded();
+      await page.locator("#work-options").scrollIntoViewIfNeeded();
       await page.screenshot({ path: "test-results/workflow-mobile-enlarged-checks-viewport.png" });
     }
     await page.locator("#cancel-work-button").click();
