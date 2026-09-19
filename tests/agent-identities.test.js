@@ -140,6 +140,37 @@ test("re-linking applies the permissions the owner supplies now, not the unlinke
   assert.equal(badName.status, 422);
 });
 
+test("identity-links accepts an empty permissions array: read/chat-only link", async t => {
+  const { origin, ownerCommons } = await serve(t);
+  const { identityId, secret } = await createAgentIdentity(origin, "Readonly Bot");
+  const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId, permissions: [] })
+  });
+  assert.equal(link.status, 201);
+  const members = (await (await fetch(`${origin}/api/rooms/commons`, { headers: { Authorization: `Bearer ${ownerCommons}` } })).json()).state.members;
+  assert.deepEqual(members[identityId].permissions, []);
+  // Read + chat work with no grants…
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: secret, memberId: identityId });
+  assert.equal((await client.checkConnection()).status, "credential_accepted");
+  await client.command({ id: randomUUID(), type: "message.posted", data: { messageId: randomUUID(), body: "readonly hello" } });
+  const snapshot = await client.snapshot();
+  assert.ok(snapshot.state.messages.some(m => m.authorId === identityId && m.body === "readonly hello"));
+  // …but permission-gated administration is refused (manage_members required).
+  const other = await createAgentIdentity(origin, "Other");
+  const denied = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ identityId: other.identityId, permissions: [] })
+  });
+  assert.equal(denied.status, 403);
+  // The CLI also supports omitting permissions for a read-only link.
+  const cliOther = await createAgentIdentity(origin, "Cli Readonly");
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };
+  const cliLinked = await cli(origin, ["identity-link", cliOther.identityId], ownerEnv);
+  assert.equal(cliLinked.status, 0, cliLinked.stderr);
+  assert.equal(cliLinked.json.memberId, cliOther.identityId);
+});
+
 test("CLI plug-in loop: a new AI goes from no credential to connected member", async t => {
   const { origin, ownerCommons } = await serve(t);
   const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };
@@ -323,7 +354,8 @@ test("createAgentIdentity sends no credential and validates the origin", async (
 
 test("identity-link rejects bad arglists at the CLI boundary", async t => {
   const { origin } = await serve(t);
-  for (const args of [["identity-link"], ["identity-link", "ai_x"], ["identity-link", "ai_x", "a", "b", "c", "d"]]) {
+  // Bare `identity-link <id>` is valid: it links read/chat-only (empty permissions).
+  for (const args of [["identity-link"], ["identity-link", "ai_x", "a", "b", "c", "d"]]) {
     const r = await cli(origin, args, { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: "x".repeat(43) });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /usage_error/);

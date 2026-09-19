@@ -25,7 +25,15 @@ test("build emits a complete frozen manifest", t => {
   // transports name the wire modules
   assert.ok(manifest.transports.a2a && manifest.transports.mcp && manifest.transports.webhook);
   assert.equal(manifest.directory.url, `${ORIGIN}/api/agents/directory`);
-  assert.ok(typeof manifest.rateLimits.identityCreatePerIpPerHour === "number");
+  // RC-2026-09-19-061: the manifest is an agent's first fetch — every field
+  // must be true. Rate limit must match the enforced value in
+  // server/http.mjs (identity-create route); the access-request owner step
+  // must name the real /decide endpoint; webhook transport must not claim
+  // outbound delivery that isn't wired.
+  assert.equal(manifest.rateLimits.identityCreatePerIpPerHour, 30);
+  const accessFlow = manifest.enrollment.flows.find(f => f.id === "access-request");
+  assert.ok(accessFlow.steps.some(s => s.includes("access-decide")), `steps: ${accessFlow.steps.join(", ")}`);
+  assert.ok(!/outbound event delivery/i.test(manifest.transports.webhook.description));
   assert.ok(typeof manifest.docs.guide === "string");
 });
 

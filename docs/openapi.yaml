@@ -499,6 +499,8 @@ paths:
       description: >-
         Owner-only (manage_members). Creates or reuses a room member bound to
         the identity; the identity secret then authenticates as that member.
+        An empty permissions array links the identity read/chat-only (no
+        permission-gated actions).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -1054,6 +1056,17 @@ paths:
                         capabilities:
                           type: array
                           items: { type: string }
+                  next:
+                    type: array
+                    description: Machine-readable follow-ups — delegate-work when members are listed (the member's id is filled into the assignment body), advertise-capabilities when nobody advertises
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        description: { type: string }
   /api/rooms/{roomId}/work-sessions:
     get:
       summary: List work-session cards
