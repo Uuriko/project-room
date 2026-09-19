@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { handoffEnvelope, startEnvelope, handoffEnvelopeVersion, envelopeStatuses, envelopeTransitions,
-  handoffEnvelopeSchema, HandoffEnvelopeJournal, HandoffError } from "../server/work-handoff.mjs";
+  handoffEnvelopeSchema, HandoffEnvelopeJournal } from "../server/work-handoff.mjs";
 
 const NOW = 1729219200000; // 2024-10-18T00:00:00Z
 const iso = ms => new Date(ms).toISOString();
