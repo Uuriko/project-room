@@ -1874,10 +1874,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (!m || m.active === false) continue;
         online.set(memberId, { watching: !!online.get(memberId)?.watching, workingOn: items });
       }
+      // RC-2026-09-18-051: additive host presence for agent members. The
+      // member's linked agent identity (identity_links) resolves to its
+      // heartbeat status; offline agents with registered hosts are listed
+      // (watching:false) so clients can see wakeable agents that are away.
+      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const agentPresence = memberId => {
+        const m = members[memberId];
+        if (!m || m.kind !== "agent" || m.active === false) return null;
+        const link = identityLinkOf.get(roomId, memberId);
+        if (!link) return null;
+        const status = this.agentHeartbeats.statusOf(link.identityId);
+        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      };
+      for (const memberId of Object.keys(members)) {
+        if (online.has(memberId)) continue;
+        const p = agentPresence(memberId);
+        if (p && p.status !== "unregistered") online.set(memberId, { watching: false, offline: true });
+      }
       return { members: [...online.entries()].map(([memberId, info]) => ({
         memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
         watching: info.watching, workingOn: info.workingOn ?? [],
-        statusMessage: members[memberId].statusMessage ?? null
+        statusMessage: members[memberId].statusMessage ?? null,
+        presence: agentPresence(memberId), // null for non-agent/unlinked members
       })) };
     });
   }
@@ -1891,9 +1910,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
+      // RC-2026-09-18-051: additive host presence for agent members.
+      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const agentPresence = m => {
+        if (!m || m.kind !== "agent" || m.active === false) return null;
+        const link = identityLinkOf.get(roomId, m.id);
+        if (!link) return null;
+        const status = this.agentHeartbeats.statusOf(link.identityId);
+        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      };
       return { members: Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
-        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities }))
+        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities,
+          presence: agentPresence(m) }))
         .filter(m => !needle || m.capabilities.some(c => c.toLowerCase().includes(needle)))
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
     });

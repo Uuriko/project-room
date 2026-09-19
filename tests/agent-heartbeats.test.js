@@ -283,6 +283,43 @@ test("online agents and non-agent mentions are never woken", async t => {
   assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId), []);
 });
 
+test("room presence lists agent members with additive host presence", async t => {
+  const f = createAcceptanceFixture();
+  let at = Date.now();
+  f.store.now = () => at;
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("wake-agent-3");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "wakeagent3",
+    displayName: "Wake Agent Three", permissions: ["accept_work"],
+  });
+  const presenceOf = async () => {
+    const res = await get(origin, "/api/rooms/commons/presence", f.keys.owner);
+    assert.equal(res.status, 200);
+    return (await res.json()).members.find(m => m.memberId === "wakeagent3");
+  };
+
+  // No heartbeat yet: the agent is not in the presence list, or unregistered.
+  assert.equal((await presenceOf())?.presence ?? null, null,
+    "agents without hosts have no presence field or are absent");
+
+  await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret);
+  let listed = await presenceOf();
+  assert.ok(listed, "online agents appear in presence");
+  assert.equal(listed.presence.status, "online");
+  assert.equal(typeof listed.presence.lastSeenAt, "number");
+
+  at += HEARTBEAT_STALE_AFTER_MS + 1000;
+  listed = await presenceOf();
+  assert.ok(listed, "offline agents with registered hosts are still listed");
+  assert.equal(listed.presence.status, "offline");
+  assert.equal(listed.watching, false);
+
+  // Human members keep presence: null (additive, not breaking).
+  const humans = (await (await get(origin, "/api/rooms/commons/presence", f.keys.owner)).json()).members;
+  assert.ok(humans.every(m => m.kind === "agent" || m.presence === null));
+});
+
 test("directory cards carry host-reported presence (additive field)", async t => {
   const f = createAcceptanceFixture();
   let at = Date.now();
