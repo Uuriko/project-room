@@ -13,6 +13,7 @@ import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
+import { fenceDefinitions } from "../server/writer-fence.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 function fixture(t) {
@@ -22,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 63 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 65 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -68,6 +69,10 @@ test("online capture preserves all 63 tables, identity boundaries and exact retr
     signature: signCard({ agentId: "recovery-agent", card: recoveryCard, privateKey: recoveryKeyPair.privateKey }),
     visibility: "public" });
   f.store.agentPlugin.subscribeWebhook({ identityId, url: "https://hooks.example.test/recovery", events: ["message.posted"] });
+  // Seed one verification attestation and one room gate so the capture covers
+  // agent_identity_verification and room_verification_policy (RC-2026-09-18-049).
+  f.store.agentPlugin.verifyIdentity({ identityId, verifiedBy: "owner" });
+  f.store.agentPlugin.setRoomVerificationPolicy({ roomId: "commons", requireVerified: true, setBy: "owner" });
   // Seed one direct channel send so the capture covers direct_channel_sends.
   f.store.db.prepare(`INSERT INTO direct_channel_sends(id,account_id,channel,recipient,subject,body_hash,thread_id,status,provider_id,error_code,created_at,updated_at)
     VALUES('recovery-direct-send',?,'telegram','123456','',?,NULL,'sent','4242',NULL,?,?)`)
@@ -130,7 +135,7 @@ test("online capture preserves all 63 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 63); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 65); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -269,6 +274,19 @@ test("read-only open accepts a v34 backup written before the additive wake queue
   f.store.db.exec("PRAGMA user_version=27");
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/);
   f.store.db.exec("PRAGMA user_version=34");
+  // A true v34 file carries v34 writer triggers, not v35 ones; the doctored
+  // marker alone would leave the file self-inconsistent and the fence
+  // (correctly) refuses it. Swap the trigger generation for the tables still
+  // present (absent additive tables are skipped, per the fence's own rule) so
+  // the file is self-consistent; the writable migration below reinstalls the
+  // v35 set.
+  const v34Tables = new Set(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  for (const row of f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v35_*'").all()) {
+    f.store.db.exec(`DROP TRIGGER "${row.name}"`);
+  }
+  for (const { name, sql } of fenceDefinitions(34)) {
+    if (v34Tables.has(name.replace(/^writer_v34_/, "").replace(/_(insert|update|delete)$/, ""))) f.store.db.exec(sql);
+  }
   // A writable open recreates the additive tables and then verifies them strictly.
   const upgraded = new RoomStore(f.filename, { now: f.now });
   try {

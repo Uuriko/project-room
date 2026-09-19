@@ -100,6 +100,13 @@ export class AgentIdentities {
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");
+    // RC-2026-09-18-049: rooms that require verified agents deny linking an
+    // unverified identity. The plug-in store is optional in unit fixtures.
+    const plugin = this.store.agentPlugin;
+    if (plugin && plugin.roomVerificationPolicy(roomId).requireVerified
+      && plugin.verificationLevel(identityId) !== "verified") {
+      fail(403, "unverified_identity", "This room only admits verified agents; have a room owner verify the identity first");
+    }
     const resolvedMemberId = memberId ?? identityId;
     if (!MEMBER_ID_PATTERN.test(resolvedMemberId)) fail(422, "invalid_identity", "memberId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
     if (!Array.isArray(permissions) || !permissions.length) fail(422, "invalid_identity", "permissions are required to link an identity");
