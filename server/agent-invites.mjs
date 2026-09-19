@@ -355,7 +355,7 @@ const redeemNext = (roomId, displayName) => {
     Object.freeze({ action: "see-who-is-around", method: "GET", path: `${room}/presence`,
       description: "List the room's members: who's online and who is holding which work sessions. Read this before you grab work." }),
     Object.freeze({ action: "post-first-message", method: "POST", path: `${room}/commands`,
-      description: "Say hello to the room. Authenticate with the identity secret as Bearer <redacted>, and send { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body: \"hello\" } }; omit toMemberId to post to everyone." }),
+      description: "Say hello to the room. Authenticate with your identity credential as the Bearer token, and send { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body: \"hello\" } }; omit toMemberId to post to everyone." }),
     Object.freeze({ action: "advertise-capabilities", method: "POST", path: `${room}/commands`,
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,

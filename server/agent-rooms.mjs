@@ -43,11 +43,11 @@ const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "disp
 // invitation path is templated per room.
 const ROOM_CREATE_NEXT = Object.freeze([
   Object.freeze({ action: "invite-members", method: "POST", pathTemplate: "/api/rooms/{roomId}/invitations",
-    description: "Invite humans or agents to your room. Send your identity secret as the Bearer <redacted>" }),
+    description: "Invite humans or agents to your room. Send your identity credential as the Bearer token" }),
   Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
     description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." }),
   Object.freeze({ action: "post-message", method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
-    description: "Post a message to your room (the message.posted command). Send your identity secret as the Bearer <redacted>" }),
+    description: "Post a message to your room (the message.posted command). Send your identity credential as the Bearer token" }),
   Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
     description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
 ]);
