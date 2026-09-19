@@ -30,11 +30,17 @@ export function auditRecovery(store) {
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
       const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
       // Phase 2 channels: old stored projections may lack channels while the
-      // replay backfills them. Compare ignoring channels, then verify the
-      // channel backfill is consistent.
+      // replay backfills them. Messages in old projections also lack channelId
+      // (new code adds it). Compare ignoring channels and message channelIds,
+      // then verify the channel backfill is consistent.
       const stripChannels = (obj) => {
         const copy = JSON.parse(JSON.stringify(obj));
-        if (copy.state) delete copy.state.channels;
+        if (copy.state) {
+          delete copy.state.channels;
+          if (Array.isArray(copy.state.messages)) {
+            for (const message of copy.state.messages) delete message.channelId;
+          }
+        }
         return copy;
       };
       requireState(canonical(stripChannels(actual)) === canonical(stripChannels(rebuilt)));
