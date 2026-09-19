@@ -1925,6 +1925,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // RC-2026-09-19-070: DM privacy. A targeted message (message.posted
+      // with data.toMemberId) is visible only to its sender and its addressed
+      // member — the room owner is not exempt. The /events and /stream routes
+      // already enforce this inside the store (RC-2026-09-18-012); the read
+      // surfaces below apply the same predicate at the HTTP layer so
+      // non-participants see no DM existence, count, or metadata.
+      const viewerId = auth.member.id;
+      const dmMessageVisible = ({ authorId, toMemberId }) =>
+        !toMemberId || authorId === viewerId || toMemberId === viewerId;
+      const dmEventVisible = event =>
+        event?.type !== "message.posted" || !event?.data?.toMemberId
+        || event.actorId === viewerId || event.data.toMemberId === viewerId;
       // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
@@ -1969,7 +1981,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
       }
-      if (route === "thread" && req.method === "GET") return json(res, 200, store.messageThread(selected.token, roomId, threadMessageId, fence));
+      if (route === "thread" && req.method === "GET") {
+        // RC-2026-09-19-070: a DM thread root is invisible to non-participants
+        // (404, like a missing message); DM replies inside a visible thread are dropped.
+        const thread = store.messageThread(selected.token, roomId, threadMessageId, fence);
+        if (!dmMessageVisible(thread.thread)) reject(404, "message_not_found", "Message not found");
+        const stripDmReplies = message => ({ ...message,
+          replies: (message.replies ?? []).filter(dmMessageVisible).map(stripDmReplies) });
+        return json(res, 200, { ...thread, thread: stripDmReplies(thread.thread) });
+      }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
@@ -1980,7 +2000,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
-        return json(res, 200, store.snapshot(selected.token, roomId, fence, params.has("view") ? "work" : "full", helpContext === "1", offerContext === "1"));
+        const snapshotView = params.has("view") ? "work" : "full";
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1");
+        if (snapshotView === "full") {
+          // RC-2026-09-19-070: strip targeted DMs from both carriers in the
+          // full snapshot — the audit tail (state.eventLog, the named P0) and
+          // the live projection (state.messages, which the client renders as
+          // the timeline). Pins reference messages by id, so pins of hidden
+          // DMs are dropped too — otherwise the pin would reveal the DM's
+          // existence. The work view carries none of these.
+          const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
+          const visibleIds = new Set(visibleMessages.map(message => message.id));
+          snapshot.state = { ...snapshot.state,
+            messages: visibleMessages,
+            eventLog: (snapshot.state.eventLog ?? []).filter(dmEventVisible),
+            pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+        }
+        return json(res, 200, snapshot);
       }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
@@ -2061,7 +2097,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Round-2 #113: full-text search over messages and work items.
         const q = url.searchParams.get("q");
         const kind = url.searchParams.get("kind") ?? "all";
-        return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
+        const result = store.search(selected.token, roomId, q, kind, fence);
+        // RC-2026-09-19-070: search hits carry bodies but not toMemberId, so
+        // re-resolve each hit against the projection and drop targeted DMs
+        // the viewer is not a party to. Fail closed when a hit cannot be resolved.
+        if (result.messages?.length) {
+          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          result.messages = result.messages.filter(hit => {
+            const message = byId.get(hit.id);
+            return message ? dmMessageVisible(message) : false;
+          });
+        }
+        return json(res, 200, result);
       }
       if (route === "usage" && req.method === "GET") {
         // F5: read-only per-room usage summary. Member-visible like the
@@ -2073,10 +2120,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "pins") {
         // Issue #6 B2: pinned messages. GET lists the ordered pins; POST pins or unpins one message (server/pins.mjs).
-        if (req.method === "GET") return json(res, 200, listPins(store, selected.token, roomId, fence));
+        // RC-2026-09-19-070: pin views carry message bodies, so pins of
+        // targeted DMs the viewer is not a party to are dropped (and the
+        // count recomputed) — otherwise the pin would leak the DM's body,
+        // existence, and count. Fail closed when a pin cannot be resolved.
+        const stripHiddenPinTargets = value => {
+          const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
+          const pins = (value.pins ?? []).filter(pin => {
+            const message = byId.get(pin.messageId);
+            return message ? dmMessageVisible(message) : false;
+          });
+          return { ...value, pins, count: pins.length };
+        };
+        if (req.method === "GET") return json(res, 200, stripHiddenPinTargets(listPins(store, selected.token, roomId, fence)));
         if (req.method === "POST") {
           const result = setPin(store, selected.token, roomId, await body(req), fence);
-          return json(res, result.changed ? 201 : 200, result); // 201 when an event was appended, 200 when the room was already in that state or the requestId replayed
+          return json(res, result.changed ? 201 : 200, stripHiddenPinTargets(result)); // 201 when an event was appended, 200 when the room was already in that state or the requestId replayed
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -2121,6 +2180,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as
         // the events route — members only). One {sequence, event} per line.
+        // RC-2026-09-19-070: the events route filters targeted DMs to
+        // sender+recipient, so the export applies the same filter here.
         // The log is bounded (10000 events per room, the same bound import
         // enforces), so the whole export is materialised before any header
         // is written: an auth, fence or storage failure part-way through
@@ -2137,7 +2198,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)];
+          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => dmEventVisible(event));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
@@ -2145,7 +2206,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(bytes);
         }
         const lines = [];
-        for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
+        for (const line of store.exportEvents(selected.token, roomId, fence)) {
+          if (dmEventVisible(line.event)) lines.push(JSON.stringify(line) + "\n");
+        }
         const bytes = Buffer.from(lines.join(""), "utf8");
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
@@ -2193,10 +2256,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
           || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Invalid discussion selection");
-        return json(res, 200, store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
+        const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
           cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
-        }));
+        });
+        // RC-2026-09-19-070: DM visibility is enforced inside
+        // selectedWorkDiscussion (before paging), so page boundaries,
+        // hasMore, cursors, rowBytes and participants reveal nothing about
+        // DMs the viewer is not a party to.
+        return json(res, 200, discussion);
       }
       if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
       if (route === "notifications" && req.method === "GET") {
