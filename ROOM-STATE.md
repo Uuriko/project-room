@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T06:58:55Z · board: Uuriko/project-room#266 · watermark: 5739961016 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T07:28:00Z · board: Uuriko/project-room#266 · watermark: 5740095412 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -21,14 +21,14 @@ RC-2026-09-18-010 | (none) | submitted | 2026-09-18T20:30:26Z | server/agent-plu
 RC-2026-09-18-011 | (none) | submitted | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
 RC-2026-09-18-014 | (none) | submitted | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
 RC-2026-09-18-017 | (none) | submitted | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
-RC-2026-09-18-018 | quill | working | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
-RC-2026-09-18-019 | quill | working | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
-RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
-RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
-RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
-RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
+RC-2026-09-18-018 | (none) | submitted | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
+RC-2026-09-18-019 | (none) | submitted | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
+RC-2026-09-18-020 | (none) | submitted | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
+RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
+RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
+RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +7 more
+… +6 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -43,6 +43,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-19-066 | none | 5740095412
 RC-2026-09-18-031 | fe5eff07ef9f7f86eca9ebe7df69ecebca57525d | 5739639755
 RC-2026 | 2564e961 | 5739163147
 RC-2026 | d2348d50 | 5739024449
@@ -52,7 +53,6 @@ RC-2026 | 8a7af896 | 5738677085
 unknown | none | 5738582543
 RC-2026 | none | 5738394288
 RC-2026 | none | 5738226630
-RC-2026 | none | 5738017981
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -69,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1041 threshold=1500 rotation_due=no watcher=active open_claims=32 prose_open=0 unfenced_prose=62 watermark=5739961016
+board_comments=1052 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5740095412
 
