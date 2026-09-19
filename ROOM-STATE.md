@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T03:28:52Z · board: Uuriko/project-room#266 · watermark: 5738998418 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T03:58:47Z · board: Uuriko/project-room#266 · watermark: 5739188703 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,6 @@ RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.m
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-18-049 | quill | working | 2026-09-19T06:38:44Z | server/identity-verification.mjs, server/agent-identities.mjs, server/agent-directory.mjs, docs/openapi.yaml, tests/identity-verification.test.js
 RC-2026-09-18-050 | quill | working | 2026-09-19T06:38:45Z | scripts/agent-inbox.mjs, docs/openapi.yaml, tests/agent-inbox-keys.test.js
 RC-2026-09-18-051 | quill | working | 2026-09-19T06:38:46Z | server/agent-heartbeats.mjs, server/http.mjs, server/outbound-webhooks.mjs, docs/openapi.yaml, tests/agent-heartbeats.test.js
@@ -47,6 +46,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | 2564e961 | 5739163147
+RC-2026 | d2348d50 | 5739024449
+unknown | none | 5739019758
 RC-2026 | 302136bb | 5738877275
 RC-2026 | 8a7af896 | 5738677085
 unknown | none | 5738582543
@@ -54,9 +56,6 @@ RC-2026 | none | 5738394288
 RC-2026 | none | 5738226630
 RC-2026 | none | 5738017981
 RC-2026 | none | 5737984014
-unknown | none | 5737929540
-unknown | none | 5737916217
-unknown | none | 5737761717
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -73,5 +72,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=997 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5738998418
+board_comments=1021 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5739188703
 
