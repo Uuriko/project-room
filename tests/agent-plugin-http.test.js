@@ -130,7 +130,7 @@ test("key routes require the pri_ identity secret and validate the body", async 
   assert.deepEqual(empty.next.map(n => n.action), ["issue-key"]);
   assert.equal(empty.next[0].method, "POST");
 
-  const issued = await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"], label: "v48" }, identity.secret)).json();
+  await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"], label: "v48" }, identity.secret)).json();
   const listed = await (await get(origin, "/api/agent-keys", identity.secret)).json();
   assert.equal(listed.keys.length, 1);
   assert.deepEqual(listed.next.map(n => n.action), ["rotate-key", "revoke-key"]);
