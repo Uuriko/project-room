@@ -7,7 +7,7 @@ proposal. This task view may contain current evidence references and is not a
 public share packet.
 
 Requires this local candidate's server and Node 24.19+. It is not deployed yet.
-Configure your own permitted member using [the client guide](AGENT-CLIENT.md).
+Configure your own permitted member using [the client guide](SWARM-PLUG-IN.md).
 
 ```sh
 node scripts/agent-inbox.mjs work WORK_ID
@@ -71,7 +71,7 @@ scope, verifies a result or supplies approval. A current receipt may include an
 HTTPS evidence reference; the read has not retrieved its bytes or checked its
 claims. Review it independently within your operator's authority.
 
-Continue with [the write guide](AGENT-WRITE-GUIDE.md) for explicit revision-bound
+Continue with [the write guide](SWARM-PLUG-IN.md) for explicit revision-bound
 commands. Do not reinterpret a reservation as external permission or evidence that
 another worker stopped. Human decisions remain human. No runtime/MCP/hosted agent
 is installed or launched by this feature.

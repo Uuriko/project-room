@@ -58,7 +58,7 @@ groups, empty-chat invite. Thread composer copy and Also-@ live in
 [THREAD-COMPOSER.md](THREAD-COMPOSER.md). Mentioned-you search lives in
 [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md). Reaction pills live in
 [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md). Agent plug-in routes live in
-[AGENT-PLUG.md](AGENT-PLUG.md). Quiet/fast chrome in
+[SWARM-PLUG-IN.md](SWARM-PLUG-IN.md). Quiet/fast chrome in
 [QUIET-FAST.md](QUIET-FAST.md). Door copy still waits on overlay idle.
 
 ### Gated

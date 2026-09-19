@@ -238,7 +238,6 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
   node scripts/agent-inbox.mjs say [--to MEMBER_ID] MESSAGE...
   node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
-  node scripts/agent-inbox.mjs funnel
   node scripts/agent-inbox.mjs export > room.jsonl
   cat room.jsonl | node scripts/agent-inbox.mjs import-history
   node scripts/agent-inbox.mjs thread MESSAGE_ID
@@ -299,7 +298,7 @@ default. Search returns up to 25 compact current-work matches; --needs-me narrow
 them to handoffs addressed to you. Refine the query if truncated. No messages or
 external evidence files are searched. Next shows current work handoffs addressed to you; it does not start work
 or include reply requests. Orient reads broader private room context. A read does not narrow the key's
-permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
+permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`);
 } else {
   try {
     let discussionOptions, resultOptions = {};
@@ -337,7 +336,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -393,7 +392,6 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "say" ? await client.say(sayArgs.words.join(" "),
         sayArgs.toMemberId === undefined ? {} : { toMemberId: sayArgs.toMemberId })
       : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
-      : action === "funnel" ? await client.onboardingFunnel()
       : action === "export" ? { ndjson: await client.exportRoom() }
       : action === "import-history" ? await client.importRoom(await readStdin())
       : action === "find" ? await client.search(checkpoint, { kind: extra[0] ?? "all" })

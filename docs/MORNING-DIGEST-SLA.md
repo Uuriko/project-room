@@ -1,5 +1,9 @@
 # Morning digest + per-channel SLA clocks (tasks 21, 24, 26)
 
+> Retired 2026-09-19: the `/api/inbox/digest` HTTP route was removed (no
+> callers). The pure digest builder (`server/morning-digest.mjs`) and the
+> per-thread SLA clocks remain live. This doc is kept as design history.
+
 ## What this is
 
 Two additive, pure modules plus thin wiring into the existing inbox read path.

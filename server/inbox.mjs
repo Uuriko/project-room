@@ -10,8 +10,6 @@ import { buildThreads } from "./inbox-threads.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { assessThreadSla, slaTargets } from "./sla-clocks.mjs";
 import { buildSlaDashboard } from "./sla-dashboard.mjs";
-import { buildMorningDigest } from "./morning-digest.mjs";
-import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
 import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
@@ -28,19 +26,6 @@ const importAuthority = Symbol("private email importer");
 const replyAuthority = Symbol("private fixture reply driver");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// Stitch store errors carry stable machine codes; translate the expected
-// owner/API failures to HTTP statuses here so they never surface as 500s.
-// Auth/session behavior is untouched: this only runs after this.auth().
-const stitchResult = fn => {
-  try { return fn(); }
-  catch (error) {
-    if (error?.code === "stitch_not_enabled") fail(409, error.code, "Cross-channel stitching is not enabled for this room.");
-    if (error?.code === "stitch_suggestion_not_found") fail(404, error.code, "That stitch suggestion was not found.");
-    if (error?.code === "stitch_suggestion_resolved") fail(409, error.code, "That stitch suggestion is already resolved.");
-    if (error?.code === "stitch_invalid_input") fail(422, error.code, "That stitch request is not valid.");
-    throw error;
-  }
-};
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
   ? "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}" : JSON.stringify(value);
 const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
@@ -246,62 +231,6 @@ export class Inbox {
     // later slice; until then the import path runs the decider on the owner's
     // configured prefs, defaulting to deliver.
     this.notifyPrefs = createNotifyPrefs({ store: new Map() });
-  }
-  // Cross-channel thread stitching (task #19): in-session participant brief
-  // for the review queue. Resolved from the stored envelope at read time —
-  // never persisted as a review artifact, so raw handles/addresses never land
-  // in the stitch tables.
-  stitchParticipantBrief(accountId, sourceId) {
-    try {
-      const row = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
-      if (!row) return null;
-      const data = this.version(accountId, sourceId, row.revision);
-      const envelope = data?.envelope ?? null;
-      const from = envelope?.message?.from ?? {};
-      return { sourceId, channel: envelope?.channel ?? null,
-        handle: from.address ?? from.handle ?? from.id ?? "",
-        displayName: from.name ?? from.displayName ?? "" };
-    } catch { return null; }
-  }
-  // Cross-channel thread stitching (task #19): owner-only stitch actions.
-  // Each runs inside one transaction and reuses the account session, CSRF,
-  // and inbox rate limiting from the HTTP layer — no auth behavior changes.
-  stitchStatus(token, binding) {
-    return this.store.readTransaction(() => {
-      const auth = this.auth(token, binding);
-      return { contractVersion: 1, viewer: viewer(auth),
-        stitching: { enabled: this.stitcher.enabled, epoch: this.stitcher.epoch } };
-    });
-  }
-  stitchSuggestions(token, binding, { limit = 25 } = {}) {
-    return this.store.readTransaction(() => {
-      const auth = this.auth(token, binding);
-      const brief = sourceId => this.stitchParticipantBrief(auth.account.id, sourceId);
-      return { contractVersion: 1, viewer: viewer(auth),
-        suggestions: this.stitcher.suggestions(auth.account.id, { limit, resolveParticipant: brief }) };
-    });
-  }
-  stitchConfirm(token, binding, { suggestionId } = {}) {
-    return this.store.transaction(() => {
-      const auth = this.auth(token, binding);
-      const result = stitchResult(() => this.stitcher.confirm(auth.account.id, { suggestionId, confirmedBy: auth.account.id }));
-      return { contractVersion: 1, viewer: viewer(auth), ...result };
-    });
-  }
-  stitchDismiss(token, binding, { suggestionId } = {}) {
-    return this.store.transaction(() => {
-      const auth = this.auth(token, binding);
-      const result = stitchResult(() => this.stitcher.dismiss(auth.account.id, { suggestionId }));
-      return { contractVersion: 1, viewer: viewer(auth), ...result };
-    });
-  }
-  stitchSplit(token, binding, { stitchKey, sourceId, channel, reason, scope } = {}) {
-    return this.store.transaction(() => {
-      const auth = this.auth(token, binding);
-      const result = stitchResult(() => this.stitcher.split(auth.account.id,
-        { stitchKey, sourceId, channel, reason, scope }));
-      return { contractVersion: 1, viewer: viewer(auth), ...result };
-    });
   }
   // Held-message quarantine review UI. The review surface is a pure
   // projection: the journal rows resolve to the imported inbox sources they
@@ -826,83 +755,6 @@ export class Inbox {
       return { contractVersion: 1, viewer: view.viewer,
         dashboard: buildSlaDashboard({ threads: view.threads, now: at,
           targets: slaTargets, owners, breachAlerts: alerts }) };
-    }
-    // Morning digest (task 21): the overnight arrivals across channels as a
-    // daily brief, built from the thread view and the pure digest builder.
-    // In-app delivery first: format, delivery channel, and daily time are
-    // John's call (task 22), so this is an on-demand read, never a push.
-    digest(token, binding, { since = null, limit = null, includeChannels = false } = {}) {
-      const windowStart = since === null || since === undefined ? Date.now() - 24 * 3600 * 1000 : Date.parse(since);
-      if (!Number.isFinite(windowStart)) fail(422, "invalid_digest_since", "Supply a parseable since timestamp.");
-      const view = this.threads(token, binding, { limit, includeChannels });
-      const arrivals = [];
-      for (const thread of view.threads) {
-        const threadId = thread.threadId ?? null;
-        for (const entry of thread.entries) {
-          const source = entry.source;
-          if (!source || source.updatedAt < windowStart) continue;
-          const channel = source.connection?.channel ?? (source.adapter === "email" ? "email" : "unknown");
-          const sender = source.sender == null ? "unknown" : String(source.sender);
-          arrivals.push({ id: source.id, channel, threadId: threadId ?? source.id,
-            senderId: sender, senderLabel: sender, subject: source.subject == null ? "" : String(source.subject),
-            occurredAt: new Date(source.updatedAt).toISOString(), sla: thread.sla ?? null });
-        }
-      }
-      const now = new Date();
-      return { contractVersion: 1, viewer: view.viewer,
-        digest: buildMorningDigest({ arrivals, since: new Date(windowStart).toISOString(),
-          date: now.toISOString().slice(0, 10), now: now.toISOString() }) };
-    }
-    // Agent handoff protocol (task 23): hand a thread to a named agent with a
-    // structured context packet, journaled so nothing closes unowned. The
-    // packet is built from the recent thread view — ids and labels the owner
-    // can already see — never from a fresh fetch, so no new raw PII enters
-    // the packet. One open handoff per thread: a repeat create returns the
-    // existing receipt (duplicate: true).
-    handoff(token, binding, request, { includeChannels = false } = {}) {
-      const auth = this.auth(token, binding);
-      const fields = request !== null && typeof request === "object" && !Array.isArray(request) ? request : null;
-      if (!fields) fail(422, "invalid_handoff", "Supply a handoff request.");
-      const { threadId, to, from = "owner", summary = null, openQuestions = null, pendingActions = null,
-        excerpt = null, triage = null } = fields;
-      if (typeof threadId !== "string" || !threadId) fail(422, "invalid_handoff", "Supply a threadId.");
-      const view = this.threads(token, binding, { includeChannels: includeChannels === true, limit: 50 });
-      const thread = view.threads.find(t => t.threadId === threadId);
-      if (!thread) fail(404, "handoff_thread_not_found",
-        "That thread is not in the recent thread view; pick it from the thread list or the digest.");
-      const entries = [...thread.entries].sort((a, b) => b.source.updatedAt - a.source.updatedAt || (a.source.id < b.source.id ? -1 : 1));
-      const latest = entries[0].source;
-      const channel = latest.connection?.channel ?? (latest.adapter === "email" ? "email" : "unknown");
-      const senderId = typeof latest.sender === "string" && latest.sender ? latest.sender : "unknown";
-      const sla = thread.sla ? { status: thread.sla.status, targetMs: thread.sla.targetMs ?? null,
-        label: thread.sla.label ?? null, elapsedMs: thread.sla.elapsedMs ?? null,
-        awaitingSince: thread.sla.awaitingSince ?? null, deadlineAt: thread.sla.deadlineAt ?? null } : null;
-      const { duplicate, receipt } = this.store.handoffs.create(auth.account.id, {
-        threadId, channel, sourceIds: entries.map(e => e.source.id),
-        sender: { id: senderId, label: senderId },
-        subject: typeof latest.subject === "string" && latest.subject ? latest.subject : "(no subject)",
-        occurredAt: new Date(latest.updatedAt).toISOString(), sla,
-        triage: triage ?? { action: "needs_human", reasons: ["Handed off for a person or agent to pick up."] },
-        summary, openQuestions, pendingActions, excerpt,
-      }, { from, to });
-      return { contractVersion: 1, duplicate, handoff: receipt };
-    }
-    // The "nothing closes unowned" sweep: every journaled handoff, optionally
-    // filtered to one lifecycle status.
-    handoffs(token, binding, { status = null } = {}) {
-      const auth = this.auth(token, binding);
-      return { contractVersion: 1, statuses: inboxHandoffStatuses,
-        handoffs: this.store.handoffs.list(auth.account.id, { status }) };
-    }
-    // Move a handoff along its lifecycle: open → accepted → completed, or
-    // open/accepted → released. Terminal handoffs are immutable.
-    handoffTransition(token, binding, request) {
-      const auth = this.auth(token, binding);
-      const fields = request !== null && typeof request === "object" && !Array.isArray(request) ? request : null;
-      if (!fields) fail(422, "invalid_handoff", "Supply a transition request.");
-      const { handoffId, status, note = null } = fields;
-      return { contractVersion: 1,
-        handoff: this.store.handoffs.transition(auth.account.id, handoffId, status, { note }) };
     }
     // Attachment descriptors for one source. Descriptors are metadata only: the
     // system never retains attachment bytes, so this is a listing and a

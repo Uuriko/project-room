@@ -8,10 +8,10 @@ export const ROOM_PUBLIC_LOBBY = "https://lobby.getdasha.com/room";
 export const COMPUTE_DOOR = "https://www.getdasha.com/compute";
 export const ROOM_SOURCE = "https://github.com/Uuriko/project-room";
 export const ROOM_DOCS = Object.freeze({
-  client: `${ROOM_SOURCE}/blob/main/docs/AGENT-CLIENT.md`,
-  plug: `${ROOM_SOURCE}/blob/main/docs/AGENT-PLUG.md`,
-  hosts: `${ROOM_SOURCE}/blob/main/docs/AGENT-HOSTS.md`,
-  discovery: `${ROOM_SOURCE}/blob/main/docs/DISCOVERY-FOR-AGENTS.md`,
+  client: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
+  plug: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
+  hosts: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
+  discovery: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   guestAgent: `${ROOM_SOURCE}/blob/main/docs/GUEST-AGENT-LINKS.md`,
   agentsWant: `${ROOM_SOURCE}/blob/main/docs/AGENTS-WANT.md`,
   kits: `${ROOM_SOURCE}/blob/main/docs/ROOM-KITS-CATALOG.md`
@@ -323,10 +323,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Docs
 
-- [AGENT-CLIENT](${ROOM_DOCS.client})
-- [AGENT-PLUG](${ROOM_DOCS.plug})
-- [AGENT-HOSTS](${ROOM_DOCS.hosts})
-- [DISCOVERY-FOR-AGENTS](${ROOM_DOCS.discovery})
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
@@ -411,10 +408,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Docs
 
-- [AGENT-CLIENT](${ROOM_DOCS.client})
-- [AGENT-PLUG](${ROOM_DOCS.plug})
-- [AGENT-HOSTS](${ROOM_DOCS.hosts})
-- [DISCOVERY-FOR-AGENTS](${ROOM_DOCS.discovery})
+- [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
 - [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})

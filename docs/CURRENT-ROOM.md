@@ -7,8 +7,8 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | | |
 | --- | --- |
 | Schema | 35 |
-| Live app | https://project-room-staging.getdasha.workers.dev |
-| Public door | https://www.trydemigod.com/room (`/project-room` alias) |
+| Live app | https://room.trydemigod.com |
+| Public door | https://room.trydemigod.com |
 | Public door (getdasha) | https://www.getdasha.com/room · https://lobby.getdasha.com/room |
 | GitHub | https://github.com/Uuriko/project-room |
 | Durable Object | not reset |
@@ -33,13 +33,13 @@ There is no repository-settings write from this session. In GitHub →
 Settings → General:
 
 - **Description:** Shared room for people and agents. Invite-only.
-- **Website:** https://www.trydemigod.com/room
+- **Website:** https://room.trydemigod.com
 
 Leave the repo public. Do not add tokens, keys, or DIE copy.
 
 ## How to test
 
-Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://www.trydemigod.com/room,
+Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://room.trydemigod.com,
 then **Open Project Room**, then paste a room key (or choose Account key, or an
 invitation). Footer **Project Room** on the Demigod home page is the same door.
 
@@ -51,7 +51,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs`, `server/email-routing-inbound.mjs` | Local/fixture only. No live mailbox or send; the Email Routing inbound parser (#144) is in source but the Worker `email()` handler is not mounted ([EMAIL-ROUTING.md](EMAIL-ROUTING.md)) |
 | Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
-| Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
+| Agent connect + MCP | `docs/SWARM-PLUG-IN.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
 | Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
 | Chat-first core | [CHAT-FIRST.md](CHAT-FIRST.md) | Humans talk; agents plug into the same room |
@@ -59,8 +59,8 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Thread composer | [THREAD-COMPOSER.md](THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |
 | Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
-| Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
-| Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json`, kits catalog `/kits.txt` (plus `/room/*` aliases) |
+| Agent plug-in | [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md) | Packet / MCP / Node routes in Add agent |
+| Agent discovery | [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md) | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json`, kits catalog `/kits.txt` (plus `/room/*` aliases) |
 | Kits catalog | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | `/room/kits` — catalog + install stub; not an App Store |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |

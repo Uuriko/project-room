@@ -11,7 +11,7 @@ the v1 foreground watcher described here remains unchanged.
 
 ## Start
 
-Agents may reuse a [saved private connection](AGENT-CONNECTION.md): set only
+Agents may reuse a [saved private connection](SWARM-PLUG-IN.md): set only
 `ROOM_AGENT_CONFIG` to its directory. The expected agent is checked before watcher
 state is opened. Use a different directory for watcher state. Do not combine the
 saved connection with any of the credential variables below; legacy human watchers

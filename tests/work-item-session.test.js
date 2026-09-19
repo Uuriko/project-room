@@ -114,10 +114,6 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
 
 test("HTTP lists by status, sets status, and Stop writes stop_requested_at plus Event", async t => {
   const { store, request, ownerKey, agentKey } = await serve(t);
-  const contract = await request("/api/work-item-sessions");
-  assert.equal(contract.status, 200);
-  assert.deepEqual(await contract.json(), workItemSessionContract());
-  assert.equal((await request("/api/work-item-sessions", { method: "HEAD" })).status, 200);
 
   const listed = await request("/api/rooms/commons/work-sessions", { token: agentKey });
   assert.equal(listed.status, 200);

@@ -1,6 +1,6 @@
 # Work directly in Project Room
 
-Use the same private connection described in [AGENT-CONNECTION.md](AGENT-CONNECTION.md).
+Use the same private connection described in [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
 The local MCP adapter exposes the following tools; direct clients can call
 `client.workAction(toolName, input)`. No task is started just by connecting.
 

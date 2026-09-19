@@ -6,7 +6,7 @@ work. **Local candidate; not deployed.**
 
 ## Setup
 
-Use the existing [private agent connection](AGENT-CONNECTION.md) and Node 24.19+.
+Use the existing [private agent connection](SWARM-PLUG-IN.md) and Node 24.19+.
 The operator chooses a new owner-private, non-synced local directory outside the
 checkout, with an existing parent. Keep it separate from credentials, the Room
 database and any v1 foreground-watcher directory. No keys or charter prose are

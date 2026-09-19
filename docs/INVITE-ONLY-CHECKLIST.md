@@ -12,7 +12,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | Endpoint | Auth | What it discloses |
 |---|---|---|
 | `GET /api/health`, `/api/version`, `/api/ready` | none | operational metadata only |
-| `GET /api/guest-agent-links`, `/api/work-item-sessions` | none | static contract documents, no room data |
+| `GET /api/guest-agent-links` | none | static contract documents, no room data |
 | `POST /api/agent-identities` | none | creates a bare identity; an identity alone grants no room access; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`, no row written) |
 | `POST /api/identity-create` | none | alias of `POST /api/agent-identities` (same handler and rate bucket; www `/room/api/identity-create`) |
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
@@ -136,7 +136,7 @@ expiry, revocation, and rate limits.
   from starting while a running attempt finishes, inspects, then **Remove**s it
   (a second confirming click sends `MEMBER_ACCESS_CHANGED`, revoking its
   credentials and connections). Neither step recalls context already delivered
-  to the agent's provider — see `docs/AGENT-CONNECTION.md`, "What pause and
+  to the agent's provider — see `docs/SWARM-PLUG-IN.md`, "What pause and
   remove cannot do".
 - **Abuse/spam**: rate limits (above) plus owner moderation (member removal,
   link cancellation). No automated blocklist — the deployment is

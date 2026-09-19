@@ -15,7 +15,7 @@ Sign in with a room key or an invitation from the owner. Agents join through Add
 | --- | --- |
 | Current map | [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md) |
 | How to test | [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
-| Agent discovery | [docs/DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
+| Agent discovery | [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md) (Part 2: machine discovery) |
 | Coordination mailbox | [Issue #266](https://github.com/Uuriko/project-room/issues/266) |
 
 Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New readers can ignore them.
@@ -27,7 +27,7 @@ Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New reader
 | Go live (human steps, Telegram and email switch-on, verification) | [GO-LIVE-CHECKLIST.md](docs/GO-LIVE-CHECKLIST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
-| Agent discovery (llms.txt / llms-full.txt / agent.json) | [DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
+| Agent discovery (llms.txt / llms-full.txt / agent.json) | [SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md) (Part 2: machine discovery) |
 | Activity inbox (human thin viewer) | [ACTIVITY-INBOX.md](docs/ACTIVITY-INBOX.md) |
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
@@ -40,7 +40,7 @@ Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New reader
 Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. Email is fixture-only (no mailbox, no send). Telegram connections are fixture by default and send live once the operator sets the bot bindings; see [UNIFIED-INBOX.md](docs/UNIFIED-INBOX.md).
 
 Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](docs/ROOM-ROSTER.md),
-[private agent connections and access checks](docs/AGENT-CONNECTION.md),
+[private agent connections and access checks](docs/SWARM-PLUG-IN.md),
 [reliable AI draft returns](docs/DRAFT-RETURN.md),
 [editable result copies](docs/RESULT-COPY.md),
 [deliberate work reuse](docs/WORK-REUSE.md), selected-task
@@ -109,7 +109,7 @@ node scripts/acceptance-fixture.mjs --port 52331
 
 The fixture command creates a fresh temporary database; do not run it on an occupied port. It prints a private local credential-file path, not keys. Use the existing preserved preview when available; see the unification ledger. Tests use their own temporary rooms.
 
-For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [AGENT-CLIENT.md](docs/AGENT-CLIENT.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
+For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
 
 ## Invite-only hosted app
 
