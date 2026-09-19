@@ -37,7 +37,7 @@ import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
-import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
@@ -544,6 +544,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
+      // RC-2026-09-19-055: identity-secret revoked_at converges on existing
+      // databases via ALTER TABLE; old rows backfill NULL and keep reading
+      // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
+      ensureIdentitySecretSchema(this.db);
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.

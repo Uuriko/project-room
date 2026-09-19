@@ -19,7 +19,8 @@ export const agentIdentitySchema = `
     identity_id TEXT PRIMARY KEY,
     secret_hash TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
   );
   CREATE TABLE IF NOT EXISTS identity_links (
     room_id TEXT NOT NULL REFERENCES rooms(id),
@@ -30,6 +31,19 @@ export const agentIdentitySchema = `
   );
   CREATE INDEX IF NOT EXISTS identity_links_member ON identity_links(room_id, member_id);
 `;
+
+// Idempotent additive migration for the revoked_at column (RC-2026-09-19-055:
+// identity-secret rotate/revoke). Existing rows backfill NULL, which reads
+// as "not revoked". Follows the spam-quarantine column pattern (PR #562):
+// called from the writer boot path, not the module constructor (the module
+// is constructed before tables exist). agent_identities is excluded from
+// the upgrade comparability filter, so the column evolution is audit-safe.
+export function ensureIdentitySecretSchema(db) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_identities'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+  if (!columns.has("revoked_at")) db.exec("ALTER TABLE agent_identities ADD COLUMN revoked_at INTEGER");
+}
 
 export const IDENTITY_SECRET_PREFIX = "pri_";
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -158,6 +172,68 @@ export class AgentIdentities {
     });
   }
 
+  // Proves ownership of an identity secret: the presented secret must be
+  // the identity's CURRENT, unrevoked secret. Used by rotate/revoke; a
+  // revoked secret fails here, so revoke is final — there is no other
+  // owner credential for a self-minted identity.
+  authenticateIdentitySecret(identityId, secret) {
+    if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(401, "unauthenticated", "Unknown agent identity");
+    if (!isIdentitySecret(secret)) fail(401, "unauthenticated", "Unknown agent identity");
+    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL")
+      .get(identityId, hash(secret));
+    if (!row) fail(401, "unauthenticated", "Unknown or revoked agent identity secret");
+    return row;
+  }
+
+  // Owner-only: rotate an identity secret. The old secret stops working
+  // atomically with the issue of the new one; the new secret is returned
+  // once (shown once, like the scoped-key rotation in RC-2026-09-18-050).
+  // The old secret never appears in any response. Rotating a revoked
+  // identity is rejected — revoke is the final state.
+  rotate(identityId, secret) {
+    const identity = this.authenticateIdentitySecret(identityId, secret);
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
+      if (!row) fail(404, "identity_not_found", "No such agent identity");
+      if (row.revokedAt !== null) fail(409, "identity_revoked", "This identity's secret is revoked; it cannot rotate");
+      const newSecret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
+      // Conditional update: a concurrent revoke/rotate that lands first
+      // must win — the stale rotation is rejected instead of resurrecting
+      // a revoked secret or double-issuing.
+      const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
+        .run(hash(newSecret), identityId, hash(secret));
+      if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
+      return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now() };
+    });
+  }
+
+  // Owner-only: revoke an identity secret. The secret stops authenticating
+  // everywhere immediately (resolveGlobalIdentitySecret and
+  // resolveIdentityAuth both refuse revoked rows); the identity row stays
+  // for audit, and room links stay untouched — unlinking remains a separate
+  // owner-only per-room action. Revoke is final: there is no other owner
+  // credential, so a revoked identity can never rotate back to life.
+  // Scoped API keys bound to the identity are revoked too — a revoked
+  // identity must not keep operating through a key it minted earlier.
+  revoke(identityId, secret) {
+    const identity = this.authenticateIdentitySecret(identityId, secret);
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
+      if (!row) fail(404, "identity_not_found", "No such agent identity");
+      const revokedAt = row.revokedAt ?? this.store.now();
+      if (row.revokedAt === null) {
+        this.db.prepare("UPDATE agent_identities SET revoked_at=? WHERE identity_id=?").run(revokedAt, identityId);
+      }
+      const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+      return { identityId, displayName: identity.displayName, revoked: true, revokedAt, revokedApiKeys };
+    });
+  }
+
+  // Whether an identity's secret is revoked. Read surface only.
+  secretRevoked(identityId) {
+    const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
+    return row ? row.revokedAt !== null : null;
+  }
   // Owner-only, like the sibling audit lists (agent-invites, agent-connections,
   // share-links): which identities are plugged into a room is membership
   // administration data, not something every member should enumerate.
@@ -177,16 +253,18 @@ export class AgentIdentities {
   // "unknown secret".
   resolveGlobalIdentitySecret(secret) {
     if (!isIdentitySecret(secret)) return null;
-    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE secret_hash=?")
+    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL")
       .get(hash(secret));
     return row ?? null;
   }
 
   // Resolves an identity secret to the linked room member, or null. Called
-  // from RoomStore#authenticate before the room-key path.
+  // from RoomStore#authenticate before the room-key path. Revoked secrets
+  // never resolve — rotation/revocation take effect on the next request,
+  // with no cache in between (resolution is a fresh DB read every call).
   resolveIdentityAuth(secret, roomId) {
     if (!roomId) return null;
-    const row = this.db.prepare("SELECT identity_id FROM agent_identities WHERE secret_hash=?").get(hash(secret));
+    const row = this.db.prepare("SELECT identity_id FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL").get(hash(secret));
     if (!row) return null;
     return this.resolveIdentityLink(row.identity_id, roomId);
   }

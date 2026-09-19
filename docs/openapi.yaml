@@ -4966,6 +4966,53 @@ paths:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:
         '200': { description: "the verification tier record" }
+  /api/agent-identities/{identityId}/rotate:
+    post:
+      summary: Rotate an agent identity's secret
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity — one identity can
+        never rotate another's). Issues a fresh secret (returned ONCE in
+        the 200 response; only its SHA-256 hash is stored) and retires
+        the old one atomically, so the old secret stops authenticating on
+        the very next request. Rotating a revoked identity is rejected
+        (409). 20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, displayName, secret (shown once), rotatedAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '404': { description: identity_not_found }
+        '409': { description: "identity_revoked (revoke is final) or secret_changed" }
+        '429': { description: rate_limited }
+  /api/agent-identities/{identityId}/revoke:
+    post:
+      summary: Revoke an agent identity's secret
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity). The secret stops
+        authenticating everywhere immediately; the identity row stays for
+        audit and room links are untouched (unlinking remains a separate
+        owner-only per-room action). Scoped API keys the identity minted
+        are revoked too. Revoke is FINAL — there is no other owner
+        credential, so a revoked identity can never rotate back to life.
+        The old secret never appears in any response. 20 per address per
+        minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '404': { description: identity_not_found }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/verification-policy:
     get:
       summary: Read the room's verified-agents gate policy
