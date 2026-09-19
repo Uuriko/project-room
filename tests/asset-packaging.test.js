@@ -19,7 +19,10 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   assert.equal(await buildAssets(output), assetPaths.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
   await buildAssets(output);
-  assert.deepEqual((await readdir(output)).sort(), ['index.html', 'src']);
+  // Derived from the allowlist rather than written down: 'connectors' was
+  // added to publicAssets and this line still said ['index.html', 'src'].
+  const topLevel = [...new Set(assetPaths.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
+  assert.deepEqual((await readdir(output)).sort(), topLevel);
   assert.deepEqual((await readdir(new URL('src/', output))).sort(), assetPaths.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
   for (const file of assetPaths) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
