@@ -162,9 +162,13 @@ test("start->callback roundtrip upgrades the slot and provisions github:<id>", a
   noSecrets(body);
   // The presented PKCE verifier matches the challenge from the authorize URL.
   assert.equal(codeChallengeFor(fetchFn.captured.codeVerifier), authorize.searchParams.get("code_challenge"));
-  // The slot is upgraded: the same token now authenticates the new account.
-  assert.equal(accountCookie(res), slot.token);
-  const session = f.store.authenticateAccountSession(slot.token);
+  // The login minted a fresh slot token (QAS-702 session-fixation fix): the
+  // pre-login token is dead and the fresh cookie token authenticates the
+  // new account with the carried-over revision.
+  const fresh = accountCookie(res);
+  assert.ok(fresh && fresh !== slot.token, "GitHub login rotates the slot token");
+  assert.throws(() => f.store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+  const session = f.store.authenticateAccountSession(fresh);
   assert.equal(session.account.id, `github:${userId}`);
   assert.equal(session.sessionRevision, 1);
   // The account row is keyed on the GitHub subject, never the email address.

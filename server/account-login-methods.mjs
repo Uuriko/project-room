@@ -407,6 +407,10 @@ export class AccountLoginMethods {
     return this.store.transaction(() => {
       const now = this.#now();
       this.db.prepare("DELETE FROM account_magic_codes WHERE expires_at <= ? OR consumed_at IS NOT NULL").run(now);
+      // QAX-001 (RC-2026-09-19-073): a fresh request burns every prior code
+      // for this email — siblings die at request time, not only on consume —
+      // so only the newest issued code is ever live.
+      this.db.prepare("DELETE FROM account_magic_codes WHERE email_hash=?").run(emailLookupHash(normalized));
       const code = base64url(this.random(24)); // 192 bits, URL-safe
       this.db.prepare(`INSERT INTO account_magic_codes(code_hash,account_id,email,email_hash,expires_at,consumed_at,attempts,created_at)
         VALUES(?,?,?,?,?,?,0,?)`)

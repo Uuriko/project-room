@@ -58,9 +58,12 @@ test("signup provisions an email account, links password+magic methods, and upgr
   assert.equal(body.authenticated, true);
   assert.match(body.account.id, /^email:[0-9a-f]{64}$/);
   assert.ok(body.sessionBinding, "upgraded session carries a binding");
-  assert.ok(accountCookie(res), "signup sets the account session cookie");
-  // The slot token now authenticates as the new account.
-  const session = f.store.authenticateAccountSession(slot.sessionToken);
+  // QAS-702: signup mints a fresh slot token — the pre-login token is dead,
+  // the fresh cookie token carries the new account's session.
+  const fresh = accountCookie(res);
+  assert.ok(fresh && fresh !== slot.sessionToken, "signup rotates the slot token");
+  assert.throws(() => f.store.authenticateAccountSession(slot.sessionToken), { code: "unauthenticated" });
+  const session = f.store.authenticateAccountSession(fresh);
   assert.equal(session.account.id, body.account.id);
   // Provisioning used the password-signup origin and linked both methods.
   const row = f.store.db.prepare("SELECT id, origin FROM accounts WHERE id=?").get(body.account.id);
@@ -115,8 +118,11 @@ test("signup then login roundtrip upgrades a real slot", async t => {
   const body = await logged.json();
   assert.equal(body.authenticated, true);
   assert.equal(body.account.id, createdBody.account.id, "login lands on the signed-up account");
-  assert.ok(accountCookie(logged), "login sets the account session cookie");
-  const session = f.store.authenticateAccountSession(second.sessionToken);
+  // QAS-702: login mints a fresh slot token — the presented token is retired.
+  const fresh = accountCookie(logged);
+  assert.ok(fresh && fresh !== second.sessionToken, "login rotates the slot token");
+  assert.throws(() => f.store.authenticateAccountSession(second.sessionToken), { code: "unauthenticated" });
+  const session = f.store.authenticateAccountSession(fresh);
   assert.equal(session.account.id, createdBody.account.id);
 });
 
