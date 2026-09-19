@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T06:28:06Z · board: Uuriko/project-room#266 · watermark: 5739895147 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T06:58:55Z · board: Uuriko/project-room#266 · watermark: 5739961016 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,9 +32,6 @@ RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-049 | quill | working | 2026-09-19T06:38:44Z | server/identity-verification.mjs, server/agent-identities.mjs, server/agent-directory.mjs, docs/openapi.yaml, tests/identity-verification.test.js
-RC-2026-09-18-050 | quill | working | 2026-09-19T06:38:45Z | scripts/agent-inbox.mjs, docs/openapi.yaml, tests/agent-inbox-keys.test.js
-RC-2026-09-18-051 | quill | working | 2026-09-19T06:38:46Z | server/agent-heartbeats.mjs, server/http.mjs, server/outbound-webhooks.mjs, docs/openapi.yaml, tests/agent-heartbeats.test.js
 RC-2026-09-19-055 | quill | working | 2026-09-19T08:14:25Z | server/agent-identities.mjs, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, docs/openapi.yaml, tests/agent-identity-secrets.test.js
 
 ## unclaimed-lanes
@@ -72,5 +69,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1040 threshold=1500 rotation_due=no watcher=active open_claims=32 prose_open=0 unfenced_prose=62 watermark=5739895147
+board_comments=1041 threshold=1500 rotation_due=no watcher=active open_claims=32 prose_open=0 unfenced_prose=62 watermark=5739961016
 
