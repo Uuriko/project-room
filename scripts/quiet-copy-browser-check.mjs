@@ -109,6 +109,12 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.equal(await page.locator("#auth-error").textContent(), "");
   assert.equal(await page.locator(".connection-bar").isVisible(), false);
   await page.route("**/api/session", route => route.abort("failed"));
+  // QAU-006: a first paint with no remembered room and no account hint does
+  // not probe the session at all, so there is nothing for the abort to fail
+  // and the screen honestly says "sign in required". The failure this checks
+  // for is the one a returning member meets, so leave the hint a returning
+  // member would have.
+  await page.evaluate(() => localStorage.setItem("pr-had-account", "1"));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator(".connection-bar").isVisible(), true);
