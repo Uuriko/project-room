@@ -1489,8 +1489,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
         // Issue #6 A2: create a room for the signed-in account. Account session
-        // cookie + X-Session-Binding + CSRF; the store requires membership
-        // administration somewhere (owner or manage_members) and bounds the count.
+        // cookie + X-Session-Binding + CSRF; the store allows an account with
+        // no rooms yet to create its first room, otherwise requires membership
+        // administration somewhere (owner or manage_members), and bounds the count.
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         protectWrite(req, auth, false); rate(`account-room-create:${auth.account.id}`, 10);

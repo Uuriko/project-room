@@ -543,7 +543,7 @@ $("#account-room-form").addEventListener("submit", async event => {
     if (accountClient.session !== owned) return;
     if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) { endAccountAccess(); return; }
     if (error.code === "room_exists") delete form.dataset.roomId; // A lost response created it under another shape; the next attempt gets a fresh id.
-    setFormStatus(status, error.code === "room_creation_denied" ? "Creating a room needs membership administration in one of your rooms."
+    setFormStatus(status, error.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
       : error.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
       : error.status === 429 ? "Too many rooms just now. Try again in a minute."
         : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
