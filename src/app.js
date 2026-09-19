@@ -2502,6 +2502,7 @@ $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;
     if (inboxUI.hasPending() && !window.confirm("Sign out and clear unsent drafts? Saved replies stay.")) return;
+    recovery.clear();
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
     try {
@@ -2525,6 +2526,7 @@ $("#signout-button").addEventListener("click", async () => {
   if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
+  recovery.clear();
   const operationId = ++signoutOperationId;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   const isCurrentOperation = () => operationId === signoutOperationId && sameSession(generation, roomId, memberId);
