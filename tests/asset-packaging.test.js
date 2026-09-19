@@ -28,6 +28,19 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node ../scripts/stamp-version.mjs && node build-assets.mjs', 'deploy stamps the committed revision before building exact assets');
 });
+test('the deployment allowlist and the runtime package agree on the public assets', async () => {
+  // Three lists name the browser assets: cloudflare/build-assets.mjs (what is
+  // uploaded), server/http.mjs (what is served) and scripts/runtime-package.mjs
+  // (what an exact-commit package contains). The first two are checked by the
+  // tests either side of this one. The third was not, and
+  // src/handoff-envelope-ui.js landed in two of the three - which did not show
+  // up as a missing file but as `createRuntimePackage` refusing to build at
+  // all, failing seven tests across five files with an error about an import
+  // closure. This states the invariant in one line so the next one says so.
+  const { publicAssets } = await import('../scripts/runtime-package.mjs');
+  assert.deepEqual([...publicAssets].sort(), [...assetPaths].sort());
+});
+
 test('every local browser import is included in the deployment allowlist', async () => {
   for (const file of assetPaths.filter(path => path.endsWith('.js'))) {
     const source = await readFile(new URL('../' + file, import.meta.url), 'utf8');
