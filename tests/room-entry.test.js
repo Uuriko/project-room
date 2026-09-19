@@ -135,7 +135,11 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
   assert.match(html, /data-room-origin="\/room"/);
   assert.match(html, /id="join-empty"/);
+  assert.match(html, /id="join-empty-message"/);
+  assert.match(html, /id="join-empty-recover"/);
   assert.match(html, /This invite link is incomplete/);
+  assert.match(html, /id="join-empty-recover"[\s\S]*href="#join-code">Join with code</);
+  assert.match(html, /id="join-empty-recover"[\s\S]*href="#join-agent">Paste a prompt</);
   // Plain-language door copy (same sentences as the Demigod entry).
   assert.match(html, /Joining as a person or an agent is free\./);
   assert.match(html, /href="#join-agent"/);
@@ -232,18 +236,32 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect|Bearer |ROOM_AGENT_TOKEN|# Project Room|getone\.one|Amore/i);
 });
 
-function runDoorHash(hash) {
+function runDoorScript({ hash = "", code = "", submit = false } = {}) {
   const hrefs = {
     "a.open": BROWSER_ROOM_PATH,
     "a.people": "#people",
     "a.join": `${BROWSER_ROOM_PATH}/#join/`
   };
-  const empty = { hidden: true };
-  const node = selector => hrefs[selector] === undefined ? null : {
-    getAttribute(name) { return name === "href" ? hrefs[selector] : ""; },
-    setAttribute(name, value) { if (name === "href") hrefs[selector] = value; }
+  const empty = { hidden: true, message: "" };
+  const listeners = [];
+  const node = selector => {
+    if (selector === "#join-code") {
+      return { value: code };
+    }
+    if (selector === "#join-empty-message") {
+      return {
+        set textContent(value) { empty.message = value; },
+        get textContent() { return empty.message; }
+      };
+    }
+    if (hrefs[selector] === undefined) return null;
+    return {
+      getAttribute(name) { return name === "href" ? hrefs[selector] : ""; },
+      setAttribute(name, value) { if (name === "href") hrefs[selector] = value; }
+    };
   };
   let replaced = "";
+  let assigned = "";
   const previous = {
     location: Object.getOwnPropertyDescriptor(globalThis, "location"),
     document: Object.getOwnPropertyDescriptor(globalThis, "document"),
@@ -251,15 +269,21 @@ function runDoorHash(hash) {
   };
   Object.defineProperty(globalThis, "location", {
     configurable: true, writable: true,
-    value: { hash, href: `https://www.getdasha.com/room${hash}`, replace(url) { replaced = url; } }
+    value: {
+      hash, href: `https://www.getdasha.com/room${hash}`,
+      replace(url) { replaced = url; },
+      assign(url) { assigned = url; }
+    }
   });
   Object.defineProperty(globalThis, "document", {
     configurable: true, writable: true,
     value: {
       querySelector: node,
+      addEventListener(type, fn) { listeners.push({ type, fn }); },
       getElementById(id) {
         if (id !== "join-empty") return null;
         return {
+          querySelector: node,
           removeAttribute(name) { if (name === "hidden") empty.hidden = false; },
           setAttribute(name, value) { if (name === "hidden") empty.hidden = value !== null; }
         };
@@ -272,13 +296,24 @@ function runDoorHash(hash) {
   });
   try {
     publicDoorHashForward();
-    return { hrefs, replaced, emptyShown: !empty.hidden };
+    if (submit) {
+      const event = {
+        target: { id: "join-code-form", getAttribute(name) { return name === "data-room-origin" ? BROWSER_ROOM_PATH : ""; } },
+        preventDefault() {}
+      };
+      for (const listener of listeners.filter(item => item.type === "submit")) listener.fn(event);
+    }
+    return { hrefs, replaced, assigned, emptyShown: !empty.hidden, emptyMessage: empty.message };
   } finally {
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else delete globalThis[key];
     }
   }
+}
+
+function runDoorHash(hash) {
+  return runDoorScript({ hash });
 }
 
 test("www /room #join/<token> writes the token onto Join and stays on /room", () => {
@@ -298,10 +333,33 @@ test("www /room #join/<token>/work/<id> keeps the purpose path on the forwarded 
   assert.equal(result.replaced, `https://www.getdasha.com/room/${hash}`);
 });
 
-test("www /room #code/ABC-DEF-GHJ writes the short code onto Join and stays on /room", () => {
+test("www /room #code/ABC-DEF-GHJ shows a live-invite error and does not auto-leave", () => {
   const result = runDoorHash("#code/abc-def-ghj");
-  assert.equal(result.hrefs["a.join"], "https://www.getdasha.com/room/#code/ABC-DEF-GHJ");
-  assert.equal(result.replaced, "https://www.getdasha.com/room/#code/ABC-DEF-GHJ");
+  assert.equal(result.hrefs["a.join"], `${BROWSER_ROOM_PATH}/#join/`);
+  assert.equal(result.replaced, "");
+  assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /isn't a live invite/i);
+});
+
+test("www /room #code/not-a-code shows a format whisper", () => {
+  const result = runDoorHash("#code/nope");
+  assert.equal(result.replaced, "");
+  assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /isn't a join code/i);
+});
+
+test("Join-with-code form ABC-DEF-GHJ shows a live-invite error instead of a silent no-op", () => {
+  const result = runDoorScript({ submit: true, code: "ABC-DEF-GHJ" });
+  assert.equal(result.assigned, "");
+  assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /isn't a live invite/i);
+});
+
+test("Join-with-code form rejects a short code with a format whisper", () => {
+  const result = runDoorScript({ submit: true, code: "AB" });
+  assert.equal(result.assigned, "");
+  assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /isn't a join code/i);
 });
 
 test("www /room #join/ stub shows an empty-state whisper and does not auto-leave", () => {
@@ -309,12 +367,14 @@ test("www /room #join/ stub shows an empty-state whisper and does not auto-leave
   assert.equal(result.hrefs["a.join"], `${BROWSER_ROOM_PATH}/#join/`);
   assert.equal(result.replaced, "");
   assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /incomplete/i);
 });
 
 test("www /room #join/too-short shows the incomplete-invite whisper", () => {
   const result = runDoorHash("#join/abc");
   assert.equal(result.replaced, "");
   assert.equal(result.emptyShown, true);
+  assert.match(result.emptyMessage, /incomplete/i);
 });
 
 test("www /room #room/{id} still rewrites Open/People and does not follow Join", () => {

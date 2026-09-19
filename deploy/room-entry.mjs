@@ -8,7 +8,10 @@ const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
 // browsers survive. Complete #join/<43-char> stays on /room (same-origin;
-// marketing never ejects to workers.dev). Bare or short #join/ shows #join-empty.
+// marketing never ejects to workers.dev). Bare or short #join/ shows #join-empty
+// with recovery CTAs. #code/ and the Join-with-code form stay on the door:
+// CSP cannot preview a code, so a formatted code (including ABC-DEF-GHJ)
+// shows a clear empty-state instead of a silent hash rewrite.
 export function publicDoorHashForward() {
   function id() {
     var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
@@ -19,16 +22,19 @@ export function publicDoorHashForward() {
     if (!/^[0-9A-HJKMNP-TV-Z]{9}$/.test(s)) return "";
     return s.slice(0, 3) + "-" + s.slice(3, 6) + "-" + s.slice(6, 9);
   }
-  function joinSecret(hash) {
+  function joinInvite(hash) {
     if (hash.indexOf("#join/") !== 0) return "";
-    var token = hash.slice(6).split("/")[0];
-    return /^[A-Za-z0-9_-]{43}$/.test(token) ? token : "";
+    var piece = hash.slice(6).split("/")[0];
+    return /^[A-Za-z0-9_-]{43}$/.test(piece) ? piece : "";
   }
-  function whisperJoin(show) {
+  function whisperJoin(show, text) {
     var el = globalThis.document.getElementById && globalThis.document.getElementById("join-empty");
     if (!el) return;
-    if (show) el.removeAttribute("hidden");
-    else el.setAttribute("hidden", "");
+    var msg = el.querySelector && el.querySelector("#join-empty-message");
+    if (show) {
+      if (msg && text) msg.textContent = text;
+      el.removeAttribute("hidden");
+    } else el.setAttribute("hidden", "");
   }
   function handoff(href) {
     var room = id();
@@ -51,8 +57,8 @@ export function publicDoorHashForward() {
       return;
     }
     if (hash.indexOf("#join/") === 0) {
-      if (!joinSecret(hash)) {
-        whisperJoin(true);
+      if (!joinInvite(hash)) {
+        whisperJoin(true, "This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.");
         return;
       }
       if (join) {
@@ -63,13 +69,13 @@ export function publicDoorHashForward() {
         return;
       }
     }
-    if (hash.indexOf("#code/") === 0 && join) {
+    if (hash.indexOf("#code/") === 0) {
       var formatted = formatCode(hash.slice(6).split("/")[0]);
-      if (!formatted) return;
-      var codeUrl = new URL(join.getAttribute("href"), globalThis.location.href);
-      codeUrl.hash = "#code/" + formatted;
-      join.setAttribute("href", codeUrl.href);
-      globalThis.location.replace(codeUrl.href);
+      if (!formatted) {
+        whisperJoin(true, "That isn't a join code. Use ABC-DEF-GHJ (9 characters).");
+        return;
+      }
+      whisperJoin(true, "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.");
     }
   }
   apply();
@@ -90,9 +96,11 @@ export function publicDoorHashForward() {
       e.preventDefault();
       var input = globalThis.document.querySelector("#join-code");
       var formatted = formatCode(input && input.value);
-      var origin = form.getAttribute("data-room-origin");
-      if (!formatted || !origin) return;
-      globalThis.location.assign(origin.replace(/\/$/, "") + "/#code/" + formatted);
+      if (!formatted) {
+        whisperJoin(true, "That isn't a join code. Use ABC-DEF-GHJ (9 characters).");
+        return;
+      }
+      whisperJoin(true, "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.");
     });
   }
 }
@@ -319,6 +327,9 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .whisper:hover{color:var(--acid)}
 .join-empty{margin:0 0 .85rem;font-size:15px;color:var(--acid);max-width:34em}
 .join-empty[hidden]{display:none}
+.join-empty p{margin:0 0 .45rem}
+.join-empty-recover{display:flex;flex-wrap:wrap;gap:.75rem 1.15rem;font-size:14px}
+.join-empty-recover a{color:var(--acid);text-decoration:none}
 .join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
 .open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
 .open{background:var(--acid);color:var(--ink)}
@@ -383,7 +394,10 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="ghost join" href="${BROWSER_ROOM_PATH}/#join/">Join</a>
   </div>
   <p class="whispers"><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
-  <p class="join-empty" id="join-empty" hidden role="status">This invite link is incomplete. Use a full #join/… link or Join with code.</p>
+  <div class="join-empty" id="join-empty" hidden role="status">
+    <p id="join-empty-message">This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.</p>
+    <p class="join-empty-recover" id="join-empty-recover"><a href="#join-code">Join with code</a> <a href="#join-agent">Paste a prompt</a></p>
+  </div>
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
   <section class="connect" id="connect" aria-labelledby="connect-title">
     <h2 id="connect-title">Connect</h2>
