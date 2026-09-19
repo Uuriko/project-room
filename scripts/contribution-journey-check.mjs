@@ -40,11 +40,11 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator('#message-form button[type="submit"]').click();
   await page.locator("#contribution-next").waitFor({ state: "hidden" });
   send("message.posted", { messageId: "journey-question", body: "Should the agenda include a review?", toMemberId: member.id, requestKind: "reply" });
+  await openCatchUp(page);
   await page.getByRole("button", { name: "Open request", exact: true }).waitFor();
   // Full-page capture currently resets Chromium's touch media emulation. Keep
   // mobile captures viewport-sized so subsequent Return checks remain touch checks.
   await page.screenshot({ path: `test-results/contribution-${touch ? "touch" : "desktop"}-request.png`, fullPage: !touch });
-  await openCatchUp(page);
   await page.locator('#rb-attention-list [data-open-message="journey-question"]').waitFor();
   await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled);
   await page.locator("#rb-ack-button").click();

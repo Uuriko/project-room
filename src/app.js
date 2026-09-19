@@ -3707,7 +3707,8 @@ function resetNotifications() {
   clearTimeout(notificationTimer); notificationTimer = null;
   $("#notification-count").textContent = ""; $("#notification-count").hidden = true;
   $("#notification-panel").hidden = true; $("#notification-list").replaceChildren(); delete $("#notification-list")._content;
-  $("#notification-status").textContent = ""; $("#notification-read-button").hidden = true; $("#notification-read-button").disabled = true; $("#notification-read-button").textContent = "Mark read";
+  $("#notification-status").textContent = ""; $("#notification-status").classList.remove("visible");
+  $("#notification-read-button").hidden = true; $("#notification-read-button").disabled = true; $("#notification-read-button").textContent = "Mark read";
 }
 function renderNotifications() {
   const owned = Boolean(state) && ownsNotifications(notificationOwner);
@@ -3715,7 +3716,9 @@ function renderNotifications() {
   const badge = $("#notification-count");
   badge.textContent = count ? `${count} for you` : ""; badge.hidden = !count;
   $("#notification-panel").hidden = !owned;
-  setText("#notification-status", notificationError || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : ""));
+  const note = notificationError || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : "");
+  setText("#notification-status", note);
+  $("#notification-status").classList.toggle("visible", Boolean(note));
   $("#notification-read-button").hidden = !owned || !count;
   $("#notification-read-button").disabled = !owned || notificationBusy || !count;
   $("#notification-read-button").textContent = notificationBusy ? "Marking read…" : "Mark read";
