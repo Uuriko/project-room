@@ -150,6 +150,21 @@ const invitationSchema = `
     )
   );
   CREATE INDEX IF NOT EXISTS account_session_slot_account ON account_session_slots(account_id);
+  -- OAuth PKCE pending states (google/github). Must survive Worker isolate
+  -- eviction between the provider redirect and the callback, so they live in
+  -- SQLite instead of server memory. Short-lived (10min); pruned on write.
+  CREATE TABLE IF NOT EXISTS oauth_pending_states (
+    state_hash TEXT PRIMARY KEY,
+    provider TEXT NOT NULL CHECK(provider IN ('google','github')),
+    slot_token TEXT NOT NULL,
+    expected_revision INTEGER NOT NULL CHECK(expected_revision>=0),
+    verifier TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    link INTEGER NOT NULL DEFAULT 0 CHECK(link IN (0,1)),
+    used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS oauth_pending_states_expires ON oauth_pending_states(expires_at);
   CREATE TABLE IF NOT EXISTS membership_invitations (
     id TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
@@ -1227,6 +1242,44 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("INSERT INTO account_session_slots(hash,revision,expires_at,created_at) VALUES(?,0,?,?)").run(hash(token), now + lifetimeMs, now);
       return { token, session: this.accountSessionSlot(token) };
     });
+  }
+  // OAuth PKCE pending states: persisted in SQLite so the provider callback
+  // survives Worker isolate eviction between start and callback. Short-lived.
+  oauthPendingStateCreate({ provider, stateHash, slotToken, expectedRevision, verifier, expiresAt, link }) {
+    if (provider !== "google" && provider !== "github") fail(422, "invalid_provider", "OAuth provider must be google or github");
+    return this.transaction(() => {
+      const now = this.now();
+      this.db.prepare("DELETE FROM oauth_pending_states WHERE expires_at <= ?").run(now);
+      this.db.prepare("DELETE FROM oauth_pending_states WHERE provider=? AND slot_token=?").run(provider, slotToken);
+      if (this.db.prepare("SELECT count(*) AS n FROM oauth_pending_states").get().n >= 100) fail(429, "oauth_busy", "Too many pending OAuth flows; try again shortly");
+      this.db.prepare(`INSERT INTO oauth_pending_states
+        (state_hash,provider,slot_token,expected_revision,verifier,expires_at,link,used,created_at)
+        VALUES(?,?,?,?,?,?,?,0,?)`)
+        .run(stateHash, provider, slotToken, expectedRevision, verifier, expiresAt, link ? 1 : 0, now);
+    });
+  }
+  oauthPendingStateGet(provider, stateHash) {
+    const row = this.db.prepare("SELECT * FROM oauth_pending_states WHERE provider=? AND state_hash=?").get(provider, stateHash);
+    if (!row) return null;
+    if (row.used || row.expires_at <= this.now()) {
+      this.db.prepare("DELETE FROM oauth_pending_states WHERE provider=? AND state_hash=?").run(provider, stateHash);
+      return null;
+    }
+    return {
+      slotToken: row.slot_token, expectedRevision: row.expected_revision,
+      verifier: row.verifier, expiresAt: row.expires_at, link: row.link === 1,
+    };
+  }
+  oauthPendingStateConsume(provider, stateHash) {
+    return this.transaction(() => {
+      const entry = this.oauthPendingStateGet(provider, stateHash);
+      if (!entry) return null;
+      this.db.prepare("UPDATE oauth_pending_states SET used=1 WHERE provider=? AND state_hash=?").run(provider, stateHash);
+      return entry;
+    });
+  }
+  oauthPendingStateDelete(provider, stateHash) {
+    this.db.prepare("DELETE FROM oauth_pending_states WHERE provider=? AND state_hash=?").run(provider, stateHash);
   }
   accountSessionSlot(token) {
     if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Invalid account session slot");
