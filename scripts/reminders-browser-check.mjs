@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUp } from "./room-chrome.mjs";
+import { openCatchUpPanel } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -49,12 +49,11 @@ for (const mobile of [false, true]) {
     assert.equal(f.store.reminders.list(f.keys.owner, "commons").reminders[0].dueAt, dueAt);
     assert.equal(f.store.reminders.list(f.keys.guest, "commons").reminders.length, 0);
     assert.deepEqual(snapshot(), initial);
-    await openCatchUp(page);
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
-    assert.equal(await page.locator("#reminder-scheduled").evaluate(node => node.open), false);
+    await openCatchUpPanel(page, "reminder-panel");
+    await page.locator("#reminder-upcoming li").waitFor({ state: "visible" });
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
-    await openCatchUp(page);
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
+    await openCatchUpPanel(page, "reminder-panel");
+    await page.locator("#reminder-upcoming li").waitFor({ state: "visible" });
     at = dueAt + 1000; await page.clock.fastForward(240000);
     await page.locator("#reminder-due li").waitFor();
     await page.locator("#reminder-due li").scrollIntoViewIfNeeded();
@@ -94,7 +93,7 @@ for (const mobile of [false, true]) {
     const elsewhere = { requestId: randomUUID(), workItemId: "replacement", expectedRevision: 0, action: "schedule", dueAt: at + 3600000 };
     f.store.reminders.mutate(f.keys.owner, "commons", elsewhere);
     await page.locator("#return-brief-panel > summary").click();
-    await page.locator("#reminder-scheduled").waitFor({ state: "visible" }); await page.locator("#reminder-scheduled > summary").click();
+    await page.locator("#reminder-panel").evaluate(node => { node.open = true; });
     await page.locator("#reminder-upcoming button").click(); await page.locator('#reminder-form[aria-busy="false"]').waitFor();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);

@@ -35,6 +35,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator('[data-message-record-id="journey-background"]').waitFor();
   assert.equal(await page.evaluate(() => document.activeElement.id), "contribution-open", "background activity preserves next-step focus");
   await page.getByRole("button", { name: "Say hello", exact: true }).click();
+  await closeCatchUp(page);
   assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
   await page.locator("#message-input").fill("I can help review the agenda.");
   await page.locator('#message-form button[type="submit"]').click();
@@ -50,7 +51,6 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator("#rb-ack-button").click();
   await page.waitForFunction(() => document.querySelector("#rb-ack-button").textContent === "Already caught up");
   assert.equal(await page.getByRole("button", { name: "Open request", exact: true }).isVisible(), true, "read is not resolved");
-  await closeCatchUp(page);
   await page.locator("#contribution-open").click();
   await page.locator('[data-message-id="journey-question"][data-message-action="request-answered"]').click();
   await page.waitForFunction(() => !document.querySelector("#message-input").disabled);
@@ -76,6 +76,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   send("work.completed", { workItemId: "journey-work", expectedRevision: 1, evidenceKind: "room_text", evidenceMessageId: "journey-result",
     evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: "owner", summary: "A short agenda", nextAction: "Check the final step and owner." });
   page = await context.newPage(); await page.goto(`${origin}/?room=commons`); await page.locator("#main").waitFor({ state: "visible" });
+  await openCatchUp(page);
   await page.getByRole("button", { name: "Review result", exact: true }).waitFor();
   assert.equal(await page.locator("#contribution-title").textContent(), "An agenda we can use");
   await page.screenshot({ path: `test-results/contribution-${touch ? "touch" : "desktop"}-return.png`, fullPage: !touch });

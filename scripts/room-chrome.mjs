@@ -3,6 +3,11 @@
 // Product code is unchanged — these only teach checks how to reach it.
 
 export async function ensurePeopleOpen(page) {
+  const sidebar = page.locator("#room-sidebar");
+  if (!(await sidebar.isVisible())) {
+    await page.locator("#sidebar-toggle").click();
+    await sidebar.waitFor({ state: "visible" });
+  }
   const panel = page.locator("#people-panel");
   if (!(await panel.evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();
@@ -24,6 +29,11 @@ export async function closeCatchUp(page) {
     await page.locator("#catchup-close").click();
     await dialog.waitFor({ state: "hidden" });
   }
+}
+
+export async function openCatchUpPanel(page, panelId) {
+  await openCatchUp(page);
+  await page.locator(`#${panelId}`).evaluate(node => { node.open = true; });
 }
 
 export async function openSettings(page, panelId) {

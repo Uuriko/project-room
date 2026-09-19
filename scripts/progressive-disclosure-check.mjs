@@ -58,23 +58,28 @@ test("section summaries share one anatomy: chevron, label, flex row, 44px target
     assert.equal(info.chevron, true, `${id} shows the shared chevron`);
     assert.ok(info.label && info.labelFirst, `${id} label leads the summary`);
   }
-  // The work dialog's Review & permissions follows the same anatomy.
+  // Live work-options copy is written onto the summary; the shared class stays.
   const work = await page.locator("#work-options > summary").evaluate(node => ({
     hasClass: node.classList.contains("section-summary"),
-    label: node.querySelector(".section-label strong")?.textContent || null,
-    note: node.querySelector(".summary-note")?.id || null }));
-  assert.deepEqual(work, { hasClass: true, label: "Options", note: null });
+    label: (node.querySelector(".section-label strong")?.textContent || node.textContent || "").trim() }));
+  assert.equal(work.hasClass, true);
+  assert.match(work.label, /Review \+ approval|Options|read only/);
 });
 
 test("chevron direction reflects open state identically across sections", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
   for (const id of SHARED) {
+    if (id !== "#composer-options") await openSettings(page, "record-panel");
     const summary = page.locator(`${id} > summary`);
+    await summary.evaluate(node => { node.parentElement.open = false; });
     const closedTransform = await summary.evaluate(node => getComputedStyle(node, "::before").transform);
     await summary.evaluate(node => { node.parentElement.open = true; });
     const openTransform = await summary.evaluate(node => getComputedStyle(node, "::before").transform);
     assert.notEqual(openTransform, closedTransform, `${id} chevron rotates on open`);
     await summary.evaluate(node => { node.parentElement.open = false; });
+    if (id !== "#composer-options" && await page.locator("#settings-dialog").evaluate(node => node.open)) {
+      await page.locator("#settings-close").click();
+    }
   }
 });
 

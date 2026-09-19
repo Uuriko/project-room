@@ -7,7 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUp } from "./room-chrome.mjs";
+import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -90,10 +90,13 @@ for (const mobile of [false, true]) {
     await page.locator("#rb-show-all").click(); assert.equal(await page.locator("#rb-attention-list a").count(), 5);
     assert.equal(await page.locator("#rb-show-all").evaluate(node => node === document.activeElement), true);
 
+    // Catch-up is a modal dialog; close it to use the composer, then reopen.
+    await closeCatchUp(page);
     await page.locator("#message-input").fill("A draft to keep while catching up.");
     await page.locator("#composer-options > summary").click();
     page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "guest");
     await page.locator("#message-input").evaluate(node => node.setSelectionRange(2, 9));
+    await openCatchUp(page); await ready();
     await attention("return-1").click();
     assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
     assert.equal(await card("return-1").evaluate(node => node === document.activeElement), true);
