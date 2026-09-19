@@ -2940,6 +2940,30 @@ paths:
         '200': { description: "{ signedOut: true }" }
         '401': { description: unauthenticated }
         '403': { description: origin_denied or csrf_denied }
+  /api/account/ensure-default-room:
+    post:
+      summary: Ensure the account's default room (RC-2026-09-19-088)
+      description: |
+        First sign-in must never land in an empty void. Account-session write
+        (X-CSRF-Token, Origin, X-Session-Binding), 10 per minute per account.
+        Idempotent: an account that already holds any room membership gets its
+        first room back with `created: false` and nothing is created. An
+        account with no rooms that has never held one gets a
+        fresh personal room ("My first room") with the account as owner
+        (`created: true`). An account that held rooms before but holds none
+        now gets `{ room: null, created: false }` — the endpoint never
+        resurrects a room for someone who deliberately left (or was removed
+        from) all of theirs. The client only calls this when
+        no invitation is being redeemed.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: "{ room: { id } | null, created: false }"
+        '201':
+          description: "{ room: { id }, created: true }"
+        '401': { description: unauthenticated }
+        '422': { description: session_binding_required }
   /api/account-rooms:
     get:
       summary: List the account's current rooms
