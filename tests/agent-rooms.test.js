@@ -323,6 +323,20 @@ test("HTTP: self-serve creation over the bearer identity secret", async t => {
   assert.equal(noAuth.status, 401);
 });
 
+test("GET on POST-only agent-room and invite-redeem routes is 405 with Allow: POST", async t => {
+  const { origin } = await httpFixture(t);
+  for (const path of ["/api/agent-rooms", "/api/agent-invites/redeem", "/room/api/agent-rooms", "/room/api/agent-invites/redeem"]) {
+    const res = await fetch(`${origin}${path}`);
+    assert.equal(res.status, 405, path);
+    assert.equal(res.headers.get("Allow"), "POST", path);
+    assert.equal((await res.json()).error.code, "method_not_allowed", path);
+  }
+  const fake = await fetch(`${origin}/api/bootstrap-agent-room`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+  });
+  assert.equal(fake.status, 404, "bootstrap-agent-room is CLI-only; no fake HTTP POST");
+});
+
 test("HTTP: owner transfers ownership; non-owner is refused", async t => {
   const { store, post } = await httpFixture(t);
   const ownerToken = store.issueAccessKey("commons", "owner");

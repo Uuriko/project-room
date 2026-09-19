@@ -11,7 +11,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 
 | Endpoint | Auth | What it discloses |
 |---|---|---|
-| `GET /api/health`, `/api/version`, `/api/ready` | none | operational metadata only |
+| `GET /api/health`, `/api/healthz`, `/healthz`, `/api/version`, `/api/ready` | none | operational metadata only |
 | `GET /api/guest-agent-links` | none | static contract documents, no room data |
 | `POST /api/agent-identities` | none | creates a bare identity; an identity alone grants no room access; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`, no row written) |
 | `POST /api/identity-create` | none | alias of `POST /api/agent-identities` (same handler and rate bucket; www `/room/api/identity-create`) |

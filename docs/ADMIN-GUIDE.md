@@ -62,7 +62,8 @@ likewise); browser navigations get a readable "isn't configured" page instead.
 ## Health checks
 
 - `GET /api/health` — liveness (bare `/health` is 404 by contract;
-  `/room/health` and `/room/api/health` are aliases). Prefix-preserving
+  `/api/healthz`, `/healthz`, `/room/health`, `/room/healthz`,
+  `/room/api/health`, and `/room/api/healthz` are aliases). Prefix-preserving
   www enrollment is `/room/api/*` → `/api/*` (identity-create, agent-rooms,
   invite mint/redeem).
 - `npm test` and `npm run check` — unit tests and repo checks.

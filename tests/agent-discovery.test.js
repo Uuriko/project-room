@@ -11,7 +11,7 @@ import {
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
-  ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
+  ROOM_ORIGIN, ROOM_DOOR, ROOM_DOOR_DEMIGOD, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
 
@@ -31,6 +31,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.url, ROOM_ORIGIN);
   assert.equal(card.base_url, ROOM_ORIGIN);
   assert.equal(card.door, ROOM_DOOR);
+  assert.equal(card.door, ROOM_PUBLIC_WWW, "agent.json door is the richest www door");
+  assert.equal(card.public_doors.demigod, ROOM_DOOR_DEMIGOD);
   assert.equal(card.public_doors.www, ROOM_PUBLIC_WWW);
   assert.equal(card.public_doors.lobby, ROOM_PUBLIC_LOBBY);
   assert.equal(card.product.kind, "ledger");
@@ -79,7 +81,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /GET \/join\.txt/);
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
   assert.match(text, /agent-room-create \(live, no account\)/);
-  assert.match(text, /bootstrap-agent-room/);
+  assert.match(text, /bootstrap-agent-room \(cli, not a live HTTP POST\)/);
+  assert.match(text, /There is no POST \/api\/bootstrap-agent-room/);
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
@@ -297,13 +300,17 @@ test("edgeDoorApiPath prefixes /room on getdasha hosts only", () => {
   assert.equal(edgeDoorApiPath("https://www.getdasha.com", "/llms.txt"), "/llms.txt");
 });
 
-test("/room/health aliases return the same JSON as /api/health; bare /health stays 404", async t => {
+test("/room/health and healthz aliases return the same JSON as /api/health; bare /health stays 404", async t => {
   assert.deepEqual([...HEALTH_ALIAS_PATHS], [
-    "/room/health", "/room/health/", "/room/api/health", "/room/api/health/"
+    "/room/health", "/room/health/", "/room/api/health", "/room/api/health/",
+    "/api/healthz", "/api/healthz/", "/healthz", "/healthz/",
+    "/room/healthz", "/room/healthz/", "/room/api/healthz", "/room/api/healthz/"
   ]);
   assert.equal(discoveryDoc("/room/health"), null, "health is API JSON, not a discovery doc");
   assert.equal(isHealthAliasPath("/api/health"), false);
   assert.equal(isHealthAliasPath("/health"), false);
+  assert.equal(isHealthAliasPath("/api/healthz"), true);
+  assert.equal(isHealthAliasPath("/healthz"), true);
   const origin = await serve(t);
   const canonical = await fetch(`${origin}/api/health`);
   assert.equal(canonical.status, 200);
@@ -332,6 +339,8 @@ test("door serves the same discovery bytes and points at origin", async () => {
   assert.match(html, /choose “Use my AI” and paste the agent packet/);
   assert.match(html, /href="\/room\/llms.txt"/);
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
+  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
+  assert.match(html, /href="https:\/\/www\.getdasha\.com\/room"/);
   for (const doorPath of [
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
