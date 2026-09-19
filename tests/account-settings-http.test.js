@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { GITHUB_CALLBACK_PATH } from "../server/github-oauth.mjs";
+import { isSealedOAuthState } from "../server/oauth-state-seal.mjs";
 
 const clientId = "Iv1.fixtureclientid0000";
 const clientSecret = "fixture-secret-never-real";
@@ -257,7 +258,7 @@ test("GitHub link intent attaches the subject to the signed-in account", async t
   const authorize = new URL(start.headers.get("location"));
   assert.equal(authorize.origin, "https://github.com");
   const state = authorize.searchParams.get("state");
-  assert.match(state || "", /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(isSealedOAuthState(state), "link intent state is the sealed stateless blob");
 
   const callback = await get(origin, `${GITHUB_CALLBACK_PATH}?code=link-fixture&state=${state}`, creds.cookie);
   assert.equal(callback.status, 200);
