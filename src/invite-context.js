@@ -46,3 +46,88 @@ export function takeRestoredInvite({ storage, hash, search }) {
   if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, secret: pending.slice("#invite/".length) };
 }
+
+// ---------------------------------------------------------------------------
+// RC-2026-09-19-071 (QAJ-001): the request-access door.
+//
+// A bad/expired invitation dialog used to be a dead end ("ask a current Room
+// administrator" — but the stranger knows no administrator). When the
+// invitation preview names the room (expired/revoked/stale statuses still
+// carry roomId), the dialog offers a "Request access" door: the stranger
+// files a self-serve access request against that room instead of bouncing.
+//
+// Pure helpers, same contract as above: storage and values are passed in so
+// these stay unit-testable without a browser. The network calls
+// (identity mint + access-request POST) live in the UI layer.
+
+// Invitation statuses whose dialog is a dead end WITH a known room: the
+// request has somewhere to go. "pending"/"accepted" have their own flows;
+// a missing preview means the room is unknown and the door stays shut.
+export const REQUESTABLE_INVITE_STATUSES = Object.freeze(["expired", "revoked", "stale"]);
+
+// Returns { roomId, roomTitle } when the dead-invite dialog should offer the
+// request-access door, else null.
+export function inviteRequestDoor(preview) {
+  if (!preview || typeof preview !== "object") return null;
+  if (typeof preview.roomId !== "string" || !preview.roomId) return null;
+  if (!REQUESTABLE_INVITE_STATUSES.includes(preview.status)) return null;
+  return { roomId: preview.roomId, roomTitle: preview.roomTitle || "Project Room" };
+}
+
+// The permissions a stranger asks for: what the dead invitation would have
+// granted, falling back to a minimal ask when the preview carries none. The
+// owner still chooses the final grant at decision time.
+export const FALLBACK_REQUEST_PERMISSIONS = Object.freeze(["accept_work"]);
+export function defaultRequestPermissions(preview) {
+  const fromInvite = Array.isArray(preview?.permissions) ? preview.permissions.filter(p => typeof p === "string" && p) : [];
+  return fromInvite.length ? fromInvite : [...FALLBACK_REQUEST_PERMISSIONS];
+}
+
+// Client-side mirror of the server's displayName/note limits, so the form
+// fails fast before any network call.
+export const ACCESS_REQUEST_NAME_MAX = 80;
+export const ACCESS_REQUEST_NOTE_MAX = 500;
+export function validateAccessRequestForm({ displayName, note }) {
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  if (!name) return { ok: false, error: "Enter the display name the room owner will see." };
+  if (name.length > ACCESS_REQUEST_NAME_MAX) return { ok: false, error: `Display name must be at most ${ACCESS_REQUEST_NAME_MAX} characters.` };
+  if (note !== undefined && note !== null && note !== "") {
+    if (typeof note !== "string" || note.length > ACCESS_REQUEST_NOTE_MAX) {
+      return { ok: false, error: `Note must be at most ${ACCESS_REQUEST_NOTE_MAX} characters.` };
+    }
+  }
+  return { ok: true, displayName: name, note: typeof note === "string" && note.trim() ? note.trim() : null };
+}
+
+// Idempotency-key mint for the access request. Same shape as the server's
+// default (ar_ + 16 hex chars) so either side can originate it.
+export function newAccessRequestId() {
+  const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+  return `ar_${random.replaceAll("-", "").slice(0, 16)}`;
+}
+
+// Per-room stash of the requester's minted identity + request id, so a
+// retry or a later status check reuses the same identity instead of minting
+// (and rate-limit-burning) a new one per click.
+export const accessRequestStorageKey = roomId => `pr-access-request:${roomId}`;
+export function stashAccessRequest(storage, roomId, record) {
+  if (!storage || typeof roomId !== "string" || !roomId || !record || typeof record !== "object") return;
+  const { identityId, secret, requestId, displayName } = record;
+  if (typeof identityId !== "string" || !identityId || typeof requestId !== "string" || !requestId) return;
+  try {
+    storage.setItem(accessRequestStorageKey(roomId), JSON.stringify({ identityId, secret: secret ?? null, requestId, displayName: displayName ?? null }));
+  } catch { /* storage unavailable */ }
+}
+// Read without consuming: status checks need the record after the submit.
+export function readAccessRequest(storage, roomId) {
+  if (!storage || typeof roomId !== "string" || !roomId) return null;
+  let raw = null;
+  try { raw = storage.getItem(accessRequestStorageKey(roomId)); } catch { return null; }
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const record = JSON.parse(raw);
+    if (!record || typeof record.identityId !== "string" || !record.identityId
+      || typeof record.requestId !== "string" || !record.requestId) return null;
+    return record;
+  } catch { return null; }
+}

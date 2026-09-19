@@ -30,6 +30,7 @@ in one read transaction). The route lives beside the other room reads in
    | `reply` | `message.posted` | `replyToId` points at a message you wrote |
    | `assignment` | `work.proposed` | you are named `accountableMemberId`, `verifierMemberId` or `humanDecisionMakerId` |
    | `work_update` | `work.accepted`, `work.started`, `work.blocked`, `work.blocker_resolved`, `work.completed`, `work.superseded`, `work.handoff_recorded`, `work.halt_cleared`, `verification.recorded`, `owner.decision_recorded` (claims and sessions are not included) | the work names you (accountable, verifier, decision maker) or you proposed it |
+   | `access_request` | `access.requested` | you are the room owner: a new self-serve access request arrived (RC-2026-09-19-071) |
    A message that is both a reply to you and addresses you yields one `reply`
    item, not two.
 3. **Your own actions never notify you.** Events whose `actorId` is the
@@ -42,7 +43,7 @@ in one read transaction). The route lives beside the other room reads in
    | `work_updates` | assignments and state changes on work you are on | assignments only (work that names you directly) | neither |
    | `announcements` | reserved; no event type feeds it yet | | |
    Unknown or unset preferences fall back to `all`.
-5. **Dedupe.** One item per `(member, messageId | workItemId, kind)`. Message
+5. **Dedupe.** One item per `(member, messageId | workItemId | requestId, kind)`. Message
    edits do not add items: the item is keyed by the message and evaluated
    against the **current** body, so an edit that adds a mention surfaces one
    item and an edit that removes it drops the item. Several state changes on

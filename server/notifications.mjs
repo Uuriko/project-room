@@ -10,7 +10,7 @@ import { mutedEvent } from "./moderation.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update"]);
+export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request"]);
 // Bounded tail: the feed never scans unbounded history. Older unread events
 // stay reachable through the return brief; the response says where it started.
 export const NOTIFICATION_TAIL = 500;
@@ -64,6 +64,20 @@ export function deriveNotifications({ events, state, member }) {
         put("reply", "messageId", messageId, row, { replyToId: parent.id, workItemId: message.workItemId ?? null });
       } else if (addressed && preferences.mentions !== "none") {
         put("mention", "messageId", messageId, row, { workItemId: message.workItemId ?? null });
+      }
+      continue;
+    }
+    // RC-2026-09-19-071 (QAJ-006): the room owner hears about every new
+    // access request. Approval is their explicit decision and nothing else
+    // surfaces the queue, so this is not gated on work_updates preferences —
+    // like the session-enforcement carve-out below, it waits on the owner.
+    if (event.type === T.ACCESS_REQUESTED) {
+      if (member.id === state.room?.ownerId) {
+        put("access_request", "requestId", event.data.requestId, row, {
+          eventId: event.id,
+          displayName: event.data.displayName,
+          note: event.data.note ?? null,
+        });
       }
       continue;
     }
