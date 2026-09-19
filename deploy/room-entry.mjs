@@ -146,7 +146,7 @@ export const HOSTED_MCP_JOIN_PATH = "/room/mcp";
 export const HOSTED_MCP_JOIN_PUBLIC_URL = ROOM_MCP_PUBLIC_URL;
 
 export function connectMcpPathHtml() {
-  return `<li id="connect-mcp"><strong><a href="${ROOM_MCP_PUBLIC_URL}">Add Room as MCP</a></strong> — <a href="#mcp-join">GET snippets</a>. No OAuth. No keys.</li>`;
+  return `<li id="connect-mcp"><strong><a href="${ROOM_MCP_PUBLIC_URL}">Add Room as MCP</a></strong> — <a href="#mcp-join">GET snippets. No OAuth. No keys.</a></li>`;
 }
 
 // Import in the existing Demigod edge Worker, before its generic page routing.
