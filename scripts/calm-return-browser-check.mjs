@@ -106,6 +106,8 @@ for (const mobile of [false, true]) {
 
     // No event arrives when permission scope expires. Both places must agree,
     // without shifting the focused second item to the first or marking anything read.
+    // The attention click above drilled through to the work card; re-open Catch up.
+    await openCatchUp(page); await ready();
     await attention("return-1").focus();
     now += 600100; await page.clock.fastForward(600100);
     await page.waitForFunction(() => document.querySelector("#catchup-count").textContent.startsWith("8 need you"));
