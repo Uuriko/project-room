@@ -499,8 +499,12 @@ export class AgentPluginStore {
 
   withdrawCard({ identityId, agentId }) {
     return this.mutate(() => {
-      const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
-      if (!row || row.ownerIdentityId !== identityId) {
+      const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId, withdrawn FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+      // RC-2026-09-19-084: an already-withdrawn card reads as unknown_card
+      // (docs/openapi.yaml documents 404 for DELETE
+      // /api/agent-directory/cards/{agentId}) — never the 422 the pure
+      // withdraw's guard would produce, and never an oracle for non-owners.
+      if (!row || row.ownerIdentityId !== identityId || row.withdrawn === 1) {
         throw new AgentPluginError(404, "unknown_card", `No card "${agentId}" for this identity`);
       }
       const result = this.directory.withdraw(agentId);
