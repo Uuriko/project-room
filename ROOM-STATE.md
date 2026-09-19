@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-19T02:28:19Z · board: Uuriko/project-room#266 · watermark: 5738595827 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-19T02:59:02Z · board: Uuriko/project-room#266 · watermark: 5738730161 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -47,6 +47,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | 8a7af896 | 5738677085
 unknown | none | 5738582543
 RC-2026 | none | 5738394288
 RC-2026 | none | 5738226630
@@ -56,7 +57,6 @@ unknown | none | 5737929540
 unknown | none | 5737916217
 unknown | none | 5737761717
 unknown | none | 5737755463
-unknown | none | 5737754086
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -73,5 +73,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=969 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5738595827
+board_comments=986 threshold=1500 rotation_due=no watcher=active open_claims=31 prose_open=0 unfenced_prose=62 watermark=5738730161
 
