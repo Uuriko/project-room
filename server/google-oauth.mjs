@@ -155,7 +155,17 @@ export class GoogleSignIn {
       || !Number.isSafeInteger(claims.exp) || !Number.isSafeInteger(claims.iat)
       || claims.exp <= seconds || claims.iat > seconds || claims.exp <= claims.iat || claims.exp - claims.iat > 3600)
       fail('google_token_invalid');
-    return { iss: GOOGLE_ISSUER, sub: claims.sub, exp: claims.exp, iat: claims.iat };
+    // RC-2026-09-19-075: thread the provider-verified email through the
+    // flow like the GitHub one does, so the HTTP layer can link the same
+    // human's magic-link method (linkOAuthMethod + linkMagicMethod) instead
+    // of forking a second account on a later magic-link sign-in. Only an
+    // address Google attests (email_verified === true) is ever trusted —
+    // anything else yields null and the account is keyed on the subject.
+    // The HTTP layer's normalizeEmail is the final shape gate.
+    const emailClaim = claims.email;
+    const email = claims.email_verified === true && typeof emailClaim === 'string'
+      && emailClaim.length > 0 && emailClaim.length <= 254 ? emailClaim : null;
+    return { iss: GOOGLE_ISSUER, sub: claims.sub, exp: claims.exp, iat: claims.iat, email };
   }
 
   async complete({ callbackUrl }) {
