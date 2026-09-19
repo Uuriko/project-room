@@ -406,6 +406,24 @@ const capabilitiesNext = (roomId, assignees) => {
   })];
 };
 
+// RC-2026-09-18-057: work-sessions guidance — seeing open work is half
+// the loop; the other half is the atomic claim (set_status -> processing).
+const workSessionsNext = (roomId, sessions) => {
+  if (sessions.length > 0) {
+    const first = sessions[0];
+    return [Object.freeze({
+      action: "claim-session",
+      method: "POST",
+      path: `/api/rooms/${roomId}/work-sessions`,
+      description: `Claim "${first.workItemId}": send { requestId: "<uuid>", workItemId: "${first.workItemId}", expectedRevision: ${first.revision ?? 0}, action: "set_status", status: "processing" }. Send your identity secret as the Bearer token.`,
+    })];
+  }
+  return [Object.freeze({
+    action: "start-session",
+    description: "No work sessions are open. Start one with the session.start command on a work item.",
+  })];
+};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
@@ -1793,9 +1811,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (status != null && !isSessionStatus(status)) fail(422, "invalid_session_status", "Choose one session status");
       const room = this.room(roomId);
+      const sessions = listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() });
       return {
         contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
-        sessions: listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() })
+        sessions,
+        // RC-2026-09-18-057: seeing open work is half the loop — name the
+        // atomic claim (set_status -> processing on a queued card).
+        next: Object.freeze(workSessionsNext(roomId, sessions)),
       };
     });
   }
