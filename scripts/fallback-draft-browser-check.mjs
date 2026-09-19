@@ -121,6 +121,8 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   if (!await page.locator('#request-mode-bar').isVisible()) {
     if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
     await page.locator('#request-reply').click();
+    // Wait for request mode to engage before asserting readOnly.
+    await page.locator('#request-mode-bar').waitFor({ state: 'visible', timeout: 5000 });
   }
   assert.equal(await page.locator('#message-input').evaluate(node => node.readOnly), true);
   await page.locator('#message-form button[type=submit]').click();
