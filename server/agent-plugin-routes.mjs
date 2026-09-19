@@ -187,7 +187,21 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const listKeys = translate(async (req, res) => {
     const auth = ownerAuth(req);
     rate(`agent-keys-read:${auth.identityId}`, 120);
-    return json(res, 200, { keys: store.agentPlugin.listApiKeys(auth.identityId) });
+    const keys = store.agentPlugin.listApiKeys(auth.identityId);
+    // RC-2026-09-18-048: the list is where an agent checks what it already
+    // has — name the full key lifecycle: issue, rotate, revoke.
+    const next = keys.length === 0
+      ? [Object.freeze({ action: "issue-key", method: "POST", path: "/api/agent-keys",
+          description: "No API keys yet — POST { scopes, label?, expiresAt? } to issue one. The credential is shown once in the 201." })]
+      : keys.slice(0, 3).flatMap(k => [
+          Object.freeze({ action: "rotate-key", method: "POST",
+            path: `/api/agent-keys/${encodeURIComponent(k.keyId)}/rotate`,
+            description: `Rotate ${k.keyId}: issues a replacement credential (shown once) and retires the old key.` }),
+          Object.freeze({ action: "revoke-key", method: "POST",
+            path: `/api/agent-keys/${encodeURIComponent(k.keyId)}/revoke`,
+            description: `Revoke ${k.keyId}: the key stops working immediately. Use rotate instead when you need continuity.` }),
+        ]);
+    return json(res, 200, { keys, next });
   });
 
   const keyAction = translate(async (req, res, { remoteAddress, keyId, action }) => {
