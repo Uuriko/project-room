@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -40,6 +41,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   const workHit = id => hits.locator(`[data-open-work="${id}"]`);
   const before = auditRecovery(f.store).dataSha256;
   await page.locator('#message-input').fill('Keep my unsent thought.');
+  await openSearch(page);
   await search.fill('Orbit');
   assert.equal(await page.locator('#search-count').textContent(), '3 matches in this room');
   assert.equal(await hits.locator('[data-open-work]').count(), 2);

@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { ensurePeopleOpen, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -38,9 +39,9 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
   assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
-  await page.locator('#people-panel > summary').click();
+  await ensurePeopleOpen(page);
   assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan));
-  await page.locator('#people-panel > summary').click();
+  await openSearch(page);
   await page.locator('#message-search').fill('I can help');
   assert.equal(await page.locator('#search-list strong').textContent(), 'Jordan');
   await page.locator('#message-search').fill('');

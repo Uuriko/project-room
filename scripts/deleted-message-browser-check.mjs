@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch } from "./room-chrome.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -80,6 +81,7 @@ test("deleted messages render a tombstone, never crash, and leave search", { tim
   // Back in the room, search no longer touches deleted bodies and still finds live messages.
   await page.locator("#thread-back").click();
   await page.locator("#thread-bar").waitFor({ state: "hidden" });
+  await openSearch(page);
   await page.locator("#message-search").fill("dahlias");
   await page.locator("#search-count", { hasText: "0 matches" }).waitFor({ state: "visible" });
   await page.locator("#message-search").fill("cactus");

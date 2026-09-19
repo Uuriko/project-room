@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -54,7 +55,7 @@ for (const mobile of [false, true]) {
     await page.goto(origin); await fillAccessKey(page, f.keys.owner);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
-    const panel = page.locator("#return-brief-panel"), summary = panel.locator(":scope > summary");
+    const panel = page.locator("#return-brief-panel"), summary = page.locator("#topbar-catchup");
     const attention = id => page.locator(`#rb-attention-list [data-open-work="${id}"]`);
     const card = id => page.locator(`[data-work-record-id="${id}"]`);
     const ready = () => page.waitForFunction(() => Boolean(document.querySelector("#rb-ack-button").dataset.horizon) && !document.querySelector("#rb-ack-button").disabled);
@@ -66,14 +67,14 @@ for (const mobile of [false, true]) {
     await ready(); await page.waitForFunction(() => document.querySelector("#reminder-count").textContent === "1 reminder");
     now += 6000; await page.clock.fastForward(6000); // Let the normal sign-in notice clear.
     assert.equal(await panel.evaluate(node => node.open), false, "chat is home; catch-up stays closed");
+    assert.equal(await page.locator("#catchup-dialog").evaluate(node => node.open), false);
     assert.equal(await page.locator("#return-brief-panel").count(), 1);
     assert.equal(await page.locator("#caught-up-button").count(), 0);
     assert.match(await page.locator("#catchup-count").textContent(), /^7 need you/);
-    assert.equal(await panel.evaluate(node => Boolean(node.compareDocumentPosition(document.querySelector(".conversation-panel")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
     await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
     const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
-    await summary.click(); await openedBrief; await ready();
+    await openCatchUp(page); await openedBrief; await ready();
     await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
     assert.ok(horizon > 0, 'the opened brief owns a populated history horizon');
@@ -153,7 +154,7 @@ for (const mobile of [false, true]) {
     assert.equal(await blockersGroup.locator('[data-open-work="return-0"]').count(), 1, "the blocker line keeps its exact work-record link");
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; scrollTo(0, 0); });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
-    assert.equal(await summary.evaluate(node => getComputedStyle(node).fontSize), "32px");
+    assert.equal(await page.locator("#return-brief-heading").evaluate(node => getComputedStyle(node).fontSize), "32px");
     assert.equal(await page.locator("#rb-show-all").evaluate(node => getComputedStyle(node).fontSize), "28px");
     await capture("large-text");
     await page.locator("#rb-ack-button").scrollIntoViewIfNeeded();

@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -34,7 +35,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
     await other.goto(`http://127.0.0.1:${server.address().port}`); await fillAccessKey(other, key);
     await other.getByRole("button", { name: "Enter room", exact: true }).click(); await other.locator("#main").waitFor({ state: "visible" }); return other;
   };
-  const openDialog = async p => { await p.locator("#room-about").evaluate(el => { el.open = true; }); await p.locator("#room-instructions-open").click(); await p.locator("#room-instructions-dialog").waitFor({ state: "visible" }); };
+  const openDialog = async p => { await openSettings(p, "room-about"); await p.locator("#room-instructions-open").click(); await p.locator("#room-instructions-dialog").waitFor({ state: "visible" }); };
   const policy = () => f.store.room("commons").state.room.policy;
   return { ...f, page, send, items, openForm, login, openDialog, policy, review: page.locator("#require-verification"), decision: page.locator("#require-decision"), note: page.locator("#work-policy-note") };
 }

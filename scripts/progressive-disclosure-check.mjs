@@ -8,9 +8,11 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp, openSettings } from "./room-chrome.mjs";
 
-// Sections normalized to the shared .section-summary anatomy.
-const SHARED = ["#composer-options", "#people-panel", "#record-panel", "#decision-section"];
+// In-room section disclosures that still use the shared .section-summary anatomy.
+// People is sidebar chrome (`sidebar-label`), not a section summary.
+const SHARED = ["#composer-options", "#record-panel", "#decision-section"];
 
 async function setup(t, { mobile = false } = {}) {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -61,7 +63,7 @@ test("section summaries share one anatomy: chevron, label, flex row, 44px target
     hasClass: node.classList.contains("section-summary"),
     label: node.querySelector(".section-label strong")?.textContent || null,
     note: node.querySelector(".summary-note")?.id || null }));
-  assert.deepEqual(work, { hasClass: true, label: "Review & permissions", note: "work-options-summary" });
+  assert.deepEqual(work, { hasClass: true, label: "Options", note: null });
 });
 
 test("chevron direction reflects open state identically across sections", { timeout: 30000 }, async t => {
@@ -78,7 +80,8 @@ test("chevron direction reflects open state identically across sections", { time
 
 test("keyboard toggling never moves focus off the summary", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
-  for (const id of ["#composer-options", "#people-panel", "#record-panel"]) {
+  for (const id of ["#composer-options", "#record-panel"]) {
+    if (id === "#record-panel") await openSettings(page, "record-panel");
     const summary = page.locator(`${id} > summary`);
     await summary.scrollIntoViewIfNeeded();
     await summary.focus();
@@ -94,19 +97,26 @@ test("keyboard toggling never moves focus off the summary", { timeout: 30000 }, 
 
 test("trailing chips align to the summary's right edge", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
-  for (const [id, chip] of [["#record-panel", "#event-count"], ["#decision-section", "#decision-count"], ["#rb-history-section", "#rb-history-count"]]) {
-    if (id === "#rb-history-section") await page.locator("#return-brief-panel > summary").evaluate(node => { node.parentElement.open = true; });
-    if (id === "#decision-section") await page.locator("#record-panel > summary").evaluate(node => { node.parentElement.open = true; });
+  await openSettings(page, "record-panel");
+  for (const [id, chip] of [["#record-panel", "#event-count"], ["#decision-section", "#decision-count"]]) {
+    if (id === "#decision-section") await page.locator("#record-panel").evaluate(node => { node.open = true; });
     const [sum, ch] = await Promise.all([
       page.locator(`${id} > summary`).boundingBox(), page.locator(chip).boundingBox()]);
     assert.ok(sum && ch, `${id} summary and chip render`);
     assert.ok(Math.abs(sum.x + sum.width - (ch.x + ch.width)) < 24, `${id} chip sits at the right edge`);
   }
+  await page.locator("#settings-close").click();
+  await openCatchUp(page);
+  await page.locator("#return-brief-panel").evaluate(node => { node.open = true; });
+  const [sum, ch] = await Promise.all([
+    page.locator("#rb-history-section > summary").boundingBox(), page.locator("#rb-history-count").boundingBox()]);
+  assert.ok(sum && ch, "#rb-history-section summary and chip render");
+  assert.ok(Math.abs(sum.x + sum.width - (ch.x + ch.width)) < 24, "#rb-history-section chip sits at the right edge");
 });
 
 test("the same anatomy holds on mobile", { timeout: 30000 }, async t => {
   const { page } = await setup(t, { mobile: true });
-  for (const id of ["#composer-options", "#people-panel", "#record-panel"]) {
+  for (const id of ["#composer-options", "#record-panel"]) {
     const info = await page.locator(`${id} > summary`).evaluate(node => {
       const cs = getComputedStyle(node);
       return { display: cs.display, minHeight: parseFloat(cs.minHeight), chevron: getComputedStyle(node, "::before").content !== "none" };

@@ -12,6 +12,7 @@ import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = new Set(), traffic = [], errors = [];
@@ -76,6 +77,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
+  await openCatchUp(page);
   await page.locator('#contribution-open').click();
   assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
   await page.screenshot({ path: `${prefix}-offer.png` });
@@ -161,7 +163,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   await page.screenshot({ path: `${prefix}-return.png` });
   await page.waitForFunction(label => document.querySelector('#contribution-label').textContent === label, multiple ? 'Drafts to inspect' : 'Draft to inspect');
-  if (!(await page.locator('#return-brief-panel').evaluate(node => node.open))) await page.locator('#return-brief-panel > summary').click(); // first-visit auto-open (#38) must not be toggled closed
+  await openCatchUp(page);
   const draftStep = page.locator(multiple ? `#rb-attention-list [data-open-work="${workItemId}"]` : `#rb-attention-list [data-open-message="${draft.messageId}"]`);
   await draftStep.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#rb-attention-list .rb-event').count(), 1, 'One draft replaces the same work start step');

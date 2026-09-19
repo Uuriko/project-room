@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSearch, openSettings } from "./room-chrome.mjs";
 
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'desktop'}: quiet controls, stable reading and usable History`, { timeout: 60000 }, async t => {
@@ -34,6 +35,7 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   assert.match(await message.locator('[data-reaction="heart"]').getAttribute('aria-label'), /, 1$/);
   assert.equal(await message.locator('[data-reaction="heart"].used').count(), 1, 'a used reaction stays visibly marked');
 
+  await openSearch(page);
   await page.locator('#message-search').fill('agenda');
   assert.equal(await page.locator('#clear-search').isVisible(), true);
   await page.locator('#composer-options > summary').click();
@@ -67,7 +69,7 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/release-polish-${touch ? 'touch' : 'desktop'}.png` });
 
-  await page.locator('#record-panel > summary').click();
+  await openSettings(page, 'record-panel');
   const first = page.locator('#event-list li').first();
   await first.focus();
   await first.evaluate(el => { window.retainedHistory = el; });

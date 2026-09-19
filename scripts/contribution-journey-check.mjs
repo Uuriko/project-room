@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
+import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" : "desktop"}: join, answer, return, review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -28,6 +29,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator("#main").waitFor({ state: "visible" });
   const member = Object.values(state().members).find(person => person.displayName === "Journey guest");
   assert.ok(member); assert.deepEqual(member.permissions, []);
+  await openCatchUp(page);
   await page.locator("#contribution-open").focus();
   send("message.posted", { messageId: "journey-background", body: "A little more room context." });
   await page.locator('[data-message-record-id="journey-background"]').waitFor();
@@ -42,13 +44,13 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   // Full-page capture currently resets Chromium's touch media emulation. Keep
   // mobile captures viewport-sized so subsequent Return checks remain touch checks.
   await page.screenshot({ path: `test-results/contribution-${touch ? "touch" : "desktop"}-request.png`, fullPage: !touch });
-  await page.locator("#return-brief-panel > summary").click();
+  await openCatchUp(page);
   await page.locator('#rb-attention-list [data-open-message="journey-question"]').waitFor();
   await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled);
   await page.locator("#rb-ack-button").click();
   await page.waitForFunction(() => document.querySelector("#rb-ack-button").textContent === "Already caught up");
   assert.equal(await page.getByRole("button", { name: "Open request", exact: true }).isVisible(), true, "read is not resolved");
-  await page.locator("#return-brief-panel > summary").click();
+  await closeCatchUp(page);
   await page.locator("#contribution-open").click();
   await page.locator('[data-message-id="journey-question"][data-message-action="request-answered"]').click();
   await page.waitForFunction(() => !document.querySelector("#message-input").disabled);

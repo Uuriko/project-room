@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 test("unified guest entry, account-bound draft recovery, catch-up and agent handoff share one room", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -66,7 +67,7 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   assert.equal(await card.locator(".work-next-step").count(), 1);
   assert.equal(await card.locator(".work-next").count(), 0);
   assert.equal((await agent("owner").orient()).work.find(w => w.id === "test-handoff").next.action, "decide");
-  await owner.locator("#return-brief-panel > summary").click();
+  await openCatchUp(owner);
   await owner.locator("#rb-attention-list").getByText(/Test: prepare an agenda/).waitFor();
   assert.equal((await agent("owner").returnBrief()).current.needsAttention.some(w => w.workItemId === "test-handoff" && w.step === "decide"), true);
 

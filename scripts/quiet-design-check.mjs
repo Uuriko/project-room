@@ -29,7 +29,8 @@ for (const touch of [false, true]) {
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
-    for (const id of ["people-panel", "composer-options", "work-options"]) {
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
+    for (const id of ["composer-options", "work-options"]) {
       assert.equal(await page.locator("#" + id).evaluate(e => e.open), false, id + " starts quiet");
     }
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
@@ -120,7 +121,8 @@ for (const touch of [false, true]) {
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
-    for (const id of ["people-panel", "composer-options", "work-options"]) assert.equal(await page.locator("#" + id).evaluate(e => e.open), false);
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);
+    for (const id of ["composer-options", "work-options"]) assert.equal(await page.locator("#" + id).evaluate(e => e.open), false);
     assert.deepEqual(errors, []);
   });
 }

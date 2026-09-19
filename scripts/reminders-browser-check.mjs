@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -48,11 +49,11 @@ for (const mobile of [false, true]) {
     assert.equal(f.store.reminders.list(f.keys.owner, "commons").reminders[0].dueAt, dueAt);
     assert.equal(f.store.reminders.list(f.keys.guest, "commons").reminders.length, 0);
     assert.deepEqual(snapshot(), initial);
-    await page.locator("#return-brief-panel > summary").click();
+    await openCatchUp(page);
     await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reminder-scheduled").evaluate(node => node.open), false);
     await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
-    if (!await page.locator("#return-brief-panel").evaluate(node => node.open)) await page.locator("#return-brief-panel > summary").click();
+    await openCatchUp(page);
     await page.locator("#reminder-scheduled").waitFor({ state: "visible" });
     at = dueAt + 1000; await page.clock.fastForward(240000);
     await page.locator("#reminder-due li").waitFor();

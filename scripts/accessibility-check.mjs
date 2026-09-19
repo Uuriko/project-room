@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 test("stale return brief cannot cross a session; skip, local alerts, focus return, and AA primary controls hold", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-accessibility-"));
@@ -146,10 +147,11 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
     await held;
     await route.fulfill({ response });
   });
-  if (await page.locator("#return-brief-panel").evaluate(node => node.open)) {
+  if (await page.locator("#return-brief-panel").evaluate(node => node.open)
+    && await page.locator("#catchup-dialog").evaluate(node => node.open)) {
     await page.locator("#rb-refresh-button").click();
   } else {
-    await page.locator("#return-brief-panel > summary").click();
+    await openCatchUp(page);
   }
   await captured;
   assert.equal(await page.locator("#return-brief-panel").getAttribute("aria-busy"), "true");

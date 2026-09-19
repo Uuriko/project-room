@@ -12,6 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { ensurePeopleOpen } from "./room-chrome.mjs";
 
 test("background updates preserve open disclosures, focus, draft and recipient", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-disclosure-"));
@@ -55,7 +56,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   await input.evaluate(e => e.setSelectionRange(6, 13));
 
   // A2: open a disclosure in the presence list and keep focus on its summary
-  await page.locator("#people-panel > summary").click();
+  await ensurePeopleOpen(page);
   const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary');
   await summary.click();
   const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details');

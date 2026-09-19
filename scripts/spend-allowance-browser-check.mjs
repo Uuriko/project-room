@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { spendAllowance } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, actor, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -28,7 +29,7 @@ async function setup(t, actor, viewport = { width: 1440, height: 1000 }) {
   await fillAccessKey(page, f.keys[actor]);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#spend-panel").evaluate(el => { el.open = true; });
+  await openSettings(page, "spend-panel");
   const state = () => f.store.room("commons").state;
   const session = body => f.store.mutateWorkSession(f.keys.producer, "commons", { requestId: randomUUID(), workItemId: "test-handoff",
     expectedRevision: state().workItems["test-handoff"].revision, action: "set_status", ...body });

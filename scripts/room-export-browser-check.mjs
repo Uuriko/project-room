@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, { account = false } = {}) {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -36,7 +37,7 @@ async function setup(t, { account = false } = {}) {
 }
 
 async function exportFromHistory(page) {
-  await page.locator("#record-panel > summary").click();
+  await openSettings(page, "record-panel");
   const button = page.locator("#record-export-html");
   await button.waitFor({ state: "visible" });
   const [download] = await Promise.all([page.waitForEvent("download"), button.click()]);
@@ -70,7 +71,7 @@ test("in account mode the export request carries the session binding a plain lin
 test("a failed export leaves the room usable and says so at the control", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
   await page.route("**/api/rooms/commons/export**", route => route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: { code: "rate_limited", message: "Too many requests" } }) }));
-  await page.locator("#record-panel > summary").click();
+  await openSettings(page, "record-panel");
   await page.locator("#record-export-html").click();
   await page.getByText("Export is rate limited; try again in a minute.", { exact: true }).waitFor();
   assert.equal(await page.locator("#record-export-html").isEnabled(), true);

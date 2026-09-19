@@ -12,6 +12,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = [], traffic = [], errors = [];
@@ -50,6 +51,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
+  await openCatchUp(page);
   await page.locator('#contribution-open').focus();
   assert.equal(await page.locator('#contribution-open').getAttribute('data-step'), `request:${questions[0].requestMessageId}`);
   for (let i = 0; i < 6; i++) send('owner', 'work.proposed', { workItemId: `queue-work-${i}`, title: `Check source ${i + 1}`,
@@ -201,13 +203,14 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
     assert.equal(await page.locator('[data-work-record-id]').count(), 81, 'All work remains reachable');
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-arrival.png` });
-    await page.locator('#return-brief-panel > summary').click();
+    await openCatchUp(page);
     await page.waitForFunction(() => !document.querySelector('#rb-ack-button').disabled);
     assert.equal(await page.locator('#rb-attention-list a').count(), 1);
     assert.equal(await page.locator('#rb-attention-list [data-open-message]').getAttribute('data-open-message'), question.requestMessageId);
     for (const id of ['rb-involving-section', 'rb-history-section']) assert.equal(await page.locator(`#${id}`).evaluate(node => node.open), false);
     await page.screenshot({ path: `${prefix}-catchup.png` });
-    await page.locator('#return-brief-panel > summary').click();
+    await page.locator('#catchup-close').click();
+    await openSearch(page);
     await page.locator('#message-search').fill('prepare an agenda');
     const hit = page.locator('#search-list [data-open-work="test-handoff"]');
     await hit.focus(); await hit.press('Enter');
@@ -215,6 +218,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: `${prefix}-selected.png` });
     await page.locator('#clear-search').click();
+    await openCatchUp(page);
     await page.locator('#contribution-open').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
     assert.equal(auditRecovery(f.store).dataSha256, beforeNavigation, 'catch-up, search and navigation do not mark read or mutate Room data');
@@ -294,6 +298,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
 
   page = await pageForOwner(false);
   if (crowded) {
+    await openCatchUp(page);
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-ready.png` });
     await page.locator('#contribution-open').click();
