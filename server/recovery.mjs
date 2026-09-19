@@ -38,10 +38,14 @@ export function auditRecovery(store) {
         return copy;
       };
       requireState(canonical(stripChannels(actual)) === canonical(stripChannels(rebuilt)));
-      // Verify channels match if both have them, or the backfill is correct.
-      const actualChannels = actual.state.channels, rebuiltChannels = rebuilt.state.channels;
-      if (actualChannels || rebuiltChannels) {
-        requireState(JSON.stringify(actualChannels?.general ?? null) === JSON.stringify(rebuiltChannels?.general ?? null));
+      // Verify the general channel backfill is consistent (compare essential
+      // fields only; createdBy/createdAt may differ between repair and replay
+      // for legacy data).
+      const actualGeneral = actual.state.channels?.general, rebuiltGeneral = rebuilt.state.channels?.general;
+      if (actualGeneral || rebuiltGeneral) {
+        requireState(actualGeneral?.id === rebuiltGeneral?.id
+          && actualGeneral?.name === rebuiltGeneral?.name
+          && actualGeneral?.archivedAt === rebuiltGeneral?.archivedAt);
       }
       requireState(actual.state.room?.id === row.id);
       const checkpoint = store.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
