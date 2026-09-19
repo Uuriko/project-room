@@ -124,7 +124,12 @@ function ensureAccountProfileSchema(db) {
   // for someone who deliberately left (or was removed from) all of theirs.
   if (!columns.has("ever_had_room")) {
     db.exec("ALTER TABLE accounts ADD COLUMN ever_had_room INTEGER NOT NULL DEFAULT 0");
-    db.exec("UPDATE accounts SET ever_had_room=1 WHERE id IN (SELECT account_id FROM member_accounts)");
+    // Backfill: accounts with a current membership have had a room. Defensive:
+    // if member_accounts is absent (partial migration), the column defaults
+    // to 0 and the endpoint treats the account as new (safe direction).
+    try {
+      db.exec("UPDATE accounts SET ever_had_room=1 WHERE id IN (SELECT account_id FROM member_accounts)");
+    } catch { /* member_accounts absent; leave default 0 */ }
   }
   // Note: ever_had_room is maintained by markAccountHadRoom() at each
   // member_accounts INSERT (application-level, not a trigger — D1 trigger
