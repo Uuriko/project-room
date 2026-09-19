@@ -154,7 +154,7 @@ export class AccessRequests {
   // Anyone else gets 404, so pending requests are not enumerable.
   status(requestId, identityId) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
-    if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such access request");
+    if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
     return rowToRequest(this.maybeExpire(row));
   }
 
@@ -183,7 +183,7 @@ export class AccessRequests {
     }
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
-      if (!row) fail(404, "not_found", "No such access request");
+      if (!row) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);
       if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();

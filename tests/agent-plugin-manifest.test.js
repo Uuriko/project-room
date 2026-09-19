@@ -18,7 +18,7 @@ test("build emits a complete frozen manifest", t => {
   for (const s of manifest.auth.schemes) assert.ok(s.scheme && s.scheme.length > 0);
   // all three enrollment flows documented
   const flows = manifest.enrollment.flows.map(f => f.id).sort();
-  assert.deepEqual(flows, ["access-request", "agent-room-create", "identity-create", "invite-redeem"]);
+  assert.deepEqual(flows, ["agent-room-create", "identity-create", "invite-redeem", "join-request"]);
   for (const f of manifest.enrollment.flows) assert.ok(Array.isArray(f.steps) && f.steps.length > 0);
   // permission profiles match the documented standing profiles
   assert.deepEqual(manifest.enrollment.permissionProfiles.chat, "read-only");
@@ -27,12 +27,12 @@ test("build emits a complete frozen manifest", t => {
   assert.equal(manifest.directory.url, `${ORIGIN}/api/agents/directory`);
   // RC-2026-09-19-061: the manifest is an agent's first fetch — every field
   // must be true. Rate limit must match the enforced value in
-  // server/http.mjs (identity-create route); the access-request owner step
+  // server/http.mjs (identity-create route); the join-request owner step
   // must name the real /decide endpoint; webhook transport must not claim
   // outbound delivery that isn't wired.
   assert.equal(manifest.rateLimits.identityCreatePerIpPerHour, 30);
-  const accessFlow = manifest.enrollment.flows.find(f => f.id === "access-request");
-  assert.ok(accessFlow.steps.some(s => s.includes("access-decide")), `steps: ${accessFlow.steps.join(", ")}`);
+  const accessFlow = manifest.enrollment.flows.find(f => f.id === "join-request");
+  assert.ok(accessFlow.steps.some(s => s.includes("join-decide")), `steps: ${accessFlow.steps.join(", ")}`);
   assert.ok(!/outbound event delivery/i.test(manifest.transports.webhook.description));
   assert.ok(typeof manifest.docs.guide === "string");
 });

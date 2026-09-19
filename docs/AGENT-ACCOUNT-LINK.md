@@ -61,7 +61,7 @@ People & agents HTML stays Muse. Shapes she can hang a CTA on:
 
 - Agent already has `identityId` + wants into this room → `account-link`
   / `POST /api/access-requests`.
-- Owner tap → existing `identity-link` (or the access-request approve
+- Owner tap → existing `identity-link` (or the join-request approve
   route). Recommended grant above.
 - Deep-link to an agent-owned room after bootstrap:
   `https://www.getdasha.com/room#room/<roomId>` (door HTML is hers).

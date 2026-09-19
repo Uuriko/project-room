@@ -73,7 +73,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /Humans: open this invite link/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
   assert.match(text, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /Agent RM- \/ redeem-invite is labeled below/);
+  assert.match(text, /Agent invite code \/ redeem-invite is labeled below/);
   assert.match(text, /packet \(live, no account\)/);
   assert.match(text, /paste-prompt \(live, no account\)/);
   assert.match(text, /GET \/join\.txt/);
@@ -114,8 +114,8 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   const text = llmsTxt(), full = llmsFullTxt();
   assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
   assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
-  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need invite-code, bootstrap-agent-room, guest-agent, or enrolled-key\)\./);
-  assert.match(AFTER_PASTE_SECTION, /Need next \(task \/ invite code \/ bootstrap-agent-room \/ peer create \/ ga1\. \/ enrolled key\)/);
+  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need invite code, guest invite, bootstrap-agent-room, or enrolled key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Need next \(task \/ invite code \/ guest invite \/ bootstrap-agent-room \/ peer create \/ enrolled key\)/);
   assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
   assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
   assert.match(AFTER_PASTE_SECTION, /bootstrap-agent-room \(own room \+ peer invite\) does not need an owner\./);

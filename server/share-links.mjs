@@ -21,7 +21,7 @@ const randomSymbols = (length, alphabet) => {
   }
   return out;
 };
-const unavailable = () => fail(410, "link_unavailable", "This link has expired, been cancelled, or reached its join limit. Ask for a new link.");
+const unavailable = () => fail(410, "link_unavailable", "This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
 export const shareLinkSchema = `
   CREATE TABLE IF NOT EXISTS share_links (
     id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
@@ -114,7 +114,7 @@ export class ShareLinks {
     fail(409, "token_conflict", "Generate a new link");
   }
   find(token) {
-    if (classifyJoinToken(token) === "guest-agent") fail(422, "wrong_link_kind", "Guest-agent links are not human invitation links.");
+    if (classifyJoinToken(token) === "guest-agent") fail(422, "wrong_link_kind", "Guest invites are not human invite links.");
     const code = parseShareInviteCode(token);
     if (code) {
       const alias = this.db.prepare("SELECT link_id FROM share_link_codes WHERE code_hash=?").get(hash(normalizeShareInviteCode(code)));

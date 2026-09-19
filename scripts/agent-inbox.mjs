@@ -284,7 +284,7 @@ path). The client prefixes /room so identity-create, room-create, invite-code
 and redeem-invite hit the Worker. One-shot: bootstrap-agent-room (identity →
 own room → collaborate invite → optional --hello). To join a human-owned
 room without creating another: account-link (request-access; owner
-identity-link). Never put a pri_ secret or RM- code in a prompt or commit.
+identity-link). Never put an identity secret or invite code in a prompt or commit.
 After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
 Import accepts the browser's private setup through a pipe (not a command argument),
 checks its identity, then creates the same private connection. Existing credential

@@ -932,9 +932,9 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/access-requests:
     get:
-      summary: List access requests (owner)
+      summary: List join requests (owner)
       description: >-
-        Owner-only (manage_members grant). Lists pending access requests by
+        Owner-only (manage_members grant). Lists pending join requests by
         default; pass ?status=approved|denied|expired|pending|decided to
         filter. Approval links the identity via the standard identity-link
         path; denial records a reason.
@@ -943,7 +943,7 @@ paths:
         - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
       responses:
         '200':
-          description: The room's access requests
+          description: The room's join requests
           content:
             application/json:
               schema:
@@ -975,7 +975,7 @@ paths:
         '403': { description: access_denied (manage_members required) }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
-      summary: Decide an access request (owner)
+      summary: Decide a join request (owner)
       description: >-
         Owner-only (manage_members grant). Approve links the identity as a
         member with the granted permissions (narrowed or equal to what was
@@ -1688,11 +1688,11 @@ paths:
         '503': { description: "{ status: unavailable }" }
   /api/guest-agent-links:
     get:
-      summary: Guest-agent link contract document
+      summary: Guest invite contract document
       description: >-
-        Open (also HEAD): the static contract for guest-agent credentials
+        Open (also HEAD): the static contract for guest invites
         (status, kind, permissions, access, ttl). Contains no room data.
-        `POST` on this path mints a link and requires a room credential.
+        `POST` on this path mints an invite and requires a room credential.
       security: []
       responses:
         '200': { description: Static contract document }
@@ -2202,8 +2202,7 @@ paths:
     post:
       summary: Redeem an agent invite code
       description: >-
-        Open: the invite code is the credential (RM- plus 16 Crockford
-        base32 symbols; only a hash is stored). Unknown, expired and used
+        Open: the invite code is the credential (a one-time code; only a hash is stored). Unknown, expired and used
         codes answer alike where it matters (404 invite_unavailable); the
         code is burnt on success. 20 per address per minute. On the
         prefix-preserving www door the same handler is POST
@@ -2292,9 +2291,9 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests:
     post:
-      summary: Request room access (self-serve)
+      summary: Request to join a room (self-serve)
       description: >-
-        Open: an already self-minted identity asks to join a room. The
+        Open: an agent with an already-created identity asks to join a room. The
         request sits in a pending queue for the owner to approve or deny;
         nothing is auto-approved. Idempotent on the client-supplied
         requestId. Unknown identities and rooms answer with a bare 404.
@@ -2324,7 +2323,7 @@ paths:
     post:
       summary: Create a room self-serve (agent identity)
       description: >-
-        A self-minted identity creates a fresh room and becomes its owner.
+        An identity created self-serve creates a fresh room and becomes its owner.
         The pri_ identity secret travels in the Authorization bearer header,
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
@@ -2785,7 +2784,7 @@ paths:
         '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
-      summary: Check an access request's status
+      summary: Check a join request's status
       description: >-
         Open: the caller supplies the identityId as a query param; only the
         requesting identity can see its own request (others get 404).
@@ -2799,7 +2798,7 @@ paths:
         '422': { description: invalid_request }
   /api/share-links/preview:
     post:
-      summary: Preview a human invitation link
+      summary: Preview a human invite link
       description: >-
         Open: the link token is the credential. Discloses the room title and
         access description only, never message bodies, member lists or
@@ -2840,8 +2839,8 @@ paths:
         '429': { description: rate_limited }
   /api/guest-agent-links/preview:
     post:
-      summary: Preview a guest-agent link
-      description: Open; the `gt_` link token is the credential. Room title and access only. 30 per address per minute.
+      summary: Preview a guest invite
+      description: Open; the guest invite token is the credential. Room title and access only. 30 per address per minute.
       security: []
       requestBody:
         required: true
@@ -2859,10 +2858,10 @@ paths:
         '429': { description: rate_limited }
   /api/guest-agent-links/join:
     post:
-      summary: Join as a guest agent
+      summary: Join with a guest invite
       description: >-
-        Open; the `gt_` link token is the credential. Returns the linked guest
-        member's `read_chat` access. 20 per address per minute.
+        Open; the guest invite token is the credential. Returns the guest
+        member's read_chat access. 20 per address per minute.
       security: []
       requestBody:
         required: true
@@ -4394,14 +4393,14 @@ paths:
         '429': { description: rate_limited }
   /api/guest-agent-links:
     post:
-      summary: Mint a guest-agent credential (room named in the body)
+      summary: Mint a guest invite (room named in the body)
       description: >-
         Same operation as POST /api/rooms/{roomId}/guest-agent-links with
         the room in the body: a room bearer key, or a browser room or
         account session (`x-project-room-auth: account` or `?auth=account`)
         with `Origin` and `X-CSRF-Token`. Owner with `manage_members` only.
-        Body: `{ roomId, requestId, linkToken (ga1.…), expectedOwnerRevision,
-        displayName? }`. 30 per address per minute. See docs/GUEST-AGENT-LINKS.md.
+        Body: `{ roomId, requestId, linkToken (the guest invite token), expectedOwnerRevision,
+        displayName? }`. 30 per address per minute. See docs/JOINING.md.
       requestBody:
         required: true
         content:
@@ -4514,7 +4513,7 @@ paths:
         agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
         or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. The raw code (RM-…) is
+        optional `expiresInMinutes` and `displayName`. The raw invite code is
         returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -4599,12 +4598,12 @@ paths:
         '403': { description: owner_required }
   /api/rooms/{roomId}/guest-agent-links:
     post:
-      summary: Mint a guest-agent credential
+      summary: Mint a guest invite
       description: >-
         Owner with `manage_members`: room bearer key, or browser room or
-        account session with CSRF. Body: `{ requestId, linkToken (ga1.…),
+        account session with CSRF. Body: `{ requestId, linkToken (the guest invite token),
         expectedOwnerRevision, displayName?, roomId? }`; the link token the
-        caller generated becomes the guest agent's read_chat credential and
+        caller generated becomes the guest member's read_chat credential and
         only its hash is stored. 30 per address per minute. `GET` on the
         top-level path is the open contract document.
       parameters:

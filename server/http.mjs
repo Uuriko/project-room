@@ -1689,9 +1689,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`guest-agent-mint:${remoteAddress}`, 30);
         const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest-agent credential or Add agent.");
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
         const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest-agent mint fields");
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest invite mint fields");
         const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
         const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
           : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
@@ -2265,7 +2265,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             })]
           : [Object.freeze({
               action: "watch-requests",
-              description: "No pending access requests. New requests from agents asking to join appear here.",
+              description: "No pending join requests. New requests from agents asking to join appear here.",
             })];
         return json(res, 200, { roomId, requests, next: Object.freeze(next) });
       }

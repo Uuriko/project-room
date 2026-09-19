@@ -383,7 +383,7 @@ test("double-interrupted guest join stays honest, keeps the record, and names th
 
 test("confirmed join rejection rolls the optimistic record back", async () => {
   const dom = guestJoinDom();
-  const expired = new Error("This link has expired, been cancelled, or reached its join limit. Ask for a new link.");
+  const expired = new Error("This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
   expired.status = 410; expired.code = "link_unavailable";
   const accountClient = {
     session: {},
@@ -436,7 +436,7 @@ test("reload resumes the uncertain join with the same redemption id", async () =
 test("a failed join keeps the invitation in the address bar instead of stranding the guest", async () => {
   const dom = guestJoinDom();
   const token = "f".repeat(43);
-  const expired = new Error("This link has expired, been cancelled, or reached its join limit. Ask for a new link.");
+  const expired = new Error("This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
   expired.status = 410; expired.code = "link_unavailable";
   let statusText = "";
   const accountClient = {

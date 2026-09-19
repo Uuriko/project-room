@@ -39,23 +39,23 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Ask the owner to mint a guest-agent credential or Add agent. Then room_check_access.",
-      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+      hint: "Ask the owner to mint a guest invite or Add agent. Then room_check_access.",
+      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (reasonCode === "wrong_link_kind") {
     return {
       status: "action_required", reason: "wrong_link_kind",
-      hint: "That is a human #join/ link. Ask the owner for a ga1. guest-agent token or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+      hint: "That is a human invite link. Ask the owner for a guest invite or Add agent.",
+      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
       reason: reasonCode,
-      hint: "This guest-agent link is not live. Ask the owner to mint a new one or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+      hint: "This guest invite is not live. Ask the owner to mint a new one or Add agent.",
+      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "origin_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
@@ -63,9 +63,9 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required",
       reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
       hint: reasonCode === "owner_required"
-        ? "Only the room owner can mint a guest-agent credential or Add agent."
+        ? "Only the room owner can mint a guest invite or Add agent."
         : "This credential cannot do that. Check access; ask the owner if needed.",
-      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (stale(reasonCode, message)) {
