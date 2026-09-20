@@ -157,7 +157,7 @@ export default {
     headers.delete('X-Forwarded-For');
     const response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
     const authFailure = response.headers.get('X-Room-Auth-Failure');
-    if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}`);
+    if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}; ${response.headers.get("X-Room-Auth-Diagnostic") || ""}`);
     return response;
   },
 

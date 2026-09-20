@@ -27,7 +27,7 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   jwk = {...keys.publicKey.export({format: 'jwk'}), kid: 'fixture', alg: 'RS256', use: 'sig'};
   const now = Math.floor(Date.now()/1000);
   const encode = x => Buffer.from(JSON.stringify(x)).toString('base64url');
-  const input = encode({alg: 'RS256', kid: 'fixture'}) + '.' + encode({iss: 'https://accounts.google.com', aud: '123-example.apps.googleusercontent.com', sub: '123456789', iat: now, exp: now+3600});
+  const input = encode({alg: 'RS256', kid: 'fixture'}) + '.' + encode({iss: 'https://accounts.google.com', aud: '123-example.apps.googleusercontent.com', sub: '123456789', email: 'synthetic@example.test', email_verified: true, iat: now, exp: now+3600});
   token = input + '.' + sign('RSA-SHA256', Buffer.from(input), keys.privateKey).toString('base64url');
   const callback = state => mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + state + '&code=synthetic-code', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
   const completed = await callback(url.searchParams.get('state'));
