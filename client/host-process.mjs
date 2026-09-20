@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { mkdirSync, realpathSync, rmdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 
 export function configuredHost(config) {
   if (!config || !isAbsolute(config.command ?? "") || !isAbsolute(config.cwd ?? "")
@@ -15,11 +18,20 @@ export function configuredHost(config) {
     let payload;
     try { payload = JSON.stringify(input); }
     catch { reject(new Error("Host input must be JSON serializable")); return; }
+    let lock;
+    try {
+      const directory = join(homedir(), ".project-room", "host-locks");
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      lock = join(directory, createHash("sha256").update(realpathSync(settings.cwd)).digest("hex"));
+      mkdirSync(lock, { mode: 0o700 });
+    } catch { reject(new Error("Checkout has an active or unresolved host, or its lock is unavailable; reconcile before running")); return; }
     const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
     Object.assign(env, settings.env ?? {});
     const grouped = process.platform !== "win32";
-    const child = spawn(settings.command, settings.args, { cwd: settings.cwd, env,
-      shell: false, detached: grouped, stdio: ["pipe", "pipe", "pipe"] });
+    let child;
+    try { child = spawn(settings.command, settings.args, { cwd: settings.cwd, env,
+      shell: false, detached: grouped, stdio: ["pipe", "pipe", "pipe"] }); }
+    catch { rmdirSync(lock); reject(new Error("Host could not start; inspect its configuration")); return; }
     let failure = null, size = 0; const chunks = [];
     const stop = message => {
       failure ??= message;
@@ -38,6 +50,10 @@ export function configuredHost(config) {
     });
     child.on("close", code => {
       clearTimeout(timer); signal?.removeEventListener("abort", abort);
+      // A clean exit can still leave detached children behind. On POSIX,
+      // retire the original process group before releasing checkout ownership.
+      if (grouped && child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* group already gone */ } }
+      try { rmdirSync(lock); } catch { /* leave an unresolved lock intact */ }
       if (failure || code !== 0) { reject(new Error(failure ?? "Host exited unsuccessfully; reconcile the original attempt")); return; }
       try {
         const result = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));

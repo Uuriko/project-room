@@ -26,6 +26,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 // fence): older writers have no code path to the table, and Inbox.verify()
 // replays the read/unread journal against actual rows as the integrity gate.
 export const unfencedAdditiveTables = Object.freeze([
+  "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
   // account_login_methods + account_passkey_credentials + account_magic_codes

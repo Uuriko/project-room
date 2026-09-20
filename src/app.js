@@ -136,6 +136,7 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let requestRuns = {}, requestRunsReading = false;
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
@@ -177,6 +178,7 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
     roomGeneration = client.generation;
@@ -261,7 +263,7 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
+    requestRuns = {}; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
@@ -1745,6 +1747,27 @@ function restoreComposer(draft) {
   select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   syncComposerChrome();
 }
+function requestRunLabel(id) {
+  const run = requestRuns[id];
+  if (!run || state?.replyRequests?.[id]?.status !== "open") return "";
+  const status = run.state === "working" && Date.now() - run.updatedAt > 120000 ? "unknown" : run.state;
+  return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
+    needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
+}
+async function refreshRequestRuns() {
+  if (!state || !session || requestRunsReading || document.hidden || !Object.keys(state.replyRequests ?? {}).length) return;
+  requestRunsReading = true;
+  const generation = client.generation, roomId = state.room.id, viewerId = session.member.id;
+  try {
+    const view = await client.request(client.path("/request-runs"));
+    if (generation !== client.generation || view.roomId !== roomId || view.viewerId !== viewerId) return;
+    requestRuns = view.runs;
+  } catch { /* Last heartbeat still ages into unknown; never claim a new run. */ }
+  finally { requestRunsReading = false; }
+  if (generation !== client.generation) return;
+  for (const node of document.querySelectorAll("[data-request-run]")) node.textContent = requestRunLabel(node.dataset.requestRun);
+}
+setInterval(() => { void refreshRequestRuns(); }, 10000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
   if (!request) return "";
@@ -1754,7 +1777,7 @@ function requestControls(message) {
   const actions = [];
   if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
-  return `<span class="request-state">${esc(status)}</span>${actions.map(([kind, label]) =>
+  return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
 }
 function syncRequestComposer() {

@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 71 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 74 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -176,8 +176,18 @@ test("online capture preserves all 71 tables, identity boundaries and exact retr
   f.store.dmConsents.request("commons", "agent", "owner", "recovery fixture");
   f.store.dmConsents.decide("commons", "owner", "agent", "approve");
   f.store.publicFace.enable("commons", "owner");
+  // A reservation is external-execution history: capture it with the room.
+  f.store.dmConsents.request("commons", "owner", "agent", "recovery fixture");
+  f.store.dmConsents.decide("commons", "agent", "owner", "approve");
+  f.store.command(f.keys.owner, "commons", { id: "recovery-run-request", type: T.MESSAGE_POSTED,
+    data: { messageId: "recovery-run-request", toMemberId: "agent", requestKind: "reply", body: "Synthetic host recovery" } });
+  const runRequest = f.store.room("commons").state.replyRequests["recovery-run-request"];
+  const runInput = { requestMessageId: runRequest.id, attemptId: "recovery-host", action: "claim",
+    expectedRequestRevision: runRequest.revision, contextEventId: runRequest.contextEventId };
+  f.store.requestRuns.apply(f.keys.agent, "commons", runInput);
+  const captureSequence = f.store.room("commons").sequence;
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 73,
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 74,
     "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
@@ -198,6 +208,8 @@ test("online capture preserves all 71 tables, identity boundaries and exact retr
   assert.throws(() => f.store.authenticate(f.validSession.token), { code: "unauthenticated" });
   let recovered = new RoomStore(receipt.filename, { now: f.now });
   try {
+    assert.equal(recovered.requestRuns.list(f.keys.owner, "commons").runs[runRequest.id].state, "working");
+    assert.throws(() => recovered.requestRuns.apply(f.keys.agent, "commons", { ...runInput, attemptId: "replacement-host" }), { code: "request_run_owned" });
     assert.deepEqual(auditRecovery(recovered), before);
     assert.equal(recovered.authenticate(f.validSession.token).member.id, "owner");
     for (const token of [f.revokedSession.token, f.keys.oldAgent, f.keys.commonsShared, f.keys.secondShared, f.loggedOut.token, f.sharedSession.token]) assert.throws(() => recovered.authenticate(token));
@@ -207,7 +219,7 @@ test("online capture preserves all 71 tables, identity boundaries and exact retr
     assert.equal(recovered.previewInvitation(f.pending.token).status, "pending");
     assert.equal(recovered.issueInvitation(f.owner.token, "commons", f.pending).duplicate, true);
     assert.equal(recovered.command(f.keys.owner, "commons", f.command).duplicate, true);
-    assert.equal(recovered.room("commons").sequence, f.cursor);
+    assert.equal(recovered.room("commons").sequence, captureSequence);
     for (const reminder of f.reminders.filter(row => ![f.keys.commonsShared, f.keys.secondShared].includes(row.token))) {
       const retry = recovered.reminders.mutate(reminder.token, reminder.room, reminder.request);
       assert.equal(retry.duplicate, true); assert.deepEqual(retry.receipt, reminder.receipt);
@@ -242,7 +254,7 @@ test("online capture preserves all 71 tables, identity boundaries and exact retr
       assert.equal(response.status, 200); assert.equal(JSON.parse(response.body).viewerId, "owner");
     } finally { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   } finally { recovered.close(); }
-  assert.equal(f.store.room("commons").sequence, f.cursor + 1, "recovery writes never replace the source");
+  assert.equal(f.store.room("commons").sequence, captureSequence + 1, "recovery writes never replace the source");
 });
 
 test("audit permits overdue, cancelled, resolved, rescheduled and backward-clock reminder histories", t => {

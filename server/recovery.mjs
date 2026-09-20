@@ -119,6 +119,7 @@ export function auditRecovery(store) {
     }
     const invitations = store.verifyInvitationAudit();
     store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
+    store.requestRuns.verifySchema({ allowAbsent: true });
     store.inbox.verify();
     store.email.verify();
     store.channelUpdates.verifySchema(); store.channelUpdates.verify();

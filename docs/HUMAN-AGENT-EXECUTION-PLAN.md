@@ -1,6 +1,6 @@
 # Human and agent collaboration: execution plan
 
-20 September 2026. This plan refines PRODUCT-EXECUTION-PLAN.md after the broader interaction and memory research. Persistent mixed rooms remain primary; focused work and private Inbox sharing remain optional. Phase 1 is being implemented; later phases are acceptance-driven scope, not shipped features.
+20 September 2026. This plan refines PRODUCT-EXECUTION-PLAN.md after the broader interaction and memory research. Persistent mixed rooms remain primary; focused work and private Inbox sharing remain optional. PR #734 has shipped the initial orientation, preparation and explicit host bridge. The checkpoint sections below preserve their historical validation status. The current priorities and remaining gaps are in [Next product slices](NEXT-PRODUCT-SLICES-2026-09-20.md).
 
 ## Product outcome
 

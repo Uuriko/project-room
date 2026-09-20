@@ -390,7 +390,29 @@ Your installed adapter reads one JSON object from stdin (`requestId`, `request`,
 
 Execution uses an argument array, never shell evaluation. Only PATH, HOME, TMPDIR and LANG are inherited; optional `env` in the private host JSON explicitly configures additional host variables. Do not put secrets in room messages or command arguments. Host output is capped at 32 KiB, with reply text capped at 4096 characters. Host stderr is consumed without being echoed. Timeout or interruption terminates the process group on POSIX; this does not prove remote provider work stopped. The executable runs as your local OS user and is not sandboxed by this adapter.
 
-Keep the same journal when retrying. If the host's outcome is unknown or a human clarified the request during execution, reconcile that run rather than deleting the journal or forcing a fresh attempt. `--help` prints the command contract. This command is explicit and one-shot; it does not enable a background watcher.
+Keep the same journal when retrying. If the host's outcome is unknown or a human clarified the request during execution, reconcile that run rather than deleting the journal or forcing a fresh attempt. `--help` prints the command contract. A request ID runs once. `--auto` explicitly enables the separate execution loop described below; the notify-only watcher remains read-only.
+
+### Enable automatic addressed-request pickup
+
+After choosing the host, repository, connection and execution policy once:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/connection \
+  node scripts/run-room-request.mjs --auto \
+  /absolute/private/requests.sqlite /absolute/private/host.json
+```
+
+Leave this process running (or supervise this same command with your existing process manager). It polls every ten seconds, processes at most fifty eligible requests per scan, and runs one host at a time. Network failures back off to sixty seconds. Ordinary chat, mentions without an explicit reply request, and room membership never invoke a model. Stop with Ctrl-C. A machine that sleeps cannot execute new requests until it returns.
+
+The service permanently reserves each original request attempt before execution. Independent machines with separate journals cannot both start that request through this runner. A lost claim response starts no host and retains the uncertain intent. Every thirty seconds, the runner checks current eligibility and reports its heartbeat; refusal or connection failure requests cancellation of the local host. Closed or changed requests, revoked access, a paused agent, and an archived room cannot start a fresh run. Cancellation of a local process does not prove remote work stopped.
+
+The original conversation shows **Agent working**, **Result saved · delivery pending**, **Host needs attention**, or **Host connection lost**. Two minutes without a heartbeat becomes unknown, never permission for another executor. Status reads are private to the requester and recipient and do not change the answer basis. The requester can use the existing Cancel request action.
+
+On restart, saved answers are retried unchanged without another model call. Unknown execution stays reserved: inspect the original host and repository before opening a new request. There is deliberately no automatic takeover or “retry execution” button yet. Human clarification preserves the saved answer but prevents stale delivery; explicit continuation is a later slice.
+
+The process adapter locks the canonical checkout under `~/.project-room/host-locks/`. Separate worktrees have separate locks. A normal POSIX exit terminates the original process group and releases its lock; an abrupt runner crash leaves a lock for reconciliation because a child may still be writing. This is local checkout coordination, not a filesystem sandbox or a cross-machine repository lock. Confirm the original processes have stopped before an operator removes an abandoned lock. Never delete a request journal or service reservation to force another execution.
+
+This checkpoint provides automatic pickup, durable ownership, visible status, and saved-answer recovery. Downloadable patches, revision-bound test receipts, automatic continuation, and a human-friendly recovery action are still subsequent work; a text reply must not be presented as verified code delivery.
 
 ### Connect Codex directly
 

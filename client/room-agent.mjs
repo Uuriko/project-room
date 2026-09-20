@@ -345,6 +345,14 @@ export class RoomAgentClient {
     const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
+  async requestRuns(input, { signal } = {}) {
+    const value = await this.#request("/request-runs", input, signal);
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId)
+      throw new Error("Host reservation response has the wrong identity");
+    if (input && (value.attemptId !== input.attemptId || value.requestMessageId !== input.requestMessageId
+      || value.state !== (input.action === "claim" ? "working" : input.action))) throw new Error("Host reservation is unconfirmed");
+    return value;
+  }
   replyRequests(options = {}) { const { signal, ...args } = options; return this.replyRead("room_list_requests", args, { signal }); }
   replyContext(requestMessageId, options = {}) {
     const { signal, ...args } = options;

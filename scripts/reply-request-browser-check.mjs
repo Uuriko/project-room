@@ -149,3 +149,21 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
   assert.equal(Object.keys(f.state().replyRequests).length, 1);
   assert.equal(await input(page).inputValue(), "Ordinary draft"); assert.deepEqual(f.errors, []);
 });
+
+
+test("original conversation shows host progress and recovery without changing the request", { timeout: 60000 }, async t => {
+  const f = await setup(t), requestMessageId = "host-visible";
+  f.request(requestMessageId, "producer");
+  const request = f.state().replyRequests[requestMessageId];
+  const input = { requestMessageId, attemptId: "visible-host", action: "claim",
+    expectedRequestRevision: request.revision, contextEventId: request.contextEventId };
+  f.store.requestRuns.apply(f.keys.producer, "commons", input);
+  const owner = await f.login("owner"), row = record(owner, requestMessageId);
+  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent === "Agent working", requestMessageId);
+  assert.equal(f.state().replyRequests[requestMessageId].revision, request.revision);
+  f.store.requestRuns.apply(f.keys.producer, "commons", { ...input, action: "needs_attention" });
+  // The operational poll does not require a new room event or a page reload.
+  await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent.includes("Host needs attention"), requestMessageId, { timeout: 15000 });
+  assert.equal(await row.locator('[data-message-action="request-cancelled"]').count(), 1);
+  assert.deepEqual(f.errors, []);
+});

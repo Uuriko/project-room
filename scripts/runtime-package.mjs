@@ -79,7 +79,7 @@ optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
 optional.push("server/room-norms.mjs"); // RC-2026-09-18-043: coordination norms defaults (pure; consumed by the activation-pack route)
 optional.push("server/attachment-schema.mjs");
-optional.push("server/wake-queue.mjs");
+optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/attention.mjs");
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs", "server/sms-ingest.mjs", "server/messenger-ingest.mjs", "server/sms-outbound.mjs", "server/messenger-outbound.mjs");
