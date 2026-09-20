@@ -51,6 +51,14 @@ const assets = new Map([
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+// RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
+// the llms packet, the skills catalog, and the public HTML door.
+const discoveryLinks = () => [
+  `</.well-known/agent-card.json>; rel="alternate"; type="application/json"`,
+  `</llms.txt>; rel="help"`,
+  `</skills>; rel="describedby"`,
+  `</room>; rel="alternate"; type="text/html"`
+].join(", ");
 const pathId = encoded => {
   let id;
   try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
@@ -1279,11 +1287,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (wantsPublicDoorHtml(req.headers.accept)) {
           const bytes = Buffer.from(publicRoomDoorHtml());
           res.setHeader("Content-Security-Policy", PUBLIC_DOOR_CSP);
+          res.setHeader("Link", discoveryLinks());
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
           return res.end(req.method === "HEAD" ? undefined : bytes);
         }
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
+        res.setHeader("Link", discoveryLinks());
         const packetBytes = Buffer.from(packet.body);
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
@@ -1291,11 +1301,47 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const discovery = discoveryDoc(url.pathname);
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
+        res.setHeader("Link", discoveryLinks());
         const bytes = Buffer.from(discovery.body);
         res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
+      // Public read-only face: no login, owner opt-in only. The code is the
+      // Bearer <redacted> (unguessable pub1.*); no member, identity, or DM data ever leaves.
+      const publicFaceMatch = /^\/p\/([A-Za-z0-9._~-]{1,128})$/.exec(url.pathname);
+      // The /api/public/* matchers use the extractor-friendly ([^/]{1,128})
+      // group form so scripts/open-routes.mjs can inventory them; the code
+      // charset is validated below (unknown/malformed codes 404 identically).
+      const publicApiMatch = /^\/api\/public\/rooms\/([^/]{1,128})$/.exec(url.pathname);
+      const publicFeedMatch = /^\/api\/public\/rooms\/([^/]{1,128})\/feed$/.exec(url.pathname);
+      const publicApiAny = publicApiMatch ?? publicFeedMatch;
+      if ((publicFaceMatch || publicApiAny) && req.method === "GET") {
+        rate(`public-face:${remoteAddress}`, 120);
+        const code = (publicFaceMatch ?? publicApiAny)[1];
+        // Malformed/unknown/disabled codes all 404 as face_not_found inside
+        // the module (never plain not_found, so the invite-only boundary
+        // probe counts these routes as served-open rather than unserved).
+        res.setHeader("X-Robots-Tag", "noindex, nofollow");
+        res.setHeader("Link", discoveryLinks());
+        if (publicFeedMatch) {
+          const after = url.searchParams.get("after");
+          const limit = url.searchParams.get("limit");
+          return json(res, 200, store.publicFace.feedByCode(code, {
+            after: after ?? null,
+            limit: limit == null ? 50 : Number(limit)
+          }));
+        }
+        if (publicApiAny) return json(res, 200, store.publicFace.faceByCode(code));
+        const accept = String(req.headers.accept || "");
+        if (accept.includes("application/json") && !accept.includes("text/html")) {
+          return json(res, 200, store.publicFace.faceByCode(code));
+        }
+        const html = store.publicFace.faceHtml(code);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(html) });
+        return res.end(html);
+      }
+      if (publicFaceMatch || publicApiAny) reject(405, "method_not_allowed", "Method not allowed");
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
@@ -1971,6 +2017,64 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // path), /api/agent-webhooks. Mounted before the /api/ 404 guard so
       // the well-known path (outside /api/) is reachable; the handler
       // returns true when it served the request, false to fall through.
+      // One-URL machine door: POST /join (+ /room/join, /api/join).
+      // Mounted before the /api/ 404 guard (same as the agent-plugin
+      // surface): /join is not under /api/. Unauthenticated and
+      // rate-limited, like identity-create. The /api/join alias keeps the
+      // door inside the /api/ inventory (openapi security: [], boundary
+      // probes, route-docs gate).
+      //   { displayName }               -> mint an identity + a personal first room
+      //   { displayName, inviteCode }   -> redeem the invite into its room
+      // The one-time identity secret is shown once; save it immediately.
+      if ((url.pathname === "/join" || url.pathname === "/room/join" || url.pathname === "/api/join") && req.method === "POST") {
+        rate(`join:${remoteAddress}`, 20);
+        const data = await body(req);
+        if (!(exact(data, ["displayName"]) || exact(data, ["displayName", "inviteCode"]))) {
+          reject(422, "invalid_join", "displayName and an optional inviteCode are the accepted fields");
+        }
+        const name = typeof data.displayName === "string" ? data.displayName.trim() : "";
+        if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
+        if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
+          const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
+          return json(res, 201, {
+            identityId: redeemed.identityId,
+            identitySecret: redeemed.secret,
+            roomId: redeemed.roomId,
+            memberId: redeemed.memberId,
+            displayName: redeemed.displayName,
+            via: "invite",
+            next: [
+              "Save identitySecret now — it is shown once and never again",
+              `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${redeemed.roomId}/…`,
+              `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
+              `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
+            ]
+          });
+        }
+        const identity = store.identities.create(name);
+        const room = agentRooms.create(identity.secret, {
+          roomId: `personal-${identity.identityId}`,
+          title: `${name}'s room`,
+          purpose: "A personal room for getting oriented and starting work.",
+          kind: "personal",
+          displayName: name
+        });
+        return json(res, 201, {
+          identityId: identity.identityId,
+          identitySecret: identity.secret,
+          roomId: room.roomId,
+          memberId: room.ownerMemberId,
+          displayName: name,
+          via: "first-room",
+          duplicate: room.duplicate,
+          next: [
+            "Save identitySecret now — it is shown once and never again",
+            `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${room.roomId}/…`,
+            `Orient: GET /api/rooms/${room.roomId}/activation-pack`,
+            `Read the room: GET /api/rooms/${room.roomId}?view=work`
+          ]
+        });
+      }
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
@@ -2060,12 +2164,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy))?$/.exec(url.pathname);
+      // onboarding-funnel was removed on main (replaced by activation-pack);
+      // dm-consents + public-face are this branch's consent/face routes.
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|public-face))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
+      // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
+      const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      const dmConsentRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/revoke$/.exec(url.pathname);
+      const dmConsentUnblockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/unblock$/.exec(url.pathname);
+      // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
+      const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
       // route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file.
@@ -2112,12 +2224,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch)[1]);
+      // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
+      // the same funnel: their literal segments must never be mistaken for ids.
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+        && !dmConsentDecideMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+        ?? dmConsentDecideMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : "ownership-transfer";
+      const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide"
+        : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentRevokeMatch ? "dm-consent-revoke"
+        : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate" : "ownership-transfer";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -2609,6 +2728,51 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["linkId"])) reject(422, "invalid_link", "Select one invitation link to cancel");
         return json(res, 200, store.shareLinks.cancel(selected.token, roomId, data.linkId, fence));
+      }
+      // Consent-bound DMs: participants list/request their own directional
+      // pairs; the owner sees pair metadata. The authenticated member is the
+      // implicit actor — ids in the response are handles, never member ids.
+      if (route === "dm-consents" && req.method === "GET") {
+        return json(res, 200, store.dmConsents.list(roomId, auth.member.id));
+      }
+      if (route === "dm-consents" && req.method === "POST") {
+        const data = await body(req);
+        if (!(exact(data, ["targetId"]) || exact(data, ["targetId", "reason"]))) {
+          reject(422, "invalid_dm_request", "targetId and an optional reason are the accepted fields");
+        }
+        return json(res, 201, store.dmConsents.request(roomId, auth.member.id, data.targetId, data.reason));
+      }
+      if (route === "dm-consent-decide" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["decision"])) reject(422, "invalid_dm_decision", "decision is the accepted field");
+        return json(res, 200, store.dmConsents.decide(roomId, auth.member.id, dmRequesterId, data.decision));
+      }
+      if (route === "dm-consent-revoke" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_revoke", "peerId is the accepted field");
+        return json(res, 200, store.dmConsents.revoke(roomId, auth.member.id, data.peerId));
+      }
+      if (route === "dm-consent-unblock" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_unblock", "peerId is the accepted field");
+        return json(res, 200, store.dmConsents.unblock(roomId, auth.member.id, data.peerId));
+      }
+      // Public-face controls: owner only (enforced in the module). Status is
+      // visible to the owner alone; the public reads the face at /p/{code}.
+      if (route === "public-face" && req.method === "GET") {
+        return json(res, 200, store.publicFace.status(roomId, auth.member.id));
+      }
+      if (route === "public-face" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["enabled"]) || typeof data.enabled !== "boolean") {
+          reject(422, "invalid_face", "enabled (boolean) is the accepted field");
+        }
+        return json(res, 200, data.enabled
+          ? store.publicFace.enable(roomId, auth.member.id)
+          : store.publicFace.disable(roomId, auth.member.id));
+      }
+      if (route === "public-face-rotate" && req.method === "POST") {
+        return json(res, 200, store.publicFace.rotate(roomId, auth.member.id));
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;

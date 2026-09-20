@@ -73,6 +73,8 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
+  paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)
+  paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

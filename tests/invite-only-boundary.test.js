@@ -51,6 +51,14 @@ const PROBES = {
   "GET /api/account-session": [undefined, 200],
   "POST /api/agent-identities": [{ displayName: "Boundary probe" }, 201],
   "POST /api/identity-create": [{ displayName: "Boundary probe" }, 201],
+  // One-URL machine door: shape-valid body mints an identity + personal
+  // first room (also served at POST /join and POST /room/join, outside the
+  // /api/ inventory by design like the discovery packets).
+  "POST /api/join": [{ displayName: "Boundary probe" }, 201],
+  // Public read-only face: unknown codes 404 as face_not_found (never plain
+  // not_found), so the sweep above counts these as served-open.
+  "GET /api/public/rooms/{}": [undefined, 404],
+  "GET /api/public/rooms/{}/feed": [undefined, 404],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it

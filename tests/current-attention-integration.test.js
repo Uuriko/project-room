@@ -11,6 +11,9 @@ import { WatchJournal } from "../client/watch-journal.mjs";
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }), requests = [], clients = [];
+  // Consent-bound DMs: these tests post owner -> producer DMs.
+  f.store.dmConsents.request("commons", "owner", "producer", "test setup");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
   t.after(async () => { for (const client of clients) await client.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   server.prependListener("request", req => requests.push({ method: req.method, path: req.url }));
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });

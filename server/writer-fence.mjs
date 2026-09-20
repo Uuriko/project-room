@@ -120,7 +120,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // share_link_codes: short human invite aliases of existing #join/ share-links.
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to them, and share_links.verify() plus hash-only storage are the gate.
-  "share_link_codes"
+  "share_link_codes",
+  // dm_consents (directional DM-consent journal) + room_public_settings
+  // (opt-in public read-only face settings) are purely additive and intentionally
+  // NOT fenced: older writers have no code path to them, and each module
+  // verifies its own schema on open.
+  "dm_consents",
+  "room_public_settings"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

@@ -228,6 +228,13 @@ async function dmSetup(t) {
   const jill = linkAgent(store, keys.owner, "dogfood dm jill", "dmjill");
   const grok = linkAgent(store, keys.owner, "dogfood dm grok", "dmgrok");
   const codex = linkAgent(store, keys.owner, "dogfood dm codex", "dmcodex");
+  // Consent-bound DMs: jill requests, grok approves, then the DM goes out.
+  const consentReq = await post(origin, "/api/rooms/commons/dm-consents",
+    { targetId: grok.memberId, reason: "dogfood dm" }, jill.secret);
+  assert.equal(consentReq.status, 201, `dm consent request: ${await errCode(consentReq)}`);
+  const consentOk = await post(origin, `/api/rooms/commons/dm-consents/${jill.memberId}/decide`,
+    { decision: "approve" }, grok.secret);
+  assert.equal(consentOk.status, 200, `dm consent approve: ${await errCode(consentOk)}`);
   const dm = await post(origin, "/api/rooms/commons/commands", {
     id: randomUUID(), type: T.MESSAGE_POSTED,
     data: { messageId: "dm-secret-1", body: "eyes only: the launch code is 481516", toMemberId: grok.memberId },
@@ -278,6 +285,13 @@ async function inboxSetup(t) {
   const { origin, store, keys } = await startServer(t);
   const agent = linkAgent(store, keys.owner, "dogfood inbox agent", "inboxagent");
   const other = linkAgent(store, keys.owner, "dogfood inbox other", "inboxother");
+  // Consent-bound DMs: owner requests, agent approves, then the DM goes out.
+  const consentReq = await post(origin, "/api/rooms/commons/dm-consents",
+    { targetId: agent.memberId, reason: "dogfood inbox" }, keys.owner);
+  assert.equal(consentReq.status, 201, `inbox dm consent request: ${await errCode(consentReq)}`);
+  const consentOk = await post(origin, "/api/rooms/commons/dm-consents/owner/decide",
+    { decision: "approve" }, agent.secret);
+  assert.equal(consentOk.status, 200, `inbox dm consent approve: ${await errCode(consentOk)}`);
   const dm = await post(origin, "/api/rooms/commons/commands", {
     id: randomUUID(), type: T.MESSAGE_POSTED,
     data: { messageId: "inbox-dm-1", body: "your assignment is ready", toMemberId: agent.memberId },
