@@ -107,6 +107,6 @@ test("spend allowance mobile: a non-owner sees the figures and never the control
   assert.match(await f.figures.textContent(), /\$20\.00 reserved by 1 live session · \$30\.00 left over 7 days\.$/);
   assert.equal(await f.form.isHidden(), true);
   assert.match(await page.locator("#spend-note").textContent(), /Only the room owner can change this\.$/);
-  const box = await page.locator("#room-health").boundingBox();
+  const box = await page.locator("#spend-panel").boundingBox();
   assert.ok(box && box.x >= 0 && box.x + box.width <= 390, "the card fits the phone width");
 });

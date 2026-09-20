@@ -293,7 +293,7 @@ const client = new RoomClient({
     // are authored closed except People, which is authored open - closing that
     // one was not a reset, it left the next person to sign in on this browser
     // with a collapsed rail the markup says should be open.
-    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "room-health"]) $(`#${id}`).open = false;
+    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     $("#people-panel").open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
@@ -3727,7 +3727,7 @@ function openSettings(panelId) {
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
-    if (panel) { panel.open = true; panel.closest("#room-health") && (panel.closest("#room-health").open = true); panel.querySelector("summary")?.focus({ preventScroll: true }); }
+    if (panel) { panel.open = true; panel.querySelector("summary")?.focus({ preventScroll: true }); }
   }
 }
 function openCatchUp() {
