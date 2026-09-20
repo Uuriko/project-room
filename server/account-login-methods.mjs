@@ -100,7 +100,15 @@ export function normalizeEmail(email) {
   const normalized = email.trim().toLowerCase();
   // Bounded, plain-ASCII sanity check — full RFC validation is the
   // mail layer's job; the model only needs a stable lookup key.
-  if (normalized.length === 0 || normalized.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null;
+  // QA-Auth 2026-09-19 (R2-002): reject angle brackets anywhere. Real
+  // addresses never carry them (they only appear in display-name syntax
+  // like `"Name" <a@b.com>`, which is not a bare address), and they are
+  // the injection vector for HTML/JS payloads in the recipient field.
+  // Whitespace (incl. CR/LF) is already rejected above, so no header
+  // injection is possible; the Resend path posts JSON, not SMTP.
+  if (normalized.length === 0 || normalized.length > 254
+    || normalized.includes("<") || normalized.includes(">")
+    || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null;
   return normalized;
 }
 

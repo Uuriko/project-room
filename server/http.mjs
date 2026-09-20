@@ -1006,9 +1006,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // to the login page with a return URL.
       if (url.pathname === "/oauth/authorize" && req.method === "GET") {
         rate(`oauth-authorize:${remoteAddress}`, 30);
+        // QA-Auth 2026-09-19: authenticateAccountSession (not
+        // accountSessionSlot — the slot view has no .session and its
+        // account is always null, so the old code read every user as
+        // logged-out and consent could never be reached). 401 on an
+        // anonymous/expired slot redirects to login with a return URL.
         const slotToken = cookie(req, accountCookieName);
-        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
-        const accountId = slot?.session?.account?.id;
+        let session = null;
+        if (slotToken) {
+          try { session = store.authenticateAccountSession(slotToken); }
+          catch { session = null; }
+        }
+        const accountId = session?.account?.id;
         if (!accountId) {
           res.statusCode = 302;
           res.setHeader("Location", "/?oauth=login&return=" + encodeURIComponent(url.pathname + url.search));
@@ -1039,7 +1048,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         const scopeItems = validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
@@ -1048,17 +1057,46 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // POST /oauth/authorize — process the consent decision.
       if (url.pathname === "/oauth/authorize" && req.method === "POST") {
         rate(`oauth-authorize:${remoteAddress}`, 30);
-        const slotToken = cookie(req, accountCookieName);
-        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
-        const accountId = slot?.session?.account?.id;
-        if (!accountId) reject(401, "account_session_required", "Log in to Project Room first");
-        protectWrite(req, slot, false);
+        // QA-Auth 2026-09-19: same fix as the GET path above — the
+        // authenticated account session is the login signal; the raw slot
+        // view can never tell a logged-in user apart.
+        const postSlotToken = cookie(req, accountCookieName);
+        let postSession = null;
+        if (postSlotToken) {
+          try { postSession = store.authenticateAccountSession(postSlotToken); }
+          catch { postSession = null; }
+        }
+        const postAccountId = postSession?.account?.id;
+        if (!postAccountId) reject(401, "account_session_required", "Log in to Project Room first");
+        protectWrite(req, postSession, false);
         const data = await body(req);
+        // QA-Auth 2026-09-19: validate the authorization request BEFORE
+        // acting on the decision. The redirect target must be a registered
+        // client URI: an unvalidated redirect_uri on the deny/error path was
+        // an open redirect (302 to an arbitrary URL) and a malformed URI
+        // threw an uncaught 500. Per RFC 6749 §4.1.2.1 we redirect error
+        // responses only when the redirect_uri itself is valid; otherwise
+        // 400 JSON directly.
+        let validated;
+        try {
+          validated = oauthProvider.validateAuthorizationRequest({
+            clientId: data.client_id,
+            redirectUri: data.redirect_uri,
+            scopes: String(data.scope || "").split(" ").filter(Boolean),
+            state: data.state,
+            codeChallenge: data.code_challenge,
+          });
+          if (data.code_challenge_method !== "S256") {
+            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+          }
+        } catch (error) {
+          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          return json(res, 400, { error: code, error_description: error.message });
+        }
         const decision = data.decision;
-        const redirectUri = data.redirect_uri;
-        const state = data.state;
+        const state = validated.state;
         const failRedirect = (error, description) => {
-          const u = new URL(redirectUri);
+          const u = new URL(validated.redirectUri);
           u.searchParams.set("error", error);
           if (description) u.searchParams.set("error_description", description);
           if (state) u.searchParams.set("state", state);
@@ -1067,23 +1105,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end();
         };
         if (decision !== "allow") return failRedirect("access_denied", "The user denied the request");
-        try {
-          const { code } = oauthProvider.issueCode({
-            clientId: data.client_id,
-            userId: accountId,
-            redirectUri,
-            scopes: String(data.scope || "").split(" ").filter(Boolean),
-            codeChallenge: data.code_challenge,
-          });
-          const u = new URL(redirectUri);
-          u.searchParams.set("code", code);
-          if (state) u.searchParams.set("state", state);
-          res.statusCode = 302;
-          res.setHeader("Location", u.href);
-          return res.end();
-        } catch (error) {
-          return failRedirect("invalid_request", error.message);
-        }
+        const { code } = oauthProvider.issueCode({
+          clientId: validated.client.clientId,
+          userId: postAccountId,
+          redirectUri: validated.redirectUri,
+          scopes: [...validated.scopes],
+          codeChallenge: validated.codeChallenge,
+        });
+        const u = new URL(validated.redirectUri);
+        u.searchParams.set("code", code);
+        if (state) u.searchParams.set("state", state);
+        res.statusCode = 302;
+        res.setHeader("Location", u.href);
+        return res.end();
       }
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
       if (url.pathname === "/oauth/token" && req.method === "POST") {
@@ -1556,9 +1590,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
           rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
-          const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
+          store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
             revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
           });
+          // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: the account-key
+          // path never rotated the slot — a token planted before login stayed
+          // valid after it. Mint a fresh slot token and invalidate the
+          // pre-login one, like every other login path.
+          const { token: freshSlotToken, session: loggedIn } = store.rotateAccountSessionSlot(slotToken);
+          setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           return json(res, 201, accountView(loggedIn));
         }
         if (req.method === "DELETE") {
@@ -1623,10 +1663,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const method = store.accountLogins.listMethods(accountId)
           .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
         if (method) store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
-          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
+        // QA-Auth 2026-09-19: QAS-702 rotation was missing on the recovery
+        // path — mint a fresh slot token so a planted pre-login token can
+        // never authenticate after the redeem.
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
+          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" },
+          rotateSlot: true
         });
-        setCookie(res, accountCookieName, redeemToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
       }
       // ---- Login method settings (slice 7, RC-2026-09-17-016) ----

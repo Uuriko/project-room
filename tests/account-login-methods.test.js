@@ -32,6 +32,12 @@ test("normalizeEmail accepts and normalizes valid addresses, rejects junk", () =
   assert.equal(normalizeEmail(""), null);
   assert.equal(normalizeEmail(null), null);
   assert.equal(normalizeEmail("x".repeat(300) + "@example.com"), null);
+  // QA-Auth 2026-09-19: a@b.invalid<script>alert(1)</script> was accepted and
+  // reported as sent. Angle brackets are never legitimate in a bare address.
+  assert.equal(normalizeEmail("a@b.invalid<script>alert(1)</script>"), null);
+  assert.equal(normalizeEmail("a<b@example.com"), null);
+  assert.equal(normalizeEmail("a>b@example.com"), null);
+  assert.equal(normalizeEmail("o'brien+tag@example-mail.com"), "o'brien+tag@example-mail.com");
 });
 
 test("constantTimeDigestEqual compares safely and never throws", () => {
