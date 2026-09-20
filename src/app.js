@@ -2838,7 +2838,7 @@ function submitRequest(form) {
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
 }
-$("#message-list")?.addEventListener("toggle", e => {
+document.addEventListener("toggle", e => {
   // Flip the "⋯" overflow menu upward when there isn't room below: the menu
   // is absolutely positioned inside the scroll container, so opening downward
   // from a message near the composer would slide it under the composer form
