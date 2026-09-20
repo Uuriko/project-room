@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, PERMISSIONS, applyEvent, event, replay } from "../src/events.js";
 import { RoomStore } from "../server/store.mjs";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 // Return-brief wiring, disposition 5557850637 decision 2: proposedById derives from the
@@ -344,18 +345,24 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("fresh databases use schema v34 and every unsupported schema fails closed without mutation", () => {
+// Every version here is derived from STORE_SCHEMA_VERSION. Written down, the
+// "newer than this service" probe has to be bumped on the same commit as the
+// schema or it stops probing: at v35 it still set user_version=35, which is not
+// newer, so the throw it asserted never came. The first half had been updated
+// and the second half had not.
+test("fresh databases use the current schema and every unsupported schema fails closed without mutation", () => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-schema-version-"));
   const filename = join(directory, "room.sqlite");
+  const future = STORE_SCHEMA_VERSION + 1;
   const store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 35);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projection_checkpoints'").get());
-  store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=35");
+  store.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA user_version=${future}`);
   store.close();
   assert.throws(() => new RoomStore(filename), /schema is newer/);
 
   let raw = new DatabaseSync(filename);
-  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 35);
+  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, future);
   assert.equal(raw.prepare("PRAGMA journal_mode").get().journal_mode, "delete", "rejection must not change a future database's storage mode");
   raw.exec("PRAGMA user_version=-1");
   raw.close();

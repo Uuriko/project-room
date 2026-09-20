@@ -14,23 +14,30 @@ import { join } from "node:path";
 
 const METHODS = ["get", "post", "put", "delete", "patch", "head", "options"];
 
-// Every operation under `paths:` as { method, path, security } where security
-// is null (inherits the document default), [] (open) or the scheme names.
+// Every operation under `paths:` as { method, path, security, parameterLines }
+// where security is null (inherits the document default), [] (open) or the
+// scheme names, and parameterLines is the raw `parameters:` block (see
+// pathParameterSamples).
 export function openapiOperations(text) {
   const operations = [];
-  let section = null, path = null, operation = null, securityList = null;
+  let section = null, path = null, operation = null, securityList = null, parameters = null;
   for (const line of text.split("\n")) {
-    if (/^\S/.test(line)) { section = line.split(":")[0]; path = operation = securityList = null; continue; }
+    if (/^\S/.test(line)) { section = line.split(":")[0]; path = operation = securityList = parameters = null; continue; }
     if (section !== "paths") continue;
     const pathKey = /^  (\/\S+):\s*$/.exec(line);
-    if (pathKey) { path = pathKey[1]; operation = securityList = null; continue; }
+    if (pathKey) { path = pathKey[1]; operation = securityList = parameters = null; continue; }
     const methodKey = /^    ([a-z]+):\s*$/.exec(line);
     if (methodKey && path) {
-      operation = securityList = null;
-      if (METHODS.includes(methodKey[1])) { operation = { method: methodKey[1].toUpperCase(), path, security: null }; operations.push(operation); }
+      operation = securityList = parameters = null;
+      if (METHODS.includes(methodKey[1])) { operation = { method: methodKey[1].toUpperCase(), path, security: null, parameterLines: [] }; operations.push(operation); }
       continue;
     }
     if (!operation) continue;
+    if (/^      parameters:\s*$/.test(line)) { parameters = operation.parameterLines; continue; }
+    if (parameters) {
+      if (/^ {8,}\S/.test(line)) { parameters.push(line); continue; }
+      if (/\S/.test(line)) parameters = null;
+    }
     const security = /^      security:\s*(.*?)\s*$/.exec(line);
     if (security) {
       if (security[1] === "[]") { operation.security = []; securityList = null; }
@@ -45,6 +52,36 @@ export function openapiOperations(text) {
     if (/^      \S/.test(line)) securityList = null;
   }
   return operations;
+}
+
+// Sample values for path parameters that declare a vocabulary, read out of an
+// operation's `parameters:` block. A prober cannot invent a value for a
+// segment the server constrains - /api/agent-keys/{keyId}/{action} only
+// matches when action is rotate|revoke and keyId carries the rak_ prefix - so
+// it reads the one the spec already publishes: the first `enum` entry, or an
+// `example`. Everything else is shape-only and any dummy will do.
+//
+// Both spellings in the document are handled: the flow form
+// `- { name: x, in: path, schema: { enum: [a, b] } }` and the block form with
+// `in:`/`schema:` on following lines.
+export function pathParameterSamples(lines = []) {
+  const samples = {};
+  let current = null;
+  const flush = () => {
+    if (current) {
+      const text = current.join("\n");
+      const name = /\bname:\s*([A-Za-z0-9_-]+)/.exec(text)?.[1];
+      const declared = /\benum:\s*\[\s*([^,\]]+)/.exec(text)?.[1] ?? /\bexample:\s*([^,}\n]+)/.exec(text)?.[1];
+      if (name && declared && /\bin:\s*path\b/.test(text)) samples[name] = declared.trim().replace(/^["']|["']$/g, "");
+    }
+    current = null;
+  };
+  for (const line of lines) {
+    if (/^\s*- /.test(line)) { flush(); current = [line]; }
+    else if (current) current.push(line);
+  }
+  flush();
+  return samples;
 }
 
 export function openRoutes(text) {

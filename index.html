@@ -42,6 +42,22 @@
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
         <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
+        <section id="join-agent" class="join-agent" aria-labelledby="join-agent-title">
+          <h2 id="join-agent-title">Connect your agent</h2>
+          <p class="form-hint">Paste this into Claude, Codex, Cursor or Grok.</p>
+          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
+          <button id="join-agent-copy" class="button" type="button">Copy</button>
+          <p id="join-agent-status" class="status form-status" role="status"></p>
+          <details id="join-agent-help"><summary>What your agent does with this</summary>
+            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
+            <p>The packet grants nothing. You approve an agent inside the room with Add agent, which is where it gets a key.</p>
+            <ul>
+              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
+              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
+              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
+            </ul>
+          </details>
+        </section>
         <div id="signin-extra" hidden>
         <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
@@ -226,6 +242,7 @@
             <h1 id="room-title" tabindex="-1">Project Room</h1>
             <span id="room-kind-badge" class="room-kind-badge" hidden></span>
           </div>
+          <button id="room-overview-open" class="button ghost room-overview-open" type="button" aria-haspopup="dialog" aria-controls="room-overview-dialog">Overview</button>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
           <nav aria-label="Channels">
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
@@ -245,7 +262,7 @@
               <p>Open this invite link to invite a person. <code>#room/{roomId}</code> opens a room for members already in it — it is not a shareable invite.</p>
             </details>
             <p id="people-hint" class="form-hint"></p>
-            <p id="people-wake-hint" class="member-status">@mention uses Connect Wake/Pull once Quill's RC-051 lands.</p>
+            <p id="people-wake-hint" class="member-status">Agents act with their granted room permissions.</p>
             <div id="presence-list" class="presence-list"></div>
           </details>
         </aside>
@@ -320,6 +337,12 @@
           <div id="recipe-preview" class="recipe-preview" hidden></div>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
         </section>
+
+        <dialog id="room-overview-dialog" aria-labelledby="room-overview-title">
+          <div class="dialog-head"><h2 id="room-overview-title">Room overview</h2><button id="room-overview-close" class="button ghost" type="button">Close</button></div>
+          <p id="room-overview-purpose"></p>
+          <div id="room-overview-content" class="room-overview-content"></div>
+        </dialog>
 
         <dialog id="catchup-dialog" aria-labelledby="catchup-title">
           <div class="dialog-head"><h2 id="catchup-title">Catch up</h2><button id="catchup-close" class="button ghost" type="button">Close</button></div>
@@ -425,12 +448,13 @@
             </summary>
             <div id="spend-figures" class="spend-figures"></div>
             <form id="spend-allowance-form" class="spend-allowance-form">
-              <label>Allowance (USD)<input id="spend-allowance-input" inputmode="decimal" autocomplete="off"></label>
-              <label>Days<input id="spend-period-input" inputmode="numeric" autocomplete="off"></label>
+              <p id="spend-error" class="status form-status" role="status"></p>
+              <label>Allowance (USD)<input id="spend-allowance-input" type="number" min="0" step="0.01" required inputmode="decimal" autocomplete="off"></label>
+              <label>Days<input id="spend-period-input" type="number" min="1" max="365" step="1" required inputmode="numeric" autocomplete="off"></label>
               <button class="button secondary" type="submit">Set</button>
               <button id="spend-allowance-remove" class="button ghost" type="button">Remove</button>
             </form>
-            <p id="spend-note" class="status form-status" role="status"></p>
+            <p id="spend-note" class="form-hint" role="status"></p>
           </details>
         </dialog>
 
@@ -439,13 +463,13 @@
             <div class="dialog-head"><h2 id="work-dialog-title">New work</h2></div>
             <p id="work-reuse-hint" class="form-hint" hidden></p>
             <p id="new-work-status" class="status form-status" role="status"></p>
-            <label id="work-title-label" class="field"><span>Title</span><input id="work-title-input" name="title" maxlength="200" required></label>
+            <label id="work-title-label" class="field"><span>Title</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
             <input id="new-work-title" type="hidden" name="new-work-title">
             <input id="source-message-id" type="hidden" name="sourceMessageId">
             <p id="source-context" class="form-hint source-context"></p>
             <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
-            <label id="work-done-field" class="field"><span>Done looks like</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="2000"></textarea></label>
-            <label id="assignee-field" class="field"><span>Owner</span><select id="assignee-select" name="assigneeId"></select></label>
+            <label id="work-done-field" class="field"><span>Done looks like</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
+            <label id="assignee-field" class="field"><span>Owner</span><select id="assignee-select" name="assigneeId" required></select></label>
             <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label"></select><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
               <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>

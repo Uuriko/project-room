@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { openCatchUp } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -282,16 +283,16 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await historyMessage.count(), 1, "history exposes the underlying message");
     await historyMessage.click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), "catch-up-55", "history drill-through focuses the message");
+    await openCatchUp(page);
     await page.locator('#rb-attention-list [data-open-work="w-brief"]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), "w-brief", "current action drill-through focuses the work card");
     mkdirSync("test-results", { recursive: true });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await page.screenshot({ path: `test-results/return-brief-${label}-open.png`, fullPage: true });
 
-    // A late event stays out of the frozen history while current stays live on the next fetch.
-    await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("New changes available"));
-    assert.match(await page.locator("#rb-history-boundary").textContent(), /through 59/);
-    await panel.evaluate(e => { e.open = false; }); await panel.locator(":scope > summary").click(); // reopen: fresh horizon
+    // Source navigation closes Catch up. Reopening starts a fresh horizon;
+    // the frozen 59 boundary and live 60 boundary were verified before leaving.
+    await openCatchUp(page);
     await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through 60"));
     assert.equal(await page.locator("#rb-history-list").textContent().then(t => t.includes("arrived while reading")), false); // still paged out
     await page.locator("#rb-more-button").click(); // the continuation keeps the SAME frozen horizon
@@ -384,7 +385,8 @@ for (const outcome of ["success", "failure"]) {
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
     };
     await page.goto(origin); await enter();
-    // The catch-up dialog load in enter() already fetched the brief; the panel is open.
+    // Entering the room loads the data but leaves Catch up closed.
+    await openCatchUp(page);
     await page.waitForFunction(() => !document.querySelector("#rb-refresh-button").disabled);
     let release, arrived;
     const held = new Promise(resolve => arrived = resolve);

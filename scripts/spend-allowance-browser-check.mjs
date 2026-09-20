@@ -51,6 +51,14 @@ test("spend allowance: the owner sets it, the card follows the ledger as a sessi
   // $50.00 over 30 days.
   await page.locator("#spend-allowance-input").fill("50");
   await page.locator("#spend-period-input").fill("30");
+  // A service refusal stays in the form and leaves the allowance unchanged.
+  await page.route("**/commands", route => route.fulfill({ status: 503, contentType: "application/json",
+    body: JSON.stringify({ error: { code: "unavailable", message: "Synthetic service refusal" } }) }));
+  await page.locator('#spend-allowance-form button[type="submit"]').click();
+  await page.locator("#spend-error").waitFor({ state: "visible" });
+  assert.match(await page.locator("#spend-error").textContent(), /Allowance not saved/);
+  assert.equal(spendAllowance(f.state()), null);
+  await page.unroute("**/commands");
   await page.locator('#spend-allowance-form button[type="submit"]').click();
   await f.summaryIs("$0.00 of $50.00");
   assert.deepEqual([spendAllowance(f.state()).allowanceCents, spendAllowance(f.state()).periodDays, spendAllowance(f.state()).setById], [5000, 30, "owner"]);

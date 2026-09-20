@@ -1,3 +1,4 @@
+import { publicAssetPaths } from "../deploy/public-assets.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -43,12 +44,11 @@ const roomCookieName = "room_session";
 const accountCookieName = "account_session";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
+const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css"
+  : path.endsWith(".html") ? "text/html" : "text/markdown; charset=utf-8";
 const assets = new Map([
-  ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js", "handoff-envelope-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ["/src/styles.css", ["src/styles.css", "text/css"]],
-  ["/connectors/muse.md", ["connectors/muse.md", "text/markdown; charset=utf-8"]],
+  ["/", ["index.html", "text/html"]],
+  ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
 const pathId = encoded => {
@@ -493,6 +493,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0; const chunks = [];
       req.on("data", chunk => {
+        if (bytes > limit) return;
         bytes += chunk.length;
         if (bytes > limit) { chunks.length = 0; rejectPromise(tooLarge()); }
         else chunks.push(chunk);
@@ -1963,6 +1964,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // join. Unauthenticated (the identity is not a member yet); the
       // module rate-limits per identity and never reveals more than 404.
       if (url.pathname === "/api/access-requests" && req.method === "POST") {
+        // The other three open POST routes all bound themselves per address
+        // before reading a body; this one did not, so the only limit it had was
+        // keyed on a field the caller chooses.
+        rate(`access-request:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"])) {
           reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, requestId are the accepted fields");
@@ -2626,11 +2631,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Non-room 5xx (inbox, account session, login) still leave an operator trace.
         console.warn(`service diagnostic ${operationId} ${httpStatus} ${code} ${category} ${serviceRoute(req.url)}`);
       }
+      if (httpStatus === 413) {
+        // finish means handed to the OS, not received by the client. Drain
+        // in-flight bytes without buffering, then close; a stalled sender gets
+        // at most one second to read the refusal before its socket is destroyed.
+        const socket = req.socket;
+        res.once("finish", () => {
+          if (req.complete) socket.end();
+          else req.once("end", () => socket.end());
+          const deadline = setTimeout(() => socket.destroy(), 1000);
+          deadline.unref();
+          socket.once("close", () => clearTimeout(deadline));
+        });
+      }
       json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
-      // An oversized request is refused after the 413 leaves: destroying the
-      // socket releases the connection at once instead of letting a slow client
-      // hold it until it finishes sending the body it was told to stop sending.
-      if (httpStatus === 413) res.once("finish", () => { try { req.socket?.destroy(); } catch { /* the client is already gone */ } });
     }
   });
   server.requestTimeout = 15000;

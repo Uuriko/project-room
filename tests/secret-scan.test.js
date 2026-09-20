@@ -60,6 +60,18 @@ test("telegram bot token shape is detected with a redacted preview", () => {
   assert.ok(!hit.preview.includes(token.slice(5)), "preview must be redacted");
 });
 
+test("telegram token detection includes non-word endings without partial matches", () => {
+  const pattern = PATTERNS.find(p => p.id === "telegram-bot-token").regex;
+  for (const length of [34, 35]) for (const ending of ["-", "_", "a", "0"]) {
+    const token = [String(123456789), "A".repeat(length - 1) + ending].join(":");
+    for (const wrapped of [token, `https://api.telegram.org/bot${token}/sendMessage`, `"${token}"`]) {
+      assert.equal(pattern.exec(wrapped)?.[0].replace(/^bot/, ""), token);
+      assert.ok(scanText(wrapped).some(f => f.rule === "telegram-bot-token"));
+    }
+    assert.equal(pattern.test(token + "AA"), false, "do not match only a prefix of a longer alphabet run");
+  }
+});
+
 test("regression: telegram fixtures carry no real-shaped bot token", () => {
   const pattern = PATTERNS.find(p => p.id === "telegram-bot-token");
   const globalShape = new RegExp(pattern.regex.source, "g");
@@ -77,4 +89,24 @@ test("regression: telegram fixtures carry no real-shaped bot token", () => {
     }
   }
   assert.ok(shapedTotal > 0, "fixtures should still exercise the token shape");
+});
+
+// The gate's allowlist is where a false positive gets silenced, so it is also
+// where a real secret would get silenced by accident. This pins the one entry
+// that suppresses a whole shape rather than a named line.
+test("the gate allows a token assembled at runtime and still catches a literal one", async () => {
+  const { ALLOWLIST } = await import("../scripts/secret-scan-check.mjs");
+  const scan = line => scanText(line, { allowlist: ALLOWLIST });
+
+  // A template literal whose only content is interpolations and separators
+  // carries nothing to leak. server/web-push.mjs builds the VAPID JWT this way.
+  assert.deepEqual(scan("  const token = `${signingInput}.${toBase64Url(signature)}`;"), []);
+  assert.deepEqual(scan("  const token = `${a}`;"), []);
+  assert.deepEqual(scan("    headers: { token: `${scheme} ${value}` },"), []);
+
+  // A literal run inside the template is exactly what the rule is for.
+  const literal = "sk_test_" + randomBytes(16).toString("hex");
+  assert.equal(scan(`  const token = \`${literal}\`;`).length > 0, true, "a hardcoded value in a template is still a finding");
+  assert.equal(scan(`  const token = \`prefix-\${x}-${literal}\`;`).length > 0, true, "and so is one beside an interpolation");
+  assert.equal(scan(`  const password = "${literal}";`).length > 0, true);
 });

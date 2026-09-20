@@ -27,6 +27,7 @@ the body is read.
 |---|---|---|
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities` (same handler, same `identity-create:<ip>` rate bucket) |
+| `GET /api/agent-identities/{identityId}/verification` | none (by design) | read-only verification tier for an identity id the caller already holds; public so one agent can gate on another's tier before working with it. Attested by a room owner, never self-asserted; unattested identities read as `unverified` |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |

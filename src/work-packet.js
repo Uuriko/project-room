@@ -36,7 +36,10 @@ export function reportedProducer(data) {
 }
 
 // Text is never normalized here: the immutable stored message is the artifact.
-export function nativeTextEvidence(state, work, data) {
+// `allowWithdrawn` is for replay, not for submission: a completion recorded
+// before its text was withdrawn still has to reconstruct exactly, and the
+// tombstone keeps everything this needs except the body.
+export function nativeTextEvidence(state, work, data, { allowWithdrawn = false } = {}) {
   if (data.evidenceKind !== "room_text" || Object.hasOwn(data, "evidenceUrl")
     || ![data.evidenceMessageId, data.evidenceMessageEventId].every(id)
     || !Object.hasOwn(data, "previousCompletionEventId")
@@ -45,10 +48,13 @@ export function nativeTextEvidence(state, work, data) {
     || !Object.hasOwn(data, "producerId") || (data.producerId !== null && !id(data.producerId))
     || !/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion)) invalid("Choose exact text evidence and its current previous result");
   const message = state.messages.find(message => message.id === data.evidenceMessageId);
-  if (!message || message.workItemId !== work.id || !validResultBody(message.body)) invalid("Choose a well-formed message explicitly linked to this work");
+  const withdrawn = allowWithdrawn && Boolean(message?.deletedAt);
+  if (!message || message.workItemId !== work.id || !(withdrawn ? message.body === null : validResultBody(message.body)))
+    invalid("Choose a well-formed message explicitly linked to this work");
   return { kind: "room_text", messageId: message.id, messageEventId: data.evidenceMessageEventId,
     previousCompletionEventId: data.previousCompletionEventId, postedById: message.authorId,
-    proposal: message.proposal ? structuredClone(message.proposal) : null };
+    proposal: message.proposal ? structuredClone(message.proposal) : null,
+    ...(withdrawn ? { withdrawnAt: message.deletedAt, withdrawnBy: message.deletedBy } : {}) };
 }
 
 // Both clients verify the exact selected body with platform crypto, not the DOM.
@@ -79,21 +85,36 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
   }
   if (["draft", "room_text"].includes(result.kind)) {
     const text = result.text, proposal = text?.proposal;
+    // Withdrawn text is served as an absence, not as content: the body is gone
+    // and the hash stays, so the reader can see that a result was reported and
+    // verified and that what it pointed at has since been taken out of the
+    // room. There is nothing to re-digest, and calling that a mismatch would
+    // tell the reader the room is lying to them when it is not.
+    const withdrawn = result.kind === "room_text" && text?.withdrawnAt !== undefined;
     check(id(text?.messageId) && id(text.messageEventId) && id(text.postedById) && Number.isFinite(Date.parse(text.createdAt))
       && revision(text.postSequence) && text.postSequence > 0 && text.postSequence <= current.evaluatedThrough
-      && validResultBody(text.body)
+      && (withdrawn ? text.body === null : validResultBody(text.body))
       && (proposal === null || id(proposal?.packetId) && revision(proposal.basisRevision) && revision(proposal.submittedAtRevision)
         && proposal.basisRevision <= proposal.submittedAtRevision && proposal.attribution === "manual-unverified"));
-    const bytes = new TextEncoder().encode(text.body);
-    const digest = `sha256:${Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("")}`;
-    check(text.byteLength === bytes.length && text.evidenceVersion === digest);
+    let digest = text.evidenceVersion;
+    if (withdrawn) {
+      check(/^sha256:[0-9a-f]{64}$/.test(text.evidenceVersion) && Number.isInteger(text.byteLength) && text.byteLength > 0
+        && id(text.withdrawnBy) && Number.isFinite(Date.parse(text.withdrawnAt)));
+    } else {
+      const bytes = new TextEncoder().encode(text.body);
+      digest = `sha256:${Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("")}`;
+      check(text.byteLength === bytes.length && text.evidenceVersion === digest);
+    }
     if (result.kind === "draft") check(text.messageId === draftMessageId && !result.receipt);
     else {
       const native = result.receipt.nativeText;
       check(result.receipt.evidenceUrl === null && result.receipt.evidenceVersion === digest && native?.kind === "room_text"
         && native.messageId === text.messageId && native.messageEventId === text.messageEventId && native.postedById === text.postedById
         && (native.previousCompletionEventId === null || id(native.previousCompletionEventId))
-        && JSON.stringify(native.proposal) === JSON.stringify(proposal));
+        && JSON.stringify(native.proposal) === JSON.stringify(proposal)
+        // The receipt and the served text must agree that it was withdrawn,
+        // and by whom: one of them saying so alone is a tampered answer.
+        && native.withdrawnAt === text.withdrawnAt && native.withdrawnBy === text.withdrawnBy);
     }
   }
   return value;

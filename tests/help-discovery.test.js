@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { PERMISSIONS } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture } from "../scripts/frozen-runtime-fixture.mjs";
@@ -207,8 +208,19 @@ test("real older schema13 service preserves data but explicitly lacks help disco
   const { auditRecovery: olderAudit } = await import(pathToFileURL(join(runtime, "server/recovery.mjs")));
   const { RoomAgentClient: OlderClient } = await import(pathToFileURL(join(runtime, "client/room-agent.mjs")));
   const olderClient = new OlderClient(f.config());
-  assert.equal((await olderClient.orient({ query: "agenda" })).work.length, 1, "old client still reads the new service");
-  assert.equal((await olderClient.orient({ focus: "needs_me" })).work.length, 0);
+  // The old client refuses a work snapshot in which any member holds a
+  // permission its own vocabulary does not name, and it is right to: two of its
+  // own checks refuse to vouch for an agent that holds manage_members or
+  // decide, and it cannot make that judgement about a word it has never seen.
+  // invite_member (#614) is in the owner's default grant, so a client from
+  // before it cannot orient in any room at all. That is the real cost of
+  // minting a permission, and it belongs in a test rather than in a support
+  // thread. Reads that do not carry the member list are unaffected.
+  const { PERMISSIONS: olderVocabulary } = await import(pathToFileURL(join(runtime, "src/events.js")));
+  const minted = PERMISSIONS.filter(permission => !olderVocabulary.includes(permission));
+  assert.ok(minted.includes("invite_member"), `the room's vocabulary has grown by ${minted.join(", ") || "nothing"}`);
+  await assert.rejects(olderClient.orient({ query: "agenda" }), { code: "invalid_response" });
+  await assert.rejects(olderClient.orient({ focus: "needs_me" }), { code: "invalid_response" });
   assert.equal((await olderClient.workContext("test-handoff")).work.id, "test-handoff");
   const createOldFixture = await frozenAcceptanceFixture(resolve("."), runtime, "87a54234db084eb7a2fe31de092c6301b5158bd2");
   const old = await fixture(t, createOldFixture, olderServer); old.invite();

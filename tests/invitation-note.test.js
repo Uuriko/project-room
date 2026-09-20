@@ -43,6 +43,14 @@ for (const boundary of ["generation", "visible session", "client session", "acco
   test(`invitation note retires before copying after ${boundary} changes`, async t => {
     const f = setup(t); await f.open(); await f.create(); f.note("Private draft");
     assert.ok(f.node("#share-note-preview").value.includes("Private draft"));
+    // Creating a link now copies it straight away (#634, "Reduce Room
+    // auth/session friction"), so the clipboard is already non-empty here and
+    // asserting it is empty would only be asserting the retired contract.
+    // The property this test is actually about is unchanged: once an authority
+    // boundary moves, the copy control must add nothing further, and the
+    // displayed link, note and preview must be gone.
+    const copiedOnCreation = f.copies.length;
+    assert.equal(copiedOnCreation, 1, "creating the link copies it exactly once");
     if (boundary === "generation") f.client.generation++;
     if (boundary === "visible session") f.setSession({ ...f.client.session });
     if (boundary === "client session") f.client.session = { ...f.client.session };
@@ -52,7 +60,7 @@ for (const boundary of ["generation", "visible session", "client session", "acco
     if (boundary === "inactive") f.member.active = false;
     if (boundary === "agent") f.member.kind = "agent";
     await f.node("#share-note-copy").handlers.click();
-    assert.deepEqual(f.copies, []);
+    assert.equal(f.copies.length, copiedOnCreation, "the copy control must add nothing once the boundary has moved");
     for (const field of ["share-link-url", "share-note-text", "share-note-preview"]) assert.equal(f.node("#" + field).value, "");
     assert.equal(f.node("#share-link-result").hidden, true);
   });
@@ -103,8 +111,13 @@ for (const status of ["full", "cancelled", "expired", "authority_changed"]) {
       ? { link: { id: "link", status: "active", expiresAt: options.data.expiresAt } }
       : { links: [{ id: "link", status, joins: 0, maxJoins: 1, expiresAt: Date.now() + 3600000 }] });
     await f.open(); await f.create();
+    // Creation copies the link itself now (#634), and the listing retiring it
+    // races that copy, so the count here is not the thing to pin. What must
+    // hold is that the retired result yields nothing further to the copy
+    // control.
+    const copiedOnCreation = f.copies.length;
     await f.node("#share-link-copy").handlers.click();
     assert.equal(f.node("#share-link-result").hidden, true);
-    assert.deepEqual(f.copies, []);
+    assert.equal(f.copies.length, copiedOnCreation, "a retired invitation must not be copyable");
   });
 }

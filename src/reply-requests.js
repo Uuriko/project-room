@@ -115,7 +115,11 @@ export function prepareReplyPost(state, incoming) {
   const mode = replyPostMode(incoming.data);
   requireValid(mode, "Reply request policy requires explicit request fields");
   const data = incoming.data;
-  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
+  // channelId arrived with channels, after this list was written. Every message
+  // the composer sends now carries one, and message.posted's command shape
+  // already permits it, so leaving it out here refused every reply request and
+  // every answer with "Unexpected reply request fields".
+  const allowed = ["messageId", "body", "channelId", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");

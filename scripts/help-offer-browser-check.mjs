@@ -77,17 +77,17 @@ for (const touch of [false, true]) test("human + agent offers " + (touch ? "mobi
   await owner.card.locator(".work-help").evaluate(node => { node.open = true; });
   await owner.card.scrollIntoViewIfNeeded(); await owner.page.screenshot({ path: prefix + "-choices.png" });
   assert.equal(await owner.card.locator(".help-offer img").count(), 0);
-  await owner.action("select-offer", humanOffer.id); await owner.page.locator('[name="reason"]').fill("Use this example");
+  await owner.action("select-offer", humanOffer.id); await owner.page.locator('#action-fields [name="reason"]').fill("Use this example");
   await owner.save(); await guest.card.getByText("Helper selected", { exact: true }).waitFor();
   f.help("withdrawn");
   await guest.card.getByText("Helper · review needed", { exact: true }).waitFor();
   await guest.card.locator(".work-help").evaluate(node => { node.open = true; }); await guest.card.scrollIntoViewIfNeeded();
   await guest.page.screenshot({ path: prefix + "-review.png" });
-  await guest.action("release-offer", humanOffer.id); await guest.page.locator('[name="reason"]').fill("Request ended");
+  await guest.action("release-offer", humanOffer.id); await guest.page.locator('#action-fields [name="reason"]').fill("Request ended");
   await guest.page.locator("#action-form button[type=submit]").click();
   assert.equal(await guest.dialog.isVisible(), true);
   await guest.page.locator('[name="externalActivityUnverified"]').check(); await guest.save();
-  await owner.action("decline-offer", "agent-offer"); await owner.page.locator('[name="reason"]').fill("Request ended"); await owner.save();
+  await owner.action("decline-offer", "agent-offer"); await owner.page.locator('#action-fields [name="reason"]').fill("Request ended"); await owner.save();
   await owner.card.locator(".offer-history").waitFor({ state: "attached" });
   assert.equal(await owner.card.locator(".offer-history").evaluate(node => node.open), false);
   const state = f.store.room("commons").state;
@@ -141,12 +141,12 @@ test("human selection refuses a concurrent winner without silently taking over",
   const f = await setup(t), guest = await f.open("guest"), owner = await f.open("owner");
   await guest.action("offer-help"); await guest.page.locator('[name="plan"]').fill("Human alternative"); await guest.save();
   const humanOffer = Object.values(f.store.room("commons").state.helpOffers)[0]; await f.agentOffer();
-  await owner.action("select-offer", humanOffer.id); await owner.page.locator('[name="reason"]').fill("Human contribution");
+  await owner.action("select-offer", humanOffer.id); await owner.page.locator('#action-fields [name="reason"]').fill("Human contribution");
   await owner.page.route("**/api/rooms/commons/commands", route => { f.update("agent-offer", "selected"); return route.continue(); });
   await owner.page.locator("#action-form button[type=submit]").click();
   await owner.page.locator("#refresh-action").waitFor({ state: "visible" });
   assert.equal(await owner.page.locator("#action-form button[type=submit]").isDisabled(), true);
-  assert.equal(await owner.page.locator('[name="reason"]').inputValue(), "Human contribution");
+  assert.equal(await owner.page.locator('#action-fields [name="reason"]').inputValue(), "Human contribution");
   assert.equal(f.store.room("commons").state.helpOffers["agent-offer"].status, "selected");
   assert.equal(f.store.room("commons").state.helpOffers[humanOffer.id].status, "offered");
   assert.deepEqual(f.errors, []);
@@ -177,7 +177,7 @@ test("human offer text stays literal and a pending contribution can be withdrawn
   await guest.card.locator(".work-help").evaluate(node => { node.open = true; });
   assert.equal(await guest.card.locator(".help-offer img").count(), 0);
   assert.equal(await guest.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-  await guest.action("withdraw-offer", offer.id); await guest.page.locator('[name="reason"]').fill("No longer available"); await guest.save();
+  await guest.action("withdraw-offer", offer.id); await guest.page.locator('#action-fields [name="reason"]').fill("No longer available"); await guest.save();
   assert.equal(f.store.room("commons").state.helpOffers[offer.id].status, "withdrawn"); assert.deepEqual(f.errors, []);
 });
 

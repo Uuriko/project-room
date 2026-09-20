@@ -9,6 +9,10 @@ import {
   isCatalogAgentType, rosterSelection, routeFromDisplayName
 } from "../src/room-roster.js";
 import { publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 
 const checkout = fileURLToPath(new URL("..", import.meta.url));
 
@@ -99,4 +103,30 @@ test("Add agent markup renders the catalog with roster aliases on the four named
   assert.match(css, /\.agent-type-catalog/);
   assert.match(css, /\.agent-type-card/);
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
+});
+
+// The catalog, the reducer and the UI all handled agentType; the command
+// envelope did not list it, and it is the envelope that decides what a client
+// may send. So every attempt to connect a typed agent - which is the only way
+// the People rail creates one - came back 422 "Unexpected field: agentType",
+// while tests/events.test.js went on passing because it calls the reducer
+// directly. A field is not shipped until it survives the door it arrives
+// through.
+test("a member may be added with a catalog agentType through the command door", t => {
+  const fixture = createAcceptanceFixture();
+  t.after(() => { fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
+  const add = (memberId, data) => fixture.store.command(fixture.keys.owner, "commons", { id: randomUUID(),
+    type: T.MEMBER_ADDED, data: { memberId, displayName: "Agent", kind: "agent", permissions: [], accountableHumanId: "owner", ...data } });
+  const member = id => fixture.store.room("commons").state.members[id];
+
+  add("typed-agent", { agentType: "claude-code" });
+  assert.equal(member("typed-agent").agentType, "claude-code");
+
+  // Still bounded: the envelope lets the word through, the reducer decides
+  // whether it is one the catalog could have produced.
+  assert.throws(() => add("shouty-agent", { agentType: "NOT VALID" }), /agentType/);
+  assert.equal(member("shouty-agent"), undefined);
+
+  add("plain-agent", {});
+  assert.equal("agentType" in member("plain-agent"), false, "an untyped agent gains no field");
 });

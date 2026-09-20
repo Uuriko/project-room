@@ -4,7 +4,8 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent, replay, event } from "../src/events.js";
-import { replyContextOwners, MAX_REPLY_REQUESTS } from "../src/reply-requests.js";
+import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
+import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
 
 function fixture(t, extra = []) {
@@ -282,4 +283,36 @@ test("zero checkpoints, post-terminal comments and pasted-draft provenance stay 
   assert.deepEqual(f.store.replyRequests.history(f.keys.agent, "commons", { checkpoint: encode(checkpoint) }).page.items, history.page.items);
   checkpoint.throughEventId = "not-zero";
   assert.throws(() => f.store.replyRequests.history(f.keys.agent, "commons", { checkpoint: encode(checkpoint) }), { code: "reply_history_changed" });
+});
+
+// Every message the composer sends carries the channel it was written in, and
+// message.posted's command shape has permitted channelId since channels
+// landed. prepareReplyPost's own allowlist did not, so a reply request and an
+// answer were both refused with "Unexpected reply request fields" - in the
+// browser, before anything was sent, leaving the composer stuck in request
+// mode with the request still open. Every fixture in this file omitted
+// channelId, which is why the whole file passed while the feature did not
+// work at all.
+test("a reply request and its answer carry the channel they were written in", t => {
+  const f = fixture(t);
+  const question = f.open("guest", { channelId: DEFAULT_CHANNEL_ID });
+  const request = f.state().replyRequests[question.command.data.messageId];
+  assert.equal(request.status, "open");
+
+  f.send("agent", f.answer(question, question.receipt, { channelId: DEFAULT_CHANNEL_ID }));
+  assert.equal(f.state().replyRequests[question.command.data.messageId].status, "answered");
+
+  // The channel is kept on the messages, not swallowed on the way through.
+  for (const message of f.state().messages) assert.equal(message.channelId, DEFAULT_CHANNEL_ID);
+  assert.doesNotThrow(() => auditRecovery(f.store), "the audit replays a channelled reply request");
+
+  // Still an allowlist, and widening it by one name did not open it. No field
+  // the command envelope permits can reach this branch today - the only ones
+  // left are the proposal fields, which a reply request refuses by name one
+  // line earlier - so it is exercised directly, which is also the shape the
+  // next added field will arrive in.
+  assert.throws(() => prepareReplyPost(f.state(), { actorId: "guest", id: "x", data: {
+    requestPolicyVersion: 1, messageId: "m", body: "Another?", toMemberId: "agent", requestKind: "reply",
+    channelId: DEFAULT_CHANNEL_ID, somethingNew: "not declared anywhere" } }),
+    /Unexpected reply request fields/);
 });

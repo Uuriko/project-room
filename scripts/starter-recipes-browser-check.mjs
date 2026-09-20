@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUp } from "./room-chrome.mjs";
+import { openCatchUp, closeCatchUp } from "./room-chrome.mjs";
 
 test("recipe strip: catch-up and next-work chips render from committed state; dismissal is local only", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -42,6 +42,7 @@ test("recipe strip: catch-up and next-work chips render from committed state; di
   await strip.locator('[data-recipe-action="open-catch-up"]').click();
   await page.locator("#catchup-dialog").waitFor({ state: "visible" });
   await openCatchUp(page);
+  await closeCatchUp(page);
   // Dismissal hides only that chip for this page session.
   await chips.first().locator("[data-recipe-dismiss]").click();
   assert.equal(await strip.locator(".recipe-chip").count(), 1);

@@ -49,3 +49,34 @@ test("saved result questions and unknown retries recover after a newer result wi
   memory.set(recovery.key, JSON.stringify(saved));
   assert.equal(recovery.read("scope", state).drafts.entries.has(key), false);
 });
+test("channel-bearing pending reply questions recover with the channel retained", () => {
+  const state = fixture(), q = creditQuestion(state, "work", "reviewer", "result"), key = replyDraftKey(q.mode);
+  const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k,v) => memory.set(k,v), removeItem: k => memory.delete(k) }, () => 1000);
+  const drafts = new ConversationDrafts();
+  // The pending command was built with a channel; the draft entry retains it so recovery recomputes identical contents.
+  const data = replyDraftData(q.mode, { ...q, messageId: "question", channelId: "general" });
+  assert.equal(data.channelId, "general");
+  const pending = draftCommand(null, "message.posted", data);
+  drafts.save(key, { ...q, threadId: "text", channelId: "general", pending });
+  recovery.write("scope", drafts, "text", key);
+  const restored = recovery.read("scope", state);
+  assert.equal(restored.activeKey, key, "the channel-bearing pending question is not dropped");
+  assert.deepEqual(restored.drafts.get(key).pending, pending);
+});
+
+test("pending reply channel survives repeated recovery and tampering cannot rebind it", () => {
+  const state = fixture(), q = creditQuestion(state, "work", "reviewer", "result"), key = replyDraftKey(q.mode);
+  const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k,v) => memory.set(k,v), removeItem: k => memory.delete(k) }, () => 1000);
+  const drafts = new ConversationDrafts();
+  const pending = draftCommand(null, "message.posted", replyDraftData(q.mode, { ...q, messageId: "question", channelId: "general" }));
+  drafts.save(key, { ...q, threadId: "text", channelId: "general", pending });
+  recovery.write("scope", drafts, "text", key);
+  const first = recovery.read("scope", state);
+  assert.equal(first.drafts.get(key).channelId, "general");
+  recovery.write("scope", first.drafts, "text", key);
+  assert.deepEqual(recovery.read("scope", state).drafts.get(key).pending, pending);
+  const saved = JSON.parse(memory.get(recovery.key));
+  saved.entries.find(([id]) => id === key)[1].channelId = "other";
+  memory.set(recovery.key, JSON.stringify(saved));
+  assert.equal(recovery.read("scope", state).drafts.entries.has(key), false);
+});

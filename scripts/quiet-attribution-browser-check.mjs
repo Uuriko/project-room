@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
-import { ensurePeopleOpen, openSearch } from "./room-chrome.mjs";
+import { ensurePeopleOpen, ensureSidebarClosed, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -34,13 +34,18 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
   const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
   const directed = record('naming-directed').locator('.audience-chip');
-  assert.equal(await directed.textContent(), 'To Jordan · room-visible');
+  // RC-2026-09-19-070 made a targeted message visible only to its sender and
+  // its recipient, so the chip says private where it used to say room-visible.
+  assert.equal(await directed.textContent(), 'To Jordan · private');
   assert.match(await next.textContent(), /Jordan —/); assert.equal((await next.textContent()).includes(jordan), false);
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
   assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
   await ensurePeopleOpen(page);
   assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan));
+  // On a phone the People rail is an overlay; leaving it up covers the search
+  // control in the top bar.
+  await ensureSidebarClosed(page);
   await openSearch(page);
   await page.locator('#message-search').fill('I can help');
   assert.equal(await page.locator('#search-list strong').textContent(), 'Jordan');

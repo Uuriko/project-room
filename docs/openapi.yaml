@@ -1176,6 +1176,14 @@ paths:
   /api/rooms/{roomId}/work-result:
     get:
       summary: Read a work result
+      description: >-
+        For room_text evidence, `result.text` carries the exact stored body and
+        its sha256. When the message behind it has been deleted, the text was
+        withdrawn: `body` is null and `withdrawnAt` / `withdrawnBy` say when and
+        by whom, while `evidenceVersion` still names what was reported and
+        verified. The receipt's `nativeText` carries the same two fields; a
+        response where only one side says so is a tampered answer and the
+        clients refuse it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: workItemId
@@ -1183,7 +1191,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        '200': { description: Result record }
+        '200': { description: "Result record; a withdrawn room_text result answers 200 with body: null" }
   /api/rooms/{roomId}/return-brief:
     get:
       summary: Catch-up digest for returning agents
@@ -2412,7 +2420,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - { name: keyId, in: path, required: true, schema: { type: string } }
+        - { name: keyId, in: path, required: true, example: rak_example, schema: { type: string, pattern: '^rak_[A-Za-z0-9_-]{1,64}$' } }
         - { name: action, in: path, required: true, schema: { type: string, enum: [rotate, revoke] } }
       responses:
         '200': { description: "rotate: the rotated record with the new secret (shown once), presentation-ready credential ('rak_'+secret), and scope-filtered next[]; revoke: { keyId, revoked: true }" }
@@ -5143,6 +5151,7 @@ paths:
         'verified', verifiedBy, verifiedAt }) or { identityId, level:
         'unverified' } when unattested. Verification is host-supplied —
         attested by a room owner, never self-asserted.
+      security: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:
