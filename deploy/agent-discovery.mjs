@@ -98,6 +98,10 @@ export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
 // Kits / tools catalog — a distinct packet, not the llms short index.
 // Agents guess /room/kit, /room/kits, /room/apps, /room/tools on www.
 export const KITS_CATALOG_PATH = "/kits.txt";
+// Machine-readable skills catalog: the HTTP twin of the A2A card's skills
+// array, simplified for plain fetchers (id, name, description, tags, via).
+// Served as JSON at /skills (+ /room/skills, /project-room/skills).
+export const SKILLS_CATALOG_PATH = "/skills";
 export const KITS_CATALOG_SYNONYMS = Object.freeze([
   "/room/kit", "/room/kits", "/room/apps", "/room/tools"
 ]);
@@ -149,6 +153,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/room/mcp", auth: false, first: "hosted MCP join; prefix-preserving edge" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
+  Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
@@ -250,6 +255,7 @@ export function agentCard() {
       healthz: `${ROOM_ORIGIN}/api/health`,
       llms: `${ROOM_ORIGIN}/llms.txt`,
       llms_full: `${ROOM_ORIGIN}/llms-full.txt`,
+      skills: `${ROOM_ORIGIN}${SKILLS_CATALOG_PATH}`,
       agent_json: `${ROOM_ORIGIN}/.well-known/agent.json`
     }),
     key_routes: KEY_ROUTES,
@@ -279,6 +285,7 @@ card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
+skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
 
@@ -362,6 +369,7 @@ healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 kits ${ROOM_ORIGIN}/kits.txt
+skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 
 Prefix-preserving edges can fetch the same bytes at /room/llms.txt,
@@ -478,11 +486,29 @@ export function agentCardJson() {
   return JSON.stringify(agentCard(), null, 2) + "\n";
 }
 
+// GET /skills body: the room's skills as plain JSON (no A2A envelope).
+export function skillsJson() {
+  const skills = A2A_SKILLS.map(skill => ({
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    tags: [...skill.tags],
+    via: skill.tags.includes("mcp") ? "mcp" : skill.tags.includes("join") ? "door" : "direct"
+  }));
+  return JSON.stringify({
+    product: "Project Room",
+    catalog: `${ROOM_ORIGIN}${SKILLS_CATALOG_PATH}`,
+    card: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
+    skills
+  }, null, 2) + "\n";
+}
+
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
   [JOIN_PROMPT_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: joinPrompt() }),
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
   [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
+  [SKILLS_CATALOG_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: skillsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
 });
@@ -495,6 +521,10 @@ const ALIASES = Object.freeze({
   "/room/join.txt": JOIN_PROMPT_PATH,
   "/room/llms-full.txt": "/llms-full.txt",
   "/room/kits.txt": KITS_CATALOG_PATH,
+  // Skills catalog leftovers (same bytes as /skills).
+  ...Object.fromEntries(
+    ["/room/skills", "/project-room/skills"].flatMap(path =>
+      withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/project-room/llms.txt": "/llms.txt",
   "/project-room/join.txt": JOIN_PROMPT_PATH,

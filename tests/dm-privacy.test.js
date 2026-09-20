@@ -35,6 +35,10 @@ async function fixture(t) {
 async function seed(t) {
   const f = await fixture(t);
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
+  // Consent-bound DMs: the producer's DMs to the reviewer need the
+  // reviewer's approval first.
+  f.store.dmConsents.request("commons", "producer", "reviewer", "test fixture");
+  f.store.dmConsents.decide("commons", "reviewer", "producer", "approve");
   send("producer", T.MESSAGE_POSTED, { messageId: "dm-1", body: DM_BODY, toMemberId: "reviewer" });
   send("producer", T.MESSAGE_POSTED, { messageId: "dm-work-1", body: DM_WORK_BODY, toMemberId: "reviewer", workItemId: "test-handoff" });
   send("owner", T.MESSAGE_POSTED, { messageId: "thread-root", body: "a public thread root" });

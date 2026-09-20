@@ -241,6 +241,22 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     await json(await call('/api/rooms/commons?view=work', { headers: offerHeaders }), 422);
     const questionCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-request', requestKind: 'reply',
       toMemberId: joined.session.member.id, body: 'Which agenda would you choose?' } };
+    // Consent-bound DMs: the owner's question below is a DM to the guest, so
+    // the guest must approve the direction first (requester = owner).
+    const ownerViewer = await json(await call('/api/rooms/commons', { headers: ownerHeaders }));
+    const dmConsent = await json(await call('/api/rooms/commons/dm-consents', { headers: ownerHeaders,
+      data: { targetId: joined.session.member.id, reason: 'reply-request question' } }), 201);
+    assert.equal(dmConsent.status, 'pending');
+    const dmApproved = await json(await call(`/api/rooms/commons/dm-consents/${ownerViewer.viewerId}/decide`,
+      { headers: guestHeaders, data: { decision: 'approve' } }), 200);
+    assert.equal(dmApproved.status, 'approved');
+    // The guest's answer below is a DM back to the owner: approve that direction too.
+    const dmBack = await json(await call('/api/rooms/commons/dm-consents', { headers: guestHeaders,
+      data: { targetId: ownerViewer.viewerId, reason: 'reply answer' } }), 201);
+    assert.equal(dmBack.status, 'pending');
+    const dmBackApproved = await json(await call(`/api/rooms/commons/dm-consents/${joined.session.member.id}/decide`,
+      { headers: ownerHeaders, data: { decision: 'approve' } }), 200);
+    assert.equal(dmBackApproved.status, 'approved');
     const asked = await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: questionCommand }), 201);
     const selectedReply = await json(await call('/api/rooms/commons/reply-context?requestMessageId=worker-reply-request', { headers: guestHeaders }));
     assert.equal(selectedReply.current.answerBasis.contextEventId, asked.event.id);

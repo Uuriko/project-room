@@ -14,6 +14,8 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
+import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
+import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
@@ -546,6 +548,8 @@ export class RoomStore {
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.replyRequests = new ReplyRequests(this);
+    this.dmConsents = new DmConsents(this);
+    this.publicFace = new PublicFace(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
@@ -711,6 +715,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(spamQuarantineSchema);
+      // Consent-bound DMs and the public read-only face: purely additive
+      // side tables (no events, no projection impact), same pattern.
+      this.db.exec(dmConsentSchema);
+      this.db.exec(roomPublicFaceSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -2580,6 +2588,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // inside the readTransaction below ("Cannot write inside a read-only
     // transaction" -> 500), so warm it here first. Idempotent once warm.
     this.collab.listAssignments(roomId);
+    // Consent-bound DMs: incoming pending requests for the inbox. Read
+    // outside the readTransaction below — the module wraps reads in a
+    // write-capable transaction, which cannot nest inside a read-only one.
+    // authenticate() is a pure read, so calling it twice is harmless.
+    const preAuth = this.authenticate(token, roomId, expectedSessionBinding);
+    const dmRequests = this.dmConsents.pendingFor(roomId, preAuth.member.id);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
@@ -2628,6 +2642,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
         next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions)),
+        dmRequests: Object.freeze(dmRequests),
       });
     });
   }
@@ -2666,6 +2681,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
       refuseArchivedWrite(room.state);
+      if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
+        // Consent-bound DMs: the recipient must have approved this direction.
+        // Runs before the event is built, so a refused DM never persists and
+        // never wakes its target.
+        this.dmConsents.requireApproved(roomId, auth.member.id, command.data.toMemberId);
+      }
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);

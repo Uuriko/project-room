@@ -21,6 +21,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
     send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
     send(owner, T.MEMBER_ADDED, { memberId: "room-agent", displayName: "Room agent", kind: "agent", permissions: [] });
+    // Consent-bound DMs: the owner addresses both members in this flow.
+    for (const target of ["maya", "room-agent"]) {
+      store.dmConsents.request("commons", "owner", target, "browser test");
+      store.dmConsents.decide("commons", target, "owner", "approve");
+    }
     const human = store.issueAccessKey("commons", "maya"), agent = store.issueAccessKey("commons", "room-agent");
     send(human, T.MESSAGE_POSTED, { messageId: "book-club", body: "Anyone up for a weekend book club?" });
     send(agent, T.MESSAGE_POSTED, { messageId: "book-reply", body: "A science-fiction pick could be fun. Which edition?", replyToId: "book-club" });

@@ -136,6 +136,12 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
     current.email.verify();
   }
   const cursors = current.db.prepare("SELECT * FROM cursors ORDER BY room_id,member_id").all();
+  // Consent-bound DMs: the upgrade flow below posts DMs in both directions,
+  // so seed the (directional) consent pairs first.
+  current.dmConsents.request("commons", "owner", "agent", "upgrade check");
+  current.dmConsents.decide("commons", "agent", "owner", "approve");
+  current.dmConsents.request("commons", "agent", "owner", "upgrade answer");
+  current.dmConsents.decide("commons", "owner", "agent", "approve");
   const question = { id: "upgrade-question", type: "message.posted", data: { messageId: "upgrade-question-message",
     body: "Can you check these instructions?", requestKind: "reply", toMemberId: "agent" } };
   const asked = current.command(f.keys.owner, "commons", question);

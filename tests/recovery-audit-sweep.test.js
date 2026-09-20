@@ -53,6 +53,9 @@ function sweep() {
   const item = (id = W) => state().workItems[id];
   const exercised = new Set(["room.created", "member.added", "work.proposed"]);
   const broke = [];
+  // Consent-bound DMs: the sweep's owner→producer reply-request DM needs approval.
+  fixture.store.dmConsents.request("commons", "owner", "producer", "test fixture");
+  fixture.store.dmConsents.decide("commons", "producer", "owner", "approve");
 
   const step = (type, actor, data) => {
     let receipt;

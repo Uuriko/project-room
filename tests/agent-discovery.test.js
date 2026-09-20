@@ -38,7 +38,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
+    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/skills", "/.well-known/agent.json",
     "/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",

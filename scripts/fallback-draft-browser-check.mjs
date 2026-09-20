@@ -24,7 +24,7 @@ const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? headCommit;
 const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? '4a2490bdef0be2858901f1675b3177454181d87e';
 
 for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'touch' : 'desktop'}: drafts survive and sign-out clears private state`, { timeout: 60000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'room-draft-switch-')), fixture = createAcceptanceFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'room-draft-switch-')), fixture = createAcceptanceFixture({ dmConsent: true });
   let browser, server, runtimeStore, port;
   const stop = async () => {
     if (server) { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); server = null; }

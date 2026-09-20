@@ -33,6 +33,16 @@ export async function startHelperAgentExercise({ humanReviewer = false } = {}) {
     store.agentConnections.apply(slot.token, "commons", { action: "create", requestId: randomUUID(), memberId: "helper",
       displayName: "Acceptance helper", access: "chat", keyHash: createHash("sha256").update(token).digest("hex"),
       expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, slot.session.sessionBinding);
+    // Consent-bound DMs: the helper agent answers the reviewer directly,
+    // and the owner addresses both in the credit-question flow.
+    // Approve all directions among the three so UI journeys are not blocked.
+    for (const from of ["owner", "helper", "reviewer"]) {
+      for (const to of ["owner", "helper", "reviewer"]) {
+        if (from === to) continue;
+        store.dmConsents.request("commons", from, to, "browser test");
+        store.dmConsents.decide("commons", to, from, "approve");
+      }
+    }
     send("message.posted", { messageId: "welcome-brief", body: "Our room should feel welcoming even when someone only wants to talk. Write a short welcome inviting a question, an idea, or a small draft. Do not require a task, an AI agent, payment, or a completed project. Avoid claims about automation or privacy features. Submit your own wording for review; do not publish it or approve your own result." });
     const workItemId = "welcome-card";
     send("work.proposed", { workItemId, title: "A welcome for people who just want to begin",

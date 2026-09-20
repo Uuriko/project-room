@@ -75,7 +75,7 @@ async function agentReconnectReadAndAnswer(origin, identitySecret, agentMemberId
 }
 
 test("agent asks, disconnects, reconnects, reads clarification, and answers", async t => {
-  const { origin, ownerKey, reviewerKey, inviteCode } = await serve(t);
+  const { store, origin, ownerKey, reviewerKey, inviteCode } = await serve(t);
 
   // Enrollment: the agent redeems its invite code for an identity secret.
   const redeem = await fetch(`${origin}/api/agent-invites/redeem`, { method: "POST",
@@ -86,6 +86,19 @@ test("agent asks, disconnects, reconnects, reads clarification, and answers", as
   const identitySecret = redeem.json.secret;
   const agentMemberId = redeem.json.memberId;
   assert.ok(identitySecret && agentMemberId, "redeem must return an identity secret and member id");
+
+  // Consent-bound DMs: the agent requests consent to DM the owner and the
+  // owner approves, before the first question goes out.
+  const consent = store.dmConsents.request("commons", agentMemberId, "owner", "pilot question");
+  assert.equal(consent.status, "pending");
+  const decided = store.dmConsents.decide("commons", "owner", agentMemberId, "approve");
+  assert.equal(decided.status, "approved");
+  // The reverse direction too: the owner's clarification below is itself a
+  // DM to the agent, and consent is directional.
+  const consentBack = store.dmConsents.request("commons", "owner", agentMemberId, "clarifications");
+  assert.equal(consentBack.status, "pending");
+  const decidedBack = store.dmConsents.decide("commons", agentMemberId, "owner", "approve");
+  assert.equal(decidedBack.status, "approved");
 
   // 1. The agent asks its question (first connection).
   const questionMessageId = `question-${randomUUID()}`;

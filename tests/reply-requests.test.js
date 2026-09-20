@@ -18,6 +18,15 @@ function fixture(t, extra = []) {
     send("owner", { id: `add-${memberId}`, type: "member.added", data: { memberId, displayName: memberId, kind, permissions } });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // Consent-bound DMs: the reply-request flows DM between fixture members;
+  // approve every direction up front so the tests exercise request/answer
+  // logic, not the consent gate.
+  for (const a of ["owner", "guest", "agent", "reviewer"])
+    for (const b of ["owner", "guest", "agent", "reviewer"])
+      if (a !== b) {
+        store.dmConsents.request("commons", a, b, "test fixture");
+        store.dmConsents.decide("commons", b, a, "approve");
+      }
   const open = (actor = "guest", patch = {}, id = crypto.randomUUID()) => {
     const command = { id, type: "message.posted", data: { messageId: `message-${id}`, body: "Which option should we use?", toMemberId: "agent", requestKind: "reply", ...patch } };
     return { command, receipt: send(actor, command) };

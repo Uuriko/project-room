@@ -224,6 +224,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
     identityId: identity.identityId, memberId: "wakeagent",
     displayName: "Wake Agent", permissions: ["accept_work"],
   });
+  // Consent-bound DMs: the owner's test DM to wakeagent needs approval.
+  f.store.dmConsents.request("commons", "owner", "wakeagent", "test fixture");
+  f.store.dmConsents.decide("commons", "wakeagent", "owner", "approve");
 
   // Register a wakeable host, then let it go stale.
   assert.equal((await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret)).status, 200);

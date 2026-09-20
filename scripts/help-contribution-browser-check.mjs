@@ -15,7 +15,7 @@ import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture({ managedProducer: true }), handles = new Set(), traffic = [], errors = [];
+  const f = createAcceptanceFixture({ managedProducer: true, dmConsent: true }), handles = new Set(), traffic = [], errors = [];
   const server = createRoomServer({ store: f.store, streamInterval: 50 }); let browser;
   t.after(async () => {
     for (const handle of handles) await handle.close(); await browser?.close();
@@ -28,6 +28,9 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     f.store.command(f.keys.owner, 'commons', { id: 'add-alternate', type: T.MEMBER_ADDED, data: {
       memberId: 'alternate', displayName: 'Test alternate', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'complete_work'] } });
     f.keys.alternate = f.store.issueAccessKey('commons', 'alternate');
+    // Consent-bound DMs: the owner addresses the alternate contributor.
+    f.store.dmConsents.request('commons', 'owner', 'alternate', 'browser test');
+    f.store.dmConsents.decide('commons', 'alternate', 'owner', 'approve');
   }
   f.store.command(f.keys.owner, 'commons', { id: 'help-work', type: 'work.proposed', data: { workItemId, title,
     definitionOfDone: 'Two steps: offer bounded help, then preserve attribution when adopting the draft.', mode: 'read',

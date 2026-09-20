@@ -10,7 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-export function createAcceptanceFixture({ managedProducer = false } = {}) {
+export function createAcceptanceFixture({ managedProducer = false, dmConsent = false } = {}) {
   if (typeof managedProducer !== "boolean") throw new Error("Choose a boolean managed-producer fixture mode");
   const directory = mkdtempSync(join(tmpdir(), "project-room-acceptance-"));
   let offset = 0;
@@ -35,6 +35,19 @@ export function createAcceptanceFixture({ managedProducer = false } = {}) {
       }
       send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
       keys[memberId] = store.issueAccessKey("commons", memberId);
+    }
+    // Consent-bound DMs: acceptance flows address each other directly.
+    // Opt-in via { dmConsent: true } so consent-flow tests keep a clean slate.
+    // Approves every direction among the fixture members so UI journeys that
+    // send DMs are not blocked by the consent gate.
+    if (dmConsent) {
+      for (const from of ["owner", "guest", "producer", "reviewer"]) {
+        for (const to of ["owner", "guest", "producer", "reviewer"]) {
+          if (from === to) continue;
+          store.dmConsents.request("commons", from, to, "acceptance fixture");
+          store.dmConsents.decide("commons", to, from, "approve");
+        }
+      }
     }
     send("owner", T.MESSAGE_POSTED, { messageId: "test-welcome", body: "Disposable test room. Try a reply and a reaction; no real conversation is affected." });
     send("guest", T.MESSAGE_POSTED, { messageId: "test-request", body: "Please prepare an agenda naming its owner. This is a synthetic handoff." });

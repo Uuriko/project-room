@@ -24,6 +24,12 @@ async function fixture(t) {
     server.once("error", reject); server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
   });
   const origin = `http://127.0.0.1:${server.address().port}`, identity = { roomId: "commons", memberId: "producer" };
+  // Consent-bound DMs: the owner→producer questions and producer→owner
+  // answers need mutual approval.
+  f.store.dmConsents.request("commons", "owner", "producer", "test fixture");
+  f.store.dmConsents.decide("commons", "producer", "owner", "approve");
+  f.store.dmConsents.request("commons", "producer", "owner", "test fixture");
+  f.store.dmConsents.decide("commons", "owner", "producer", "approve");
   const config = { version: 1, origin, ...identity, token: f.keys.producer }, configDirectory = join(f.directory, "private-agent");
   saveAgentConnection(configDirectory, config);
   const client = new RoomAgentClient(config);

@@ -1,0 +1,288 @@
+// Consent-bound direct messages.
+//
+// DMs travel as message.posted events with data.toMemberId (see
+// RC-2026-09-18-012 in server/store.mjs). This module adds the consent
+// layer on top of that transport: nobody may DM a member who has not
+// approved them, in that direction.
+//
+// Model: one row per (room, requester → target) direction. Consent is
+// directional — A approved to DM B says nothing about B DMing A. States:
+//   pending  — requester asked, target has not decided
+//   approved — target approved; DMs flow requester → target
+//   rejected — target declined; requester may ask again
+//   blocked  — target blocked; requester may not ask again (until unblocked)
+//   revoked  — consent was approved, then either party revoked it;
+//              forward-looking only: history stays readable, new DMs need a
+//              fresh request
+//
+// Visibility: consent rows live in this side table, never as room events,
+// so there are no room-visible indicators of DM activity. Participants see
+// their own pairs; the room owner sees every pair's metadata (handles +
+// status + timestamps) for moderation — never message contents (contents
+// are not stored here at all).
+//
+// The module is storage-shaped like AccessRequests/ShareLinks: it takes the
+// RoomStore (db handle, transactions, room state) and exports its schema
+// for store.mjs to apply. Local ServiceError avoids the store.mjs import
+// cycle (Workers-bundle-safe).
+
+class ServiceError extends Error {
+  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
+}
+
+const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+export const dmConsentSchema = `
+  CREATE TABLE IF NOT EXISTS dm_consents (
+    room_id TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','blocked','revoked')),
+    reason TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER,
+    PRIMARY KEY (room_id, requester_id, target_id)
+  );
+  CREATE INDEX IF NOT EXISTS dm_consents_target ON dm_consents(room_id, target_id, status);
+  CREATE INDEX IF NOT EXISTS dm_consents_requester ON dm_consents(room_id, requester_id, status);
+`;
+
+export const DM_CONSENT_STATUSES = Object.freeze(["pending", "approved", "rejected", "blocked", "revoked"]);
+export const DM_CONSENT_DECISIONS = Object.freeze(["approve", "reject", "block"]);
+export const MAX_DM_REASON_CHARS = 500;
+
+const nowMs = () => Date.now();
+
+const rowToPair = row => row ? Object.freeze({
+  roomId: row.room_id,
+  requesterId: row.requester_id,
+  targetId: row.target_id,
+  status: row.status,
+  reason: row.reason,
+  createdAt: row.created_at,
+  decidedAt: row.decided_at
+}) : null;
+
+export class DmConsents {
+  constructor(store) {
+    if (!store || !store.db) fail(500, "dm_store_missing", "DmConsents requires a store with a db handle");
+    this.store = store;
+    this.db = store.db;
+  }
+
+  // ---- internals -------------------------------------------------------
+  _roomState(roomId) {
+    const room = this.store.room(roomId);
+    if (!room) fail(404, "room_not_found", "No such room");
+    return room.state;
+  }
+
+  _activeMember(state, memberId) {
+    const member = state?.members?.[memberId];
+    return member && member.active !== false ? member : null;
+  }
+
+  _requireActiveMember(state, memberId, code = "member_not_found") {
+    const member = this._activeMember(state, memberId);
+    if (!member) fail(404, code, "No such active member in this room");
+    return member;
+  }
+
+  _get(roomId, requesterId, targetId) {
+    return this.db.prepare(
+      "SELECT * FROM dm_consents WHERE room_id=? AND requester_id=? AND target_id=?"
+    ).get(roomId, requesterId, targetId);
+  }
+
+  _handleOf(state, memberId) {
+    const member = state?.members?.[memberId];
+    if (!member) return null;
+    const name = typeof member.displayName === "string" && member.displayName.trim()
+      ? member.displayName.trim() : memberId;
+    return name;
+  }
+
+  _isOwner(state, memberId) {
+    return memberId === state?.room?.ownerId;
+  }
+
+  // ---- request ----------------------------------------------------------
+  // requesterId asks targetId for DM consent with an optional reason.
+  // Idempotent-ish: a live pending/approved row is returned as-is (409 for
+  // approved, 200 for pending re-ask with updated reason); rejected/revoked
+  // rows restart at pending; blocked rows refuse with 403.
+  request(roomId, requesterId, targetId, reason = "") {
+    if (typeof roomId !== "string" || !roomId) fail(422, "invalid_dm_request", "roomId is required");
+    if (typeof requesterId !== "string" || !requesterId) fail(422, "invalid_dm_request", "requesterId is required");
+    if (typeof targetId !== "string" || !targetId) fail(422, "invalid_dm_request", "targetMemberId is required");
+    if (requesterId === targetId) fail(422, "invalid_dm_request", "You do not need consent to message yourself");
+    if (typeof reason !== "string") fail(422, "invalid_dm_request", "reason must be text");
+    const cleanReason = reason.trim().slice(0, MAX_DM_REASON_CHARS);
+
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      this._requireActiveMember(state, requesterId, "requester_not_found");
+      this._requireActiveMember(state, targetId, "target_not_found");
+      const existing = this._get(roomId, requesterId, targetId);
+      if (existing) {
+        if (existing.status === "blocked") fail(403, "dm_blocked", "This member is not accepting DM requests from you");
+        if (existing.status === "approved") fail(409, "dm_already_approved", "DM consent is already approved for this direction");
+        if (existing.status === "pending") {
+          this.db.prepare(
+            "UPDATE dm_consents SET reason=?, created_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
+          ).run(cleanReason, nowMs(), roomId, requesterId, targetId);
+          return rowToPair(this._get(roomId, requesterId, targetId));
+        }
+        // rejected | revoked → fresh request
+        this.db.prepare(
+          "UPDATE dm_consents SET status='pending', reason=?, created_at=?, decided_at=NULL WHERE room_id=? AND requester_id=? AND target_id=?"
+        ).run(cleanReason, nowMs(), roomId, requesterId, targetId);
+        return rowToPair(this._get(roomId, requesterId, targetId));
+      }
+      const at = nowMs();
+      this.db.prepare(
+        "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,?,?,?,NULL)"
+      ).run(roomId, requesterId, targetId, "pending", cleanReason, at);
+      return rowToPair(this._get(roomId, requesterId, targetId));
+    });
+  }
+
+  // ---- decide ------------------------------------------------------------
+  // Only the target decides on a pending request.
+  decide(roomId, targetId, requesterId, decision) {
+    if (!DM_CONSENT_DECISIONS.includes(decision)) fail(422, "invalid_dm_decision", "decision must be approve, reject, or block");
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      this._requireActiveMember(state, targetId, "target_not_found");
+      this._requireActiveMember(state, requesterId, "requester_not_found");
+      const existing = this._get(roomId, requesterId, targetId);
+      if (!existing || existing.status !== "pending") fail(409, "dm_no_pending_request", "There is no pending DM request in this direction");
+      const status = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "blocked";
+      this.db.prepare(
+        "UPDATE dm_consents SET status=?, decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
+      ).run(status, nowMs(), roomId, requesterId, targetId);
+      return rowToPair(this._get(roomId, requesterId, targetId));
+    });
+  }
+
+  // ---- revoke -------------------------------------------------------------
+  // Either participant may unilaterally revoke an approved consent.
+  // Forward-looking: past messages stay readable.
+  revoke(roomId, memberId, otherId) {
+    if (typeof otherId !== "string" || !otherId) fail(422, "invalid_dm_request", "otherMemberId is required");
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      this._requireActiveMember(state, memberId, "member_not_found");
+      const forward = this._get(roomId, memberId, otherId);
+      const backward = this._get(roomId, otherId, memberId);
+      const live = [forward, backward].find(r => r && r.status === "approved");
+      if (!live) fail(409, "dm_nothing_to_revoke", "There is no approved DM consent between these members");
+      this.db.prepare(
+        "UPDATE dm_consents SET status='revoked', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
+      ).run(nowMs(), roomId, live.requester_id, live.target_id);
+      return rowToPair(this._get(roomId, live.requester_id, live.target_id));
+    });
+  }
+
+  // ---- unblock --------------------------------------------------------------
+  // Only the target that blocked may unblock. The row returns to rejected:
+  // history is kept, and the requester may ask again.
+  unblock(roomId, targetId, requesterId) {
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      this._requireActiveMember(state, targetId, "target_not_found");
+      const existing = this._get(roomId, requesterId, targetId);
+      if (!existing || existing.status !== "blocked") fail(409, "dm_not_blocked", "This member is not blocked");
+      this.db.prepare(
+        "UPDATE dm_consents SET status='rejected', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
+      ).run(nowMs(), roomId, requesterId, targetId);
+      return rowToPair(this._get(roomId, requesterId, targetId));
+    });
+  }
+
+  // ---- read -----------------------------------------------------------------
+  // list: participants see pairs involving them (both directions); the room
+  // owner additionally sees every pair's metadata for moderation. Handles,
+  // never member ids, in the output.
+  list(roomId, viewerId) {
+    const state = this._roomState(roomId);
+    this._requireActiveMember(state, viewerId, "viewer_not_found");
+    const owner = this._isOwner(state, viewerId);
+    const rows = owner
+      ? this.db.prepare("SELECT * FROM dm_consents WHERE room_id=? ORDER BY created_at DESC").all(roomId)
+      : this.db.prepare(
+        "SELECT * FROM dm_consents WHERE room_id=? AND (requester_id=? OR target_id=?) ORDER BY created_at DESC"
+      ).all(roomId, viewerId, viewerId);
+    return Object.freeze(rows.map(row => Object.freeze({
+      requester: this._handleOf(state, row.requester_id),
+      target: this._handleOf(state, row.target_id),
+      status: row.status,
+      reason: row.reason,
+      createdAt: row.created_at,
+      decidedAt: row.decided_at,
+      outgoing: row.requester_id === viewerId
+    })));
+  }
+
+  // pendingFor: incoming pending requests for a member (agentInbox surface).
+  pendingFor(roomId, memberId) {
+    const state = this._roomState(roomId);
+    this._requireActiveMember(state, memberId, "member_not_found");
+    const rows = this.db.prepare(
+      "SELECT * FROM dm_consents WHERE room_id=? AND target_id=? AND status='pending' ORDER BY created_at ASC"
+    ).all(roomId, memberId);
+    return Object.freeze(rows.map(row => Object.freeze({
+      requester: this._handleOf(state, row.requester_id),
+      reason: row.reason,
+      at: row.created_at
+    })));
+  }
+
+  // ---- enforcement ------------------------------------------------------------
+  // requireApproved: throws 403 unless requesterId → targetId is approved.
+  // Self-DMs are always allowed. Lazy migration: a direction that already
+  // has ≥1 persisted DM message is seeded approved (past exchange implies
+  // consent), so shipping this gate never breaks live conversations.
+  requireApproved(roomId, requesterId, targetId) {
+    if (requesterId === targetId) return true;
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      // NB: no member-active check here — an inactive recipient (or
+      // requester) is rejected downstream by message posting ("Member
+      // access revoked"), preserving that long-standing error contract.
+      const existing = this._get(roomId, requesterId, targetId);
+      if (existing) {
+        if (existing.status === "approved") return true;
+        if (existing.status === "blocked") {
+          fail(403, "dm_blocked", "This member is not accepting direct messages from you");
+        }
+        // pending / rejected / revoked are all explicit states: the
+        // recipient (or a past revocation) has spoken, so the
+        // migration heuristic below must NOT override them.
+        fail(403, "dm_consent_required",
+          existing.status === "pending"
+            ? "Your DM request is still pending — wait for approval before messaging"
+            : "Direct messages need the recipient's consent — send a DM request first");
+      }
+      // No row ever existed: lazy migration. A direction that already has
+      // ≥1 persisted DM message is seeded approved (past exchange implies
+      // consent), so shipping this gate never breaks live conversations.
+      if (this._hasPriorDm(state, requesterId, targetId)) {
+        const at = nowMs();
+        this.db.prepare(
+          "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,'approved','',?,?)"
+        ).run(roomId, requesterId, targetId, at, at);
+        return true;
+      }
+      fail(403, "dm_consent_required", "Direct messages need the recipient's consent — send a DM request first");
+    });
+  }
+
+  // _hasPriorDm: any persisted message.posted with from=requester,
+  // toMemberId=target. Reads room state messages (the reducer's store).
+  _hasPriorDm(state, requesterId, targetId) {
+    const messages = state?.messages;
+    if (!Array.isArray(messages)) return false;
+    return messages.some(m => m && m.toMemberId === targetId && m.authorId === requesterId && m.body !== null);
+  }
+}

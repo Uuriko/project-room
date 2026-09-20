@@ -12,7 +12,7 @@ import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
   test(`calm return ${label}: current needs, personal reminders, frozen history and clock-only changes`, { timeout: 90000 }, async t => {
-    const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
+    const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store, streamInterval: 60 });
     let browser, now = Date.now(); f.store.now = () => now;
     t.after(async () => {
       await browser?.close(); server.closeStreams(); server.closeAllConnections();
