@@ -52,7 +52,9 @@ async function loginAccount(request, origin, accountAccessKey) {
     data: { accountAccessKey, expectedSessionRevision: bootstrap.sessionRevision }
   });
   assert.equal(response.status, 201);
-  return { cookie, session: await response.json() };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  return { cookie: accountCookie(response), session: await response.json() };
 }
 
 function accountRoomHeaders(account) {

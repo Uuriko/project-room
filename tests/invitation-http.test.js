@@ -84,8 +84,11 @@ async function loginAccount(request, origin, accountAccessKey) {
     data: { accountAccessKey, expectedSessionRevision: bootstrap.sessionRevision }
   });
   assert.equal(response.status, 201);
-  assert.equal(response.headers.get("set-cookie"), null, "login keeps the stable account-session cookie");
-  return { cookie, session: await response.json() };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  const fresh = accountCookie(response);
+  assert.ok(fresh && fresh !== cookie, "login rotates the account-session cookie");
+  return { cookie: fresh, session: await response.json() };
 }
 
 function accountRoomHeaders(account, { write = false } = {}) {
@@ -138,7 +141,7 @@ function invitationState(store, invitationId) {
   };
 }
 
-test("account-session bootstrap and login require Origin, CSRF, and revision CAS without replacing the cookie", async t => {
+test("account-session bootstrap and login require Origin, CSRF, and revision CAS, rotating the cookie at login", async t => {
   const { store, origin, request, accountKeys } = await fixture(t);
   const bootstrapResponse = await request("/api/account-session");
   assert.equal(bootstrapResponse.status, 200);
@@ -192,7 +195,11 @@ test("account-session bootstrap and login require Origin, CSRF, and revision CAS
     data: { accountAccessKey: accountKeys.target, expectedSessionRevision: 0 }
   });
   assert.equal(loginResponse.status, 201);
-  assert.equal(loginResponse.headers.get("set-cookie"), null, "login reuses the bootstrapped stable slot");
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // a planted pre-login token can never authenticate after the login.
+  const rotatedCookie = loginResponse.headers.get("set-cookie");
+  assert.match(rotatedCookie, /^account_session=/, "login mints a fresh slot cookie");
+  assert.notEqual(rotatedCookie.split(";", 1)[0], cookie, "the pre-login cookie is retired");
   const loggedIn = await loginResponse.json();
   assert.equal(loggedIn.authenticated, true);
   assert.deepEqual(loggedIn.account, { id: "account-target", revision: 0, authEpoch: 0 });
@@ -200,9 +207,10 @@ test("account-session bootstrap and login require Origin, CSRF, and revision CAS
   assert.notEqual(loggedIn.csrf, bootstrap.csrf);
   assert.notEqual(loggedIn.sessionBinding, bootstrap.sessionBinding);
 
+  const freshCookie = rotatedCookie.split(";", 1)[0];
   const staleReplay = await request("/api/account-session", {
     method: "POST",
-    headers: { Cookie: cookie, Origin: origin, "X-CSRF-Token": loggedIn.csrf },
+    headers: { Cookie: freshCookie, Origin: origin, "X-CSRF-Token": loggedIn.csrf },
     data: { accountAccessKey: accountKeys.target, expectedSessionRevision: 0 }
   });
   await errorCode(staleReplay, 409, "stale_session_revision");
