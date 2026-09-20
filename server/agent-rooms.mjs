@@ -71,6 +71,24 @@ export class AgentRooms {
     });
   }
 
+  // Page linked rooms, not creation history: ownership can change and an
+  // identity may join rooms created by someone else. Recheck live membership.
+  list(secret, after = "") {
+    const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+    if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+    if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
+      fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
+    const links = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
+        json_extract(r.projection, '$.room.title') AS title
+      FROM identity_links l JOIN rooms r ON r.id=l.room_id
+      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT 101`).all(identity.identityId, after);
+    const rooms = links.slice(0, 100).flatMap(link => {
+      const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
+      return auth ? [{ ...link, memberId: auth.member.id }] : [];
+    });
+    return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
+  }
+
   // Self-serve room creation. secret is the caller's pri_ identity secret
   // (from the bearer header); request carries roomId/title/purpose/kind/
   // displayName. The client-chosen roomId is the idempotency key: the same

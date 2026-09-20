@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { RoomAgentClient, createAgentIdentity } from "../client/room-agent.mjs";
+import { RoomAgentClient, createAgentIdentity, listAgentRooms } from "../client/room-agent.mjs";
 import { AgentIdentities, IDENTITY_LIMIT } from "../server/agent-identities.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -502,4 +502,56 @@ test("identity create rejects C0 control chars in displayName (RC-2026-09-19-086
   const ok = store.identities.create("Relay Bot 🤖 v2.0");
   assert.equal(ok.displayName, "Relay Bot 🤖 v2.0");
   assert.equal(count(), 1);
+});
+
+
+test("room discovery needs only identity, isolates callers and immediately reflects unlink and rotation", async t => {
+  const { store, origin, ownerCommons, ownerLab } = await serve(t);
+  const identity = store.identities.create("Returning agent");
+  const other = store.identities.create("Other agent");
+  for (const [roomId, owner] of [["commons", ownerCommons], ["lab", ownerLab]])
+    store.identities.link(owner, roomId, { identityId: identity.identityId, permissions: [] });
+  const result = await listAgentRooms(origin, identity.secret);
+  assert.equal(result.identityId, identity.identityId);
+  assert.deepEqual(result.rooms.map(room => room.roomId), ["commons", "lab"]);
+  assert.equal(result.nextCursor, null);
+  assert.ok(result.rooms.every(room => Object.keys(room).sort().join() === "archivedAt,memberId,roomId,title"));
+  assert.deepEqual((await listAgentRooms(origin, other.secret)).rooms, []);
+  assert.deepEqual((await listAgentRooms(origin, identity.secret, { after: "commons" })).rooms.map(room => room.roomId), ["lab"]);
+  const command = await cli(origin, ["rooms"], { ROOM_AGENT_TOKEN: identity.secret });
+  assert.equal(command.status, 0, command.stderr);
+  assert.deepEqual(command.json, result);
+  for (const token of ["", ownerCommons, "pri_invalid"]) {
+    const denied = await fetch(`${origin}/api/agent-rooms`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(denied.status, 401);
+    assert.doesNotMatch(await denied.text(), /Returning agent|commons|lab/);
+  }
+  await assert.rejects(listAgentRooms(origin, identity.secret, { after: "../wrong" }), { code: "invalid_cursor" });
+  store.identities.unlink(ownerCommons, "commons", identity.identityId);
+  assert.deepEqual((await listAgentRooms(origin, identity.secret)).rooms.map(room => room.roomId), ["lab"]);
+  const rotated = store.identities.rotate(identity.identityId, identity.secret);
+  await assert.rejects(listAgentRooms(origin, identity.secret), { status: 401 });
+  assert.equal((await listAgentRooms(origin, rotated.secret)).rooms.length, 1);
+  store.identities.revoke(identity.identityId, rotated.secret);
+  await assert.rejects(listAgentRooms(origin, rotated.secret), { status: 401 });
+});
+
+test("room discovery pages bounded links, hides inactive members and identifies archives", async t => {
+  const { store, origin } = await serve(t);
+  const identity = store.identities.create("Paging agent");
+  // Direct fixture storage avoids unrelated room-creation rate limits.
+  const insert = store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)");
+  for (let i = 0; i < 101; i++) {
+    const id = `page-${String(i).padStart(3, "0")}`;
+    store.initialize(initialRoom(id));
+    insert.run(id, identity.identityId, "owner", store.now());
+  }
+  store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.members.owner.active',json('false')) WHERE id=?").run("page-000");
+  store.db.prepare("UPDATE rooms SET archived_at=? WHERE id=?").run("2026-09-20T00:00:00.000Z", "page-100");
+  const first = await listAgentRooms(origin, identity.secret);
+  assert.equal(first.rooms.length, 99);
+  assert.equal(first.nextCursor, "page-099");
+  const last = await listAgentRooms(origin, identity.secret, { after: first.nextCursor });
+  assert.deepEqual(last.rooms.map(room => [room.roomId, room.archivedAt]), [["page-100", "2026-09-20T00:00:00.000Z"]]);
+  assert.equal(last.nextCursor, null);
 });

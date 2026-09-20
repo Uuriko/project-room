@@ -137,20 +137,22 @@ const assertServiceOrigin = origin => {
 };
 export { assertServiceOrigin };
 
-// Minting an agent identity is the unauthenticated first step of plugging in:
-// no credential exists yet, so this sends no Authorization header and needs
-// only the service origin. The secret is returned once; store it like a key.
-export async function createAgentIdentity(origin, displayName, { fetchImpl = globalThis.fetch, signal } = {}) {
+// Shared transport for requests made before a room is selected. Bearers never
+// follow redirects or use ambient cookies; caller cancellation retains a deadline.
+async function discoveryRequest(origin, path, { method = "GET", body, token } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
   let service;
   try { service = assertServiceOrigin(origin); }
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-identities")}`, {
-      method: "POST", redirect: "error", credentials: "omit",
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, path)}`, {
+      method, redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ displayName }),
+      ...(body !== undefined || token ? { headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      } } : {}),
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (error) {
     if (error instanceof RoomClientError) throw error;
@@ -159,126 +161,61 @@ export async function createAgentIdentity(origin, displayName, { fetchImpl = glo
   let value;
   try { value = await response.json(); } catch { value = null; }
   if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  return value;
+}
+function requireIdentitySecret(secret) {
+  if (typeof secret !== "string" || !secret.startsWith("pri_"))
+    throw new RoomClientError(0, "invalid_config", "A valid identity secret is required");
+}
+
+// Mint an identity without a room credential; store the returned secret securely.
+export async function createAgentIdentity(origin, displayName, options = {}) {
+  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName } }, options);
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
   return value;
 }
-
-// One-time agent invite code redemption. Unauthenticated: the code is the
-// bearer credential. Returns a fresh identity secret for the new room member.
-export async function redeemAgentInvite(origin, code, displayName, { fetchImpl = globalThis.fetch, signal } = {}) {
-  let service;
-  try { service = assertServiceOrigin(origin); }
-  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
-  let response;
-  try {
-    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/redeem")}`, {
-      method: "POST", redirect: "error", credentials: "omit",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, displayName }),
-    });
-  } catch (error) {
-    if (error instanceof RoomClientError) throw error;
-    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
-  }
-  let value;
-  try { value = await response.json(); } catch { value = null; }
-  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
-  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string" || typeof value?.memberId !== "string") {
+export async function redeemAgentInvite(origin, code, displayName, options = {}) {
+  const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST", body: { code, displayName } }, options);
+  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string" || typeof value?.memberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
-  }
   return value;
 }
-// Read-only agent invite preview for the pre-redemption consent screen.
-// Unauthenticated: the code is the bearer credential. Consumes nothing and
-// returns no identity data — just the room, granted permissions, profile
-// and expiry the consent screen shows before redeem commits.
-export async function previewAgentInvite(origin, code, { fetchImpl = globalThis.fetch, signal } = {}) {
-  let service;
-  try { service = assertServiceOrigin(origin); }
-  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
-  let response;
-  try {
-    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/preview")}?code=${encodeURIComponent(code)}`, {
-      method: "GET", redirect: "error", credentials: "omit",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-    });
-  } catch (error) {
-    if (error instanceof RoomClientError) throw error;
-    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
-  }
-  let value;
-  try { value = await response.json(); } catch { value = null; }
-  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
-  if (typeof value?.roomId !== "string" || !Array.isArray(value?.permissions) || typeof value?.profile !== "string") {
+// Preview consumes nothing and returns no identity data.
+export async function previewAgentInvite(origin, code, options = {}) {
+  const value = await discoveryRequest(origin, `/api/agent-invites/preview?code=${encodeURIComponent(code)}`, {}, options);
+  if (typeof value?.roomId !== "string" || !Array.isArray(value?.permissions) || typeof value?.profile !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite preview");
-  }
   return value;
 }
-// Self-serve access request (unauthenticated): an identity without room
-// membership asks to join. The roomId, identityId, displayName and
-// requestedPermissions are required; note is optional. Returns the pending
-// request; the agent polls GET /api/access-requests/:id?identityId=... for
-// the owner's decision.
-export async function requestAccess(origin, { roomId, identityId, displayName, requestedPermissions, note, requestId } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
-  let service;
-  try { service = assertServiceOrigin(origin); }
-  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
-  let response;
-  try {
-    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/access-requests")}`, {
-      method: "POST", redirect: "error", credentials: "omit",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { "Content-Type": "application/json" },
-      // POST /api/access-requests uses exact() — all six keys must be present.
-      body: JSON.stringify({
-        roomId, identityId, displayName, requestedPermissions,
-        note: typeof note === "string" ? note : "",
-        requestId: typeof requestId === "string" && requestId ? requestId
-          : `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
-      }),
-    });
-  } catch (error) {
-    if (error instanceof RoomClientError) throw error;
-    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
-  }
-  let value;
-  try { value = await response.json(); } catch { value = null; }
-  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
-  if (typeof value?.requestId !== "string" || typeof value?.status !== "string") {
+export async function requestAccess(origin, { roomId, identityId, displayName, requestedPermissions, note, requestId } = {}, options = {}) {
+  // The route requires all six keys, including an idempotency key.
+  const value = await discoveryRequest(origin, "/api/access-requests", { method: "POST", body: {
+    roomId, identityId, displayName, requestedPermissions,
+    note: typeof note === "string" ? note : "",
+    requestId: typeof requestId === "string" && requestId ? requestId : `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+  } }, options);
+  if (typeof value?.requestId !== "string" || typeof value?.status !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid access request");
-  }
   return value;
 }
-// Self-serve room creation: a self-minted identity creates a fresh room and
-// becomes its owner. The identity secret travels in the Authorization bearer
-// header, never in the JSON body. The client-chosen roomId is the
-// idempotency key: retrying with the same parameters returns duplicate:true.
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
-  let service;
-  try { service = assertServiceOrigin(origin); }
-  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
-  if (typeof identitySecret !== "string" || !identitySecret.startsWith("pri_")) {
-    throw new RoomClientError(0, "invalid_config", "A valid identity secret is required");
-  }
-  let response;
-  try {
-    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-rooms")}`, {
-      method: "POST", redirect: "error", credentials: "omit",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${identitySecret}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId, title, purpose, kind, displayName }),
-    });
-  } catch (error) {
-    if (error instanceof RoomClientError) throw error;
-    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
-  }
-  let value;
-  try { value = await response.json(); } catch { value = null; }
-  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
-  if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string") {
+// roomId is the idempotency key. The identity secret travels only in the header.
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, options = {}) {
+  requireIdentitySecret(identitySecret);
+  const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
+    body: { roomId, title, purpose, kind, displayName } }, options);
+  if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
-  }
+  return value;
+}
+// Follow nextCursor even on an empty page: removed memberships are filtered out.
+export async function listAgentRooms(origin, identitySecret, { after = "", ...options } = {}) {
+  requireIdentitySecret(identitySecret);
+  const value = await discoveryRequest(origin, `/api/agent-rooms?after=${encodeURIComponent(after)}`, { token: identitySecret }, options);
+  if (typeof value?.identityId !== "string" || !Array.isArray(value?.rooms)
+    || !value.rooms.every(room => typeof room?.roomId === "string" && typeof room?.memberId === "string" && typeof room?.title === "string"
+      && (room.archivedAt === null || typeof room.archivedAt === "string"))
+    || !(value.nextCursor === null || typeof value.nextCursor === "string"))
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid room list");
   return value;
 }
 export class RoomAgentClient {

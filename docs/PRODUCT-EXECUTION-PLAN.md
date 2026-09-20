@@ -1,6 +1,6 @@
 # Project Room execution plan
 
-Updated September 19, 2026. This is the consolidated working backlog and order of execution, not a commitment to implement every possible feature. Each slice must deliver an observable improvement before the next expands scope.
+Updated September 20, 2026. This is the consolidated working backlog and order of execution, not a commitment to implement every possible feature. Each slice must deliver an observable improvement before the next expands scope.
 
 ## Product focus
 
@@ -8,24 +8,124 @@ A familiar place for people and their agents to talk, handle incoming messages, 
 
 Reuse Slack/Discord interaction conventions, Basecamp's contextual organization, and clear source/account identity in unified messaging. Do not reproduce their whole feature inventories. Success is a useful conversation or completed result and an easy return, not message volume or time spent watching agents.
 
-## Current evidence
+## Current evidence — September 20, 2026
 
-The isolated candidate contains the 32-commit Fable/Claude handoff plus Codex recovery, packaging and CI fixes. Commit 086047a repairs work destinations from threads and Inbox; 949678d adds room Overview, cross-channel message-source navigation and shorter People guidance. Latest reviewed origin/main: 33685dd7.
+Baseline: main `52f78fee` (UI calming, #725), following the merged Google
+sign-in repair #726. Main CI run 35523473151 passed contract, lint, unit,
+Cloudflare and browser. This is evidence for that commit, not future changes.
+Native Chrome access works; the dedicated browser connection still fails.
+The live getdasha door exposes internal design jargon. The app opens into an
+existing signed-in room; this observation is not a fresh-account acceptance test.
 
-Current qualified candidate: `4a2490b`. The complete configured browser suite passes 399/399; the full core suite passes 4,577 with zero failures and one existing TODO. Repository checks and packaged desktop/touch fallback pass. The prior selection, upload, validation, recipe and reuse failures are resolved. See [reliability gate](RELIABILITY-GATE-2026-09-19.md).
+Rooms, channels, threads, work, presence, search and invitations already exist.
+Inbox is private and has provider adapters; adapters and fixtures alone do not
+prove live integration readiness. Catch up remains room-scoped. Public HTTP
+MCP is discovery-only; operational tools currently use the separate stdio path.
+A mention is not proof that an external agent is executing. Preserve these
+boundaries in marketing, discovery documents and UI.
 
-Overview is currently a read-only dialog, not the final navigation shell. Catch up is room-scoped, not an account-wide Activity implementation. Adapters and synthetic fixtures do not establish production integration readiness.
+## Current order of work
 
-## Sequence and dependencies
+| Order | Deliverable | Acceptance / dependency |
+| --- | --- | --- |
+| Now | Agent room recovery (#600), clear public joining copy, shared client transport | Existing identity lists only its active memberships without a room ID; rotation/unlink effective immediately; bounded pagination; joining and create/redeem failures unchanged. |
+| Next | One coding collaboration journey | One repository, two isolated worktrees, compact shared task context, explicit changed paths/base revision, handoff to another agent, combined checkout tests, reviewable PR. Reuse existing work sessions and result objects. |
+| Next | One qualified private Inbox provider | Connect → read → draft → deliberate send → recover uncertain result, preserving account/recipient and operation ID. Fixtures first; authorized real-use pilot next. |
+| Next | Existing UI polish / accessibility | Keyboard and touch journeys, focus, drafts, source navigation, readable contrast, reduced motion and calm notifications on current main. Fix observed problems before introducing navigation. |
+| Later | Account-wide attention | Membership-authorized aggregation of mentions, replies and blockers; group by subject, source links, per-user read state. Do not rename room Catch up to imply this exists. |
+| Later | Discovery and voluntary adoption | Host-tested connection recipes, truthful public comparison pages, search-engine crawl tests, reusable public examples with explicit consent. |
 
-1. Navigation and draft continuity, alongside classification of failures affecting that journey.
-2. Message/send trust and the smallest proven Inbox connection journey.
-3. Coherent shell and truthful Activity scope using the stabilized navigation owner.
-4. First useful experience and agent/result handoff.
-5. Search, attachments, accessibility, mobile and performance refinements.
-6. Real-use pilot, measured improvements and release readiness.
+Limit active implementation to one complete journey per PR. Preserve draft/send
+recovery and auth boundaries through every change. Retention hypotheses need
+pilot evidence: time to first useful result, successful return after a day,
+repeat completed tasks, and voluntary teammate invitations. Do not optimize
+message count or agent chatter. Collect aggregate outcomes, not private content.
 
-Security and session isolation apply to every slice. Code simplification happens while changing real behavior, not as a parallel rewrite. A feature can move earlier when observed use reveals a stronger need.
+## Design and development decisions
+
+- Keep Rooms and private Inbox distinct. Use a contextual sidebar, conversation,
+  composer and one optional details panel. Present source, recipient, selected
+  location and connection status plainly. Fold routine agent logs.
+- Slack Code already supports collaborative agent coding; “agents in chat” is
+  insufficient differentiation. Our proposed advantage is easy independent
+  connection, portable context across hosts, and work alongside private messages.
+- Learn Discord's durable topics and notification control without importing
+  server administration complexity. Use work-linked threads before new boards.
+- Basecamp's project screenshot separates durable messages, files, tasks and chat
+  with headings and space. Borrow its hierarchy, not a mandatory six-card dashboard.
+- Prefer a working vertical slice and its recovery behavior to disconnected
+  front-end/back-end phases. Use existing event, authorization and navigation owners.
+- Measure simplification as fewer independent behaviors and less duplication.
+  Do not compress code, delete tests/features, or turn explicit policy into a clever
+  abstraction merely to reduce line count.
+
+## Working effectively with Astra
+
+Supply the user outcome, current source of truth, constraints, reproduction and
+acceptance evidence. Let the agent choose implementation details. Keep repository
+instructions short and current, with links to specialized guides; avoid loading
+all historical plans or conflicting skill recipes. Give mid-task corrections
+as steering, and record the resulting decision in the task rather than adding
+another permanent rule. Parallel work needs explicit ownership and independent
+paths; the final combined checkout still needs testing. A model's confidence
+never substitutes for browser observation, test results or deployment receipts.
+
+Reusable task prompt:
+
+> Starting from current main, complete [user journey]. Preserve [invariants].
+> Reproduce the current failure or gap, inspect existing owners and open PRs,
+> implement the smallest coherent change, test normal and recovery paths, and
+> inspect the rendered result when UI changes. Report evidence, net runtime
+> line change, unresolved risks and the exact commit. Update this plan and the
+> linked issue. Merge/deploy only under the applicable authorization and gates.
+
+## GitHub order and release checklist
+
+Use this document as the current product sequence; dated plans are supporting
+history. Link one issue to each implementation PR, show acceptance evidence and
+keep overlapping work explicit. Rebase/update stale PRs before evaluating their
+behavior; close only demonstrably superseded work, retaining branches/history.
+
+- Before a live Telegram pilot: resolve GitHub secret-scanning alert #1. Its
+  historical test-file location is confirmed; removal from current code is not
+  proof of revocation. Owner must revoke the exposed bot credential and provision
+  its replacement through the secret manager. Never paste it into an issue.
+- #600: room recovery in this slice; HTTP/CLI first, host-specific onboarding later.
+- #610, #601, #596: validate normal-agent access and deployed discovery claims;
+  distinguish Cloudflare edge behavior from application auth.
+- #595, #604, #584, #589, #588: private messaging and delivery correctness before growth.
+- #658, #660, #662: mention delivery, honest presence and useful attention.
+- #603: reconcile task-state vocabulary by adapting existing selectors, not adding
+  another state machine.
+- #650, #612, #704: public discovery and rooms after joining is demonstrably reliable.
+- #687 overlaps joining/discovery; reconcile it rather than merging competing door changes.
+- #582 root unit CI is already on main; verify then close the redundant proposal.
+
+Before release: current-head contract/lint/unit/browser/Workers checks; exact
+asset/source match; desktop/touch draft recovery and Google returning login;
+known compatible fallback. Record the target hostname: different public doors
+may not resolve to the same deployment. Never infer deployment from a merged PR.
+
+## Research informing these choices
+
+Reviewed September 20, 2026. Product recommendations above are our synthesis,
+not measured evidence that a competitor pattern will improve our retention.
+
+- [Slack Code](https://slack.com/features/code-channels): inspected the public
+  demo and interface; code, preview and conversation stay in task context.
+- [Discord forum channels](https://support.discord.com/hc/en-us/articles/6208479917079-Forum-Channels-FAQ): durable titled discussions and focused participation.
+- [Basecamp project reference](https://basecamp.com/assets/images/screenshots/project-page.webp)
+  and [Get One Piece Done](https://basecamp.com/shapeup/3.2-chapter-11): clear
+  project hierarchy and a small working slice before broad polish.
+- [DORA: small batches](https://dora.dev/capabilities/working-in-small-batches/):
+  smaller changes shorten feedback and reduce delivery risk.
+- [Nielsen Norman usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/):
+  visible status, familiar language, consistency and error recovery.
+- [OpenAI: Astra skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra):
+  focused skill triggers, progressive disclosure and less accumulated instruction overhead.
+
+The following sections retain detailed acceptance criteria for these journeys;
+the ordered table above determines priority.
 
 ## 1. Navigation and continuity — immediate
 

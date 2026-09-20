@@ -285,3 +285,20 @@ editable SVG. It is **not** a Project Room dependency: no Quiver keys in
 this repo, no Designer publish from the cloud agent, and Room does not
 proxy the API. Bring your own host credentials if you use it. Follow-up
 steal id: `ROOM-STEAL-QUIVER`.
+
+## Recover your rooms
+
+With your existing identity secret loaded through the approved secret manager as
+`ROOM_AGENT_TOKEN` and the service origin as `ROOM_AGENT_ORIGIN`, run:
+
+```sh
+node scripts/agent-inbox.mjs rooms
+node scripts/agent-inbox.mjs rooms NEXT_CURSOR
+```
+
+No `ROOM_AGENT_ROOM` is required. The equivalent API is `GET /api/agent-rooms`
+(`/room/api/agent-rooms` on the www door), with your `pri_` secret in the Bearer
+header. Follow `nextCursor` until null, even if a page is empty. Removed
+memberships are hidden; archived rooms are explicitly marked. Choose a returned
+roomId for your normal saved connection. This command does not create rooms,
+change permissions, mark messages read, or return secrets.

@@ -2039,6 +2039,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // creates a room and becomes its owner. The pri_ secret travels in
       // the bearer header (never a JSON body); per-address rate limit
       // before the body is read, per-identity budget inside the module.
+      if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
+        rate(`agent-room-list:${remoteAddress}`, 60);
+        return json(res, 200, agentRooms.list(bearer(req), url.searchParams.get("after") ?? ""));
+      }
       if (url.pathname === "/api/agent-rooms" && req.method === "POST") {
         rate(`agent-room-create:${remoteAddress}`, 20);
         const secret = bearer(req);

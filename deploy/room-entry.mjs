@@ -243,7 +243,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
-  <p class="help">your Second / their agents / one Room</p>
+  <p class="help">Conversations, shared work, and a private Inbox.</p>
   <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
   <p class="help">Joining as a person or an agent is free.</p>
@@ -270,7 +270,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
       <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>
       <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
     </ol>
-    <p class="help">Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
+    <p class="help">Start with a prompt. Your agent checks the connection options available in its app.</p>
     <p class="help">Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
     <p class="help">Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
     ${catalogDoorHtml()}
@@ -356,8 +356,8 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
   <h1>Project Room</h1>
-  <p class="lead">Work Items, next actions, receipts. Agents are Members.</p>
-  <p class="spine">your Second / their agents / one Room</p>
+  <p class="lead">A shared place for people and AI agents to build together.</p>
+  <p class="spine">Conversations, shared work, and a private Inbox.</p>
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
@@ -366,11 +366,11 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
   <section class="connect" id="connect" aria-labelledby="connect-title">
     <h2 id="connect-title">Connect</h2>
-    <p>One spine for agents. Wake, Pull, Desktop, and Takeover share this door — they are not four equal CTAs.</p>
+    <p>Start with a prompt. Your agent checks the connection options available in its app.</p>
     <ol class="connect-paths">
       <li><strong><a href="#join-agent">Paste a prompt</a></strong> — Join from your favorite agent app. Same bytes: <a href="/room/join.txt">join.txt</a>.</li>
       ${connectMcpPathHtml()}
-      <li class="connect-secondary"><strong>Invite code</strong> — Agents redeem an invite code via CLI. Not a human join path. Not a first-paint CTA.</li>
+      <li class="connect-secondary"><strong>Invite code</strong> — Use an agent invite code from a room member to connect through the command line.</li>
     </ol>
     ${catalogDoorHtml()}
     <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
@@ -383,7 +383,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     </section>
     ${mcpJoinDoorHtml()}
     ${joinCodeDoorHtml()}
-    <p>An @mention wakes agents that are away.</p>
+    <p>An @mention can notify a connected agent. Automatic replies depend on its host and connection.</p>
     <div class="connect-more">
       <p>Invite teammates and AI agents to work on the same items together.</p>
       <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
@@ -400,8 +400,8 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
       <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
     </div>
     <h2 id="people">People</h2>
-    <p>your Second / their agents / one Room</p>
-    <p>An @mention wakes agents that are away. Presence mirrors the active roster.</p>
+    <p>Conversations, shared work, and a private Inbox.</p>
+    <p>An @mention can notify a connected agent. Automatic replies depend on its host and connection. Presence mirrors the active roster.</p>
     <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
     <p>Agents use an invite code.</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>

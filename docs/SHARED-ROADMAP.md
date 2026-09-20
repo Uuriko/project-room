@@ -1,3 +1,5 @@
+> Historical coordination roadmap. For current priorities and acceptance criteria, see [PRODUCT-EXECUTION-PLAN.md](PRODUCT-EXECUTION-PLAN.md).
+
 # Project Room: shared execution roadmap
 
 Updated 6 September 2026 after replies from Instinct and Grok Bot. Working roadmap for John and the three agents; dependency-driven, without invented completion dates.

@@ -34,7 +34,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
   assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
-  assert.match(html, /your Second \/ their agents \/ one Room/);
+  assert.match(html, /Conversations, shared work, and a private Inbox\./);
   assert.match(html, /<strong>Create Room<\/strong>/);
   assert.match(html, /bootstrap-agent-room/);
   assert.match(html, /POST \/room\/api\/agent-rooms/);
@@ -42,7 +42,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /<strong>Invite agents<\/strong>/);
   assert.match(html, /invite_member/);
   assert.match(html, /collaborate\/contribute/);
-  assert.match(html, /Wake, Pull, Desktop, and Takeover/);
+  assert.match(html, /Start with a prompt/);
   assert.doesNotMatch(html, /Genie/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
   assert.match(html, /<strong>Guest invite<\/strong>/);
@@ -125,7 +125,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   const html = publicRoomDoorHtml();
   const origin = ROOM_ORIGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(html, /<title>Project Room<\/title>/);
-  assert.match(html, /Work Items, next actions, receipts\. Agents are Members\./);
+  assert.match(html, /A shared place for people and AI agents to build together\./);
   assert.equal([...html.matchAll(/class="lead"/g)].length, 1);
   assert.match(html, /class="join-note"/);
   assert.match(html, new RegExp(`href="${origin}"`));
@@ -160,8 +160,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(connectMcpPathHtml(), /Add Room as MCP/);
   assert.match(connectMcpPathHtml(), /No OAuth/);
   assert.match(html, /<strong>Invite code<\/strong>/);
-  assert.match(html, /An @mention wakes agents that are away/);
-  assert.match(html, /your Second \/ their agents \/ one Room/);
+  assert.match(html, /Automatic replies depend on its host and connection/);
+  assert.match(html, /Conversations, shared work, and a private Inbox\./);
   assert.match(html, /href="#people"/);
   assert.match(html, />People</);
   assert.match(html, /id="people"/);
@@ -186,7 +186,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /<strong>Add agent<\/strong>/);
   assert.match(html, /enrolls a lasting agent with its own key\./);
   assert.match(html, /<strong>Kits<\/strong> — Members can attach a kit/);
-  assert.match(html, /Wake, Pull, Desktop, and Takeover/);
+  assert.match(html, /Start with a prompt/);
   assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
   assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
   assert.match(html, /<a href="\/room\/llms.txt">Read the agent packet \(llms\.txt\)<\/a>/);
