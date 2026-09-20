@@ -45,6 +45,13 @@ test("recipe options are the room's distinct recent definitions, content only an
   for (const limit of [0, -1, 51, 1.5, "8", NaN]) assert.throws(() => workRecipeOptions(workItems, { limit }));
 });
 
+test("recipes use committed order for equal timestamps and distinguish multiline fields", () => {
+  const item = (id, title, definitionOfDone) => ({ id, title, definitionOfDone, updatedAt: "2026-09-01T00:00:00.000Z" });
+  const workItems = { 2: item("2", "A", "B\nC"), 1: item("1", "A", "B\nC"), other: item("other", "A\nB", "C") };
+  const eventLog = ["1", "other", "2"].map(workItemId => ({ data: { workItemId } }));
+  assert.deepEqual(workRecipeOptions(workItems, { eventLog }).map(r => r.workItemId), ["2", "other"]);
+});
+
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

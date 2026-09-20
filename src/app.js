@@ -2148,48 +2148,12 @@ function setTimelineWorkNode(wnode, html) {
   wnode.innerHTML = html; wnode._content = html;
   restoreDisclosures(wnode, saved);
 }
-// Syncs work cards into the message timeline without disturbing messages.
-// Used by renderReturnBrief for work updates that bypass renderMessages.
+// Use the same interleave for background card refreshes and message arrivals.
+// Different tie rules moved unchanged cards twice and discarded text selection.
 function syncTimelineWork() {
-  const list = $("#message-list");
-  if (!list || !state) return;
+  if (!state) return;
   ensureHandoffEnvelopes();
-  if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
-  const entries = timelineWorkEntries().filter(e => e.channelId === activeChannelId);
-  const byId = new Map(entries.map(e => [e.item.id, e]));
-  // Same reason as renderMessages: setTimelineWorkNode restores focus inside a
-  // card it re-renders, and the reorder below can then move that card, which
-  // drops focus from whatever is inside it. Remembered across the whole sync
-  // and restored once, at the end.
-  const focusedBefore = list.contains(document.activeElement) ? document.activeElement : null;
-  const focusedKey = focusedBefore?.closest("[data-focus-key]")?.dataset.focusKey ?? null;
-  const stale = [];
-  list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => {
-    const id = n.getAttribute("data-work-timeline");
-    if (byId.has(id)) byId.get(id).node = n; else stale.push(n);
-  });
-  stale.forEach(n => n.remove());
-  const tsById = new Map(state.messages.map(m => [m.id, Date.parse(m.createdAt) || 0]));
-  const workTs = new Map(entries.map(e => [e.item.id, e.ts]));
-  const childTs = child => child.hasAttribute("data-work-timeline")
-    ? workTs.get(child.getAttribute("data-work-timeline")) ?? 0
-    : tsById.get(child.dataset.key) ?? 0;
-  for (const entry of entries) {
-    let wnode = entry.node;
-    if (!wnode) { wnode = makeTimelineWorkNode(entry); entry.node = wnode; }
-    setTimelineWorkNode(wnode, entry.html);
-    let ref = null;
-    for (const child of list.children) {
-      if (child === wnode) continue;
-      if (childTs(child) > entry.ts) { ref = child; break; }
-    }
-    if (wnode.parentNode !== list || wnode.nextSibling !== ref) list.insertBefore(wnode, ref);
-  }
-  const emptyNote = list.querySelector(":scope > .empty-note");
-  if (emptyNote && (entries.length || list.querySelector(":scope > [data-message-record-id]"))) emptyNote.remove();
-  if (focusedKey && document.activeElement === document.body) {
-    [...list.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusedKey)?.focus({ preventScroll: true });
-  }
+  renderMessages();
 }
 async function submit(form, fn, { failureHint } = {}) {
   if (busy) return;
@@ -3442,7 +3406,7 @@ function openWork(sourceId = null, reuseId = null) {
   const recipeSelect = $("#work-recipe-select");
   if (definition || sourceId) $("#work-recipe-field").hidden = true;
   else {
-    const recipes = workRecipeOptions(state.workItems);
+    const recipes = workRecipeOptions(state.workItems, { eventLog: state.eventLog });
     recipeSelect.replaceChildren(new Option("Blank outcome", ""));
     for (const recipe of recipes) recipeSelect.add(new Option(recipe.title.replace(/\s+/g, " ").slice(0, 80), recipe.workItemId));
     $("#work-recipe-field").hidden = recipes.length === 0;

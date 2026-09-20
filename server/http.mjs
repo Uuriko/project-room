@@ -493,6 +493,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0; const chunks = [];
       req.on("data", chunk => {
+        if (bytes > limit) return;
         bytes += chunk.length;
         if (bytes > limit) { chunks.length = 0; rejectPromise(tooLarge()); }
         else chunks.push(chunk);
@@ -2630,11 +2631,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Non-room 5xx (inbox, account session, login) still leave an operator trace.
         console.warn(`service diagnostic ${operationId} ${httpStatus} ${code} ${category} ${serviceRoute(req.url)}`);
       }
+      if (httpStatus === 413) {
+        // finish means handed to the OS, not received by the client. Drain
+        // in-flight bytes without buffering, then close; a stalled sender gets
+        // at most one second to read the refusal before its socket is destroyed.
+        const socket = req.socket;
+        res.once("finish", () => {
+          if (req.complete) socket.end();
+          else req.once("end", () => socket.end());
+          const deadline = setTimeout(() => socket.destroy(), 1000);
+          deadline.unref();
+          socket.once("close", () => clearTimeout(deadline));
+        });
+      }
       json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
-      // An oversized request is refused after the 413 leaves: destroying the
-      // socket releases the connection at once instead of letting a slow client
-      // hold it until it finishes sending the body it was told to stop sending.
-      if (httpStatus === 413) res.once("finish", () => { try { req.socket?.destroy(); } catch { /* the client is already gone */ } });
     }
   });
   server.requestTimeout = 15000;

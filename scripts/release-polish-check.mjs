@@ -11,6 +11,9 @@ import { openSearch, openSettings } from "./room-chrome.mjs";
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'desktop'}: quiet controls, stable reading and usable History`, { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store, streamInterval: 30 });
+  // Force the tie that previously made two render paths move the same card.
+  const recordedAt = Date.parse(fixture.store.room("commons").state.workItems["test-handoff"].updatedAt);
+  fixture.store.now = () => recordedAt;
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   t.after(async () => {
