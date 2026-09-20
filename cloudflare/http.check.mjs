@@ -92,10 +92,13 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
     const mailSlotResponse = await call('/api/account-session', { ip: '192.0.2.20' });
     const mailCookie = mailSlotResponse.headers.get('set-cookie').split(';')[0], mailSlot = await json(mailSlotResponse);
-    const mailSession = await json(await call('/api/account-session', { method: 'POST', ip: '192.0.2.20',
+    const mailLoginResponse = await call('/api/account-session', { method: 'POST', ip: '192.0.2.20',
       headers: { Cookie: mailCookie, 'X-CSRF-Token': mailSlot.csrf, 'X-Session-Binding': mailSlot.sessionBinding },
-      data: { accountAccessKey: accountKey, expectedSessionRevision: mailSlot.sessionRevision } }), 201);
-    const mailHeaders = { Cookie: mailCookie, 'X-CSRF-Token': mailSession.csrf, 'X-Session-Binding': mailSession.sessionBinding };
+      data: { accountAccessKey: accountKey, expectedSessionRevision: mailSlot.sessionRevision } });
+    const mailSession = await json(mailLoginResponse, 201);
+    // QAS-702 (QA-Auth 2026-09-19): the account-key login rotates the slot —
+    // the pre-login cookie is dead; the response cookie carries the session.
+    const mailHeaders = { Cookie: mailLoginResponse.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': mailSession.csrf, 'X-Session-Binding': mailSession.sessionBinding };
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
     const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
     assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
