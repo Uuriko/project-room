@@ -81,11 +81,13 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.match(await page.locator("#people-wake-hint").textContent(), /granted room permissions/);
   await page.locator("#create-room-details > summary").click();
   const createCopy = await page.locator("#create-room-details").innerText();
-  assert.match(createCopy, /POST \/room\/api\/agent-rooms/);
-  assert.match(createCopy, /#room\/\{roomId\}/);
-  assert.match(createCopy, /Open this invite link/);
+  // UI calming: the Create Room block was de-jargoned — no API route, secret,
+  // schema, or fragment explanation; it points at ⌘K → Create Room.
+  assert.match(createCopy, /Start your own room/);
+  assert.match(createCopy, /⌘K/);
+  assert.doesNotMatch(createCopy, /POST \/room\/api\/agent-rooms/);
+  assert.doesNotMatch(createCopy, /pri_/);
   assert.doesNotMatch(createCopy, /share https:\/\/www\.getdasha\.com\/room#room/);
-  assert.match(createCopy, /pri_/);
   mkdirSync("test-results", { recursive: true });
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });
   const inviteButton = page.locator("#invite-agents-button");
