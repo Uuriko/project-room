@@ -54,7 +54,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await f.post("Meeting room is B-204 from Thursday");
     await f.post("Parking code is 4411");
-    const pinButton = f.row("Meeting room is B-204").getByRole("button", { name: "Pin", exact: true });
+    // Pin lives in the "⋯" overflow menu (UI calming #2); open it first.
+    const pinRow = f.row("Meeting room is B-204");
+    const pinMenu = pinRow.locator('details.message-more');
+    if (!(await pinMenu.evaluate(node => node.open))) await pinMenu.locator('summary').click();
+    const pinButton = pinRow.getByRole("button", { name: "Pin", exact: true });
     assert.equal(await pinButton.getAttribute("aria-pressed"), "false");
     // Keyboard only: focus the control and press Enter.
     await pinButton.focus(); await page.keyboard.press("Enter");

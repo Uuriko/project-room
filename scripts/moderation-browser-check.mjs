@@ -72,6 +72,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#status").filter({ hasText: "You already reported this message" }).waitFor({ state: "visible" });
     assert.equal(f.reports().length, 1); assert.equal(f.store.room("commons").sequence, sequenceBefore, "reports append no room events");
     // Mute from the message: the author's messages collapse for this viewer only.
+    // The menu closed behind the report; reopen it.
+    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
     await target.locator('[data-message-action="mute"]').click();
     await target.locator(".message-muted").waitFor({ state: "visible" });
     assert.equal(await target.locator(".message-muted").textContent(), "Hidden: you muted Test producer.");
