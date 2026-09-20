@@ -20,6 +20,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const owner = store.issueAccessKey("commons", "owner");
     const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
+    // Consent-bound DMs: the owner addresses maya in this flow.
+    store.dmConsents.request("commons", "owner", "maya", "browser test");
+    store.dmConsents.decide("commons", "maya", "owner", "approve");
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
     send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });

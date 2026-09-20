@@ -36,6 +36,16 @@ export function createAcceptanceFixture({ managedProducer = false } = {}) {
       send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
       keys[memberId] = store.issueAccessKey("commons", memberId);
     }
+    // Consent-bound DMs: acceptance flows address each other directly.
+    // Approve every direction among the fixture members so UI journeys that
+    // send DMs are not blocked by the consent gate.
+    for (const from of ["owner", "guest", "producer", "reviewer"]) {
+      for (const to of ["owner", "guest", "producer", "reviewer"]) {
+        if (from === to) continue;
+        store.dmConsents.request("commons", from, to, "acceptance fixture");
+        store.dmConsents.decide("commons", to, from, "approve");
+      }
+    }
     send("owner", T.MESSAGE_POSTED, { messageId: "test-welcome", body: "Disposable test room. Try a reply and a reaction; no real conversation is affected." });
     send("guest", T.MESSAGE_POSTED, { messageId: "test-request", body: "Please prepare an agenda naming its owner. This is a synthetic handoff." });
     send("owner", T.WORK_PROPOSED, { workItemId: "test-handoff", title: "Test: prepare an agenda", definitionOfDone: "Agenda names its owner; reviewer checks the exact submitted version.", accountableMemberId: "producer", verifierMemberId: "reviewer", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner", sourceMessageId: "test-request", mode: "read" });

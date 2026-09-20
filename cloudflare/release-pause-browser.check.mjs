@@ -59,6 +59,11 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await guest.goto(invitation); await guest.locator('#join-link-name').fill('Recovery guest');
     await guest.locator('#join-link-submit').click(); await guest.locator('#main').waitFor({ state: 'visible' });
     await guestContext.close();
+    // Consent-bound DMs: the owner’s request-reply to the guest needs approval.
+    // The guest’s memberId is the value of their option in the owner’s message-to select.
+    await page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' }).waitFor();
+    const guestId = await page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' }).getAttribute('value');
+    await context.request.post(origin + '/__test-dm-consent', { data: { fromMemberId: 'owner', toMemberId: guestId } });
     const options = async () => { if (!await page.locator('#remember-drafts').isVisible()) await page.locator('#composer-options > summary').click(); };
     await options(); await page.locator('#remember-drafts').check();
     const drafts = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)
@@ -74,7 +79,6 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     for (const request of [false, true]) {
       if (request) {
         await options(); await page.locator('#request-reply').click();
-        const guestId = await page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' }).getAttribute('value');
         await page.locator('#message-to-select').selectOption(guestId);
       }
       const body = request ? 'Request awaiting exact receipt' : 'Ordinary send awaiting exact receipt';
