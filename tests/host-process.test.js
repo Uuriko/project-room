@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { configuredHost } from "../client/host-process.mjs";
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const host = (code, extra = {}) => configuredHost({ command: process.execPath, args: ["-e", code], cwd: process.cwd(), timeoutMs: 2000, ...extra });
 test("host process receives JSON, literal arguments and only explicitly allowed environment", async () => {
   process.env.ROOM_HOST_TEST_SECRET = "must-not-inherit";
@@ -26,4 +29,18 @@ test("timeout and cancellation stop host processes", async () => {
 });
 test("invalid executable configuration is rejected before execution", () => {
   assert.throws(() => configuredHost({ command: "node", args: [], cwd: process.cwd(), timeoutMs: 1000 }), /absolute/);
+});
+test("unserializable input never starts a host with side effects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "room-host-preflight-"));
+  const marker = join(directory, "started");
+  try {
+    const execute = host(`require('node:fs').writeFileSync(${JSON.stringify(marker)},'started');setInterval(()=>{},1000)`, { timeoutMs: 100 });
+    const circular = {}; circular.self = circular;
+    for (const input of [circular, { value: 1n }]) {
+      await assert.rejects(execute(input), /JSON serializable/);
+    }
+    // A mistakenly spawned process has time to write before its timeout kills it.
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(existsSync(marker), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

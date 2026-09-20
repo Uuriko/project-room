@@ -11,6 +11,10 @@ export function configuredHost(config) {
   const settings = structuredClone(config);
   return ({ signal, ...input }) => new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error("Host cancelled")); return; }
+    // Reject unusable input before starting a host that may have side effects.
+    let payload;
+    try { payload = JSON.stringify(input); }
+    catch { reject(new Error("Host input must be JSON serializable")); return; }
     const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
     Object.assign(env, settings.env ?? {});
     const grouped = process.platform !== "win32";
@@ -42,6 +46,6 @@ export function configuredHost(config) {
         resolve(result);
       } catch { reject(new Error("Host must return one JSON object containing a nonempty body of at most 4096 characters")); }
     });
-    child.stdin.end(JSON.stringify(input));
+    child.stdin.end(payload);
   });
 }
