@@ -33,7 +33,13 @@ async function setup(t, { mobile = false, review = false } = {}) {
   await page.goto(origin); await fillAccessKey(page, f.keys[review ? "human-checker" : "owner"]); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
   const open = async () => {
     if (review) await page.locator(`[data-work-record-id='${workItemId}'] [data-action='verify']`).click();
-    else await page.locator("[data-message-id='native-draft'][data-message-action='result']").click();
+    else {
+      // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+      const draftRow = page.locator(`[data-message-record-id='native-draft']`);
+      const draftMenu = draftRow.locator('details.message-more');
+      if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
+      await page.locator("[data-message-id='native-draft'][data-message-action='result']").click();
+    }
     await page.locator("#action-dialog").waitFor({ state: "visible" });
   };
   const textReady = async () => { await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, body); };

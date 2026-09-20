@@ -47,6 +47,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await target.locator(".message-body").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reports-section").isHidden(), true, "a non-owner never sees the report list");
     // Report: a short reason goes to the owner only; the room sees nothing.
+    // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+    const reportMenu = target.locator('details.message-more');
+    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
     await target.locator('[data-message-action="report"]').click();
     await page.locator("#report-dialog").waitFor({ state: "visible" });
     assert.match(await page.locator("#report-source").textContent(), /^Message from Test producer: Synthetic message/);
@@ -60,6 +63,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(f.store.room("commons").state.eventLog.length, 0, "projection carries no report; no room event was appended");
     const sequenceBefore = f.store.room("commons").sequence;
     // Reporting again is a no-op receipt, not a second report.
+    // The menu closed behind the first report; reopen it.
+    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
     await target.locator('[data-message-action="report"]').click();
     await page.locator("#report-reason-input").fill("Still off-topic.");
     await dialogPrimarySubmit(page, "#report-form").click();
