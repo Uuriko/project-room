@@ -16,6 +16,7 @@ import { fillAccessKey } from "./auth-signin.mjs";
 async function openMessageMenu(message) {
   const menu = message.locator('details.message-more');
   if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  await message.evaluate(node => node.classList.add('message-menu-open'));
 }
 
 for (const touch of [false, true]) {
