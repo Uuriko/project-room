@@ -1624,7 +1624,7 @@ function renderSearch(now = Date.now()) {
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: activeChannelId, pending: pendingMessage,
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage,
     ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
@@ -2594,8 +2594,9 @@ $("#message-form").addEventListener("submit", e => {
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
   const previous = pendingMessage?.command?.data;
-  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && previous.channelId === content.channelId;
-  const data = { messageId: unchanged ? previous.messageId : crypto.randomUUID(), ...content };
+  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId;
+  // Preserve the exact legacy payload, including an omitted default channel.
+  const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
   const generation = client.generation, threadId = currentThreadId;

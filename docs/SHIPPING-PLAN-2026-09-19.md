@@ -27,3 +27,9 @@ Continue Project Room release PR #717 in the isolated handoff-review worktree. R
 ## Provider semantics
 
 Cloudflare separates [version upload from traffic deployment](https://developers.cloudflare.com/workers/versions-and-deployments/). Worker version rollback does not restore Durable Object data. Use explicit immutable version IDs and preserve storage bindings. Recovery here intentionally stops execution before storage access rather than claiming a database rollback.
+
+## Additional upgrade finding and repair
+
+The exact old-live → candidate test reproduced an actual second ordinary-message command after the first send committed and its response was lost. The old writer stored channel only inside pending command contents. The new reader now recovers that field, reconstructs and validates the full permitted payload, and retains the original command. The composer preserves legacy payload shape when retrying, including omitted default-channel fields, and does not add channel metadata to a pending legacy request on re-save. Desktop/touch upgrade tests include two reloads and assert exact command identity and duplicate receipt. Current request recovery is separately covered by the real Workers pause/resume test.
+
+GitHub's synthetic merge commit also exposed an unreliable development-test fallback selector: nearest same-schema first parent selected main, not the locally qualified checkpoint. The development package switch now pins known compatible `4a2490b` explicitly and fails closed on a future schema mismatch. It does not certify production rollback to that unuploaded checkpoint. The production emergency target remains the retained maintenance version.

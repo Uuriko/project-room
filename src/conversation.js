@@ -351,6 +351,15 @@ export class DraftRecovery {
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
       const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
       for (const [id, d] of saved.entries) {
+        let channelId = typeof d?.channelId === "string" ? d.channelId : undefined;
+        // The old writer saved channel only inside the pending command. Recover
+        // that field, then validate the entire reconstructed payload below.
+        if (channelId === undefined && d?.pending?.contents) {
+          try {
+            const previous = JSON.parse(d.pending.contents);
+            if (typeof previous.data?.channelId === "string") channelId = previous.data.channelId;
+          } catch { /* malformed contents never become a retained command */ }
+        }
         if (d?.mode) {
           if (!validReplyDraft(d.mode, state) || replyDraftKey(d.mode, d.threadId) !== id
             || d.threadId !== null && !index.threads.has(d.threadId)
@@ -363,7 +372,7 @@ export class DraftRecovery {
           try {
             const data = replyDraftData(d.mode, { body: d.body.trim(), toMemberId: d.toMemberId || null,
               replyToId: d.replyToId, messageId: d.pending?.messageId,
-              ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}) });
+              ...(channelId === undefined ? {} : { channelId }) });
             const type = d.mode.kind === "cancelled" ? "reply_request.cancelled" : "message.posted";
             const contents = JSON.stringify({ type, data, causationId: null });
             if (d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id))
@@ -372,7 +381,7 @@ export class DraftRecovery {
           // A malformed retained operation must never become a new automatic send.
           if (d.pending && !pending) continue;
           drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-            mode: d.mode, threadId: d.threadId, channelId: d.channelId, pending });
+            mode: d.mode, threadId: d.threadId, channelId, pending });
           continue;
         }
         if (id !== null && !index.threads.has(id)) continue;
@@ -384,7 +393,6 @@ export class DraftRecovery {
         // Older saved commands without a messageId keep their original payload.
         const messageId = d.pending?.messageId;
         const messageIdValid = messageId === undefined || (typeof messageId === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(messageId));
-        const channelId = typeof d.channelId === "string" ? d.channelId : null;
         const data = { ...(messageId === undefined ? {} : { messageId }), body: d.body.trim(), toMemberId: d.toMemberId || null, replyToId: d.replyToId,
           ...(channelId ? { channelId } : {}) };
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
