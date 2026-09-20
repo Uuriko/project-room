@@ -267,6 +267,11 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     $("#work-dialog").close();
+    $("#room-overview-dialog").close();
+    $("#room-overview-title").textContent = "Room overview";
+    $("#room-overview-purpose").textContent = "";
+    $("#room-overview-content").replaceChildren();
+    delete $("#room-overview-content")._content;
     if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
     // Every disclosure goes back to how index.html authored it. All of these
     // are authored closed except People, which is authored open - closing that
@@ -841,7 +846,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "your Second / their agents / one Room. @mention uses Connect Wake/Pull once Quill's RC-051 lands. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
+  if (hint) hint.textContent = "Invite people or add an agent to work together.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1359,6 +1364,7 @@ function render() {
   syncChannelChrome();
   renderMessages();
   syncRequestComposer();
+  renderRoomOverview();
   renderSpendAllowance();
   syncReports();
   $("#event-count").textContent = `${client.sequence}`;
@@ -1777,6 +1783,7 @@ function revealMessage(id) {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   inboxUI?.showRooms();
   const message = conversation.byId.get(id);
+  if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
@@ -3555,6 +3562,37 @@ let resultView = null;
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
+// Overview is a read-only projection of the authorized room snapshot. Keep
+// discussion and work canonical: each entry opens the existing source surface.
+function renderRoomOverview() {
+  if (!state || !$("#room-overview-dialog").open) return;
+  setText("#room-overview-title", `${state.room.title} · Overview`);
+  setText("#room-overview-purpose", state.room.purpose || "No purpose recorded yet.");
+  const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
+  const steps = contributionSteps(state, session.member.id).slice(0, 3);
+  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED).slice(-3).reverse();
+  const results = completedResults(state).slice(0, 3);
+  const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
+  renderContent("#room-overview-content",
+    section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
+    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.data.statement)}</p>${link("message", e.data.sourceMessageId, "Open discussion", e.id)}<p class="form-hint">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet."));
+}
+$("#room-overview-open").addEventListener("click", () => {
+  if (!state || busy) return;
+  $("#room-overview-dialog").showModal();
+  renderRoomOverview();
+});
+$("#room-overview-close").addEventListener("click", () => $("#room-overview-dialog").close());
+$("#room-overview-dialog").addEventListener("click", event => {
+  // Close before the existing source-link handler moves focus to the timeline.
+  if (!busy && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+    && event.target.closest("[data-open-work], [data-open-message]")) {
+    $("#room-overview-dialog").close();
+    $("#main").classList.remove("sidebar-open");
+    $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  }
+});
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;

@@ -242,6 +242,7 @@
             <h1 id="room-title" tabindex="-1">Project Room</h1>
             <span id="room-kind-badge" class="room-kind-badge" hidden></span>
           </div>
+          <button id="room-overview-open" class="button ghost room-overview-open" type="button" aria-haspopup="dialog" aria-controls="room-overview-dialog">Overview</button>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
           <nav aria-label="Channels">
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
@@ -261,7 +262,7 @@
               <p>Open this invite link to invite a person. <code>#room/{roomId}</code> opens a room for members already in it — it is not a shareable invite.</p>
             </details>
             <p id="people-hint" class="form-hint"></p>
-            <p id="people-wake-hint" class="member-status">@mention uses Connect Wake/Pull once Quill's RC-051 lands.</p>
+            <p id="people-wake-hint" class="member-status">Agents act with their granted room permissions.</p>
             <div id="presence-list" class="presence-list"></div>
           </details>
         </aside>
@@ -336,6 +337,12 @@
           <div id="recipe-preview" class="recipe-preview" hidden></div>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
         </section>
+
+        <dialog id="room-overview-dialog" aria-labelledby="room-overview-title">
+          <div class="dialog-head"><h2 id="room-overview-title">Room overview</h2><button id="room-overview-close" class="button ghost" type="button">Close</button></div>
+          <p id="room-overview-purpose"></p>
+          <div id="room-overview-content" class="room-overview-content"></div>
+        </dialog>
 
         <dialog id="catchup-dialog" aria-labelledby="catchup-title">
           <div class="dialog-head"><h2 id="catchup-title">Catch up</h2><button id="catchup-close" class="button ghost" type="button">Close</button></div>

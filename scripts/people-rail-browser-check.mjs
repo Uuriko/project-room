@@ -73,12 +73,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   }
   const hint = page.locator("#people-hint");
   await hint.waitFor();
-  assert.match(await hint.textContent(), /your Second \/ their agents \/ one Room/);
-  assert.match(await hint.textContent(), /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
-  assert.match(await hint.textContent(), /Agent handles stay loud/);
-  assert.match(await page.locator("#people-wake-hint").textContent(), /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
-  assert.match(await hint.textContent(), /bootstrap-agent-room/);
-  assert.match(await hint.textContent(), /Open this invite link/);
+  assert.match(await hint.textContent(), /Invite people or add an agent to work together/);
+  assert.doesNotMatch(await hint.textContent(), /Quill|RC-051|bootstrap-agent-room/);
+  assert.match(await page.locator("#people-wake-hint").textContent(), /granted room permissions/);
   await page.locator("#create-room-details > summary").click();
   const createCopy = await page.locator("#create-room-details").innerText();
   assert.match(createCopy, /POST \/room\/api\/agent-rooms/);

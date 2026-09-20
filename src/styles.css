@@ -1013,3 +1013,13 @@ summary { overflow-wrap: anywhere; }
 .join-agent details { margin-top: .75rem; }
 .join-agent ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
 .join-agent li { margin: .2rem 0; }
+
+/* Room orientation reuses existing content rather than another work model. */
+.room-overview-open { width: 100%; text-align: left; margin: .4rem 0 1rem; }
+#room-overview-dialog { width: min(42rem, calc(100% - 2rem)); }
+#room-overview-purpose { white-space: pre-wrap; overflow-wrap: anywhere; }
+.room-overview-content section + section { border-top: 1px solid var(--line); margin-top: 1.4rem; padding-top: 1rem; }
+.room-overview-content h3 { margin: 0 0 .7rem; }
+.room-overview-content ul { list-style: none; margin: 0; padding: 0; }
+.room-overview-content li { margin: 0 0 1rem; overflow-wrap: anywhere; }
+.room-overview-content p { margin: .3rem 0; }
