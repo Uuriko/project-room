@@ -79,14 +79,18 @@ try {
     post("Clarification: also consider case sensitivity before answering. Do not silently change case handling.", { replyToId: steeringId });
     return pending;
   };
-  await assert.rejects(runRequestOnce({ connection, requestMessageId: steeringId, db, execute: steer }), { code: "command_rejected" });
-  await assert.rejects(runRequestOnce({ connection, requestMessageId: steeringId, db, execute }), { code: "command_rejected" });
+  // A quick host finishes before the next heartbeat and its stale delivery is
+  // rejected. A slower host is cancelled on the heartbeat; neither may rerun.
+  await assert.rejects(runRequestOnce({ connection, requestMessageId: steeringId, db, execute: steer }),
+    error => ["command_rejected", "request_run_changed"].includes(error.code) || /Host cancelled/.test(error.message));
+  await assert.rejects(runRequestOnce({ connection, requestMessageId: steeringId, db, execute }),
+    error => error.code === "command_rejected" || /Host outcome is unknown/.test(error.message));
   assert.equal(hostCalls, 2); assert.equal((await client.replyContext(steeringId)).request.status, "open");
   assert.equal(git(["diff", "--binary", "HEAD"]), patch, "review must not change code");
   writeFileSync(join(evidence, "tests.txt"), tests.stdout + tests.stderr);
   writeFileSync(join(evidence, "receipt.json"), JSON.stringify({ qualifiedAt: new Date().toISOString(), baseRevision, patchSha256, hostCalls,
     codingResult: body, restartRecovered: true, duplicateDelivery: true, clarificationRefusedStaleAnswer: true,
-    limitations: ["Synthetic human messages; not a human usability study", "One Codex host; not multi-vendor qualification", "Clarification refuses stale delivery; it does not interrupt or resume the model"] }, null, 2) + "\n");
+    limitations: ["Synthetic human messages; not a human usability study", "One Codex host; not multi-vendor qualification", "Clarification rejects stale delivery or requests local cancellation on the next heartbeat; no model continuation or remote-stop guarantee"] }, null, 2) + "\n");
   completed = true; console.log("Live host qualification passed. Evidence: " + evidence);
 } finally {
   db?.close(); server.closeStreams(); server.closeAllConnections();
