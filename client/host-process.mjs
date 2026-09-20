@@ -1,3 +1,4 @@
+import { hostReplyBody } from "./host-result.mjs";
 import { spawn } from "node:child_process";
 import { isAbsolute, join } from "node:path";
 import { mkdirSync, realpathSync, rmdirSync } from "node:fs";
@@ -57,10 +58,9 @@ export function configuredHost(config) {
       if (failure || code !== 0) { reject(new Error(failure ?? "Host exited unsuccessfully; reconcile the original attempt")); return; }
       try {
         const result = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
-        if (!result || Object.keys(result).length !== 1 || typeof result.body !== "string"
-          || !result.body.trim() || result.body.length > 4096 || !result.body.isWellFormed()) throw new Error();
+        hostReplyBody(result);
         resolve(result);
-      } catch { reject(new Error("Host must return one JSON object containing a nonempty body of at most 4096 characters")); }
+      } catch { reject(new Error("Host must return one JSON object with body and optional valid codeResult, totaling at most 4096 reply characters")); }
     });
     child.stdin.end(payload);
   });

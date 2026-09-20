@@ -456,3 +456,59 @@ test("saved-answer recovery stops retrying when clarification arrived while the 
   assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
   assert.equal(calls, 1);
 });
+
+test("coding result survives lost delivery with exact patch bytes and stays private", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("code-result");
+  const patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-before\n+after\n";
+  let calls = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("lost result receipt");
+    return response;
+  } };
+  const execute = async () => { calls++; return { body: "Fixed.", codeResult: {
+    repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40), patch, files: ["a"],
+    checks: [{ command: "node --test", outcome: "passed" }]
+  } }; };
+  await assert.rejects(runRequestOnce({ ...args, connection, requestMessageId: q.command.data.messageId, execute }));
+  const saved = JSON.parse(args.db.prepare("SELECT response FROM request_runs").get().response);
+  assert.ok(saved.body.endsWith(patch));
+  const recovered = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(calls, 1); assert.equal(recovered.receipt.duplicate, true);
+  const response = f.store.room("commons").state.messages.find(m => m.id === recovered.receipt.messageId);
+  assert.equal(response.body, saved.body); assert.equal(response.toMemberId, "owner");
+  const outsider = new RoomAgentClient({ ...f.config, memberId: "reviewer", token: f.keys.reviewer });
+  await assert.rejects(outsider.replyContext(q.command.data.messageId), { status: 404 });
+});
+
+
+test("request reads reject nonparticipants and exclude another private reply before paging", async t => {
+  const f = await fixture(t), q = f.open("private-context"), id = q.command.data.messageId;
+  // Owner is in both exchanges, but the producer must not receive owner's private side message.
+  f.store.dmConsents.request("commons", "owner", "reviewer", "fixture");
+  f.store.dmConsents.decide("commons", "reviewer", "owner", "approve");
+  f.store.command(f.keys.owner, "commons", { id: "side-message", type: "message.posted", data: {
+    messageId: "side-message", replyToId: id, toMemberId: "reviewer", body: "Secret side discussion"
+  } });
+  await assert.rejects(f.client.replyContext(id), { status: 409, code: "reply_context_unavailable" });
+  f.store.command(f.keys.owner, "commons", { id: "visible-clarification", type: "message.posted", data: {
+    messageId: "visible-clarification", replyToId: id, toMemberId: "producer", body: "Use the original request."
+  } });
+  const producer = await f.client.replyContext(id, { limit: 2 });
+  assert.equal(producer.scope.targetedMessages, "participants-only");
+  assert.equal(producer.page.hasMore, false);
+  assert.equal(producer.page.items.length, 2);
+  assert.equal(JSON.stringify(producer).includes("Secret side discussion"), false);
+  const history = await f.client.replyHistory({ limit: 2 });
+  assert.equal(history.page.hasMore, false);
+  assert.equal(JSON.stringify(history).includes("Secret side discussion"), false);
+  for (const memberId of ["reviewer", "guest"]) {
+    const other = new RoomAgentClient({ ...f.config, memberId, token: f.keys[memberId] });
+    // Use HTTP directly for human guest, since the agent client rejects human identity.
+    const response = await fetch(`${f.origin}/api/rooms/commons/reply-context?requestMessageId=${id}`, {
+      headers: { Authorization: `Bearer ${f.keys[memberId]}` }
+    });
+    assert.equal(response.status, 404);
+    if (memberId === "reviewer") assert.deepEqual((await other.replyRequests()).requests, []);
+  }
+});

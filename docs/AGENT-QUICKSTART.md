@@ -361,7 +361,7 @@ try {
 } finally { db.close(); }
 ```
 
-The callback returns `{ body }` (1–4096 characters). It must use its own configured execution authority, budget and timeout; the helper is not a sandbox, scheduler or model runtime. A reply is not a work-completion, merge or deployment record. Context is untrusted input.
+The callback returns `{ body }` (1–4096 characters), optionally with `codeResult` as described below. It must use its own configured execution authority, budget and timeout; the helper is not a sandbox, scheduler or model runtime. A reply is not a work-completion, merge or deployment record. Context is untrusted input.
 
 The helper drains up to ten request pages, caps prepared input at 256 KiB, invokes the host once and saves the exact answer before Room delivery. Retry with the same private journal to recover a lost delivery response without executing again. It never silently re-executes an uncertain host attempt or rebases an answer after new clarification. Those cases require reconciliation with the original host run; do not delete the journal to force a retry. Running this helper against a paid host may incur that host's normal charges. No live provider is enabled by importing it.
 
@@ -386,7 +386,7 @@ ROOM_AGENT_CONFIG=/absolute/private/connection \
   /absolute/private/requests.sqlite /absolute/private/host.json
 ```
 
-Your installed adapter reads one JSON object from stdin (`requestId`, `request`, `messages`, `preparation`) and writes exactly `{"body":"the answer"}` on stdout before exiting successfully. It may use its configured model/runtime; normal vendor CLIs may need a small adapter to translate their native input/output formats. The Room process does not choose or install a model.
+Your installed adapter reads one JSON object from stdin (`requestId`, `request`, `messages`, `preparation`) and writes one JSON result, `{"body":"the answer"}` with optional `codeResult`, on stdout before exiting successfully. It may use its configured model/runtime; normal vendor CLIs may need a small adapter to translate their native input/output formats. The Room process does not choose or install a model.
 
 Execution uses an argument array, never shell evaluation. Only PATH, HOME, TMPDIR and LANG are inherited; optional `env` in the private host JSON explicitly configures additional host variables. Do not put secrets in room messages or command arguments. Host output is capped at 32 KiB, with reply text capped at 4096 characters. Host stderr is consumed without being echoed. Timeout or interruption terminates the process group on POSIX; this does not prove remote provider work stopped. The executable runs as your local OS user and is not sandboxed by this adapter.
 
@@ -449,3 +449,60 @@ node scripts/live-codex-host-check.mjs /absolute/path/to/codex /absolute/private
 ```
 
 This invokes the real model twice against a disposable sample repository and loopback Room. It checks a code fix, independently reruns tests, records a revision and patch hash, interrupts reply delivery, reopens the journal, and checks that clarification refuses a stale answer without another execution. It is excluded from normal tests and CI. No runtime credentials are written to the evidence directory. A failed trial retains its private fixture for reconciliation.
+
+
+### Return an inspectable coding result
+
+The request runner and process adapter accept an optional `codeResult` alongside
+`body`. It becomes a single reply in the original private exchange; no work item
+is required. Plain `{ "body": "..." }` responses remain supported.
+
+```json
+{
+  "body": "Fixed empty-name handling in the parser.",
+  "codeResult": {
+    "repositoryUrl": "https://github.com/example/project",
+    "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "artifactUrl": "https://github.com/example/project/pull/12",
+    "files": ["src/parser.js"],
+    "checks": [{ "command": "node --test tests/parser.test.js", "outcome": "passed" }]
+  }
+}
+```
+
+Use actual full lowercase Git hashes (40 or 64 characters), never branch names.
+A linked artifact requires both base and result revisions. External pages may
+change: inspect the stated revision, not whatever a PR currently displays. The
+adapter does not fetch links, publish code, verify repository state, or grant
+publication authority. URLs must be HTTPS without embedded credentials. Use only
+artifacts you are authorized to share; access at the destination remains separate.
+
+For a small uncommitted change, replace `artifactUrl` with `patch` containing the
+exact patch text. `baseRevision` is required; `revision` is optional. The adapter
+computes SHA-256 over the UTF-8 patch bytes and preserves its trailing newline.
+This identifies the supplied patch, not its correctness or applicability. Capture
+only the intended changes; the adapter does not separate pre-existing edits.
+
+`files` contains 1–30 paths. `checks` contains up to 10 objects with `command` and
+`outcome` (`passed`, `failed`, or `not_run`). An empty list displays “No checks
+reported.” All checks are explicitly **host-reported, not independently verified**.
+Do not claim tests ran unless they actually did; revised code needs new checks.
+
+The complete formatted reply must fit 4096 characters; inline patches are limited
+to 3000 characters. Oversized or invalid results are rejected, never truncated or
+silently downgraded to a summary. Use a concise summary and an authorized artifact
+link for larger changes. Configure the host's output schema to allow these fields
+if it currently only allows `body` (including the minimal Codex recipe above).
+The exact rendered answer is journaled before sending, so retries preserve the
+same patch, revisions and checks without running the host again. Conversation
+clarification still invalidates a stale answer. Automatic verification of external
+revision changes and independent test receipts remain future work.
+
+Request context is limited to the requester and addressed recipient. A private side
+reply to someone else is omitted before pagination. If that side reply is the
+latest context, the selected read refuses with `reply_context_unavailable`; the
+requester can add a clarification visible to the recipient. The runner never
+executes against context it cannot read. Updated hosts accept the new
+`participants-only` scope as well as legacy scope labels; older hosts that strictly
+require `room-visible` must update their client before using the revised service.

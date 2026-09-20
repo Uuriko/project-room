@@ -1,4 +1,5 @@
 // Synthetic human journeys against a disposable real service, not participant research.
+import { hostReplyBody } from "../client/host-result.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -165,5 +166,26 @@ test("original conversation shows host progress and recovery without changing th
   // The operational poll does not require a new room event or a page reload.
   await owner.waitForFunction(id => document.querySelector(`[data-request-run="${id}"]`)?.textContent.includes("Host needs attention"), requestMessageId, { timeout: 15000 });
   assert.equal(await row.locator('[data-message-action="request-cancelled"]').count(), 1);
+  assert.deepEqual(f.errors, []);
+});
+
+
+for (const width of [1280, 390]) test(`coding result stays readable and escaped at ${width}px`, { timeout: 60000 }, async t => {
+  const f = await setup(t, { width, height: 900 });
+  const owner = await f.login("owner");
+  f.request("inspect-code", "producer");
+  const body = hostReplyBody({ body: "Fixed the parser.", codeResult: {
+    repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40),
+    patch: "diff --git a/parser.js b/parser.js\n--- a/parser.js\n+++ b/parser.js\n@@ -1 +1 @@\n-before\n+<img src=x onerror=alert(1)>\n",
+    files: ["parser.js"], checks: [{ command: "node --test", outcome: "passed" }]
+  } });
+  f.send("producer", "message.posted", { messageId: "inspect-result", replyToId: "inspect-code", toMemberId: "owner", body });
+  await record(owner, "inspect-code").locator('[data-message-action="reply"]').click();
+  const content = record(owner, "inspect-result").locator(".message-body");
+  await content.waitFor();
+  assert.equal(await content.textContent(), body);
+  assert.match(await record(owner, "inspect-result").locator(".audience-chip").textContent(), /private/);
+  assert.equal(await content.locator("img").count(), 0);
+  assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
 });

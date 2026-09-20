@@ -171,7 +171,8 @@ test("selected exchange freezes pages, exposes basis only after context is drain
   assert.deepEqual(second.page.items.map(row => row.message.id), ["context"]);
   assert.deepEqual(second.current.answerBasis, { expectedRequestRevision: 0, contextEventId: clarify.event.id, contextSequence: clarify.sequence });
   assert.equal(second.page.hasMore, false); assert.ok(second.page.rowBytes <= REPLY_PAGE_BYTES);
-  assert.equal(f.store.replyRequests.selected(f.keys.owner, "commons", id).current.answerBasis, null);
+  assert.equal(f.store.replyRequests.selected(f.keys.guest, "commons", id).current.answerBasis, null);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.owner, "commons", id), { status: 404 });
   assert.deepEqual(auditRecovery(f.store), before);
   const fresh = f.post("guest", { body: "New relevant context", replyToId: id });
   assert.equal(f.store.replyRequests.selected(f.keys.agent, "commons", id, { cursor: first.page.nextCursor }).current.answerBasis, null);
