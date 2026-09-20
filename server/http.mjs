@@ -659,6 +659,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Log only a bounded error identifier, never callback URLs, tokens,
           // provider bodies, emails, or arbitrary exception messages.
           const reason = /^[a-z][a-z0-9_]{0,63}$/.test(error?.code || "") ? error.code : "internal_error";
+          res.setHeader("X-Room-Auth-Failure", reason);
           console.warn(`google callback failed: ${reason}`);
           return finishGoogle("/?google=error");
         }
