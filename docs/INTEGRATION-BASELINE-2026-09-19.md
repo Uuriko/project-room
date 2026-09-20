@@ -16,7 +16,7 @@ Runtime: Node v24.19.0. Production-code checkpoint: `64691c5` in `codex/fable-ha
 
 Root and browser logs are separate. Local evidence is retained under ignored `test-results/async-continuity/`. Source code stayed fixed through the complete suites; targeted test-navigation repairs were run separately where the full runner had already loaded the older file.
 
-## Remaining failure inventory and repair order
+## Original failure inventory and repair order
 
 | Priority | File | Count | Observed failure | Next action |
 | --- | --- | ---: | --- | --- |
@@ -27,8 +27,18 @@ Root and browser logs are separate. Local evidence is retained under ignored `te
 | 3 | `scripts/work-recipes-browser-check.mjs` | 1 | Representative/order differs for a repeated definition. | Check event ordering and the documented deduplication rule; preserve definition-only, no-mutation behavior. |
 | 3 | `scripts/work-reuse-browser-check.mjs` | 4 | Three multiline-title/CR normalization mismatches; one oversized Unicode request returns 201 instead of expected 413. | Resolve the title-input contract and current request-size boundary. Preserve multiline definition content, explicit retry semantics and byte-size refusal coverage. |
 
-Total: **16**. These are observed symptoms and investigation steps, not a blanket classification as outdated tests. A browser path that fails early has not proved its later privacy/recovery assertions.
+At this baseline: **16**. See the later checkpoint below for current status. These are observed symptoms and investigation steps, not a blanket classification as outdated tests. A browser path that fails early has not proved its later privacy/recovery assertions.
 
 ## Gate before visual expansion
 
 Repair these bounded core-journey failures, rerun their whole files, then run the configured full suite on the final immutable candidate. Keep account-wide Activity separate from existing room Catch up. After this checkpoint, the next product build remains a coherent shell/Activity contract and one complete human–agent–Inbox workflow, not additional integrations or a backend rewrite.
+
+## Later help, credit and reconnect checkpoint
+
+The complete help, credit-question and reconnect files now pass: **12/12**, resolving **10 of the 16** browser failures above. Six original browser failures remain: allowance validation (one), recipe ordering (one), work reuse (four). The final wider regression run also reproduced both historical release-polish selection failures, bringing the current browser inventory to **eight** and effective latest accounting to **391/399**, assembled across runs. A fresh full-suite run is still required after those repairs.
+
+A real mobile reading-position defect was reproduced: a background message moved the older request by 9.59375 pixels. The timeline previously anchored its own scroll container even when the whole page was scrolling. It now identifies the visible row, distinguishes page scrolling from inner timeline scrolling, and compensates after rendering the new-message control. The original two-pixel assertion remains unchanged. Test navigation also now returns from reply threads to work cards and closes/reopens Catch up explicitly.
+
+The new full core run reports **4,574 passed, one failed, one TODO**. The previously intermittent oversized-import `EPIPE` recurred in `tests/route-hardening.test.js`; the prior green run does not establish that it is fixed. The complete route-hardening file also reproduced it (12 passed, one failed). No upload code was changed. Treat this as an additional unresolved integration gate, separate from the six browser checks.
+
+See [work-journey checkpoint](WORK-JOURNEYS-2026-09-19.md) for final verification and next steps.

@@ -1428,8 +1428,14 @@ function renderMessages() {
   const sameView = list.dataset.view === view;
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
-  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-  const anchor = [...list.children].find(e => e.getBoundingClientRect().bottom > list.getBoundingClientRect().top);
+  const pageScroll = list.scrollHeight <= list.clientHeight;
+  const listTop = Math.max(0, list.getBoundingClientRect().top);
+  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
+    : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const anchor = [...list.children].find(e => {
+    const bounds = e.getBoundingClientRect();
+    return bounds.bottom > listTop && (!pageScroll || bounds.top < innerHeight);
+  });
   const anchorOffset = anchor?.getBoundingClientRect().top;
   const focused = list.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
@@ -1536,7 +1542,7 @@ function renderMessages() {
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
   else {
-    if (anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
+    if (!pageScroll && anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
     newVisibleMessages += newCount;
   }
   if (focused && !focused.isConnected) {
@@ -1553,6 +1559,10 @@ function renderMessages() {
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   renderPinned();
+  // On narrow screens the page scrolls instead of the timeline. Keep the
+  // visible row steady after both message and new-message controls change.
+  if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
+    window.scrollBy({ top: anchor.getBoundingClientRect().top - anchorOffset, behavior: "instant" });
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
 function draftFeedbackHTML(message) {
