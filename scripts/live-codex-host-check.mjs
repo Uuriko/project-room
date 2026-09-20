@@ -21,14 +21,14 @@ const f = createAcceptanceFixture({ dmConsent: true });
 const repository = join(f.directory, "sample"), schema = join(f.directory, "reply.schema.json");
 mkdirSync(repository);
 const shell = (command, args) => spawnSync(command, args, { cwd: repository, encoding: "utf8", timeout: 15000 });
-const git = args => { const r = shell("git", args); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+const git = args => { const r = shell("git", args); assert.equal(r.status, 0, r.stderr); return r.stdout; };
 writeFileSync(join(repository, "AGENTS.md"), "This is a disposable coding qualification fixture. Work only in this repository. Do not contact other agents, use external services, install packages, edit tests, commit, or deploy. Use node --test to check your change.\n");
 writeFileSync(join(repository, "labels.mjs"), "export const cleanLabels = labels => labels;\n");
 writeFileSync(join(repository, "labels.test.mjs"), `import test from 'node:test';import assert from 'node:assert/strict';import {cleanLabels} from './labels.mjs';
 test('trim, discard blank, deduplicate preserving order without mutation',()=>{const input=[' a ','','b','a','  '];assert.deepEqual(cleanLabels(input),['a','b']);assert.deepEqual(input,[' a ','','b','a','  ']);});\n`);
 git(["init", "-q"]); git(["add", "."]);
 git(["-c", "user.name=Room Qualification", "-c", "user.email=room-test@example.invalid", "commit", "-qm", "Disposable fixture"]);
-const baseRevision = git(["rev-parse", "HEAD"]);
+const baseRevision = git(["rev-parse", "HEAD"]).trim();
 assert.notEqual(shell(process.execPath, ["--test"]).status, 0, "fixture must start broken");
 writeFileSync(schema, JSON.stringify({ type: "object", properties: { body: { type: "string" } }, required: ["body"], additionalProperties: false }));
 const host = configuredHost({ command: executable, args: ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "workspace-write", "-c", 'approval_policy="never"', "--output-schema", schema,
@@ -59,8 +59,11 @@ try {
   await assert.rejects(runRequestOnce({ connection: droppingConnection, requestMessageId: id, db, execute }));
   assert.equal(dropped, true, "host must finish and attempt delivery");
   const tests = shell(process.execPath, ["--test"]); assert.equal(tests.status, 0, tests.stdout + tests.stderr);
-  assert.deepEqual(git(["diff", "--name-only"]).split("\n"), ["labels.mjs"]);
+  assert.deepEqual(git(["diff", "--name-only"]).trim().split("\n"), ["labels.mjs"]);
   const patch = git(["diff", "--binary", "HEAD"]), patchSha256 = createHash("sha256").update(patch).digest("hex");
+  const patchFile = join(evidence, "change.patch");
+  writeFileSync(patchFile, patch);
+  git(["apply", "--reverse", "--check", patchFile]);
   db.close(); db = openRequestJournal(journal);
   const recovered = await runRequestOnce({ connection, requestMessageId: id, db, execute });
   assert.equal(recovered.hostExecuted, false); assert.equal(recovered.receipt.duplicate, true); assert.equal(hostCalls, 1);
@@ -80,7 +83,6 @@ try {
   await assert.rejects(runRequestOnce({ connection, requestMessageId: steeringId, db, execute }), { code: "command_rejected" });
   assert.equal(hostCalls, 2); assert.equal((await client.replyContext(steeringId)).request.status, "open");
   assert.equal(git(["diff", "--binary", "HEAD"]), patch, "review must not change code");
-  writeFileSync(join(evidence, "change.patch"), patch);
   writeFileSync(join(evidence, "tests.txt"), tests.stdout + tests.stderr);
   writeFileSync(join(evidence, "receipt.json"), JSON.stringify({ qualifiedAt: new Date().toISOString(), baseRevision, patchSha256, hostCalls,
     codingResult: body, restartRecovered: true, duplicateDelivery: true, clarificationRefusedStaleAnswer: true,

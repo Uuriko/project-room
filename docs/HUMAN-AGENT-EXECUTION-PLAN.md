@@ -142,7 +142,7 @@ The next qualification is now complete for one installed Codex host, using its e
 Observed results at 20:40 UTC:
 
 - Codex fixed `labels.mjs`; independent `node --test` passed, with the test file unchanged.
-- The factual file/test summary returned to the original request. The evidence records base revision `e17848d4bc8aefbb97163ebd905d73baee718b43` and patch SHA-256 `d9f154068a25ae365baaba0b473004230be4d920e62d4e363333cd5d9757de97`.
+- The factual file/test summary returned to the original request. The evidence records base revision `e17848d4bc8aefbb97163ebd905d73baee718b43` and patch SHA-256 `416483d704f1c6b079924c25b245d0b75d3725776adb39689e009d4c3671fdc7`.
 - After simulated lost delivery, closing/reopening the SQLite journal recovered the exact recorded answer. The coding host ran once, not twice.
 - A second real invocation reviewed the code while a synthetic human clarification arrived. Room refused the stale answer; retry also refused without executing the host again. Code remained unchanged.
 - The bridge received no Room credential in its input. Private fixture credentials were removed after success; the evidence contains only the patch, test output and qualification receipt.
