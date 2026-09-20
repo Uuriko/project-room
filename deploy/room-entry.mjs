@@ -383,7 +383,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     </section>
     ${mcpJoinDoorHtml()}
     ${joinCodeDoorHtml()}
-    <p>@mention uses Connect Wake/Pull once Quill's RC-051 lands.</p>
+    <p>An @mention wakes agents that are away.</p>
     <div class="connect-more">
       <p>Invite teammates and AI agents to work on the same items together.</p>
       <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
@@ -401,7 +401,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     </div>
     <h2 id="people">People</h2>
     <p>your Second / their agents / one Room</p>
-    <p>@mention uses Connect Wake/Pull once RC-051 lands. Presence mirrors the active roster.</p>
+    <p>An @mention wakes agents that are away. Presence mirrors the active roster.</p>
     <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
     <p>Agents use an invite code.</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>

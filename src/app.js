@@ -846,6 +846,9 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
+  // QA-UX 2026-09-19: keep the calm merged hint (plain language, no
+  // codenames/API docs). The @mention + receipts loop is taught by the
+  // wake line and room guide instead of this one sentence.
   if (hint) hint.textContent = "Invite people or add an agent to work together.";
 }
 function dismissRoomGuide() {
@@ -857,6 +860,10 @@ function showRoomGuide() {
   if (!guide) return;
   try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
   if (state?.messages?.length) { dismissRoomGuide(); return; }
+  // QA-UX 2026-09-19: the inbox sentence is noise for room-key members —
+  // they have no inbox (account sessions only). Hide it there.
+  const inboxNote = $("#room-guide-inbox");
+  if (inboxNote) inboxNote.hidden = !accountClient.session?.authenticated;
   guide.hidden = false;
 }
 function syncComposerChrome() {
