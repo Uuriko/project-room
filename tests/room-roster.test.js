@@ -160,8 +160,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-agents-button"/);
   assert.match(html, /id="create-room-details"/);
   assert.match(html, /id="agent-invite-dialog"/);
-  assert.match(html, /bootstrap-agent-room/);
-  assert.match(html, /#room\/\{roomId\}/);
+  // UI calming: the sidebar Create Room block was de-jargoned — the one-shot
+  // CLI / HTTP route disclosure (bootstrap-agent-room) no longer ships in the UI,
+  // along with the #room/{roomId} fragment explanation and the
+  // "Open this invite link to invite a person" sentence.
   assert.match(html, /Message #general/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
@@ -171,7 +173,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-redeem"/);
   assert.match(html, />Open this invite link</);
   assert.match(html, /Have an invite/);
-  assert.match(html, /Open this invite link to invite a person/);
+  assert.match(html, /Open this invite link/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);
   assert.match(html, /id="auth-kind-hint"/);
@@ -223,7 +225,9 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /messageMentionsMember/);
   assert.match(app, /data-mention-id/);
   assert.doesNotMatch(app, /\$\("#presence-list"\)\.addEventListener\("click", e => \{\s*if \(e\.target\.closest\("details, summary, button, a"\)\) return;/);
-  assert.match(app, /author\.kind === "agent"/);
+  // UI calming #6: the uppercase "AGENT" pill was removed from message metadata
+  // (the avatar class already marks agent messages: message-avatar ${author.kind}).
+  assert.match(app, /message-avatar \$\{author\.kind\}/);
   assert.match(app, /Address \$\{m\.displayName\} in chat/);
   assert.doesNotMatch(app, /maybeOpenCatchUp/);
   assert.doesNotMatch(app, /"Message…"/);
