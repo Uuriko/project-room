@@ -20,7 +20,7 @@ import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
@@ -86,7 +86,16 @@ let authKind = accountHomeFromLocation() || selectedRoomFromLocation()
 function accountSignIn() {
   return authKind === "account" || accountHomeFromLocation();
 }
-const initialJoinFragment = consumeJoinFragment();
+const initialJoinFragment = (() => {
+  // [QA-Join]: a Google/GitHub OAuth round-trip drops the #join/ fragment (it
+  // never reaches the server). Restore a stashed join link one-shot before
+  // consuming, so the join dialog re-opens after OAuth sign-in instead of the
+  // first-sign-in default-room flow creating a stray personal room. Same
+  // contract as #invite/ below; a fresh #join/ hash always wins over the stash.
+  const restored = takeRestoredJoin({ storage: window.sessionStorage, hash: location.hash, search: location.search });
+  if (restored) { try { location.hash = restored.fragment; } catch { /* ignore */ } }
+  return consumeJoinFragment();
+})();
 // A Google/GitHub OAuth round-trip drops the #invite/ fragment (it never
 // reaches the server). Restore a stashed invitation one-shot when landing
 // without a room context, so the dialog re-opens after OAuth sign-in.
@@ -99,6 +108,13 @@ const initialInvitationFragment = consumeInvitationFragment()
 // consumed one-shot at boot); merely previewing an invitation never stores it.
 function stashInviteForOAuth() {
   if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
+  // [QA-Join]: the #join/ share-link fragment is dropped by the OAuth
+  // round-trip exactly like #invite/. Stash the live address-bar token (put
+  // back by the join dialog when a join was attempted but not landed) so the
+  // dialog re-opens after sign-in. A stale stash from an abandoned OAuth is
+  // cleared when no join link is live, so it can't resurrect a phantom invite.
+  if (typeof location.hash === "string" && location.hash.startsWith("#join/")) stashPendingJoin(window.sessionStorage, location.hash);
+  else clearPendingJoin(window.sessionStorage);
 }
 // The Google entry point is a plain anchor: stash a live invitation before
 // the navigation, since the OAuth round-trip drops the #invite/ fragment.

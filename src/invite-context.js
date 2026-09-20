@@ -48,6 +48,59 @@ export function takeRestoredInvite({ storage, hash, search }) {
 }
 
 // ---------------------------------------------------------------------------
+// [QA-Join]: join-link context across OAuth navigations.
+//
+// The #join/<token> share-link fragment has the same round-trip problem as
+// #invite/: it never reaches the server, so a signed-out invitee who closes
+// the join dialog to sign in via Google/GitHub OAuth loses the invitation
+// through the round-trip (the dialog-close handler restores the fragment to
+// the address bar, but the cross-origin OAuth navigation drops it). Without
+// a stash the post-login landing has no room context, and the first-sign-in
+// default-room flow would create "My first room" instead of re-opening the
+// invite — the stranger never joins the room they were invited to. Mirror
+// the #invite/ contract: stash the live join fragment at OAuth start (only
+// then — never on mere preview), restore one-shot at boot when landing
+// without a room context.
+
+export const PENDING_JOIN_KEY = "pr-pending-join";
+
+// #join/<43-char token> with the optional purpose focus (#join/<token>/work/<id>
+// or /message/<id>). The fragment never leaves the browser, so the raw token
+// may touch sessionStorage only for the OAuth round-trip.
+const JOIN_FRAGMENT_PATTERN = /^#join\/[A-Za-z0-9_-]{43}(\/(work|message)\/[^/?#]+)?$/;
+
+// Mirror the join fragment at OAuth-start so the round-trip cannot drop it.
+// Called only from the OAuth entry points — never on invitation preview.
+export function stashPendingJoin(storage, fragment) {
+  if (!storage || typeof fragment !== "string" || !JOIN_FRAGMENT_PATTERN.test(fragment)) return;
+  try { storage.setItem(PENDING_JOIN_KEY, fragment); } catch { /* storage unavailable */ }
+}
+
+// Drop the mirror: the join completed, was dismissed, or was superseded.
+export function clearPendingJoin(storage) {
+  if (!storage) return;
+  try { storage.removeItem(PENDING_JOIN_KEY); } catch { /* storage unavailable */ }
+}
+
+// One-shot restore for boot: returns { valid: true, fragment } when a stashed
+// join link should be re-opened, else null. Always consumes the stash.
+// Never restores over a fresh #join/ or #invite/ hash or an active room
+// landing — a member who lands in a room keeps their session undisturbed, and
+// a freshly opened link always wins over a stale stash.
+export function takeRestoredJoin({ storage, hash, search }) {
+  let pending = null;
+  try {
+    pending = storage?.getItem(PENDING_JOIN_KEY) ?? null;
+    storage?.removeItem(PENDING_JOIN_KEY);
+  } catch { return null; }
+  if (typeof pending !== "string" || !JOIN_FRAGMENT_PATTERN.test(pending)) return null;
+  if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#invite/"))) return null;
+  if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
+  if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
+  return { valid: true, fragment: pending };
+}
+
+// ---------------------------------------------------------------------------
 // RC-2026-09-19-071 (QAJ-001): the request-access door.
 //
 // A bad/expired invitation dialog used to be a dead end ("ask a current Room
