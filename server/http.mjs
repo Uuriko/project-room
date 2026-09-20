@@ -2037,10 +2037,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
+      const workClaimReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/review$/.exec(url.pathname);
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -2117,9 +2118,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimItemMatch ? "read"
           : workClaimClaimMatch ? "claim"
           : workClaimUpdateMatch ? "update"
+          : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReleaseMatch ?? workClaimReassignMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
       }

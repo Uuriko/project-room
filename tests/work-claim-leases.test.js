@@ -2,7 +2,7 @@
 // Pure state-machine tests (no store) plus a handler smoke test with fakes.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, isLeaseExpired, releaseExpired,
+import { createWork, claimWork, updateWork, attestWork, reassignWork, isLeaseExpired, releaseExpired,
   canCloseWork, roomWorkClaimConfig, workOwnedBy, unclaimedWork, ClaimError,
   DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
@@ -131,8 +131,35 @@ test("review policies: all three enforced by canCloseWork", () => {
   throwsCode(() => canCloseWork(item, "quill", { policy: "majority_vote" }), "invalid_claim_input");
 });
 
+test("attestWork: caller-bound attestations, one per member, cleared on handoff", () => {
+  const claimed = claimWork({ id: "r9" }, "quill", { now: T0 });
+  const attested = attestWork(claimed, "grok", { note: "lgtm", now: T0 });
+  assert.equal(attested.attestations.length, 1);
+  assert.equal(attested.attestations[0].memberId, "grok");
+  assert.equal(attested.attestations[0].note, "lgtm");
+  assert.ok(attested.attestations[0].at);
+  assert.ok(Object.isFrozen(attested) && Object.isFrozen(attested.attestations));
+  assert.equal(attested.history.at(-1).action, "reviewed");
+  // a second attestation from the same member replaces the first
+  const again = attestWork(attested, "grok", { note: "second", now: T0 + H });
+  assert.equal(again.attestations.length, 1);
+  assert.equal(again.attestations[0].note, "second");
+  // a different member adds theirs alongside
+  const both = attestWork(again, "instinct", { now: T0 + H });
+  assert.equal(both.attestations.length, 2);
+  // refused on unclaimed and done work
+  throwsCode(() => attestWork({ id: "u" }, "grok", { now: T0 }), "invalid_claim_input");
+  const done = updateWork(updateWork(claimed, "quill", { state: "in_progress", now: T0 }), "quill", { state: "done", now: T0 });
+  throwsCode(() => attestWork(done, "grok", { now: T0 }), "invalid_claim_input");
+  // release and reassign clear attestations
+  const released = updateWork(both, "quill", { state: "unclaimed", now: T0 });
+  assert.deepEqual(released.attestations, []);
+  const reassigned = reassignWork(both, "quill", "instinct", { now: T0 });
+  assert.deepEqual(reassigned.attestations, []);
+  assert.equal(reassigned.owner, "instinct");
+});
+
 test("roomWorkClaimConfig: the documented config hook", () => {
-  assert.deepEqual(roomWorkClaimConfig(undefined), { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested" });
   assert.equal(DEFAULT_LEASE_HOURS, 24);
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: 6, reviewPolicy: "distinct_member" } }),
     { defaultLeaseHours: 6, reviewPolicy: "distinct_member" });
@@ -232,6 +259,15 @@ test("handler: review policies enforced on the done transition", async () => {
   await runRoute({ route: "update", id: "p1", body: { state: "in_progress" }, registry });
   const selfClose = await runRoute({ route: "update", id: "p1", body: { state: "done" }, registry }).catch(error => error);
   assert.equal(selfClose.code, "work_review_rejected");
+  // QA-Sec 2026-09-19: naming a reviewer who never attested is rejected —
+  // the confused-deputy hole (owner closes by naming anyone) is closed.
+  const spoofed = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  assert.equal(spoofed.code, "work_review_rejected");
+  assert.match(spoofed.message, /no review attestation recorded by grok/);
+  // the reviewer attests from their own session, then the owner may close
+  const { out: review } = await runRoute({ route: "review", id: "p1", memberId: "grok", body: { note: "looks good" }, registry });
+  assert.equal(review.value.attestations.length, 1);
+  assert.equal(review.value.attestations[0].memberId, "grok");
   const attested = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry });
   assert.equal(attested.out.value.state, "done");
   assert.equal(attested.out.value.reviewedBy, "grok");
@@ -239,12 +275,50 @@ test("handler: review policies enforced on the done transition", async () => {
   await runRoute({ route: "create", body: { id: "p2", reviewPolicy: "independent_principal" }, registry });
   await runRoute({ route: "claim", id: "p2", registry });
   await runRoute({ route: "update", id: "p2", body: { state: "in_progress" }, registry });
+  // an attestation from a member without verify does not close the work
+  await runRoute({ route: "review", id: "p2", memberId: "grok", registry });
   const noVerify = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
   assert.equal(noVerify.code, "work_review_rejected"); // grok lacks verify
+  // a verifier attests from their own session, then the owner closes
+  await runRoute({ route: "review", id: "p2", memberId: "quill2", registry,
+    storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });
   const { out: verified } = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "quill2" }, registry,
     storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });
   assert.equal(verified.value.state, "done"); // quill2 != claimant and holds verify
   assert.equal(verified.value.reviewedBy, "quill2");
+  // attestation from one claim does not transfer to another claim
+  await runRoute({ route: "create", body: { id: "p3", reviewPolicy: "distinct_member" }, registry });
+  await runRoute({ route: "claim", id: "p3", registry });
+  await runRoute({ route: "update", id: "p3", body: { state: "in_progress" }, registry });
+  const crossClaim = await runRoute({ route: "update", id: "p3", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  assert.equal(crossClaim.code, "work_review_rejected"); // grok attested p1, not p3
+});
+
+test("handler: review attestations are caller-bound and cleared on handoff", async () => {
+  const registry = createWorkClaimRegistry();
+  await runRoute({ route: "create", body: { id: "a1", reviewPolicy: "distinct_member" }, registry });
+  await runRoute({ route: "claim", id: "a1", registry });
+  // the attestation always names the caller — there is no way to attest as someone else
+  const { out: review } = await runRoute({ route: "review", id: "a1", memberId: "grok", body: {}, registry });
+  assert.equal(review.value.attestations[0].memberId, "grok");
+  // one attestation per member: a second review from the same member replaces the first
+  const { out: review2 } = await runRoute({ route: "review", id: "a1", memberId: "grok", body: { note: "second look" }, registry });
+  assert.equal(review2.value.attestations.length, 1);
+  assert.equal(review2.value.attestations[0].note, "second look");
+  // reassign drops attestations — reviews belong to the previous owner's round
+  await runRoute({ route: "reassign", id: "a1", body: { newOwner: "instinct" }, registry });
+  const { out: read } = await runRoute({ route: "read", id: "a1", registry });
+  assert.deepEqual(read.value.attestations, []);
+  // release drops them too
+  await runRoute({ route: "create", body: { id: "a2", reviewPolicy: "distinct_member" }, registry });
+  await runRoute({ route: "claim", id: "a2", registry });
+  await runRoute({ route: "review", id: "a2", memberId: "grok", registry });
+  await runRoute({ route: "release", id: "a2", registry });
+  const { out: reread } = await runRoute({ route: "read", id: "a2", registry });
+  assert.deepEqual(reread.value.attestations, []);
+  // cannot attest unclaimed or done work
+  const unclaimed = await runRoute({ route: "review", id: "a2", memberId: "grok", registry }).catch(error => error);
+  assert.equal(unclaimed.code, "invalid_claim_input");
 });
 
 test("handler: sweep releases expired claims", async () => {
