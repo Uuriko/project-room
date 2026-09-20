@@ -18,6 +18,9 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   const send = (actor, type, data) => f.store.command(f.keys[actor], 'commons', { id: crypto.randomUUID(), type, data });
   send('owner', 'member.added', { memberId: jordan, displayName: 'Jordan', kind: 'human', permissions: ['accept_work'] });
   f.keys[jordan] = f.store.issueAccessKey('commons', jordan);
+  // Consent-bound DMs: the owner addresses the newly added member.
+  f.store.dmConsents.request('commons', 'owner', jordan, 'browser test');
+  f.store.dmConsents.decide('commons', jordan, 'owner', 'approve');
   send(jordan, 'message.posted', { messageId: 'naming-root', body: 'I can help with the handoff.' });
   send('owner', 'message.posted', { messageId: 'naming-directed', body: 'Please check the handoff.', toMemberId: jordan });
   send('owner', 'message.posted', { messageId: 'naming-reply', body: 'Thanks for helping.', replyToId: 'naming-root' });
