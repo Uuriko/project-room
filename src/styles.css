@@ -96,7 +96,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-content p { margin-bottom: .4rem; color: #dfe5ed; font-size: .9rem; line-height: 1.55; overflow-wrap: anywhere; }
 .message-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; margin-bottom: .25rem; }
 .message-meta strong { font-size: .84rem; }
-.message-meta span { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: .62rem; text-transform: uppercase; }
+/* UI calming #6: the uppercase "AGENT" pill is gone (the square agent avatar
+   already marks agent messages); this rule now styles only the Pinned chip. */
+.pinned-chip { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--violet); font-size: .62rem; text-transform: uppercase; }
 .message-meta time { margin-left: auto; color: #738092; font-size: .7rem; }
 .mention { padding: 0; border: 0; background: transparent; color: var(--violet); font: inherit; font-weight: 650; cursor: pointer; }
 .mention.agent { color: var(--text); font-weight: 850; }
@@ -241,9 +243,19 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-links { display: flex; align-items: center; gap: .8rem; min-height: 1.25rem; }
 .message-to-work, .text-button { padding: 0; border: 0; background: transparent; color: var(--blue); font-size: .69rem; font-weight: 700; }
 .message-to-work:hover, .text-button:hover { text-decoration: underline; }
+/* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
+   work / Record decision / moderation; it fades in with the other actions. */
+.message-more { position: relative; }
+.message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
+.message-more > summary::-webkit-details-marker { display: none; }
+.message-more > summary:hover { background: rgb(255 255 255 / 6%); }
+.message-more > summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.message-more-menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 30; display: grid; gap: .1rem; min-width: 12rem; padding: .35rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised); box-shadow: var(--shadow); }
+.message-more-menu .message-to-work { padding: .5rem .6rem; text-align: left; font-size: .78rem; }
+.message-more[open] .message-more-menu .message-to-work { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
-  .message-links .message-to-work:not([data-message-action="reply"]) { opacity: 0; }
-  .message:is(:hover, :focus-within) .message-links .message-to-work { opacity: 1; }
+  .message-links .message-to-work:not([data-message-action="reply"]), .message-links .message-more { opacity: 0; }
+  .message:is(:hover, :focus-within) .message-links .message-to-work, .message:is(:hover, :focus-within) .message-links .message-more { opacity: 1; }
 }
 .composer-toolbar { display: flex; align-items: center; gap: .55rem; margin-bottom: .5rem; }
 .composer-toolbar label { white-space: nowrap; }
@@ -424,7 +436,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 }
 .request-state { display: inline-block; margin-right: .5rem; color: var(--muted); font-size: .875rem; }
 .message-content p { font-size: 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.form-hint, .prototype-note, .source-link, .audience-chip, .message-meta span, .message-meta time, .member-status, .work-facts, .definition, .receipt p, .receipt a, .blocker p, .decision p, .source-context { font-size: .875rem; }
+.form-hint, .prototype-note, .source-link, .audience-chip, .pinned-chip, .message-meta time, .member-status, .work-facts, .definition, .receipt p, .receipt a, .blocker p, .decision p, .source-context { font-size: .875rem; }
 label, input, textarea, select { font-size: 1rem; }
 .presence-member details { font-size: .875rem; color: var(--muted); max-width: 16rem; overflow-wrap: anywhere; }
 .presence-member details p { font-size: .875rem; line-height: 1.5; }
@@ -631,7 +643,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .conversation-search { border: 0; }
 .conversation-search input { border-color: transparent; background: var(--bg); }
 .message-list { padding-inline: 1.25rem; }
-.message-meta span { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
+.pinned-chip { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
 .message-links { display: inline-flex; flex-wrap: wrap; gap: .75rem; vertical-align: top; }
 .reaction { border-color: var(--line-soft); }
 .reaction:hover { background: var(--panel-raised); }
@@ -996,8 +1008,7 @@ summary { overflow-wrap: anywhere; }
 .spend-allowance-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .spend-panel[data-spend-allowance="over"] #spend-summary, .spend-panel[data-spend-allowance="full"] #spend-summary { color: var(--warning, #d9a441); }
 
-/* Issue #6 B2: pinned messages */
-.pinned-chip { color: var(--violet); }
+/* Issue #6 B2: pinned messages (chip styling consolidated above with .pinned-chip). */
 .pinned-panel { margin: 0 1rem .25rem; padding: 0 .75rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: rgb(255 255 255 / 2%); }
 .pinned-panel > .section-summary { min-height: 40px; }
 .pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }
