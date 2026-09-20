@@ -23,6 +23,29 @@ export function completedResults(state) {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }
 
+// Compact orientation shared by Overview and the authenticated activation pack.
+// Read-only source projection: never a generated consensus or an access grant.
+export function roomOrientation(state) {
+  const instructions = state.room.charter;
+  const work = Object.values(state.workItems).filter(item => !item.supersededBy
+    && ["proposed", "accepted", "working", "blocked"].includes(item.state))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+  return {
+    version: 1,
+    purpose: instructions?.purpose ?? state.room.purpose ?? "",
+    purposeSource: instructions?.purpose
+      ? { kind: "instructions", eventId: instructions.eventId, revision: instructions.revision,
+        updatedAt: instructions.updatedAt, authorId: instructions.updatedById }
+      : { kind: "room" },
+    activeWork: work.slice(0, 3).map(item => ({ id: item.id, title: item.title,
+      state: item.state, revision: item.revision, updatedAt: item.updatedAt })),
+    activeWorkTotal: work.length,
+    recentDecisions: state.eventLog.filter(e => e.type === "decision.recorded").slice(-3).reverse()
+      .map(e => ({ eventId: e.id, statement: e.data.statement, sourceMessageId: e.data.sourceMessageId,
+        authorId: e.actorId, at: e.at }))
+  };
+}
+
 // Feedback belongs to an exact immutable message, never every draft by a producer.
 // Current-state presentation only: no new assignment, notification or fulfillment.
 export function draftFeedback(item, message) {

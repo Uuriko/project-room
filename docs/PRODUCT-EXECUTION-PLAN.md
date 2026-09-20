@@ -2,6 +2,8 @@
 
 Updated September 20, 2026. This is the consolidated working backlog and order of execution, not a commitment to implement every possible feature. Each slice must deliver an observable improvement before the next expands scope.
 
+The current human/agent interaction implementation sequence is detailed in [HUMAN-AGENT-EXECUTION-PLAN.md](HUMAN-AGENT-EXECUTION-PLAN.md). It starts by reusing Overview, the activation pack and existing catch-up APIs for arrival and resumption, then qualifies steering and the Inbox loop.
+
 ## Product focus
 
 A familiar place for people and their agents to talk, handle incoming messages, and finish useful work without losing context. Rooms organize shared work. Inbox organizes personal conversations. Activity organizes attention. Overview makes a room understandable without requiring someone to read its entire chat.

@@ -1,6 +1,7 @@
+import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -182,4 +183,147 @@ test("lost answer and cancellation responses keep the original terminal operatio
   const wrong = structuredClone(last); wrong.page.items[0].requesterId = "reviewer";
   wrong.page.rowBytes = wrong.page.items.reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0);
   assert.throws(() => validateReplyRead(wrong, { roomId: "commons", name: "room_request_history", args: { direction: "outgoing", cursor: history.page.nextCursor } }), { code: "invalid_response" });
+});
+
+test("request tools automatically prepare only current room instructions and linked work", async t => {
+  const f = await fixture(t);
+  const send = (id, type, data) => f.store.command(f.keys.owner, "commons", { id, type, data });
+  send("prepare-instructions", "room.charter_updated", { expectedRevision: 0, purpose: "Build a useful room", outputs: "A working result", boundaries: null, escalation: null });
+  for (const id of ["linked", "unrelated"]) send(`prepare-${id}`, "work.proposed", {
+    workItemId: id, title: id, definitionOfDone: `${id} requirements`, accountableMemberId: "producer", mode: "read"
+  });
+  send("private-context", "message.posted", { messageId: "unrelated-message", body: "Unrelated conversation should not be bundled" });
+  const q = f.open("prepared", { workItemId: "linked" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const context = await f.client.replyContext(q.command.data.messageId);
+  assert.equal(context.preparation.room.purpose, "Build a useful room");
+  assert.equal(context.preparation.instructions.charter.outputs, "A working result");
+  assert.equal(context.preparation.work.id, "linked");
+  assert.equal(context.preparation.work.definitionOfDone, "linked requirements");
+  assert.equal(context.preparation.evaluatedThrough, context.current.evaluatedThrough);
+  assert.equal(JSON.stringify(context.preparation).includes('Unrelated conversation'), false);
+  assert.equal(JSON.stringify(context.preparation).includes('unrelated requirements'), false);
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
+  const adapter = await f.mcp();
+  const read = (await adapter.call("room_read_request", { requestMessageId: q.command.data.messageId })).result.structuredContent;
+  assert.deepEqual(read.preparation, context.preparation);
+  const args = { name: "room_read_request", args: { requestMessageId: q.command.data.messageId }, roomId: "commons" };
+  for (const change of [p => p.room.id = 'other-room', p => p.work.id = 'unrelated', p => p.instructions.revision++, p => p.evaluatedThrough--]) {
+    const bad = structuredClone(context); change(bad.preparation);
+    assert.throws(() => validateReplyRead(bad, args), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(context); delete legacy.preparation;
+  assert.equal(validateReplyRead(legacy, args), legacy, "older services remain readable");
+  const plain = f.open("no-work");
+  assert.equal((await f.client.replyContext(plain.command.data.messageId)).preparation.work, null);
+});
+
+
+const runner = (t, f) => {
+  const db = openRequestJournal(join(f.directory, "host-requests.sqlite"));
+  t.after(() => db.close());
+  return { connection: f.config, db };
+};
+test("configured host receives prepared request once and its answer returns through real Room HTTP", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-run");
+  let calls = 0;
+  const execute = async input => {
+    calls++;
+    assert.equal(input.request.recipientId, "producer");
+    assert.equal(input.messages[0].message.body, q.command.data.body);
+    assert.equal(input.preparation.room.id, "commons");
+    assert.equal(JSON.stringify(input).includes(f.config.token), false);
+    return { body: "A result from the configured test host" };
+  };
+  const result = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(result.hostExecuted, true);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+  const retry = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(retry.receipt.duplicate, true);
+  assert.equal(retry.hostExecuted, false);
+  assert.equal(calls, 1);
+});
+test("lost delivery response reuses saved answer without executing host again", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-lost");
+  let calls = 0, lost = false;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && !lost) { lost = true; throw new TypeError("lost response"); }
+    return response;
+  } };
+  const execute = async () => { calls++; return { body: "Persisted result" }; };
+  await assert.rejects(runRequestOnce({ ...args, connection, requestMessageId: q.command.data.messageId, execute }));
+  const recovered = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(recovered.receipt.duplicate, true);
+  assert.equal(calls, 1);
+});
+test("host failure is unknown and is never automatically executed a second time", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-unknown");
+  let calls = 0;
+  const execute = async () => { calls++; throw new Error("host disconnected"); };
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /disconnected/);
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /unknown/);
+  assert.equal(calls, 1);
+});
+test("human clarification during execution refuses stale delivery without rerunning or rebasing", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-steering");
+  let calls = 0;
+  const execute = async () => {
+    calls++;
+    f.store.command(f.keys.owner, "commons", { id: "steer-host", type: "message.posted", data: { messageId: "steer-host-msg", replyToId: q.command.data.messageId, body: "New clarification" } });
+    return { body: "An answer to the old request context" };
+  };
+  for (let i = 0; i < 2; i++) await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), { code: "command_rejected" });
+  assert.equal(calls, 1);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "open");
+});
+
+test("durable host result survives journal reopen and excludes concurrent execution", async t => {
+  const f = await fixture(t), path = join(f.directory, "restart.sqlite"), q = f.open("host-concurrent");
+  let db = openRequestJournal(path), entered, release, calls = 0;
+  const started = new Promise(resolve => entered = resolve);
+  const blocked = new Promise(resolve => release = resolve);
+  const execute = async () => { calls++; entered(); await blocked; return { body: "One durable answer" }; };
+  const args = { connection: f.config, requestMessageId: q.command.data.messageId, execute };
+  try {
+    const running = runRequestOnce({ ...args, db });
+    await started;
+    const other = openRequestJournal(path);
+    try { await assert.rejects(runRequestOnce({ ...args, db: other }), /unknown|owns/); }
+    finally { other.close(); release(); }
+    await running;
+    db.close(); db = openRequestJournal(path);
+    const recovered = await runRequestOnce({ ...args, db });
+    assert.equal(recovered.receipt.duplicate, true);
+    assert.equal(calls, 1);
+  } finally { release?.(); db.close(); }
+});
+test("closed and unaddressed requests never execute the configured host", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-closed");
+  const context = await f.client.replyContext(q.command.data.messageId);
+  await f.client.replyAction("room_respond_to_request", f.respond(context));
+  let calls = 0;
+  const execute = async () => { calls++; return { body: "Unexpected" }; };
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /not ready/);
+  await assert.rejects(runRequestOnce({ ...args, connection: { ...f.config, memberId: "owner", token: f.keys.owner }, requestMessageId: q.command.data.messageId, execute }));
+  assert.equal(calls, 0);
+});
+
+
+test("one command drives a separate host process and repeat invocation reuses its result", async t => {
+  const f = await fixture(t), q = f.open("process-host"), counter = join(f.directory, "executions"), hostFile = join(f.directory, "host.json");
+  const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.preparation.room.id||!v.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
+  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000 }));
+  const invoke = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["scripts/run-room-request.mjs", q.command.data.messageId, join(f.directory, "process.sqlite"), hostFile],
+      { env: { ROOM_AGENT_CONFIG: f.configDirectory }, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = ""; child.stdout.on("data", c => out += c); child.stderr.on("data", c => err += c);
+    child.on("error", reject); child.on("exit", code => resolve({ code, out, err }));
+  });
+  const first = await invoke(); assert.equal(first.code, 0, first.err);
+  assert.equal(JSON.parse(first.out).hostExecuted, true);
+  const second = await invoke(); assert.equal(second.code, 0, second.err);
+  assert.equal(JSON.parse(second.out).hostExecuted, false);
+  assert.equal(readFileSync(counter, "utf8"), "1");
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
 });

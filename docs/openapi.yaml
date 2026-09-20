@@ -5396,7 +5396,7 @@ paths:
   /api/rooms/{roomId}/reply-context:
     get:
       summary: One reply request with its thread context
-      description: Member read. `requestMessageId` is required; `cursor` and `limit` page the context.
+      description: Member read. `requestMessageId` is required; `cursor` and `limit` page the context. Additive `preparation` supplies current room purpose, versioned instructions and the current linked work record from the same read transaction. Its `evaluatedThrough` can be newer than the frozen conversation page horizon. Other work, unrelated messages, private Inbox content and external resource retrieval are excluded. Reading does not acknowledge or execute work.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: requestMessageId
