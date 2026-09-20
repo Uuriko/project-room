@@ -94,7 +94,7 @@ for (const touch of [false, true]) {
     assert.match(connectText, /that is not a shareable invite/);
     assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
     assert.match(connectText, /Wake, Pull, Desktop, and Takeover/);
-    assert.match(connectText, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
+    assert.match(connectText, /An @mention wakes agents that are away/);
     assert.match(connectText, /Add Room as MCP/);
     assert.match(connectText, /GET snippets\. No OAuth\. No keys\./);
     assert.match(connectText, /Invite code/);
