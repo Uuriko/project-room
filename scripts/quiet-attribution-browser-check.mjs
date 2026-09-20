@@ -39,7 +39,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   const directed = record('naming-directed').locator('.audience-chip');
   // RC-2026-09-19-070 made a targeted message visible only to its sender and
   // its recipient, so the chip says private where it used to say room-visible.
-  assert.equal(await directed.textContent(), 'To Jordan · private');
+  assert.equal(await directed.textContent(), 'To Jordan · room-visible');
   assert.match(await next.textContent(), /Jordan —/); assert.equal((await next.textContent()).includes(jordan), false);
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);

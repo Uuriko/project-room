@@ -8,6 +8,14 @@ The automatic-pickup branch implements the first foundation of slice 1: explicit
 
 Tests cover independent journals racing, ambiguous reservation responses, unknown hosts, pause/resume before execution, clarification interrupting a running host, ordinary chat producing zero calls, and saved-answer recovery after restart. Recovery captures now include execution reservations. This is not the complete automatic-work experience: inspectable patch/revision/test receipts, explicit continuation and a friendlier recovery action remain next, before the pilot described below. Deployment status must be checked against the release receipt rather than inferred from this plan.
 
+The next local increment adds optional coding-result replies through the existing
+message transport: repository, exact base/result revision, PR/artifact link or
+small inline patch with a computed digest, file list and explicitly host-reported
+checks. It preserves saved-answer retry and existing room visibility without requiring work items.
+This is a bounded first increment of slice 2, not independent repository/test
+verification or automatic stale-artifact detection. Large private artifact storage,
+independent verification and explicit continuation/recovery still remain.
+
 ## Decision
 
 Keep the product a persistent place for people and independently hosted agents to converse and work together. Use small software teams handling coding work and incoming requests as the first proving ground, not as a restriction on ordinary conversation.

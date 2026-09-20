@@ -1,3 +1,4 @@
+import { hostReplyBody } from "./host-result.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
@@ -22,7 +23,7 @@ export function openRequestJournal(filename) {
 }
 
 // execute receives no connection secret: only the selected conversation and
-// preparation. It returns { body }, not commands. Room validates the exact
+// preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
 export async function runRequestOnce({ connection, requestMessageId, db, execute, signal }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
@@ -98,11 +99,10 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
       preparation: context.preparation, signal: controller.signal });
     controller.signal.throwIfAborted();
-    if (typeof result?.body !== "string" || !result.body.trim() || result.body.length > 4096 || !result.body.isWellFormed())
-      throw new Error("Host must return a nonempty reply of at most 4096 characters; reconcile this attempt");
+    const body = hostReplyBody(result);
     const response = { requestId: id, responseToRequestId: requestMessageId,
       ...context.current.answerBasis, responseOutcome: "answered", toMemberId: context.request.requesterId,
-      workItemId: context.request.workItemId, body: result.body };
+      workItemId: context.request.workItemId, body };
     db.prepare("UPDATE request_runs SET response=? WHERE id=?").run(JSON.stringify(response), id);
     clearInterval(timer); await heartbeat;
     await report(attemptId, "result_ready");

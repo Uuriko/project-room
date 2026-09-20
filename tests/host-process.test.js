@@ -54,3 +54,9 @@ test("different host processes cannot write the same checkout concurrently", asy
   finally { controller.abort(); await stopped; }
   assert.equal((await host("console.log(JSON.stringify({body:'released'}))")({})).body, "released");
 });
+
+test("process adapter accepts optional coding evidence without replacing its bytes", async () => {
+  const result = { body: "Fixed.", codeResult: { repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40),
+    patch: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-before\n+after\n", files: ["a"], checks: [] } };
+  assert.deepEqual(await host(`console.log(${JSON.stringify(JSON.stringify(result))})`)({}), result);
+});

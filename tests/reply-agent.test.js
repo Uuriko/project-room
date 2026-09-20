@@ -456,3 +456,29 @@ test("saved-answer recovery stops retrying when clarification arrived while the 
   assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
   assert.equal(calls, 1);
 });
+
+test("coding result survives lost delivery with exact patch bytes and existing room visibility", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("code-result");
+  const patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-before\n+after\n";
+  let calls = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("lost result receipt");
+    return response;
+  } };
+  const execute = async () => { calls++; return { body: "Fixed.", codeResult: {
+    repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40), patch, files: ["a"],
+    checks: [{ command: "node --test", outcome: "passed" }]
+  } }; };
+  await assert.rejects(runRequestOnce({ ...args, connection, requestMessageId: q.command.data.messageId, execute }));
+  const saved = JSON.parse(args.db.prepare("SELECT response FROM request_runs").get().response);
+  assert.ok(saved.body.endsWith(patch));
+  const recovered = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(calls, 1); assert.equal(recovered.receipt.duplicate, true);
+  const response = f.store.room("commons").state.messages.find(m => m.id === recovered.receipt.messageId);
+  assert.equal(response.body, saved.body); assert.equal(response.toMemberId, "owner");
+  const outsider = new RoomAgentClient({ ...f.config, memberId: "reviewer", token: f.keys.reviewer });
+  const visible = await outsider.replyContext(q.command.data.messageId);
+  assert.equal(visible.scope.targetedMessages, "room-visible");
+  assert.equal(visible.page.items.find(item => item.message?.id === response.id).message.body, saved.body);
+});
