@@ -35,7 +35,10 @@ async function ownerSession(origin, accountKey) {
     body: JSON.stringify({ accountAccessKey: accountKey, expectedSessionRevision: sessionRevision }) });
   if (login.status !== 201) throw new Error(`account login failed: ${login.status}`);
   const session = await login.json();
-  return { Cookie: cookie, Origin: origin, "X-Project-Room-Auth": "account",
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  const freshCookie = login.headers.get("set-cookie").split(";", 1)[0];
+  return { Cookie: freshCookie, Origin: origin, "X-Project-Room-Auth": "account",
     "X-Session-Binding": session.sessionBinding ?? sessionBinding };
 }
 const authGet = (origin, path, token) => fetch(`${origin}${path}`, { headers: { Origin: origin, Authorization: `Bearer ${token}` } })

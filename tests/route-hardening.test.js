@@ -46,7 +46,10 @@ async function loginAccount(request, accountKey) {
   const response = await request("/api/account-session", { method: "POST", headers: { Cookie: cookie, "X-CSRF-Token": bootstrap.csrf },
     data: { accountAccessKey: accountKey, expectedSessionRevision: bootstrap.sessionRevision } });
   assert.equal(response.status, 201);
-  return { cookie, token: cookie.split("=")[1], session: await response.json() };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  const freshCookie = response.headers.get("set-cookie").split(";", 1)[0];
+  return { cookie: freshCookie, token: freshCookie.split("=")[1], session: await response.json() };
 }
 
 // Raw HTTP over a socket, for requests fetch() cannot shape (a Content-Length
