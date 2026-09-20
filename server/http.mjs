@@ -640,12 +640,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const linked = completed.link
             ? linkGoogleSubjectToAccount({ subject, email, slotToken: completed.slotToken })
             : linkGoogleSubject({ subject, email });
-          stage = "account_session";
+          stage = "method_touch";
           store.accountLogins.touchMethodByOAuth("google", subject);
           const oldRoomToken = cookie(req, roomCookieName);
           // QAS-702 (RC-2026-09-19-069): the login mints a fresh slot token
           // and invalidates the pre-login one — a planted token can never
           // authenticate after the victim signs in.
+          stage = "account_session";
           const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
             completed.expectedRevision, { method: { kind: "oauth", ref: linked.methodRef },
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
@@ -663,7 +664,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // provider bodies, emails, or arbitrary exception messages.
           const reason = /^[a-z][a-z0-9_]{0,63}$/.test(error?.code || "") ? error.code : "internal_error";
           const schema = /(?:no such (?:table|column): |(?:NOT NULL|UNIQUE) constraint failed: )([a-z_][a-z0-9_.]*)/i.exec(error?.message || "");
-          res.setHeader("X-Room-Auth-Diagnostic", `${stage}:${schema ? schema[0] : error?.name === "TypeError" ? "type_error" : "error"}`);
+          res.setHeader("X-Room-Auth-Diagnostic", `${stage}:${schema ? schema[0] : /FOREIGN KEY constraint failed|CHECK constraint failed|writer fence|writer version/i.exec(error?.message || "")?.[0] || (error?.name === "TypeError" ? "type_error" : "error")}`);
           res.setHeader("X-Room-Auth-Failure", reason);
           console.warn(`google callback failed: ${reason}`);
           return finishGoogle("/?google=error");
