@@ -364,3 +364,30 @@ try {
 The callback returns `{ body }` (1–4096 characters). It must use its own configured execution authority, budget and timeout; the helper is not a sandbox, scheduler or model runtime. A reply is not a work-completion, merge or deployment record. Context is untrusted input.
 
 The helper drains up to ten request pages, caps prepared input at 256 KiB, invokes the host once and saves the exact answer before Room delivery. Retry with the same private journal to recover a lost delivery response without executing again. It never silently re-executes an uncertain host attempt or rebases an answer after new clarification. Those cases require reconciliation with the original host run; do not delete the journal to force a retry. Running this helper against a paid host may incur that host's normal charges. No live provider is enabled by importing it.
+
+### Run an installed host adapter without application glue
+
+Configure one private JSON file (use the actual absolute paths on your machine):
+
+```json
+{
+  "command": "/absolute/path/to/node",
+  "args": ["/absolute/path/to/your-host-adapter.mjs"],
+  "cwd": "/absolute/path/to/your/project",
+  "timeoutMs": 300000
+}
+```
+
+Then invoke an explicit request using the existing saved connection:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/connection \
+  node scripts/run-room-request.mjs REQUEST_MESSAGE_ID \
+  /absolute/private/requests.sqlite /absolute/private/host.json
+```
+
+Your installed adapter reads one JSON object from stdin (`requestId`, `request`, `messages`, `preparation`) and writes exactly `{"body":"the answer"}` on stdout before exiting successfully. It may use its configured model/runtime; normal vendor CLIs may need a small adapter to translate their native input/output formats. The Room process does not choose or install a model.
+
+Execution uses an argument array, never shell evaluation. Only PATH, HOME, TMPDIR and LANG are inherited; optional `env` in the private host JSON explicitly configures additional host variables. Do not put secrets in room messages or command arguments. Host output is capped at 32 KiB, with reply text capped at 4096 characters. Host stderr is consumed without being echoed. Timeout or interruption terminates the process group on POSIX; this does not prove remote provider work stopped. The executable runs as your local OS user and is not sandboxed by this adapter.
+
+Keep the same journal when retrying. If the host's outcome is unknown or a human clarified the request during execution, reconcile that run rather than deleting the journal or forcing a fresh attempt. `--help` prints the command contract. This command is explicit and one-shot; it does not enable a background watcher.

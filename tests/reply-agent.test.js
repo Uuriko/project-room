@@ -1,7 +1,7 @@
 import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -307,4 +307,23 @@ test("closed and unaddressed requests never execute the configured host", async 
   await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /not ready/);
   await assert.rejects(runRequestOnce({ ...args, connection: { ...f.config, memberId: "owner", token: f.keys.owner }, requestMessageId: q.command.data.messageId, execute }));
   assert.equal(calls, 0);
+});
+
+
+test("one command drives a separate host process and repeat invocation reuses its result", async t => {
+  const f = await fixture(t), q = f.open("process-host"), counter = join(f.directory, "executions"), hostFile = join(f.directory, "host.json");
+  const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.preparation.room.id||!v.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
+  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000 }));
+  const invoke = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["scripts/run-room-request.mjs", q.command.data.messageId, join(f.directory, "process.sqlite"), hostFile],
+      { env: { ROOM_AGENT_CONFIG: f.configDirectory }, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = ""; child.stdout.on("data", c => out += c); child.stderr.on("data", c => err += c);
+    child.on("error", reject); child.on("exit", code => resolve({ code, out, err }));
+  });
+  const first = await invoke(); assert.equal(first.code, 0, first.err);
+  assert.equal(JSON.parse(first.out).hostExecuted, true);
+  const second = await invoke(); assert.equal(second.code, 0, second.err);
+  assert.equal(JSON.parse(second.out).hostExecuted, false);
+  assert.equal(readFileSync(counter, "utf8"), "1");
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
 });
