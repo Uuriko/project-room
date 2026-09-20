@@ -17,8 +17,9 @@ npm run provision -- --init --room commons --member owner --account local-owner 
 npm start
 ```
 
-Open http://127.0.0.1:4173/?room=commons. Use the Room access-key sign-in option
-with the value in `.data/owner.key`. Read that file privately; do not paste it
+Open http://127.0.0.1:4173/?room=commons. Choose **More options → Room key**,
+enter the value from `.data/owner.key`, and select **Enter room**. Read the file
+privately; do not paste it
 into an issue, URL or shared log. The database is `.data/room.sqlite`; restarting
 `npm start` preserves it. The key expires after seven days. Re-running provisioning
 **without `--init`** rotates it and ends previous room sessions:
