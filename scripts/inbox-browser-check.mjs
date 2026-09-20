@@ -1067,3 +1067,18 @@ test("reviewed reply: mismatched preview text never enables adoption", { timeout
   await p.getByText("Couldn’t verify the result. Close and try again.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-result-use").isEnabled(), false); assert.equal(f.saved().draft, null);
 });
+
+for (const mobile of [false, true]) test(`workspace continuity ${mobile ? 'mobile' : 'desktop'}: work links return from Inbox without losing private writing`, { timeout: 20000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await p.locator('#message-input').fill('Unsent room note');
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('Unsent private reply');
+  await p.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
+  await p.locator('#main').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Unsent room note');
+  assert.equal(await p.locator('#main').textContent().then(s => s.includes('Unsent private reply')), false);
+  await f.inbox();
+  assert.equal(await p.locator('#inbox-draft').inputValue(), 'Unsent private reply');
+  assert.equal(f.saved().draft, null, 'navigation neither saves nor sends a private draft');
+});

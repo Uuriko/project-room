@@ -1795,20 +1795,30 @@ function focusRecord(node) {
 function workRecord(id) {
   return $(`#message-list [data-work-record-id="${CSS.escape(id)}"]`);
 }
-function revealWork(id) {
-  if (!state?.workItems[id] || busy) return;
+// A work destination is on the room timeline, never inside the current
+// message thread. Leave the thread through the normal draft-saving path before
+// looking up its card; close attention/settings overlays before focusing it.
+function revealWorkTimeline(id) {
+  if (!state?.workItems[id] || busy) return null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-  const card = workRecord(id);
-  if (card) card.querySelector(".work-details").open = true;
+  inboxUI?.showRooms();
+  switchThread(null);
+  const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
+  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
+  return workRecord(id);
+}
+function revealWork(id) {
+  const card = revealWorkTimeline(id);
+  if (!card) return;
+  card.querySelector(".work-details").open = true;
   focusRecord(card);
 }
 function revealDrafts(id) {
-  if (!state?.workItems[id] || busy) return;
-  selectWorkView("work");
-  const choices = workRecord(id)?.querySelector('.work-drafts');
+  const card = revealWorkTimeline(id);
+  if (!card) return;
+  const choices = card.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }
-  inboxUI?.showRooms();
   choices.open = true;
   const summary = choices.querySelector('summary');
   summary.focus({ preventScroll: true });
