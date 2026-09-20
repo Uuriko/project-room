@@ -63,6 +63,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // Keyboard only: focus the control and press Enter.
     await pinButton.focus(); await page.keyboard.press("Enter");
     await f.panel.waitFor({ state: "visible" });
+    // The menu closed behind the pin; reopen it for the unpin.
+    if (!(await pinMenu.evaluate(node => node.open))) await pinMenu.locator('summary').click();
     await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).waitFor({ state: "visible" });
     assert.equal(await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.messageAction === "pin" && document.activeElement.textContent), "Unpin", "focus stays on the control that was pressed");
