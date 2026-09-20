@@ -247,12 +247,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    never be hovered or clicked. An open menu also lifts above later messages. */
 .message-more { position: relative; }
 .message-more[open] { z-index: 40; }
-/* An open menu forces its message to render and lifts it above later messages:
-   content-visibility: auto would otherwise skip the (off-screen) message,
-   leaving the absolutely positioned menu painted in the wrong place or
-   hit-tested through; and the auto stacking context would trap the menu's
-   z-index, letting a later <li> intercept its clicks. */
-.message:has(.message-more[open]) { content-visibility: visible; position: relative; z-index: 40; }
+/* Temporarily disabled for spend-allowance debugging. */
+/* .message:has(.message-more[open]) { content-visibility: visible; position: relative; z-index: 40; } */
 .message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }
