@@ -226,11 +226,12 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
-      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
+      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|\\[done\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
          // {p: null, tail: $rest}) as $pf
       | ($body | fence("claim")) as $fclaim
       | ($body | fence("receipt")) as $frcpt
       | ($body | fence("handoff")) as $fhand
+      | ($body | fence("done")) as $fdone
       | (if $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
            else ($body | prose_claim($lp.lane)) end
@@ -241,6 +242,16 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
             merged:($body | first_sha),
             ref:($pf.tail | first_rc),
             receipt:(if $frcpt then ($frcpt|fields) else null end)}
+         elif $pf.p == "[done]" then
+           # 2026-09-19: [lane][done] + ```room-done block is the
+           # canonical terminal close (RC-2026-09-18-014 used it; the
+           # parser previously ignored it, causing false RECLAIMs).
+           (($fdone | fields) // {}) as $df
+           | {kind:"done",
+              ref:(($df["task-id"] // null) // ($pf.tail | first_rc) // ($body | first_rc)),
+              receipt:{"task-id":(($df["task-id"] // null)),
+                       merged:(($df["sha"] // null) // ($df["merged"] // null)),
+                       pr:(($df["pr"] // null))}}
          elif $pf.p == "STATUS:" then
            (if ($pf.tail | test("^[ \t]*ACK[ \t]+RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+")) then
               {ack:true, ack_task:(($pf.tail | first_rc))}
@@ -261,6 +272,23 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
             strike_two:  (($body | [capture("<!--[ \t]*room:strike-two:(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+):(?<ts>[^> \t]+)[ \t]*-->")] | .[0]) // null),
             dup_refusal: (($body | [capture("<!--[ \t]*room:duplicate-refusal:(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+):(?<ts>[^> \t]+)[ \t]*-->")] | .[0]) // null),
             illegal_rej: (($body | [capture("<!--[ \t]*room:illegal-rejection:(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+):(?<ts>[^> \t]+)[ \t]*-->")] | .[0]) // null)}
+         elif ($pf.p == null) and ($rest | test("^(DONE|MERGED|DEPLOYED)(:|[ \\t])")) then
+           # 2026-09-19: completion notes drifted into prose
+           # ("[quill] DONE task-id: RC-...", "[quill] MERGED: PR #N ...",
+           # "[quill] DEPLOYED: ..."). A first line opening with one of
+           # these markers that names a task-id closes the claim
+           # terminally, same as [lane][done]. Reduces as kind "done"
+           # with via:"prose-terminal".
+           (($body | first_rc)) as $ref
+           | if ($ref | not) then {kind:"prose"}
+             else {kind:"done",
+                   ref:$ref,
+                   receipt:{"task-id":$ref,
+                            merged:(($body | first_sha)
+                                    // (($body | [capture("merged[ \\t]+as[ \\t]+(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")] | .[0] | .s) // null)),
+                            pr:(($body | first_pr) // null),
+                            attribution:($lp.lane // null)},
+                   via:"prose-terminal"} end
          else {kind:"prose"} end) as $ev
       | {id:$id, at:$at, lane:$lp.lane, prefix:$pf.p} + $ev
     ;
@@ -412,21 +440,29 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
               .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:false, errors:["unknown task-id"]}]
             else (.tasks[$tid]) as $t
             | state_word($t.state) as $from
-            | if $from != "working" then
-                .illegal += [{task_id:$tid, by_lane:$e.lane, from:$t.state, attempted:"completed", at:$at,
-                              comment_id:$cid, reason:"DONE requires working state"}]
-                | .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:false,
-                            errors:["DONE illegal from " + $t.state]}]
-              else
+            | if ((["completed","cancelled"] | index($from)) != null) then
+                # Re-closing an already terminal claim is a no-op, never an
+                # illegal transition: sweep and replays must never touch
+                # terminal claims again (2026-09-19 strike misfires).
+                .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:true,
+                          receipt:($e.receipt != null), note:"already terminal"}]
+              elif ($from == "working")
+                   or (($e.via == "prose-terminal") and ($from == "submitted")) then
                 .tasks[$tid] |= (.state = "completed" | .last_at = $at
                   | if $e.receipt then
                       .receipts += [{merged:($e.receipt.merged // null),
                                     attribution:($e.receipt.attribution // null),
+                                    pr:($e.receipt.pr // null),
                                     at:$at, comment_id:$cid}]
                     else . end
                   | .missing_receipt = ((.receipts | length) == 0))
                 | .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:true,
                             receipt:($e.receipt != null)}]
+              else
+                .illegal += [{task_id:$tid, by_lane:$e.lane, from:$t.state, attempted:"completed", at:$at,
+                              comment_id:$cid, reason:"DONE requires working state"}]
+                | .log += [{id:$cid, at:$at, kind:"done", task_id:$tid, ok:false,
+                            errors:["DONE illegal from " + $t.state]}]
               end
             end
         elif $e.kind == "receipt" then
@@ -467,7 +503,18 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             ($e[$k] // null) as $m
             | if ($m | not) then .
               else ($m.t) as $tid
-              | if $k == "strike_one" and ((.tasks[$tid] // null) != null) then
+              # Strike stamps only bite live held claims. A stamp replayed
+              # against a terminal or already-released claim is ignored, so a
+              # rogue or duplicate strike can never flip a done claim back to
+              # submitted (2026-09-19: strike-two hit completed
+              # RC-2026-09-18-031).
+              | if (($k == "strike_one") or ($k == "strike_two"))
+                   and ((.tasks[$tid] // null) != null)
+                   and (state_word(.tasks[$tid].state) != "working"
+                        or ((.tasks[$tid].lane // null) == null)) then
+                  .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                            ignored:($k + " ignored: claim not working/held")}]
+                elif $k == "strike_one" and ((.tasks[$tid] // null) != null) then
                   .tasks[$tid].strike_one_at = ($m.ts // $at)
                 elif $k == "strike_two" and ((.tasks[$tid] // null) != null) then
                   .tasks[$tid] |= (.state = "submitted" | .lane = null | .released_at = $at
@@ -534,7 +581,12 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             | $v + {lease_expires_at:
                 (if $v.lease_h
                  then ((epoch($v.claim_at) + $v.lease_h * 3600) | iso(.))
-                 else null end)})
+                 else null end),
+                    # Terminal claims are never eligible for sweep action:
+                    # done (completed/cancelled) or carrying a merge receipt.
+                    terminal:
+                (((["completed","cancelled"] | index(state_word($v.state))) != null)
+                 or ((($v.receipts // []) | length) > 0))})
       | sort_by(.lease_expires_at // "9999"))
     | .lanes |= unique
     | .noticed |= unique
@@ -1112,7 +1164,7 @@ cmd_sweep() {
         fi
       fi
     fi
-  done < <(printf '%s' "$st" | jq -c '.tasks[] | select(.state == "working" and .lane != null)')
+  done < <(printf '%s' "$st" | jq -c '.tasks[] | select(.state == "working" and .lane != null and ((.terminal // false) | not))')
   while IFS= read -r ill; do
     [ -n "$ill" ] || continue
     local task_id from attempted by at cid noticed
@@ -1286,6 +1338,9 @@ main() {
   case "$verb" in
     help|--help|-h) usage; exit 0 ;;
     claim|heartbeat|release|query|handoff|receipt|rebuild|sweep|receipts-scan|rotation-check|metrics|_parse|_state)
+      # Per-verb --help must not fall through to a live run (2026-09-19:
+      # `sweep --help` executed a live sweep because cmd_sweep ignores args).
+      case "${1:-}" in --help|-h) usage; exit 0 ;; esac
       "cmd_${verb//-/_}" "$@" ;;
     *) printf 'room: unknown verb: %s\n' "$verb" >&2; exit 1 ;;
   esac
