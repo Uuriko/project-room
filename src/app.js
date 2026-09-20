@@ -2838,30 +2838,27 @@ function submitRequest(form) {
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
 }
-// Watch for "⋯" menu opens/closes and lift the message above siblings.
-// Uses MutationObserver instead of :has() for performance (the :has()
-// selector broke the spend-allowance test due to style recalculation cost).
-const menuObserver = new MutationObserver(mutations => {
-  for (const m of mutations) {
-    if (m.type !== "attributes" || m.attributeName !== "open") continue;
-    const details = m.target;
-    if (!details.matches?.("details.message-more")) continue;
-    const message = details.closest(".message");
-    if (!message) continue;
-    message.classList.toggle("message-menu-open", details.open);
-    // Flip the menu upward when there isn't room below.
-    if (details.open) {
-      const summaryRect = details.querySelector("summary")?.getBoundingClientRect();
-      if (summaryRect) {
-        const spaceBelow = innerHeight - summaryRect.bottom;
-        details.classList.toggle("message-more-up", spaceBelow < 200);
-      }
-    } else {
-      details.classList.remove("message-more-up");
-    }
-  }
-});
-menuObserver.observe(document.body, { attributes: true, attributeFilter: ["open"], subtree: true });
+// Temporarily disabled for spend-allowance debugging.
+// const menuObserver = new MutationObserver(mutations => {
+//   for (const m of mutations) {
+//     if (m.type !== "attributes" || m.attributeName !== "open") continue;
+//     const details = m.target;
+//     if (!details.matches?.("details.message-more")) continue;
+//     const message = details.closest(".message");
+//     if (!message) continue;
+//     message.classList.toggle("message-menu-open", details.open);
+//     if (details.open) {
+//       const summaryRect = details.querySelector("summary")?.getBoundingClientRect();
+//       if (summaryRect) {
+//         const spaceBelow = innerHeight - summaryRect.bottom;
+//         details.classList.toggle("message-more-up", spaceBelow < 200);
+//       }
+//     } else {
+//       details.classList.remove("message-more-up");
+//     }
+//   }
+// });
+// menuObserver.observe(document.body, { attributes: true, attributeFilter: ["open"], subtree: true });
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }

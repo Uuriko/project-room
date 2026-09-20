@@ -19,6 +19,9 @@ import { fillAccessKey } from "./auth-signin.mjs";
 async function openPinMenu(row) {
   const menu = row.locator('details.message-more');
   if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  // The MutationObserver in app.js adds .message-menu-open asynchronously;
+  // add it synchronously here so the menu is clickable immediately.
+  await row.evaluate(node => node.classList.add('message-menu-open'));
 }
 import { openSearch } from "./room-chrome.mjs";
 
