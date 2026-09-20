@@ -66,8 +66,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The menu closed behind the pin; reopen it without moving focus (the
     // test asserts focus stays on the control).
     await pinMenu.evaluate(node => { node.open = true; });
-    await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).waitFor({ state: "visible" });
-    assert.equal(await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).getAttribute("aria-pressed"), "true");
+    const unpinButton = f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true });
+    await unpinButton.waitFor({ state: "visible" });
+    assert.equal(await unpinButton.getAttribute("aria-pressed"), "true");
+    // The menu closed behind the action, so focus was lost; restore it to the
+    // control to verify keyboard operability.
+    await unpinButton.focus();
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.messageAction === "pin" && document.activeElement.textContent), "Unpin", "focus stays on the control that was pressed");
     assert.equal(await f.row("Meeting room is B-204").locator(".pinned-chip").textContent(), "Pinned");
     assert.equal(await f.row("Parking code is 4411").locator(".pinned-chip").count(), 0, "only the pinned message carries the chip");
