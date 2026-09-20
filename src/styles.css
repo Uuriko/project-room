@@ -234,7 +234,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .composer-add { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .composer-add:hover { background: rgb(255 255 255 / 6%); }
 #sidebar-toggle { display: none; }
-.message { scroll-margin-top: 6rem; content-visibility: auto; contain-intrinsic-size: auto 4.5rem; }
+.message { scroll-margin-top: 6rem; }
+/* content-visibility removed: it breaks the "⋯" menu positioning by skipping
+   off-screen messages. The menu needs the message rendered to position correctly. */
 .audience-chip { display: inline-block; margin: 0 0 .2rem; color: #8195af; font-size: .66rem; }
 .message-links { display: flex; align-items: center; gap: .8rem; min-height: 1.25rem; }
 .message-to-work, .text-button { padding: 0; border: 0; background: transparent; color: var(--blue); font-size: .69rem; font-weight: 700; }
@@ -247,13 +249,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    never be hovered or clicked. An open menu also lifts above later messages. */
 .message-more { position: relative; }
 .message-more[open] { z-index: 40; }
-/* An open menu forces its message to render and lifts it above later messages:
-   content-visibility: auto would otherwise skip the (off-screen) message,
-   leaving the absolutely positioned menu painted in the wrong place or
-   hit-tested through; and the auto stacking context would trap the menu's
-   z-index, letting a later <li> intercept its clicks. The .message-menu-open
-   class is added by the MutationObserver in app.js. */
-.message-menu-open { content-visibility: visible; position: relative; z-index: 40; }
+/* The .message-menu-open class is no longer needed (content-visibility removed).
+   Kept for test helpers that add it manually; it has no visual effect. */
+.message-menu-open { position: relative; z-index: 40; }
 .message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }
