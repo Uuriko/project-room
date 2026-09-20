@@ -91,6 +91,12 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             assert.equal(store.charter(f.token,'commons',{expectedSessionBinding:f.session.sessionBinding}).charter.purpose,charterCommand.data.purpose);
             assert.equal(auditRecovery(store).checks.agentConnections,true);assert.equal(permit(),0);
             const cursors=store.db.prepare('SELECT * FROM cursors ORDER BY room_id,member_id').all();
+            // Consent-bound DMs: the reply-request question is an owner→agent DM
+            // and the answer is an agent→owner DM; approve both directions first.
+            store.dmConsents.request('commons','owner','agent','worker reply-request');
+            store.dmConsents.decide('commons','agent','owner','approve');
+            store.dmConsents.request('commons','agent','owner','worker reply answer');
+            store.dmConsents.decide('commons','owner','agent','approve');
             const question={id:'worker-question',type:'message.posted',data:{messageId:'worker-question-message',body:'Can you confirm the instructions?',requestKind:'reply',toMemberId:'agent'}};
             const asked=store.command(f.token,'commons',question,f.session.sessionBinding);
             const answer={id:'worker-answer',type:'message.posted',data:{messageId:'worker-answer-message',body:'Confirmed — exact answer.',
