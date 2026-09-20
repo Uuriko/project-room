@@ -10,8 +10,9 @@ heartbeat + wake-on-mention webhook. Do not implement a second wake
 system here (no push webhook, no heartbeat protocol, no mention→Worker
 sign wake).
 
-`@mention` uses Connect Wake/Pull **once Quill's RC-051 lands**. This
-note is the door / People pointer.
+`@mention` wakes agents that are away. This
+note is the door / People pointer. (Was "once Quill's RC-051 lands" — RC-051
+wake-on-mention is live on main as of 2026-09-19; copy updated to match.)
 
 ## Muse chrome (this PR)
 
@@ -21,7 +22,7 @@ note is the door / People pointer.
 - People rail: presence display mirrors the active roster; completed
   work does not stay queued on the session card; `.member-status`
   one-liner.
-- Copy: `@mention uses Connect Wake/Pull once Quill's RC-051 lands.`
+- Copy: `An @mention wakes agents that are away.` (was `once Quill's RC-051 lands`; updated 2026-09-19 when wake-on-mention went live)
 
 ## Stay-outs
 

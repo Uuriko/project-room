@@ -6,11 +6,19 @@ import assert from "node:assert/strict";
 import {
   signDelivery, verifyDeliverySignature, isFresh, deliveryEnvelope, deliveryHeaders,
   classifyHttpStatus, postDelivery, backoffDelayMs, REPLAY_TOLERANCE_MS,
-  MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, WebhookDispatchError,
+  MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, MAX_REDIRECT_HOPS, WebhookDispatchError,
 } from "../server/webhook-dispatch.mjs";
 
 const SECRET = "signing-secret-0123456789abcdef";
 const DELIVERY = { deliveryId: "del_abc123", eventType: "message.posted", issuedAt: 1_700_000_000_000, data: { messageId: "m1" } };
+// QA-Sec 2026-09-19: postDelivery re-validates the target (incl. DNS) before
+// every POST, so tests inject a resolver that answers "public" for any name.
+const publicDns = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
+const privateDns = { resolve4: async () => ["127.0.0.1"], resolve6: async () => [] };
+const nxDns = { resolve4: async () => { const e = new Error("queryA ENOTFOUND"); e.code = "ENOTFOUND"; throw e; },
+  resolve6: async () => { const e = new Error("queryAaaa ENOTFOUND"); e.code = "ENOTFOUND"; throw e; } };
+const postArgs = extra => ({ fetchImpl: async () => ({ status: 200, text: async () => "ok" }),
+  url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns, ...extra });
 
 test("signDelivery is deterministic, hex, and binds deliveryId + timestamp + data", () => {
   const a = signDelivery(SECRET, DELIVERY);
@@ -108,6 +116,7 @@ test("postDelivery returns ok on 2xx without throwing", async () => {
     url: "https://hooks.example.test/agent",
     envelope: { deliveryId: "del_1" },
     headers: { "x-webhook-delivery": "del_1" },
+    dnsResolvers: publicDns,
   });
   assert.deepEqual(result, { ok: true, status: 201, error: null });
   assert.equal(seen[0].url, "https://hooks.example.test/agent");
@@ -117,14 +126,14 @@ test("postDelivery returns ok on 2xx without throwing", async () => {
 
 test("postDelivery classifies retryable failures and dead rejections", async () => {
   const retry = await postDelivery({ fetchImpl: async () => ({ status: 503, text: async () => "busy" }),
-    url: "https://x", envelope: {}, headers: {} });
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
   assert.equal(retry.ok, false);
   assert.equal(retry.status, 503);
   assert.equal(retry.classification, "retry");
   assert.match(retry.error, /HTTP 503/);
 
   const dead = await postDelivery({ fetchImpl: async () => ({ status: 400, text: async () => "bad signature" }),
-    url: "https://x", envelope: {}, headers: {} });
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
   assert.equal(dead.ok, false);
   assert.equal(dead.classification, "dead");
   assert.match(dead.error, /bad signature/);
@@ -132,22 +141,23 @@ test("postDelivery classifies retryable failures and dead rejections", async () 
 
 test("postDelivery never throws on transport failure; errors are capped", async () => {
   const down = await postDelivery({ fetchImpl: async () => { throw new Error("connect ECONNREFUSED"); },
-    url: "https://x", envelope: {}, headers: {} });
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
   assert.equal(down.ok, false);
   assert.equal(down.status, 0);
   assert.equal(down.classification, "retry");
   assert.match(down.error, /ECONNREFUSED/);
 
   const timeout = await postDelivery({ fetchImpl: async () => { const e = new Error("timed out"); e.name = "TimeoutError"; throw e; },
-    url: "https://x", envelope: {}, headers: {} });
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
   assert.equal(timeout.ok, false);
   assert.match(timeout.error, /timed out/);
 
   const long = await postDelivery({ fetchImpl: async () => ({ status: 500, text: async () => "x".repeat(10_000) }),
-    url: "https://x", envelope: {}, headers: {} });
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
   assert.ok(long.error.length <= 500);
 
-  assert.rejects(() => postDelivery({ fetchImpl: "nope", url: "https://x", envelope: {}, headers: {} }), WebhookDispatchError);
+  assert.rejects(() => postDelivery({ fetchImpl: "nope", url: "https://hooks.example.test/agent", envelope: {}, headers: {} }), WebhookDispatchError);
+  assert.rejects(() => postDelivery(postArgs({ dnsResolvers: "nope" })), WebhookDispatchError);
 });
 
 test("backoffDelayMs doubles from 5s and caps at 10 minutes", () => {
@@ -161,4 +171,127 @@ test("backoffDelayMs doubles from 5s and caps at 10 minutes", () => {
 test("dispatch constants match the claimed policy", () => {
   assert.equal(MAX_DELIVERY_ATTEMPTS, 5);
   assert.equal(DELIVERY_TIMEOUT_MS, 10_000);
+});
+
+// --- QA-Sec 2026-09-19: dispatch-time SSRF guard ---------------------------
+
+test("postDelivery dead-letters a target that resolves private at dispatch (DNS rebinding)", async () => {
+  let fetched = 0;
+  const result = await postDelivery(postArgs({
+    fetchImpl: async () => { fetched++; return { status: 200, text: async () => "ok" }; },
+    dnsResolvers: privateDns, // name was public at subscribe time, rebinding now
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.match(result.error, /private or reserved/);
+  assert.equal(fetched, 0); // never touched the network
+});
+
+test("postDelivery dead-letters a private-IP literal mutated in after subscribing", async () => {
+  let fetched = 0;
+  const result = await postDelivery(postArgs({
+    url: "https://127.0.0.1/hook",
+    fetchImpl: async () => { fetched++; return { status: 200, text: async () => "ok" }; },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.equal(fetched, 0);
+});
+
+test("postDelivery dead-letters a downgraded (http) stored URL", async () => {
+  let fetched = 0;
+  const result = await postDelivery(postArgs({
+    url: "http://hooks.example.test/hook",
+    fetchImpl: async () => { fetched++; return { status: 200, text: async () => "ok" }; },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.equal(fetched, 0);
+});
+
+test("postDelivery retries when the hostname does not resolve (transient DNS)", async () => {
+  let fetched = 0;
+  const result = await postDelivery(postArgs({
+    fetchImpl: async () => { fetched++; return { status: 200, text: async () => "ok" }; },
+    dnsResolvers: nxDns,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "retry");
+  assert.equal(fetched, 0);
+});
+
+test("postDelivery does not follow redirects to private targets", async () => {
+  const seen = [];
+  const result = await postDelivery(postArgs({
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url === "https://hooks.example.test/agent") {
+        return { status: 307, headers: { get: name => (name === "location" ? "https://internal.example.test/callback" : null) }, text: async () => "" };
+      }
+      return { status: 200, headers: { get: () => null }, text: async () => "ok" };
+    },
+    dnsResolvers: {
+      resolve4: async host => (host === "hooks.example.test" ? ["93.184.216.34"] : ["10.0.0.9"]),
+      resolve6: async () => [],
+    },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.match(result.error, /private or reserved/);
+  assert.deepEqual(seen, ["https://hooks.example.test/agent"]); // the redirect was never followed
+});
+
+test("postDelivery refuses https->http redirect downgrades", async () => {
+  const seen = [];
+  const result = await postDelivery(postArgs({
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url === "https://hooks.example.test/agent") {
+        return { status: 302, headers: { get: name => (name === "location" ? "http://hooks.example.test/plain" : null) }, text: async () => "" };
+      }
+      return { status: 200, headers: { get: () => null }, text: async () => "ok" };
+    },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.match(result.error, /downgrade/);
+  assert.deepEqual(seen, ["https://hooks.example.test/agent"]);
+});
+
+test("postDelivery follows same-scheme public redirects, re-validating each hop", async () => {
+  const seen = [];
+  const hops = ["https://hooks.example.test/agent", "https://cdn.example.test/final"];
+  const result = await postDelivery(postArgs({
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url === hops[0]) {
+        return { status: 301, headers: { get: name => (name === "location" ? hops[1] : null) }, text: async () => "" };
+      }
+      return { status: 200, headers: { get: () => null }, text: async () => "ok" };
+    },
+  }));
+  assert.deepEqual(result, { ok: true, status: 200, error: null });
+  assert.deepEqual(seen, hops);
+});
+
+test("postDelivery dead-letters redirect loops past the hop cap", async () => {
+  let fetched = 0;
+  const result = await postDelivery(postArgs({
+    fetchImpl: async () => {
+      fetched++;
+      return { status: 302, headers: { get: name => (name === "location" ? "https://hooks.example.test/agent" : null) }, text: async () => "" };
+    },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.match(result.error, /too many redirects/);
+  assert.equal(fetched, MAX_REDIRECT_HOPS + 1);
+});
+
+test("postDelivery sends redirect: manual so fetch never follows on its own", async () => {
+  const seen = [];
+  await postDelivery(postArgs({
+    fetchImpl: async (url, opts) => { seen.push(opts); return { status: 200, text: async () => "ok" }; },
+  }));
+  assert.equal(seen[0].redirect, "manual");
 });

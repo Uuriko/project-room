@@ -91,7 +91,10 @@ async function ownerSession(origin, accountKey) {
     body: JSON.stringify({ accountAccessKey: accountKey, expectedSessionRevision: sessionRevision }) });
   assert.equal(login.status, 201, "account login");
   const session = await login.json();
-  return { Cookie: cookie, "X-Project-Room-Auth": "account", "X-Session-Binding": session.sessionBinding ?? sessionBinding };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  const freshCookie = login.headers.get("set-cookie").split(";", 1)[0];
+  return { Cookie: freshCookie, "X-Project-Room-Auth": "account", "X-Session-Binding": session.sessionBinding ?? sessionBinding };
 }
 
 test("owner account session reads the full review; removed members are absent", async t => {

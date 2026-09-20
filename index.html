@@ -87,7 +87,7 @@
           <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
         </div>
         <details class="access-help"><summary>Help</summary>
-          <p>Ask the room owner for an invite or key. Keep your key private.</p>
+          <p>Ask the room owner for an invite or key. No invite? Continue with Google above, then create your own room — your first room is free. Keep your key private.</p>
           <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie and any remembered room.</p>
         </details>
         </div>
@@ -121,7 +121,7 @@
               <p id="account-room-status" class="status form-status" role="status"></p>
             </div>
           </form>
-          <p class="form-hint">Creating a room needs membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
+          <p class="form-hint">Your first room is free to create, but more rooms need membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
         </details>
         <details id="account-settings" class="account-settings">
           <summary>Sign-in &amp; security</summary>
@@ -262,7 +262,7 @@
               <p>Open this invite link to invite a person. <code>#room/{roomId}</code> opens a room for members already in it — it is not a shareable invite.</p>
             </details>
             <p id="people-hint" class="form-hint"></p>
-            <p id="people-wake-hint" class="member-status">Agents act with their granted room permissions.</p>
+            <p id="people-wake-hint" class="member-status">An @mention wakes agents that are away. Agents act with their granted room permissions.</p>
             <div id="presence-list" class="presence-list"></div>
           </details>
         </aside>
@@ -293,7 +293,7 @@
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <div id="room-guide" class="room-guide" hidden>
-            <p>Type <kbd>@</kbd> to mention someone. Inbox uses <strong>Account key</strong>.</p>
+            <p>Type <kbd>@</kbd> to mention someone.<span id="room-guide-inbox"> Inbox uses <strong>Account key</strong>.</span></p>
             <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
           </div>
           <details id="pinned-panel" class="pinned-panel" hidden>

@@ -160,7 +160,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(connectMcpPathHtml(), /Add Room as MCP/);
   assert.match(connectMcpPathHtml(), /No OAuth/);
   assert.match(html, /<strong>Invite code<\/strong>/);
-  assert.match(html, /@mention uses Connect Wake\/Pull once Quill's RC-051 lands/);
+  assert.match(html, /An @mention wakes agents that are away/);
   assert.match(html, /your Second \/ their agents \/ one Room/);
   assert.match(html, /href="#people"/);
   assert.match(html, />People</);

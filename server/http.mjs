@@ -1019,9 +1019,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/oauth/authorize" && req.method === "GET") {
         rate(`oauth-authorize:${remoteAddress}`, 30);
         const slotToken = cookie(req, accountCookieName);
-        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
-        const accountId = slot?.session?.account?.id;
-        if (!accountId) {
+        // QA-Sec 2026-09-19: the old code read slot?.session?.account?.id,
+        // but accountSessionSlot never populates account (always null), so
+        // every logged-in user was bounced to login and consent could never
+        // complete. Authenticate the account session properly.
+        let auth = null;
+        try { auth = slotToken ? store.authenticateAccountSession(slotToken) : null; } catch { auth = null; }
+        if (!auth || !auth.account?.id) {
           res.statusCode = 302;
           res.setHeader("Location", "/?oauth=login&return=" + encodeURIComponent(url.pathname + url.search));
           return res.end();
@@ -1051,26 +1055,67 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         const scopeItems = validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
         return res.end(bytes);
       }
-      // POST /oauth/authorize — process the consent decision.
+      // POST /oauth/authorize — process the consent decision. Accepts the
+      // server's own consent form (application/x-www-form-urlencoded with a
+      // csrf_token field) and JSON API clients (x-csrf-token header).
       if (url.pathname === "/oauth/authorize" && req.method === "POST") {
         rate(`oauth-authorize:${remoteAddress}`, 30);
         const slotToken = cookie(req, accountCookieName);
-        const slot = slotToken ? store.accountSessionSlot(slotToken) : null;
-        const accountId = slot?.session?.account?.id;
-        if (!accountId) reject(401, "account_session_required", "Log in to Project Room first");
-        protectWrite(req, slot, false);
-        const data = await body(req);
+        // QA-Sec 2026-09-19: authenticateAccountSession, not the raw slot
+        // (whose account is always null) — the same authN fix QA-Auth #720
+        // made on this endpoint.
+        let auth = null;
+        try { auth = slotToken ? store.authenticateAccountSession(slotToken) : null; } catch { auth = null; }
+        if (!auth || !auth.account?.id) reject(401, "account_session_required", "Log in to Project Room first");
+        const accountId = auth.account.id;
+        const contentType = req.headers["content-type"] || "";
+        let data;
+        if (/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(contentType)) {
+          // Consent-form submission: same bounded reader as the JSON body.
+          const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          data = Object.fromEntries(new URLSearchParams(text));
+        } else {
+          data = await body(req);
+        }
+        // CSRF for the consent POST: the form carries csrf_token in the body
+        // (browsers can't set x-csrf-token); API clients use the header.
+        // Either way it must equal the session's csrf token.
+        checkOrigin(req, true);
+        const presented = req.headers["x-csrf-token"] ?? data.csrf_token;
+        if (typeof presented !== "string" || !bindingPattern.test(presented) || !auth.csrf
+          || !timingSafeEqual(Buffer.from(presented), Buffer.from(auth.csrf))) reject(403, "csrf_denied", "Session confirmation required; sign in again");
+        // QA-Auth #720: validate the authorization request BEFORE acting on
+        // the decision. The redirect target must be a registered client URI:
+        // an unvalidated redirect_uri on the deny/error path was an open
+        // redirect, and a malformed URI threw an uncaught 500. Per
+        // RFC 6749 §4.1.2.1, error responses redirect only when the
+        // redirect_uri itself is valid; otherwise 400 JSON directly.
+        let validated;
+        try {
+          validated = oauthProvider.validateAuthorizationRequest({
+            clientId: data.client_id,
+            redirectUri: data.redirect_uri,
+            scopes: String(data.scope || "").split(" ").filter(Boolean),
+            state: data.state,
+            codeChallenge: data.code_challenge,
+          });
+          if (data.code_challenge_method !== "S256") {
+            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+          }
+        } catch (error) {
+          const code = error instanceof ServiceError ? error.code : "invalid_request";
+          return json(res, 400, { error: code, error_description: error.message });
+        }
         const decision = data.decision;
-        const redirectUri = data.redirect_uri;
-        const state = data.state;
+        const state = validated.state;
         const failRedirect = (error, description) => {
-          const u = new URL(redirectUri);
+          const u = new URL(validated.redirectUri);
           u.searchParams.set("error", error);
           if (description) u.searchParams.set("error_description", description);
           if (state) u.searchParams.set("state", state);
@@ -1079,23 +1124,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end();
         };
         if (decision !== "allow") return failRedirect("access_denied", "The user denied the request");
-        try {
-          const { code } = oauthProvider.issueCode({
-            clientId: data.client_id,
-            userId: accountId,
-            redirectUri,
-            scopes: String(data.scope || "").split(" ").filter(Boolean),
-            codeChallenge: data.code_challenge,
-          });
-          const u = new URL(redirectUri);
-          u.searchParams.set("code", code);
-          if (state) u.searchParams.set("state", state);
-          res.statusCode = 302;
-          res.setHeader("Location", u.href);
-          return res.end();
-        } catch (error) {
-          return failRedirect("invalid_request", error.message);
-        }
+        const { code } = oauthProvider.issueCode({
+          clientId: validated.client.clientId,
+          userId: accountId,
+          redirectUri: validated.redirectUri,
+          scopes: [...validated.scopes],
+          codeChallenge: validated.codeChallenge,
+        });
+        const u = new URL(validated.redirectUri);
+        u.searchParams.set("code", code);
+        if (state) u.searchParams.set("state", state);
+        res.statusCode = 302;
+        res.setHeader("Location", u.href);
+        return res.end();
       }
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
       if (url.pathname === "/oauth/token" && req.method === "POST") {
@@ -1568,9 +1609,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
           rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
-          const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
-            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: rotate the slot
+          // atomically with the login (same store transaction). The pre-login
+          // token is dead on success; on failure nothing is upgraded.
+          const { token: freshSlotToken, session: loggedIn } = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+            rotateSlot: true
           });
+          setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           return json(res, 201, accountView(loggedIn));
         }
         if (req.method === "DELETE") {
@@ -1635,10 +1681,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const method = store.accountLogins.listMethods(accountId)
           .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
         if (method) store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
-          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
+        // QA-Auth 2026-09-19: QAS-702 rotation was missing on the recovery
+        // path — mint a fresh slot token so a planted pre-login token can
+        // never authenticate after the redeem.
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
+          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" },
+          rotateSlot: true
         });
-        setCookie(res, accountCookieName, redeemToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
       }
       // ---- Login method settings (slice 7, RC-2026-09-17-016) ----
@@ -2053,10 +2103,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
+      const workClaimReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/review$/.exec(url.pathname);
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -2133,9 +2184,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimItemMatch ? "read"
           : workClaimClaimMatch ? "claim"
           : workClaimUpdateMatch ? "update"
+          : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReleaseMatch ?? workClaimReassignMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
       }

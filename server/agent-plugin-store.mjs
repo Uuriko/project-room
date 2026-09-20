@@ -857,7 +857,7 @@ export class AgentPluginStore {
 
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
-  async attemptStoredDelivery(row, { fetchImpl, now }) {
+  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
       this.mutate(() => this.markDeadLetter(row.delivery_id, "subscription removed", now));
@@ -872,7 +872,7 @@ export class AgentPluginStore {
       eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
-    const result = await postDelivery({ fetchImpl, url: sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS });
+    const result = await postDelivery({ fetchImpl, url: sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
     return this.mutate(() => {
       try { this.webhooks.recordAttempt(row.delivery_id, { ok: result.ok, error: result.error }); } catch { /* cache may lag; the table is authoritative */ }
       if (result.ok) {
@@ -881,8 +881,11 @@ export class AgentPluginStore {
       }
       const attempts = row.attempts + 1;
       if (result.classification === "dead" || attempts >= MAX_DELIVERY_ATTEMPTS) {
+        // QA-Sec 2026-09-19: keep the dispatch guard's reason (e.g. an SSRF
+        // refusal) in the journal — "HTTP 0" alone hides why it died.
+        const detail = result.error ? ` — ${result.error}` : "";
         const reason = result.classification === "dead"
-          ? `receiver rejected the delivery (HTTP ${result.status}); not retried`
+          ? `receiver rejected the delivery (HTTP ${result.status}); not retried${detail}`
           : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${result.error}`;
         this.markDeadLetter(row.delivery_id, reason, now, attempts);
         return "deadLettered";
@@ -899,8 +902,11 @@ export class AgentPluginStore {
   // Called by the Cloudflare cron tick and by the agent-triggered process
   // endpoint (agentId scopes it to one identity's deliveries). Each
   // delivery mutates in its own transaction so one poison row cannot roll
-  // back the rest of the sweep.
-  async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null } = {}) {
+  // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
+  // injectable so tests never touch the network; omitted it defaults to the
+  // real resolver and every target is re-validated before its POST
+  // (dispatch-time SSRF guard, QA-Sec 2026-09-19).
+  async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const due = this.db.prepare(
       `SELECT * FROM agent_webhook_deliveries
        WHERE state IN ('pending','failed') AND next_attempt_at <= ?
@@ -910,7 +916,7 @@ export class AgentPluginStore {
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
       summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now })]++;
+      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers })]++;
     }
     return Object.freeze(summary);
   }

@@ -359,6 +359,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       actions.append(note); card.append(actions);
       return card;
     }));
+    // The empty inbox names a connected channel that is not live yet, so the
+    // reader knows what would fill it instead of seeing only the generic copy.
+    const idle = records.filter(r => r.live?.state === "not_configured");
+    const empty = $("#inbox-empty");
+    if (empty) empty.textContent = idle.length
+      ? `Nothing here yet. ${idle.map(r => channelLabel[r.connection.channel] ?? r.connection.channel).join(" and ")} can go live once configured — finish the connection below and new messages will land here.`
+      : "Nothing here yet. This inbox collects your mentions, assigned work, and messages from your connected accounts. Open a room to pick up your first task.";
   }
   async function loadConnections() {
     if (!owns()) return;

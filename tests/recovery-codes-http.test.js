@@ -64,7 +64,9 @@ async function loginAccount(request, origin, accountAccessKey) {
     data: { accountAccessKey, expectedSessionRevision: bootstrap.sessionRevision }
   });
   assert.equal(response.status, 201);
-  return { cookie, session: await response.json() };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie is the session.
+  return { cookie: accountCookie(response), session: await response.json() };
 }
 
 async function anonymousSlot(request) {
@@ -125,8 +127,12 @@ test("redeem burns a code, records the method use, and upgrades the slot", async
   assert.equal(body.remaining, 9);
   assert.equal(body.session.authenticated, true);
   assert.equal(body.session.account.id, "acct-1");
-  const slotToken = cookie.split("=", 2)[1];
-  const authenticated = store.authenticateAccountSession(slotToken);
+  // QA-Auth 2026-09-19: the redeem rotates the slot (QAS-702) — the
+  // pre-redeem token is dead; the response cookie carries the session.
+  const freshCookie = accountCookie(response);
+  const freshToken = freshCookie.split("=", 2)[1];
+  assert.notEqual(freshToken, cookie.split("=", 2)[1], "the slot token rotates at redeem");
+  const authenticated = store.authenticateAccountSession(freshToken);
   assert.equal(authenticated.account.id, "acct-1");
   const method = store.accountLogins.listMethods("acct-1").find(candidate => candidate.type === "recovery-code-set");
   assert.ok(method.lastUsedAt, "a successful redeem records the method use");

@@ -1426,7 +1426,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       expiresAt: auth.expiresAt
     };
   }
-  loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null } = {}) {
+  loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null, rotateSlot = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     return this.transaction(() => {
       const slot = this.accountSessionSlot(slotToken);
@@ -1441,6 +1441,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
       }
+      // QAS-702 (RC-2026-09-19-069): session-fixation rotation, atomic with
+      // the login (same transaction). Either the fresh token carries the
+      // authenticated session and the pre-login token is dead, or the login
+      // fails and nothing is upgraded. Mirrors loginAccountSessionWithMethod.
+      if (rotateSlot) return this.rotateAccountSessionSlot(slotToken);
       return this.authenticateAccountSession(slotToken);
     });
   }

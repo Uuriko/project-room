@@ -73,8 +73,11 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   }
   const hint = page.locator("#people-hint");
   await hint.waitFor();
+  // QA-UX 2026-09-19: keep #717's calm merged hint; wake line now carries
+  // both the wake-on-mention mechanic and the permissions note.
   assert.match(await hint.textContent(), /Invite people or add an agent to work together/);
   assert.doesNotMatch(await hint.textContent(), /Quill|RC-051|bootstrap-agent-room/);
+  assert.match(await page.locator("#people-wake-hint").textContent(), /An @mention wakes agents that are away/);
   assert.match(await page.locator("#people-wake-hint").textContent(), /granted room permissions/);
   await page.locator("#create-room-details > summary").click();
   const createCopy = await page.locator("#create-room-details").innerText();
