@@ -89,7 +89,7 @@ Everything under `/api/rooms/{id}/*` requires a credential (`server/http.mjs:190
 
 - HTTP tests (e.g. `tests/message-thread.test.js`, `tests/agent-access-requests-http.test.js`): `new RoomStore(mkdtempSync(join(tmpdir(),…)))` + `store.initialize(initialRoom())` + `store.issueAccessKey("commons","owner")` + `createRoomServer({store})` on 127.0.0.1:0; `fetch` with `Authorization: Bearer <key>` and `Origin`; teardown: `server.closeStreams(); server.closeAllConnections(); await close; store.close(); rmSync(dir)`.
 - Store/pure tests (e.g. `tests/dm-rooms.test.js`, `tests/dm-room-wiring.test.js`): `node:test` + `assert/strict`, direct module import, fake clock/storage injection where needed.
-- **Run repo tests with `TMPDIR` inside the worktree** (e.g. `TMPDIR=~/workspace/pr-<name>/.tmp`) — `/tmp` is a near-full 512 MB tmpfs; default TMPDIR causes `SQLITE_FULL` spurious failures.
+- **Run repo tests with `TMPDIR` inside the worktree** (e.g. `TMPDIR=<worktree>/.tmp`) — `/tmp` is a near-full 512 MB tmpfs; default TMPDIR causes `SQLITE_FULL` spurious failures.
 - Coded-error contract: failures throw with `.code` (DM wiring) or `ServiceError{status, code}` (server modules); HTTP layer maps module errors to stable 4xx.
 
 ## 7. Share-links (could they back a public read-only face?)
