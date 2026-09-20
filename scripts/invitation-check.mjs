@@ -241,6 +241,10 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   await page.locator("#invitation-account-key").fill(targetAccountKey);
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
   await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).waitFor();
+  // QA-Auth 2026-09-19: account-key logins rotate the slot (QAS-702), so the
+  // account cookie legitimately changed at each sign-in above. The property
+  // under test is that *acceptance itself* never rotates either cookie.
+  const cookiesBeforeFinalAccept = new Map((await context.cookies()).map(cookie => [cookie.name, cookie.value]));
   await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).click();
   await page.waitForURL(`${origin}/?room=studio`);
   await page.locator("#main").waitFor({ state: "visible" });
@@ -250,8 +254,9 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   assert.equal(await composer.inputValue(), "", "private drafts clear only after the confirmed account/Room switch");
   assert.deepEqual(counts(store, invitationId), afterCommit, "the exact lost-response replay is a no-write receipt");
   const cookiesAfterAccept = new Map((await context.cookies()).map(cookie => [cookie.name, cookie.value]));
-  assert.equal(cookiesAfterAccept.get("room_session"), cookiesBeforeAccept.get("room_session"));
-  assert.equal(cookiesAfterAccept.get("account_session"), cookiesBeforeAccept.get("account_session"));
+  assert.equal(cookiesAfterAccept.get("room_session"), cookiesBeforeFinalAccept.get("room_session"));
+  assert.equal(cookiesAfterAccept.get("account_session"), cookiesBeforeFinalAccept.get("account_session"),
+    "acceptance never rotates the account cookie");
   assert.deepEqual(errors, []);
 });
 
