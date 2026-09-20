@@ -2838,6 +2838,20 @@ function submitRequest(form) {
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
 }
+$("#message-list").addEventListener("toggle", e => {
+  // Flip the "⋯" overflow menu upward when there isn't room below: the menu
+  // is absolutely positioned inside the scroll container, so opening downward
+  // from a message near the composer would slide it under the composer form
+  // (or out of the clipped area) where its buttons can never be clicked.
+  const details = e.target.closest?.("details.message-more");
+  if (!details || !details.open) return;
+  const menu = details.querySelector(".message-more-menu");
+  if (!menu) return;
+  const summaryRect = details.querySelector("summary").getBoundingClientRect();
+  const spaceBelow = innerHeight - summaryRect.bottom;
+  // The menu is ~12rem wide with a few rows; 200px is a safe estimate.
+  details.classList.toggle("message-more-up", spaceBelow < 200);
+}, true);
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
