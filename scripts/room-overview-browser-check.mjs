@@ -31,6 +31,9 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   const dialog = page.locator('#room-overview-dialog');
   assert.match(await page.locator('#room-overview-purpose').textContent(), /Synthetic acceptance/);
   assert.match(await dialog.textContent(), /Ship a small, useful first version/);
+  assert.match(await dialog.textContent(), /Active work/);
+  f.send('owner', T.ROOM_CHARTER_UPDATED, { expectedRevision: 0, purpose: 'Current shared purpose', outputs: null, boundaries: null, escalation: null });
+  await page.waitForFunction(() => document.querySelector('#room-overview-purpose').textContent === 'Current shared purpose');
   assert.equal(await dialog.locator('[data-open-work="native-result"]').count(), 1);
   assert.equal(await dialog.locator('[data-open-work="pending-result"]').count(), 0, 'unverified completion is not presented as a finished result');
   assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth), true);
@@ -45,7 +48,11 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   assert.equal(await page.locator('#main').evaluate(node => node.classList.contains('sidebar-open')), false);
   await open();
   f.reopen('native-result');
-  await page.waitForFunction(() => !document.querySelector('#room-overview-content [data-open-work="native-result"]'));
+  await page.waitForFunction(() => {
+    const sections = [...document.querySelectorAll('#room-overview-content section')];
+    const results = sections.find(s => s.querySelector('h3')?.textContent === 'Recent results');
+    return !results?.querySelector('[data-open-work="native-result"]');
+  });
   assert.match(await dialog.textContent(), /Launch checklist/);
   await dialog.locator('[data-open-work="approved-result"]').click();
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'approved-result');

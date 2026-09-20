@@ -1,7 +1,7 @@
 import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
-import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
+import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -3695,15 +3695,18 @@ let resultView = null;
 function renderRoomOverview() {
   if (!state || !$("#room-overview-dialog").open) return;
   setText("#room-overview-title", `${state.room.title} · Overview`);
-  setText("#room-overview-purpose", state.room.purpose || "No purpose recorded yet.");
+  const orientation = roomOrientation(state);
+  setText("#room-overview-purpose", orientation.purpose || "No purpose recorded yet.");
   const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
   const steps = contributionSteps(state, session.member.id).slice(0, 3);
-  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED).slice(-3).reverse();
+  const decisions = orientation.recentDecisions;
   const results = completedResults(state).slice(0, 3);
   const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
   renderContent("#room-overview-content",
-    section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
-    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.data.statement)}</p>${link("message", e.data.sourceMessageId, "Open discussion", e.id)}<p class="form-hint">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
+    (orientation.purposeSource.kind === "instructions" ? `<p class="form-hint">Room instructions · version ${orientation.purposeSource.revision} · ${esc(time(orientation.purposeSource.updatedAt))}</p>` : "")
+    + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
+    + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
+    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
     + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet."));
 }
 $("#room-overview-open").addEventListener("click", () => {

@@ -8,6 +8,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+import { roomOrientation } from "../src/work-selectors.js";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { buildActivationPack, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
@@ -80,9 +82,12 @@ test("pack shape: every documented field is present", async t => {
   assert.equal(response.status, 200);
   const pack = await response.json();
   assert.deepEqual(Object.keys(pack).sort(), ["coordinationNorms", "eventCursor", "generatedAt", "members",
-    "openWork", "participationRules", "pinnedResources", "repoHead", "room"]);
+    "openWork", "orientation", "participationRules", "pinnedResources", "repoHead", "room"]);
   assert.deepEqual(pack.room, { slug: ROOM, title: "Activation Demo", state: "active",
     kind: "personal", owner: "owner" });
+  assert.equal(pack.orientation.purpose, "Fixture room for the activation pack.");
+  assert.equal(pack.orientation.activeWorkTotal, 2);
+  assert.equal(pack.orientation.activeWork.length, 2);
   assert.equal(pack.repoHead, null);
   assert.ok(typeof pack.eventCursor === "string" && pack.eventCursor.length > 0);
   const cursor = JSON.parse(Buffer.from(pack.eventCursor, "base64url").toString("utf8"));
@@ -154,4 +159,17 @@ test("the route rides the standard room credential funnel", async t => {
   const origin = await serve(t, f.store);
   const anonymous = await fetch(`${origin}/api/rooms/${ROOM}/activation-pack`);
   assert.equal(anonymous.status, 401);
+});
+
+
+test("agent client orientation agrees with the browser projection and reads do not advance room state", async t => {
+  const f = fixture(t), origin = await serve(t, f.store);
+  f.store.command(f.ownerKey, ROOM, { id: "orientation-purpose", type: T.ROOM_CHARTER_UPDATED,
+    data: { expectedRevision: 0, purpose: "Current instructions", outputs: null, boundaries: null, escalation: null } });
+  const before = f.store.room(ROOM);
+  const client = new RoomAgentClient({ origin, roomId: ROOM, token: f.workerKey });
+  const pack = await client.activationPack();
+  assert.deepEqual(pack.orientation, roomOrientation(before.state));
+  assert.equal(pack.orientation.purpose, "Current instructions");
+  assert.equal(f.store.room(ROOM).sequence, before.sequence);
 });

@@ -5,9 +5,10 @@
 // pinned resources, the participation rules, the coordination norms, and an
 // opaque event cursor to resume the log from.
 //
-// Pure module: no side effects, no imports beyond the shared event helpers.
+// Read-only projection using shared event helpers and orientation selectors.
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
+import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES } from "../src/events.js";
 
 /**
@@ -20,6 +21,10 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES } from "../src/events
  *     state: "active"|"archived",
  *     kind: "personal"|"organization",
  *     owner: string             // owner member id
+ *   },
+ *   orientation: {             // shared with browser Overview
+ *     version: 1, purpose: string, purposeSource: object,
+ *     activeWork: object[], activeWorkTotal: number, recentDecisions: object[]
  *   },
  *   members: [                 // active members, sorted by id
  *     {
@@ -145,6 +150,7 @@ export function buildActivationPack(store, roomSlug) {
       kind: roomKind(state.room),
       owner: state.room.ownerId
     },
+    orientation: roomOrientation(state),
     members,
     openWork,
     pinnedResources: pinnedMessages(state).map(pinnedOf),

@@ -546,6 +546,7 @@ export class RoomAgentClient {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
+  activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });
     for (const [name, value] of Object.entries({ horizon, after, cursor })) if (value !== undefined) query.set(name, value);
