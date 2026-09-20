@@ -186,7 +186,9 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     await choices.locator('summary').click();
     await openCatchUp(page);
   }
-  await page.locator('#return-brief-panel > summary').click();
+  // The contribution button lives inside #return-brief-panel (UI calming #7):
+  // ensure the panel is open instead of toggling it closed.
+  await page.locator('#return-brief-panel').evaluate(node => { node.open = true; });
   await page.locator('#contribution-open').focus();
   await page.locator('#contribution-open').press('Enter');
   if (multiple) {
