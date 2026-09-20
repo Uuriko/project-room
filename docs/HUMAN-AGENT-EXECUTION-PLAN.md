@@ -106,3 +106,12 @@ Phase 1 implemented on `codex/room-orientation-20260920`: shared deterministic o
 Validation: repository `npm run check` passed (4,656 pass, zero failures, one existing TODO); ten focused orientation/HTTP checks and two desktop/mobile Overview journeys passed. Mobile screenshot inspected. Existing resumption tests passed (37): frozen history windows, member isolation, stale session responses, pagination retries, marker changes and explicit acknowledgement. Login already prepares the return brief; no duplicate resume subsystem is needed.
 
 Remaining: automatic host context assembly/routing, real two-host execution and concurrent human steering are not qualified by this checkpoint. Full browser CI, protected merge and production release remain separate release steps. The change is locally validated, not deployed.
+
+
+### Automatic request preparation checkpoint
+
+The existing selected request read now automatically bundles current room purpose, versioned instructions and the linked current work record in `preparation`. This reaches both `RoomAgentClient.replyContext()` and the existing MCP `room_read_request` tool without a new workflow or tool. Preparation and current request state are read in the same authenticated storage transaction. The conversation page remains frozen and answer eligibility remains unchanged. The client checks room, instruction revision, work identity and evaluation sequence; older responses remain compatible.
+
+The first integration removes separate instructions/work reads for an addressed request. It does not yet dispatch execution to an external coding host. Scope stays selected: unrelated work/messages, private Inbox data and external resources are not bundled. Next: qualify an actual connected host consuming this prepared request, acknowledging execution and returning revision-bound results.
+
+Validation for automatic preparation: repository check passed (4,658 tests, zero failures, one existing TODO); 24 focused request/client/MCP tests and six request/Overview browser journeys passed. Route documentation check passed. Tests cover selected-only context, no read mutation, missing linked work, old-service compatibility, response identity/revision checks, and fresh instructions during frozen conversation paging. No external provider execution or production deployment was performed.

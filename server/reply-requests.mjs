@@ -1,3 +1,5 @@
+import { charterContext } from "../src/room-charter.js";
+import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
@@ -139,6 +141,19 @@ export class ReplyRequests {
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
         const answerBasis = open && recipient && !hasMore && context.sequence <= horizonSequence
           ? { expectedRequestRevision: request.revision, contextEventId: context.id, contextSequence: context.sequence } : null;
+        // Current preparation shares this authenticated read transaction. It is
+        // intentionally distinct from the frozen conversation page and answer basis.
+        const instructions = charterContext(state.room);
+        result.preparation = {
+          version: 1, evaluatedThrough: room.sequence,
+          room: { id: state.room.id, title: state.room.title,
+            purpose: instructions.charter?.purpose ?? state.room.purpose ?? "" },
+          instructions,
+          work: request.workItemId && Object.hasOwn(state.workItems, request.workItemId)
+            ? currentWorkRecord(state.workItems[request.workItemId]) : null,
+          omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
+          externalExecution: false
+        };
         Object.assign(result, { request: structuredClone(request), current: { evaluatedThrough: room.sequence,
           requesterAvailable: state.members[request.requesterId]?.active === true, recipientAvailable: state.members[request.recipientId]?.active === true,
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,

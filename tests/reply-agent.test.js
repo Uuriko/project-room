@@ -183,3 +183,36 @@ test("lost answer and cancellation responses keep the original terminal operatio
   wrong.page.rowBytes = wrong.page.items.reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0);
   assert.throws(() => validateReplyRead(wrong, { roomId: "commons", name: "room_request_history", args: { direction: "outgoing", cursor: history.page.nextCursor } }), { code: "invalid_response" });
 });
+
+test("request tools automatically prepare only current room instructions and linked work", async t => {
+  const f = await fixture(t);
+  const send = (id, type, data) => f.store.command(f.keys.owner, "commons", { id, type, data });
+  send("prepare-instructions", "room.charter_updated", { expectedRevision: 0, purpose: "Build a useful room", outputs: "A working result", boundaries: null, escalation: null });
+  for (const id of ["linked", "unrelated"]) send(`prepare-${id}`, "work.proposed", {
+    workItemId: id, title: id, definitionOfDone: `${id} requirements`, accountableMemberId: "producer", mode: "read"
+  });
+  send("private-context", "message.posted", { messageId: "unrelated-message", body: "Unrelated conversation should not be bundled" });
+  const q = f.open("prepared", { workItemId: "linked" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const context = await f.client.replyContext(q.command.data.messageId);
+  assert.equal(context.preparation.room.purpose, "Build a useful room");
+  assert.equal(context.preparation.instructions.charter.outputs, "A working result");
+  assert.equal(context.preparation.work.id, "linked");
+  assert.equal(context.preparation.work.definitionOfDone, "linked requirements");
+  assert.equal(context.preparation.evaluatedThrough, context.current.evaluatedThrough);
+  assert.equal(JSON.stringify(context.preparation).includes('Unrelated conversation'), false);
+  assert.equal(JSON.stringify(context.preparation).includes('unrelated requirements'), false);
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
+  const adapter = await f.mcp();
+  const read = (await adapter.call("room_read_request", { requestMessageId: q.command.data.messageId })).result.structuredContent;
+  assert.deepEqual(read.preparation, context.preparation);
+  const args = { name: "room_read_request", args: { requestMessageId: q.command.data.messageId }, roomId: "commons" };
+  for (const change of [p => p.room.id = 'other-room', p => p.work.id = 'unrelated', p => p.instructions.revision++, p => p.evaluatedThrough--]) {
+    const bad = structuredClone(context); change(bad.preparation);
+    assert.throws(() => validateReplyRead(bad, args), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(context); delete legacy.preparation;
+  assert.equal(validateReplyRead(legacy, args), legacy, "older services remain readable");
+  const plain = f.open("no-work");
+  assert.equal((await f.client.replyContext(plain.command.data.messageId)).preparation.work, null);
+});

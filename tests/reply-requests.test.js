@@ -325,3 +325,20 @@ test("a reply request and its answer carry the channel they were written in", t 
     channelId: DEFAULT_CHANNEL_ID, somethingNew: "not declared anywhere" } }),
     /Unexpected reply request fields/);
 });
+
+test("prepared instructions stay current while selected conversation pagination remains frozen", t => {
+  const f = fixture(t), q = f.open(), id = q.command.data.messageId;
+  f.post("guest", { messageId: "prep-context", body: "Please explain the tradeoff", replyToId: id });
+  const first = f.store.replyRequests.selected(f.keys.agent, "commons", id, { limit: 1 });
+  f.send("owner", { id: "prep-charter", type: "room.charter_updated", data: {
+    expectedRevision: 0, purpose: "Updated instructions", outputs: null, boundaries: null, escalation: null
+  } });
+  const next = f.store.replyRequests.selected(f.keys.agent, "commons", id, { cursor: first.page.nextCursor, limit: 1 });
+  assert.equal(next.page.horizonSequence, first.page.horizonSequence);
+  assert.ok(next.preparation.evaluatedThrough > next.page.horizonSequence);
+  assert.equal(next.preparation.instructions.revision, 1);
+  assert.equal(next.preparation.room.purpose, "Updated instructions");
+  assert.equal(next.current.answerBasis.contextEventId, next.current.contextEventId);
+  assert.equal(f.store.replyRequests.history(f.keys.agent, "commons").preparation, undefined);
+  assert.equal(f.store.replyRequests.list(f.keys.agent, "commons").preparation, undefined);
+});
