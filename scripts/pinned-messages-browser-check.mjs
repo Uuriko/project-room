@@ -19,9 +19,6 @@ import { fillAccessKey } from "./auth-signin.mjs";
 async function openPinMenu(row) {
   const menu = row.locator('details.message-more');
   if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
-  // Ensure the message is lifted above later siblings (the toggle listener
-  // in app.js should do this, but belt-and-suspenders for the test).
-  await row.evaluate(node => node.classList.add('message-menu-open'));
 }
 import { openSearch } from "./room-chrome.mjs";
 
