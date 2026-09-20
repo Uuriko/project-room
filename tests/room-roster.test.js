@@ -152,11 +152,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
   assert.match(html, /id="room-guide"/);
-  assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
+  assert.match(html, /Your private messages are in <strong>Inbox<\/strong>/);
   assert.match(html, /id="people-hint"/);
   assert.match(html, /id="people-wake-hint"/);
   assert.match(html, /Agents act with their granted room permissions/);
-  assert.match(html, /An @mention wakes agents that are away/);
+  assert.match(html, /Automatic replies require its host to be connected and running/);
   assert.match(html, /id="invite-agents-button"/);
   assert.match(html, /id="create-room-details"/);
   assert.match(html, /id="agent-invite-dialog"/);
