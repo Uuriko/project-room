@@ -1598,9 +1598,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
           rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
-          const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
-            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: rotate the slot
+          // atomically with the login (same store transaction). The pre-login
+          // token is dead on success; on failure nothing is upgraded.
+          const { token: freshSlotToken, session: loggedIn } = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+            rotateSlot: true
           });
+          setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           return json(res, 201, accountView(loggedIn));
         }
         if (req.method === "DELETE") {
@@ -1665,10 +1670,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const method = store.accountLogins.listMethods(accountId)
           .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
         if (method) store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
-          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
+        // QA-Auth 2026-09-19: QAS-702 rotation was missing on the recovery
+        // path — mint a fresh slot token so a planted pre-login token can
+        // never authenticate after the redeem.
+        const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
+          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" },
+          rotateSlot: true
         });
-        setCookie(res, accountCookieName, redeemToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
       }
       // ---- Login method settings (slice 7, RC-2026-09-17-016) ----

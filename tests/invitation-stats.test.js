@@ -36,7 +36,10 @@ async function fixture(t) {
     });
     assert.equal(response.status, 201);
     const session = await response.json();
-    return { Cookie: cookie, "X-Project-Room-Auth": "account",
+    // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+    // the pre-login cookie is dead; the response cookie carries the session.
+    const freshCookie = response.headers.get("set-cookie").split(";", 1)[0];
+    return { Cookie: freshCookie, "X-Project-Room-Auth": "account",
       "X-Session-Binding": session.sessionBinding, "X-CSRF-Token": session.csrf };
   }
   const ownerHeaders = await login(store.issueAccountAccessKey("account-owner"));

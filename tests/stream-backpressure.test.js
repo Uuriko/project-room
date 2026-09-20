@@ -21,7 +21,10 @@ async function ownerDiagnostics(store, origin) {
     headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin, "X-CSRF-Token": bootstrap.csrf },
     body: JSON.stringify({ accountAccessKey, expectedSessionRevision: bootstrap.sessionRevision }) });
   assert.equal(login.status, 201);
-  const headers = { Cookie: cookie, "X-Project-Room-Auth": "account", "X-Session-Binding": (await login.json()).sessionBinding };
+  // QA-Auth 2026-09-19: the account-key login rotates the slot (QAS-702) —
+  // the pre-login cookie is dead; the response cookie carries the session.
+  const freshCookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const headers = { Cookie: freshCookie, "X-Project-Room-Auth": "account", "X-Session-Binding": (await login.json()).sessionBinding };
   return async () => {
     const response = await fetch(`${origin}/api/rooms/commons/diagnostics`, { headers });
     assert.equal(response.status, 200);
