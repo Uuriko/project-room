@@ -281,7 +281,12 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
            # these markers that names a task-id closes the claim
            # terminally, same as [lane][done]. Reduces as kind "done"
            # with via:"prose-terminal".
-           (($body | first_rc)) as $ref
+           # 2026-09-20: the task-id MUST come from the marker line
+           # ($rest), never the whole body. Searching the full body
+           # misread a prose DONE about PR #718 (comment 5748168322,
+           # which only mentioned RC-2026-09-19-068 downstream) as a
+           # terminal close of RC-2026-09-19-068.
+           (($rest | first_rc)) as $ref
            | if ($ref | not) then {kind:"prose"}
              else {kind:"done",
                    ref:$ref,
