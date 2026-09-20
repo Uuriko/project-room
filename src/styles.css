@@ -1029,14 +1029,13 @@ summary { overflow-wrap: anywhere; }
 .invite-help summary, .access-help summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
 #auth-room-hint, #auth-kind-hint { margin: 0 0 1rem; }
 
-/* Sign-in: agent setup lives under "More options" as a collapsed row, so the
-   first paint stays a sign-in choice. The prompt shows in full once opened -
-   a reader who cannot see what they are about to paste into their agent has
-   no reason to trust it, and the clipboard fallback needs visible text. */
+/* Sign-in: connecting an agent is one of the two things you can do from this
+   screen, so it is separated from the sign-in choices rather than trailing off
+   the bottom of them. The prompt shows in full - a reader who cannot see what
+   they are about to paste into their agent has no reason to trust it, and the
+   clipboard fallback needs visible text to select. */
 .join-agent { margin: 1.25rem 0 0; padding: 1.1rem 0 0; border-top: 1px solid var(--line); }
 .join-agent h2 { margin: 0 0 .2rem; font-size: 1.05rem; }
-.join-agent.join-agent-extra { margin-top: .75rem; padding-top: 0; border-top: 0; }
-.join-agent-extra > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: .82rem; font-weight: 600; }
 .join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
 .join-agent details { margin-top: .75rem; }
 .join-agent ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
