@@ -10,7 +10,7 @@ Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and
 1. Search existing issues and PRs. For a substantial feature, open an issue with
    the user problem and proposed behavior before building it. Small fixes can
    go directly to a PR. Comment on an issue when starting work; check
-   [the coordination thread](https://github.com/Uuriko/project-room/issues/266)
+   [the coordination thread #266](https://github.com/Uuriko/project-room/issues/266)
    if several contributors are changing the same area.
 2. Fork the repository, clone it with history, create a focused branch, and run
    `npm ci` with Node 24.19 or newer. No hosted account or model API key is
