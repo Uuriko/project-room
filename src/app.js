@@ -1904,7 +1904,11 @@ function revealMessage(id) {
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
-  row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  // Scroll first: content-visibility: auto skips off-screen rows, and focusing
+  // a skipped row is a no-op. Scrolling makes it relevant (rendered), so the
+  // subsequent focus lands.
+  row?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  row?.focus({ preventScroll: true });
   // Nearest can leave a tall message clipped at its bottom. Align its beginning
   // inside the conversation without moving the surrounding page unnecessarily.
   const list = $("#message-list");

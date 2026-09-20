@@ -247,11 +247,20 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    never be hovered or clicked. An open menu also lifts above later messages. */
 .message-more { position: relative; }
 .message-more[open] { z-index: 40; }
+/* An open menu forces its message to render and lifts it above later messages:
+   content-visibility: auto would otherwise skip the (off-screen) message,
+   leaving the absolutely positioned menu painted in the wrong place or
+   hit-tested through; and the auto stacking context would trap the menu's
+   z-index, letting a later <li> intercept its clicks. */
+.message:has(.message-more[open]) { content-visibility: visible; position: relative; z-index: 40; }
 .message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }
 .message-more > summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
-.message-more-menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 30; display: grid; gap: .1rem; min-width: 12rem; padding: .35rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised); box-shadow: var(--shadow); }
+.message-more-menu { position: absolute; right: 0; bottom: calc(100% + .25rem); z-index: 30; display: grid; gap: .1rem; min-width: 12rem; padding: .35rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised); box-shadow: var(--shadow); }
+/* The overflow menu opens upward: opening downward would slide it under the
+   composer form (or out of the scroll container), where it can never be
+   clicked. */
 .message-more-menu .message-to-work { padding: .5rem .6rem; text-align: left; font-size: .78rem; }
 .message-more[open] .message-more-menu .message-to-work { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
