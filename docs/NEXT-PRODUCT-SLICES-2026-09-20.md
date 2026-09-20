@@ -11,7 +11,7 @@ Tests cover independent journals racing, ambiguous reservation responses, unknow
 The next local increment adds optional coding-result replies through the existing
 message transport: repository, exact base/result revision, PR/artifact link or
 small inline patch with a computed digest, file list and explicitly host-reported
-checks. It preserves saved-answer retry and existing room visibility without requiring work items.
+checks. It preserves saved-answer retry and participant-only request visibility without requiring work items.
 This is a bounded first increment of slice 2, not independent repository/test
 verification or automatic stale-artifact detection. Large private artifact storage,
 independent verification and explicit continuation/recovery still remain.

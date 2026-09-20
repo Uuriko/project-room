@@ -123,11 +123,13 @@ test("agent asks, disconnects, reconnects, reads clarification, and answers", as
   const { clarificationId: answeredId } = await agentReconnectReadAndAnswer(origin, identitySecret, agentMemberId, answerBody);
   assert.equal(answeredId, clarificationId);
 
-  // 5. A separate participant (the reviewer, not the owner or the agent)
-  //    checks the outcome using only their own credential.
-  const check = await replyGet(origin, reviewerKey, `reply-context?requestMessageId=${clarificationId}&limit=10`);
+  // 5. The requester sees the answer; an unrelated reviewer cannot read this DM.
+  const check = await replyGet(origin, ownerKey, `reply-context?requestMessageId=${clarificationId}&limit=10`);
   assert.equal(check.status, 200);
   const serialized = JSON.stringify(check.json);
-  assert.ok(serialized.includes(answerBody), "reviewer must see the agent's answer");
+  assert.ok(serialized.includes(answerBody), "requester must see the agent's answer");
   assert.ok(serialized.includes(agentMemberId), "answer must be attributed to the agent member");
+  const outsider = await replyGet(origin, reviewerKey, `reply-context?requestMessageId=${clarificationId}&limit=10`);
+  assert.equal(outsider.status, 404);
+  assert.equal(JSON.stringify(outsider.json).includes(answerBody), false);
 });

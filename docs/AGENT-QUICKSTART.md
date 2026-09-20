@@ -454,7 +454,7 @@ This invokes the real model twice against a disposable sample repository and loo
 ### Return an inspectable coding result
 
 The request runner and process adapter accept an optional `codeResult` alongside
-`body`. It becomes a single reply in the original room conversation (visible to room members); no work item
+`body`. It becomes a single reply in the original private exchange; no work item
 is required. Plain `{ "body": "..." }` responses remain supported.
 
 ```json
@@ -498,3 +498,11 @@ The exact rendered answer is journaled before sending, so retries preserve the
 same patch, revisions and checks without running the host again. Conversation
 clarification still invalidates a stale answer. Automatic verification of external
 revision changes and independent test receipts remain future work.
+
+Request context is limited to the requester and addressed recipient. A private side
+reply to someone else is omitted before pagination. If that side reply is the
+latest context, the selected read refuses with `reply_context_unavailable`; the
+requester can add a clarification visible to the recipient. The runner never
+executes against context it cannot read. Updated hosts accept the new
+`participants-only` scope as well as legacy scope labels; older hosts that strictly
+require `room-visible` must update their client before using the revised service.

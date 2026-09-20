@@ -184,7 +184,7 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
   const content = record(owner, "inspect-result").locator(".message-body");
   await content.waitFor();
   assert.equal(await content.textContent(), body);
-  assert.match(await record(owner, "inspect-result").locator(".audience-chip").textContent(), /room-visible/);
+  assert.match(await record(owner, "inspect-result").locator(".audience-chip").textContent(), /private/);
   assert.equal(await content.locator("img").count(), 0);
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
