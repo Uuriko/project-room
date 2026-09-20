@@ -38,6 +38,8 @@ need() {
 }
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+# jq is already required; unlike date -d, this works on macOS and Linux.
+iso_epoch() { jq -enr --arg value "$1" '$value | fromdateiso8601'; }
 
 trim() {
   # trim leading/trailing whitespace (incl. newlines -> caller decides)
@@ -1091,7 +1093,7 @@ sweep_strike_one() { # task_id lane task_json lease_expires_iso now
   iso="$(iso_now)"
   lease="$(jq -r '.lease // "lease=?h"' <<<"$t")"
   claim_at="$(jq -r '.claim_at' <<<"$t")"
-  ago="$(human_dur $((now - $(date -u -d "$exp_iso" +%s))))"
+  ago="$(human_dur $((now - $(iso_epoch "$exp_iso"))))"
   body="[$DEFAULT_LANE]RECLAIM (strike 1): @$lane — lease on $task_id expired ${ago} ago ($lease posted $claim_at), no heartbeat seen. Please post STATUS within 4h or the claim releases. $(attribution "$DEFAULT_LANE" scheduled)
 
 <!-- room:strike-one:${task_id}:${iso} -->
@@ -1148,15 +1150,15 @@ cmd_sweep() {
     strike="$(jq -r '.strike_one_at // empty' <<<"$t")"
     hb="$(jq -r '.heartbeat_at // empty' <<<"$t")"
     [ -n "$exp" ] || continue
-    local exp_e; exp_e="$(date -u -d "$exp" +%s)"
+    local exp_e; exp_e="$(iso_epoch "$exp")"
     if [ "$now" -gt "$exp_e" ]; then
       if [ -z "$strike" ]; then
         sweep_strike_one "$task_id" "$lane" "$t" "$exp" "$now"; actions=$((actions + 1))
       else
         local strike_e hb_ok=0
-        strike_e="$(date -u -d "$strike" +%s)"
+        strike_e="$(iso_epoch "$strike")"
         if [ -n "$hb" ]; then
-          local hb_e; hb_e="$(date -u -d "$hb" +%s)"
+          local hb_e; hb_e="$(iso_epoch "$hb")"
           [ "$hb_e" -gt "$strike_e" ] && hb_ok=1
         fi
         if [ $((now - strike_e)) -gt 14400 ] && [ "$hb_ok" = 0 ]; then
@@ -1280,7 +1282,7 @@ cmd_metrics() {
   hi="$(printf '%s' "$comments" | jq -r 'map(.created_at) | max // empty')"
   days=1
   if [ -n "$lo" ] && [ -n "$hi" ]; then
-    days="$(awk -v a="$(date -u -d "$lo" +%s)" -v b="$(date -u -d "$hi" +%s)" \
+    days="$(awk -v a="$(iso_epoch "$lo")" -v b="$(iso_epoch "$hi")" \
       'BEGIN{d=(b-a)/86400; if (d<1) d=1; printf "%.2f", d}')"
   fi
   cpd="$(awk -v n="$n" -v d="$days" 'BEGIN{printf "%.2f", n/d}')"
@@ -1311,7 +1313,7 @@ cmd__state() {
     *) die "_state: unknown flag $1" ;;
   esac; done
   local now events
-  if [ -n "$now_iso" ]; then now="$(date -u -d "$now_iso" +%s)"; else now="$(date +%s)"; fi
+  if [ -n "$now_iso" ]; then now="$(iso_epoch "$now_iso")"; else now="$(date +%s)"; fi
   events="$(cat)"
   [ -n "$n" ]  || n="$(printf '%s' "$events" | jq 'length')"
   [ -n "$wm" ] || wm="$(printf '%s' "$events" | jq '[.[].id] | max // 0')"

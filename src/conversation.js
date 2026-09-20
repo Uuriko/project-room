@@ -362,7 +362,8 @@ export class DraftRecovery {
           let pending = null;
           try {
             const data = replyDraftData(d.mode, { body: d.body.trim(), toMemberId: d.toMemberId || null,
-              replyToId: d.replyToId, messageId: d.pending?.messageId });
+              replyToId: d.replyToId, messageId: d.pending?.messageId,
+              ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}) });
             const type = d.mode.kind === "cancelled" ? "reply_request.cancelled" : "message.posted";
             const contents = JSON.stringify({ type, data, causationId: null });
             if (d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id))
@@ -371,7 +372,7 @@ export class DraftRecovery {
           // A malformed retained operation must never become a new automatic send.
           if (d.pending && !pending) continue;
           drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-            mode: d.mode, threadId: d.threadId, pending });
+            mode: d.mode, threadId: d.threadId, channelId: d.channelId, pending });
           continue;
         }
         if (id !== null && !index.threads.has(id)) continue;

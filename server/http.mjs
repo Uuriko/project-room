@@ -1,3 +1,4 @@
+import { publicAssetPaths } from "../deploy/public-assets.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -43,12 +44,11 @@ const roomCookieName = "room_session";
 const accountCookieName = "account_session";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
+const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css"
+  : path.endsWith(".html") ? "text/html" : "text/markdown; charset=utf-8";
 const assets = new Map([
-  ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js", "handoff-envelope-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ["/src/styles.css", ["src/styles.css", "text/css"]],
-  ["/connectors/muse.md", ["connectors/muse.md", "text/markdown; charset=utf-8"]],
+  ["/", ["index.html", "text/html"]],
+  ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
 const pathId = encoded => {

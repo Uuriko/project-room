@@ -29,6 +29,24 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run lint
+  unit:
+    # Root-suite unit tests (tests/*.test.js at the repo root). The five
+    # path-scoped workflows run `npm test` inside their shard subdirectories
+    # only; nothing in CI currently executes the root suite. This is
+    # additive: it does not touch the shard workflows or their triggers
+    # (see #266 comment 5718947975 — trigger scopes adjudicated working as
+    # designed; this proposal leaves them alone).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # The agent-upgrade gates read retained ancestor commits.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm test
   browser:
     runs-on: ubuntu-latest
     steps:
