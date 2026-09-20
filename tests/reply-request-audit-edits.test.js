@@ -37,6 +37,9 @@ function room(t) {
     send("owner", T.MEMBER_ADDED, { memberId: id, displayName: id, kind: "human", permissions: ["steer", "decide", "accept_work"] });
     keys[id] = store.issueAccessKey("commons", id);
   }
+  // Consent-bound DMs: alice's reply-request DM to bob needs his approval.
+  store.dmConsents.request("commons", "alice", "bob", "test fixture");
+  store.dmConsents.decide("commons", "bob", "alice", "approve");
   send("bob", T.MESSAGE_POSTED, { messageId: "chat-1", body: "typo here" });
   // One open reply request is what arms the whole-message-list comparison.
   send("alice", T.MESSAGE_POSTED, { messageId: "req-1", body: "Please confirm", toMemberId: "bob", requestKind: "reply" });

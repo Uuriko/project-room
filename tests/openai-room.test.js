@@ -20,6 +20,12 @@ async function fixture(t) {
     memberId: "ai", displayName: "OpenAI test", kind: "agent", permissions: [], accountableHumanId: "owner"
   } });
   const token = store.issueAccessKey("commons", "ai");
+  // Consent-bound DMs: the owner→ai question and the ai→owner reply both
+  // need approval.
+  store.dmConsents.request("commons", "owner", "ai", "test fixture");
+  store.dmConsents.decide("commons", "ai", "owner", "approve");
+  store.dmConsents.request("commons", "ai", "owner", "test fixture");
+  store.dmConsents.decide("commons", "owner", "ai", "approve");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

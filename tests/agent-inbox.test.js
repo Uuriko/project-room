@@ -52,6 +52,9 @@ async function roomWithFriend(origin, fixture) {
   assert.equal(decideRes.status, 200);
   const memberId = (await decideRes.json()).memberId;
   assert.ok(memberId);
+  // Consent-bound DMs: the owner→friend test DM needs the friend's approval.
+  fixture.store.dmConsents.request(roomId, owner.identityId, memberId, "test fixture");
+  fixture.store.dmConsents.decide(roomId, memberId, owner.identityId, "approve");
   return { ownerSecret: owner.secret, friendSecret: friend.secret, roomId, memberId };
 }
 

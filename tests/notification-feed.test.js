@@ -22,6 +22,9 @@ async function serve(t) {
   send(ownerKey, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["steer", "accept_work", "complete_work", "verify"] });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
   const mayaKey = store.issueAccessKey("commons", "maya"), agentKey = store.issueAccessKey("commons", "agent");
+  // Consent-bound DMs: the owner's directed test message needs the agent's approval.
+  store.dmConsents.request("commons", "owner", "agent", "test fixture");
+  store.dmConsents.decide("commons", "agent", "owner", "approve");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });

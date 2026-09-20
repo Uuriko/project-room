@@ -21,6 +21,9 @@ function fixture(t) {
   for (const [id, kind] of [["human", "human"], ["agent", "agent"]]) store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] }));
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
+  // Consent-bound DMs: the human→agent test DM needs the agent's approval.
+  store.dmConsents.request("commons", "human", "agent", "test fixture");
+  store.dmConsents.decide("commons", "agent", "human", "approve");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, filename, owner, human, agent };
 }

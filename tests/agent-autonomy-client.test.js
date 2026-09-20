@@ -27,6 +27,9 @@ async function fixture(t) {
   } });
   const keys = {};
   for (const memberId of ["agent", "agent-two"]) keys[memberId] = store.issueAccessKey("commons", memberId);
+  // Consent-bound DMs: the client's targeted-DM test needs agent-two's approval.
+  store.dmConsents.request("commons", "agent", "agent-two", "test fixture");
+  store.dmConsents.decide("commons", "agent-two", "agent", "approve");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });

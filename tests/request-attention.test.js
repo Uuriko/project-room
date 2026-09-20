@@ -20,6 +20,13 @@ function fixture(t) {
     send("owner", "member.added", { memberId, displayName: memberId, kind: "agent", accountableHumanId: "owner", permissions: ["accept_work", "complete_work"] });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // Consent-bound DMs: request/answer flows DM between owner, agent, other.
+  for (const a of ["owner", "agent", "other"])
+    for (const b of ["owner", "agent", "other"])
+      if (a !== b) {
+        store.dmConsents.request("commons", a, b, "test fixture");
+        store.dmConsents.decide("commons", b, a, "approve");
+      }
   const client = { snapshot: async () => store.snapshot(keys.agent, "commons"), changes: async (after, limit) => store.eventsAfter(keys.agent, "commons", after, limit) };
   const config = { client, origin: "http://127.0.0.1:12345", roomId: "commons", directory: join(directory, "v3"), version: 3 };
   const post = (actor, data) => send(actor, "message.posted", { messageId: crypto.randomUUID(), body: "PRIVATE synthetic body", ...data });

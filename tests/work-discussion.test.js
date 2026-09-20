@@ -30,6 +30,10 @@ async function fixture(t) {
   const config = { version: 1, origin, roomId: "commons", memberId: "producer", token: f.keys.producer };
   const configDirectory = join(f.directory, "producer-config"); saveAgentConnection(configDirectory, config);
   const open = async () => { const handle = await openMcpTestClient(configDirectory); handles.add(handle); return handle; };
+  // Consent-bound DMs: the guest→producer DM in the targeting test needs
+  // the producer's approval first.
+  f.store.dmConsents.request("commons", "guest", "producer", "test fixture");
+  f.store.dmConsents.decide("commons", "producer", "guest", "approve");
   return { ...f, origin, send, post, propose, config, configDirectory, open, client: new RoomAgentClient(config),
     view: (id = "test-handoff", options = {}, actor = "producer") => f.store.workDiscussion(f.keys[actor], "commons", id, options) };
 }

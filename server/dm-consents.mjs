@@ -247,8 +247,9 @@ export class DmConsents {
     if (requesterId === targetId) return true;
     return this.store.transaction(() => {
       const state = this._roomState(roomId);
-      this._requireActiveMember(state, requesterId, "requester_not_found");
-      this._requireActiveMember(state, targetId, "target_not_found");
+      // NB: no member-active check here — an inactive recipient (or
+      // requester) is rejected downstream by message posting ("Member
+      // access revoked"), preserving that long-standing error contract.
       const existing = this._get(roomId, requesterId, targetId);
       if (existing) {
         if (existing.status === "approved") return true;
