@@ -8,7 +8,7 @@ import { validId } from "../src/events.js";
 
 export async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && argv[0] === "--help") {
-    console.log("Usage: node scripts/run-room-request.mjs REQUEST_ID|--auto /absolute/private-journal.sqlite /absolute/host.json\nUses ROOM_AGENT_CONFIG or the existing Room connection environment. Host JSON: command (absolute), args (array), cwd (absolute), timeoutMs, optional env. Host reads prepared JSON on stdin and returns {body} on stdout. --auto explicitly enables sequential pickup of addressed reply requests until stopped. Ordinary chat never starts a host. Retries reuse the journal; uncertain execution requires reconciliation.");
+    console.log("Usage: node scripts/run-room-request.mjs REQUEST_ID|--auto /absolute/private-journal.sqlite /absolute/host.json\nUses ROOM_AGENT_CONFIG or the existing Room connection environment. Host JSON: command (absolute), args (array), cwd (absolute), timeoutMs, optional env and verification. Host reads prepared JSON on stdin and returns {body, codeResult?} on stdout. Optional verification runs operator-configured checks against a matching coding result. --auto explicitly enables sequential pickup of addressed reply requests until stopped. Ordinary chat never starts a host. Retries reuse the journal; uncertain execution requires reconciliation.");
     return;
   }
   const [requestMessageId, journal, hostFile] = argv;

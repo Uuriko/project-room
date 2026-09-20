@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 
+// Process stdout cannot populate this side channel. It is deliberately absent
+// from JSON and only formatted after the local adapter has run configured checks.
+const observations = new WeakMap();
+export const recordObservedChecks = (result, receipt) => observations.set(result, receipt);
 const fail = () => { throw new Error("Invalid host result; return { body } with optional codeResult and keep the complete reply within 4096 characters"); };
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 const text = (value, max) => typeof value === "string" && value.trim() && value.length <= max && value.isWellFormed();
@@ -33,6 +37,10 @@ export function hostReplyBody(result) {
   if (code.artifactUrl) lines.push(`Patch / PR: ${code.artifactUrl}`, "Review the exact revision above; the linked page may change.");
   lines.push(`Files: ${code.files.join(", ")}`, "Checks · host-reported, not independently verified:",
     ...(code.checks.length ? code.checks.map(check => `• ${check.command}: ${check.outcome.replace("_", " ")}`) : ["• No checks reported."]));
+  const observed = observations.get(result);
+  if (observed) lines.push("Observed by local adapter · exit status, not a code review:",
+    `Checked HEAD: ${observed.head}`, `Checked patch SHA-256: ${observed.patchDigest}`,
+    ...observed.checks.map(check => `• ${check.name}: exit ${check.exitCode} (${check.exitCode === 0 ? "passed" : "failed"})`));
   if (code.patch !== undefined) lines.push(`Patch SHA-256: ${createHash("sha256").update(code.patch, "utf8").digest("hex")}`,
     "Patch (exact bytes after this line):", code.patch);
   const body = lines.join("\n");
