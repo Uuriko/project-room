@@ -36,3 +36,7 @@ The smallest next investigation is draft-recovery compatibility across the exact
 Earlier full local qualification remains valid for the candidate: **399/399 browser checks, 4,577 core passes / zero failures / one existing TODO**, repository checks and lint (zero errors, 79 existing warnings). It is development evidence, not proof that this live upgrade/rollback is safe.
 
 Local logs are under ignored `test-results/production-qualification/`. Generated version stamping from the dry-run was restored to the committed template before publishing.
+
+## Follow-up shipping decision
+
+John subsequently requested immediate completion and shipping. The unsafe downgrade remains prohibited. `SHIPPING-PLAN-2026-09-19.md` replaces that release recovery route with a retained maintenance version and forward repair: temporary unavailability, no browser script execution, and no store access while paused. A new real Workers browser proof passes on desktop and touch for ordinary and reply-request lost-response retries, preserving command identity, duplicate receipts, and sign-out privacy through pause/resume. This does not claim the old live version is compatible or that maintenance is a fully functioning fallback. Provider version IDs and the final deployment receipt will be recorded after protected CI and merge.
