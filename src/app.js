@@ -1855,8 +1855,27 @@ function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
 function revealLocationHash() {
-  if (!state || !location.hash) return;
+  if (!location.hash) return;
   const hash = location.hash;
+  // Account destinations also work before any room has been opened.
+  if (accountClient.session?.authenticated) {
+    const requestedRoom = selectedRoomFromLocation();
+    // Destination history must not show the current room under another room's
+    // URL or silently clear drafts to switch sessions. Re-enter via the picker,
+    // whose existing room-switch flow confirms pending writing and access.
+    if (state && requestedRoom && requestedRoom !== session.roomId && hash === "#pr-view/rooms") {
+      history.replaceState(null, "", "?account=1#pr-view/rooms");
+      inboxUI?.showRoomList();
+      return;
+    }
+    if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
+    if (hash === "#pr-view/rooms") {
+      if (accountHomeFromLocation()) inboxUI?.showRoomList();
+      else inboxUI?.showRooms();
+      return;
+    }
+  }
+  if (!state) return;
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {
@@ -1865,8 +1884,6 @@ function revealLocationHash() {
     }
     return;
   }
-  if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
-  if (hash === "#pr-view/rooms") { inboxUI?.showRooms(); return; }
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
@@ -3127,6 +3144,11 @@ $("#main").addEventListener("click", e => {
     history.replaceState(null, "", recordHref("room", state.room.id));
     revealRoom();
   }
+});
+// History can change the room query as well as the fragment. Those entries
+// need popstate dispatch even when the browser does not emit hashchange.
+window.addEventListener("popstate", () => {
+  if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
   const fragment = consumeInvitationFragment();

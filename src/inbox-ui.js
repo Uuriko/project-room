@@ -83,13 +83,23 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     // Per-tab navigation metadata only: never source text, addresses or draft text.
     try { storage?.setItem(positionKey, JSON.stringify({ owner, sourceId: selected, ...point })); } catch {}
   }
-  function show(place, updateLocation = true) {
+  function show(place, updateLocation = true, push = false) {
     navigationEpoch++;
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
     onNavigate();
     active = place === "inbox";
     browsing = false;
-    if (updateLocation) history.replaceState(null, "", "#pr-view/" + (active ? "inbox" : "rooms"));
+    if (updateLocation) {
+      const destination = "#pr-view/" + (active ? "inbox" : "rooms");
+      const url = new URL(location.href), roomId = getRoom()?.room?.id;
+      if (roomId) { url.searchParams.set("room", roomId); url.searchParams.delete("account"); }
+      if (location.hash !== destination || location.search !== url.search) {
+        // Give the initial room URL a destination before the first explicit
+        // visit. Back must restore the room, not leave the workspace.
+        if (push && !location.hash) history.replaceState(null, "", "#pr-view/rooms");
+        history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + destination);
+      }
+    }
     $("#main").hidden = active || !getRoom();
     $("#inbox-panel").hidden = !active;
     $("#account-rooms-panel").hidden = active || Boolean(getRoom());
@@ -443,9 +453,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       await loadConnections();
     }
   }
-  async function load() {
+  async function load(push = false) {
     sync(); if (!owns()) return;
-    show("inbox"); text("#inbox-status", "Loading…");
+    show("inbox", true, push); text("#inbox-status", "Loading…");
     const turn = ++epoch;
     loadConnections();
     quarantineUI.refresh();
@@ -780,8 +790,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
     $("#inbox-thread-toggle").addEventListener("click", () => { if (selected) loadThread(selected); });
-  $("#nav-inbox").addEventListener("click", load);
-  $("#nav-rooms").addEventListener("click", () => show("rooms"));
+  $("#nav-inbox").addEventListener("click", () => load(true));
+  $("#nav-rooms").addEventListener("click", () => show("rooms", true, true));
   $("#inbox-refresh").addEventListener("click", async () => {
     const sourceId = selected, d = drafts.get(sourceId);
     if (d && !d.busy && !d.pending) { await review(sourceId, d); if (owns() && selected === sourceId) { render(); loadResults(sourceId); } }

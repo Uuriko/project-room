@@ -33,7 +33,7 @@ function seedEmail(f) {
   return { raw, importMessage, disconnect: () => apply({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 1 }) };
 }
 
-async function setup(t, mobile = false, simulate = false) {
+async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), accountKey = f.store.issueAccountAccessKey(account.id);
   const slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, accountKey, 0);
   const apply = request => f.store.inbox.apply(slot.token, request, session.sessionBinding);
@@ -53,9 +53,9 @@ async function setup(t, mobile = false, simulate = false) {
   page.on("pageerror", e => errors.push(e.message));
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin + "/?room=commons");
+  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
   await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
   // the reader rendered, and the connection list rendered (the product unhides the add-connection
@@ -1081,4 +1081,64 @@ for (const mobile of [false, true]) test(`workspace continuity ${mobile ? 'mobil
   await f.inbox();
   assert.equal(await p.locator('#inbox-draft').inputValue(), 'Unsent private reply');
   assert.equal(f.saved().draft, null, 'navigation neither saves nor sends a private draft');
+});
+
+for (const mobile of [false, true]) test(`workspace history ${mobile ? 'mobile' : 'desktop'}: Back and Forward preserve destination, selection and unsaved drafts`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await p.locator('#message-input').fill('Room draft across history');
+  const before = await p.evaluate(() => history.length);
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('Private draft across history');
+  assert.equal(await p.evaluate(() => history.length), before + 1);
+  await p.locator('#nav-inbox').click();
+  assert.equal(await p.evaluate(() => history.length), before + 1, 'reselecting the current destination does not add history');
+  await p.locator('#nav-rooms').click();
+  assert.equal(await p.evaluate(() => history.length), before + 2);
+  await p.goBack(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Private draft across history');
+  assert.equal(await p.locator('#inbox-list [aria-current=true]').getAttribute('data-source-id'), 'note');
+  assert.equal(await p.locator('#nav-inbox').getAttribute('aria-current'), 'page');
+  await p.goBack(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#message-input').inputValue(), 'Room draft across history');
+  await p.goForward(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Private draft across history');
+  await p.goForward(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#message-input').inputValue(), 'Room draft across history');
+  assert.equal(await p.evaluate(() => history.length), before + 2, 'restoring history does not rewrite the stack');
+  assert.equal(f.saved().draft, null, 'navigation never saves or sends the private draft');
+  const urls = await p.evaluate(() => ({ url: location.href, state: history.state }));
+  assert(!JSON.stringify(urls).includes('Private draft'));
+});
+
+test('workspace history without an open room restores account destinations', { timeout: 25000 }, async t => {
+  const f = await setup(t, false, false, true), p = f.page;
+  const before = await p.evaluate(() => history.length);
+  await f.inbox(); await f.pick('note'); await p.locator('#inbox-draft').fill('Account-only draft');
+  await p.goBack(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false);
+  assert.equal(await p.locator('#inbox-panel').isVisible(), false);
+  await p.goForward(); await p.locator('#inbox-reader').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Account-only draft');
+  assert.equal(await p.evaluate(() => history.length), before + 1);
+  assert.equal(await p.locator('#main').isVisible(), false);
+  assert.equal(f.saved().draft, null);
+});
+
+test('workspace history across room contexts opens the chooser without clearing current writing', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  await p.locator('#message-input').fill('Do not discard this room draft');
+  // A previous room entry can remain after the user explicitly switches rooms.
+  await p.evaluate(() => {
+    history.pushState(null, '', '?room=previous-room#pr-view/rooms');
+    history.pushState(null, '', '?room=commons#pr-view/inbox');
+  });
+  await f.inbox(); await p.goBack();
+  await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false, 'never present commons as the previous room');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
+  assert.equal(new URL(p.url()).searchParams.get('room'), null);
+  assert.equal(new URL(p.url()).hash, '#pr-view/rooms');
+  await p.locator('#nav-rooms').click(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(new URL(p.url()).searchParams.get('room'), 'commons');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
 });
