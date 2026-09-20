@@ -134,3 +134,21 @@ This is a host integration helper, not a background dispatcher or a preconfigure
 Completion for this slice means an installed host adapter can be invoked end to end without writing custom application glue. It does not claim any particular model vendor is qualified. Next qualification requires a real configured host, a bounded coding task, a second human steering, revision-bound artifacts and a second-host review. Do not silently enable paid model execution or a daemon merely to demonstrate the bridge.
 
 Implementation checkpoint: the process adapter and `scripts/run-room-request.mjs` CLI are built. Twenty-one focused checks pass, including real CLI → separate process → local Room HTTP → answered request and repeat invocation without a second host run. Both runtime packaging tests pass, with direct cold imports for the host bridge. The first broad run exposed a stale candidate-package file-count assertion; it now accounts for and checks all three new runtime files. Live model-vendor qualification and background dispatch remain outstanding.
+
+## Live Codex qualification — 20 September 2026
+
+The next qualification is now complete for one installed Codex host, using its existing local ChatGPT sign-in, workspace-write sandbox and structured final output. No custom vendor adapter was necessary. The opt-in `scripts/live-codex-host-check.mjs` creates a disposable repository with a failing test and sends synthetic addressed requests through a real loopback Room service. It is not part of CI and does not enable background execution.
+
+Observed results at 20:40 UTC:
+
+- Codex fixed `labels.mjs`; independent `node --test` passed, with the test file unchanged.
+- The factual file/test summary returned to the original request. The evidence records base revision `e17848d4bc8aefbb97163ebd905d73baee718b43` and patch SHA-256 `d9f154068a25ae365baaba0b473004230be4d920e62d4e363333cd5d9757de97`.
+- After simulated lost delivery, closing/reopening the SQLite journal recovered the exact recorded answer. The coding host ran once, not twice.
+- A second real invocation reviewed the code while a synthetic human clarification arrived. Room refused the stale answer; retry also refused without executing the host again. Code remained unchanged.
+- The bridge received no Room credential in its input. Private fixture credentials were removed after success; the evidence contains only the patch, test output and qualification receipt.
+
+Setup simplification: the quickstart now gives a direct Codex configuration using the existing executable bridge and a small JSON response schema. There is no new provider SDK, service or orchestration layer. Normal successful requests require no manual context copying or work-record creation. An operator still invokes the one-shot runner; automatic dispatch is not shipped by this slice.
+
+Limits: synthetic human actions are not a human usability study; one Codex host is not multi-vendor qualification. Clarification rejects stale delivery but does not interrupt or resume a model. Revision/patch evidence is recorded by the qualification harness, not a new product artifact service. A next request can use the existing repository state after the operator reconciles the prior run; do not erase its journal to rerun it.
+
+Release sequence: finish PR #734's required checks, merge without bypass, deploy the verified runtime to the two existing Workers, and verify version/readiness, login startup, room enrollment and scoped prepared context. A deployed server supplies context; the local host remains explicitly operator-configured. Retain the existing provider versions for rollback. Follow-on work should prioritize clear recovery in the original conversation and one configured request subscription before adding another provider or UI surface.
