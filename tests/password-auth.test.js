@@ -50,7 +50,11 @@ test("malformed verifiers return false and never throw", () => {
 test("tampering with any verifier segment fails verification", () => {
   const verifier = hashPassword("untampered-password");
   const [, n, r, p, salt, hash] = verifier.split("$");
-  const flipped = hash.slice(0, -1) + (hash.endsWith("A") ? "B" : "A");
+  // A last-character A→B edit can change only unused base64 padding bits.
+  // Mutate the decoded hash so every random fixture changes actual bytes.
+  const tamperedHash = Buffer.from(hash, "base64url");
+  tamperedHash[0] ^= 1;
+  const flipped = tamperedHash.toString("base64url");
   assert.equal(verifyPassword("untampered-password", `scrypt$${n}$${r}$${p}$${salt}$${flipped}`), false);
   assert.equal(verifyPassword("untampered-password", `scrypt$16385$${r}$${p}$${salt}$${hash}`), false);
 });
