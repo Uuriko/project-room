@@ -58,6 +58,11 @@ test("POST /join mints an identity and a personal first room", async t => {
   // /room/join is the same door.
   const alias = await post(origin, "/room/join", { displayName: "Newt Two" });
   assert.equal(alias.status, 201);
+  // /api/join is the same door under the /api/ inventory.
+  const apiAlias = await post(origin, "/api/join", { displayName: "Newt Three" });
+  assert.equal(apiAlias.status, 201);
+  assert.equal(apiAlias.json.via, "first-room");
+  assert.match(apiAlias.json.identitySecret, /^pri_/);
 });
 
 test("POST /join with an inviteCode redeems the invite", async t => {
@@ -198,10 +203,13 @@ test("discovery surfaces carry Link headers", async t => {
 test("refused DM persists no event and no message", async t => {
   const { store, origin, aliceKey } = await serve(t);
   const before = store.room("commons").sequence;
+  const wakeBefore = store.db.prepare("SELECT COUNT(*) AS n FROM wake_queue").get().n;
   const refused = await postMessage(origin, aliceKey, { messageId: "dm-nope", body: "no consent", toMemberId: "bob" });
   assert.equal(refused.status, 403);
   assert.equal(refused.json.error.code, "dm_consent_required");
   assert.equal(store.room("commons").sequence, before, "a refused DM must not append an event");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM wake_queue").get().n, wakeBefore,
+    "a refused DM must not enqueue a wake");
   const bodies = (store.room("commons").state.messages ?? []).map(m => m.body);
   assert.ok(!bodies.includes("no consent"), "a refused DM body must not enter the projection");
 });
