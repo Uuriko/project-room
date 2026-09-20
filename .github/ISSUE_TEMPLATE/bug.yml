@@ -1,0 +1,22 @@
+name: Bug or setup failure
+description: Report a reproducible problem without private data.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened, and what should happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic data. Never attach tokens, private messages or databases.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Revision, OS, browser or Node version
+    validations:
+      required: true

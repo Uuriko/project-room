@@ -1,0 +1,12 @@
+Project Room
+Copyright 2026 Project Room contributors
+
+Scheduler/board discipline and agent-card patterns in scripts/room,
+ROOM-HEALTH.md and lanes/instinct.md are adapted from Rowboat:
+https://github.com/rowboatlabs/rowboat
+Copyright rowboatlabs. Licensed under the Apache License, Version 2.0.
+Project Room changes adapt these patterns to GitHub issue coordination.
+Existing attribution comments are retained.
+
+Third-party research screenshots, quoted material, names and logos remain
+subject to their respective owners' rights; see THIRD_PARTY.md.
