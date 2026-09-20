@@ -87,7 +87,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
       });
       await page.locator('#message-input').fill(body);
       await page.locator('#message-form button[type=submit]').click();
-      await page.waitForFunction(() => !document.querySelector('#message-input').disabled && document.querySelector('#composer-status').classList.contains('error'));
+      await page.waitForFunction(() => !globalThis.document.querySelector('#message-input').disabled && globalThis.document.querySelector('#composer-status').classList.contains('error'));
       assert.equal(await page.locator('#message-input').evaluate(node => node.readOnly), request);
       assert.equal(receipts[0].duplicate, false);
       const saved = await drafts();
@@ -106,7 +106,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
       assert.equal(await page.locator('#message-input').inputValue(), body);
       assert.equal(await page.locator('#message-input').evaluate(node => node.readOnly), request);
       await page.locator('#message-form button[type=submit]').click();
-      await page.waitForFunction(() => !document.querySelector('#message-input').disabled && !document.querySelector('#message-input').value);
+      await page.waitForFunction(() => !globalThis.document.querySelector('#message-input').disabled && !globalThis.document.querySelector('#message-input').value);
       assert.equal(commands.length, 2); assert.deepEqual(commands[1], commands[0]);
       assert.equal(receipts[1].duplicate, true);
       assert.equal(receipts[1].event.id, receipts[0].event.id);
