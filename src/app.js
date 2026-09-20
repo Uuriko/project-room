@@ -293,7 +293,7 @@ const client = new RoomClient({
     // are authored closed except People, which is authored open - closing that
     // one was not a reset, it left the next person to sign in on this browser
     // with a collapsed rail the markup says should be open.
-    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "spend-panel", "room-health"]) $(`#${id}`).open = false;
     $("#people-panel").open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
@@ -1450,6 +1450,7 @@ function render() {
   renderRoomOverview();
   renderSpendAllowance();
   syncReports();
+  syncRoomHealth();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -3430,6 +3431,15 @@ function syncReports() {
   if (!owner) { reportsSequence = -1; return; }
   if ($("#reports-section").open && (reportsSequence !== client.sequence || reportsGeneration !== client.generation)) loadReports();
 }
+// UI calming #9: Usage + Spend sit under one collapsed, owner-only "Room
+// health" group. About stays open; the spend allowance form keeps its behavior.
+function syncRoomHealth() {
+  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
+  const panel = $("#room-health");
+  if (!panel) return;
+  panel.hidden = !owner;
+  if (!owner) panel.open = false;
+}
 function loadReports() {
   if (reportsFlight) return;
   const generation = client.generation, sequence = client.sequence;
@@ -3690,7 +3700,7 @@ function openSettings(panelId) {
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
-    if (panel) { panel.open = true; panel.querySelector("summary")?.focus({ preventScroll: true }); }
+    if (panel) { panel.open = true; panel.closest("#room-health") && (panel.closest("#room-health").open = true); panel.querySelector("summary")?.focus({ preventScroll: true }); }
   }
 }
 function openCatchUp() {
