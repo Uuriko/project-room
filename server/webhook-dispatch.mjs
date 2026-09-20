@@ -23,6 +23,7 @@
 //   deliveryId — the dispatcher may retry the same deliveryId and redrives
 //   reuse it, so deliveryId is the idempotency key end to end.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { assertWebhookHostDnsPublic } from "./outbound-webhooks.mjs";
 
 class WebhookDispatchError extends Error {
   constructor(code, message) { super(message); this.name = "WebhookDispatchError"; this.code = code; }
@@ -126,34 +127,92 @@ export function classifyHttpStatus(status) {
 
 // POST one delivery. Never throws for transport/HTTP failures — those come
 // back as { ok: false }. Throws only for programmer errors (bad arguments).
-export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS }) {
+//
+// QA-Sec 2026-09-19 — dispatch-time SSRF guard. The stored URL is
+// re-validated immediately before every POST: subscribe-time checks alone
+// do not cover a URL mutated after subscribing or a DNS name rebound since.
+// Redirects are followed manually (at most MAX_REDIRECT_HOPS) and every hop
+// is re-validated: https only (no downgrade to http), public host only,
+// DNS re-resolved. A target that can never be valid (private/reserved IP,
+// non-https URL) is classified "dead"; a name that merely fails to resolve
+// right now is "retry". dnsResolvers ({ resolve4, resolve6 }) is injectable
+// so tests never touch the network; omitted it defaults to the real
+// resolver (fail closed in production).
+export const MAX_REDIRECT_HOPS = 3;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+async function checkDispatchTarget(target, dnsResolvers) {
+  try {
+    await assertWebhookHostDnsPublic(target, dnsResolvers ?? {});
+    return null;
+  } catch (error) {
+    const message = error?.message ?? "webhook target rejected";
+    // A hostile or malformed target can never succeed: dead-letter it. A
+    // name that fails to resolve may be transient: retry it.
+    const hostile = /private or reserved|valid https/.test(message);
+    return { ok: false, status: 0, error: `webhook target rejected: ${message}`.slice(0, 500),
+      classification: hostile ? "dead" : "retry" };
+  }
+}
+
+export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
   check(typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
   check(headers !== null && typeof headers === "object", "headers must be an object");
   check(Number.isInteger(timeoutMs) && timeoutMs > 0, "timeoutMs must be a positive integer");
-  let response;
-  try {
-    response = await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(envelope),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    const reason = error?.name === "TimeoutError" ? "delivery timed out" : (error?.message ?? "network error");
-    return { ok: false, status: 0, error: String(reason).slice(0, 500), classification: "retry" };
+  check(dnsResolvers === undefined || (dnsResolvers !== null && typeof dnsResolvers === "object"),
+    "dnsResolvers must be an object");
+  const body = JSON.stringify(envelope);
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    const blocked = await checkDispatchTarget(current, dnsResolvers);
+    if (blocked) return blocked;
+    let response;
+    try {
+      // redirect: "manual" — every hop is re-validated below instead of
+      // trusting the receiver's Location chain.
+      response = await fetchImpl(current, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: "manual",
+      });
+    } catch (error) {
+      const reason = error?.name === "TimeoutError" ? "delivery timed out" : (error?.message ?? "network error");
+      return { ok: false, status: 0, error: String(reason).slice(0, 500), classification: "retry" };
+    }
+    const status = Number(response?.status ?? 0);
+    const location = response?.headers?.get?.("location");
+    if (REDIRECT_STATUSES.has(status) && typeof location === "string" && location.length > 0) {
+      if (hop === MAX_REDIRECT_HOPS) {
+        return { ok: false, status, error: `too many redirects (>${MAX_REDIRECT_HOPS})`, classification: "dead" };
+      }
+      let next;
+      try {
+        next = new URL(location, current);
+      } catch {
+        return { ok: false, status, error: "redirect location is not a valid URL", classification: "dead" };
+      }
+      if (next.protocol !== "https:") {
+        return { ok: false, status, error: "redirect target must stay https (no protocol downgrade)", classification: "dead" };
+      }
+      current = next.toString();
+      continue;
+    }
+    const classification = classifyHttpStatus(Number.isInteger(status) ? status : 0);
+    if (classification === "delivered") return { ok: true, status, error: null };
+    let detail = "";
+    try {
+      const text = await response.text();
+      if (typeof text === "string" && text.length > 0) detail = `: ${text.slice(0, 200)}`;
+    } catch { /* a body that cannot be read adds nothing */ }
+    return { ok: false, status, error: `HTTP ${status}${detail}`.slice(0, 500),
+      classification };
   }
-  const status = Number(response?.status ?? 0);
-  const classification = classifyHttpStatus(Number.isInteger(status) ? status : 0);
-  if (classification === "delivered") return { ok: true, status, error: null };
-  let detail = "";
-  try {
-    const text = await response.text();
-    if (typeof text === "string" && text.length > 0) detail = `: ${text.slice(0, 200)}`;
-  } catch { /* a body that cannot be read adds nothing */ }
-  return { ok: false, status, error: `HTTP ${status}${detail}`.slice(0, 500),
-    classification };
+  // Unreachable: the loop always returns.
+  return { ok: false, status: 0, error: "redirect handling fell through", classification: "dead" };
 }
 
 export { WebhookDispatchError };
