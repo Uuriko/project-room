@@ -9,7 +9,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" : "desktop"}: join, answer, return, review`, { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();

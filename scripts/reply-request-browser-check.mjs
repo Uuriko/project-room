@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1280, height: 900 }) {
-  const fixture = createAcceptanceFixture(), errors = [];
+  const fixture = createAcceptanceFixture({ dmConsent: true }), errors = [];
   const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
   let browser;
   t.after(async () => {

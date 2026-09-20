@@ -15,7 +15,7 @@ import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp, closeCatchUp, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture({ managedProducer: true }), handles = [], traffic = [], errors = [];
+  const f = createAcceptanceFixture({ managedProducer: true, dmConsent: true }), handles = [], traffic = [], errors = [];
   const server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => {
@@ -135,7 +135,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
 });
 
 for (const crowded of [false, true]) for (const touch of [false, true]) test(`${crowded ? 'crowded ' : ''}reconnect collaboration ${touch ? 'touch' : 'desktop'}: clarify, restart, contribute and review`, { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture({ managedProducer: crowded }), handles = new Set(), traffic = [], errors = [];
+  const f = createAcceptanceFixture({ managedProducer: crowded, dmConsent: true }), handles = new Set(), traffic = [], errors = [];
   let server = createRoomServer({ store: f.store, streamInterval: 50 }), browser;
   const listen = port => new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   const stopServer = async () => { server.closeStreams(); server.closeAllConnections();

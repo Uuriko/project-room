@@ -9,7 +9,7 @@ import { fillAccessKey } from "./auth-signin.mjs";
 import { ensurePeopleOpen, ensureSidebarClosed, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store, streamInterval: 50 });
   let browser;
   t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
