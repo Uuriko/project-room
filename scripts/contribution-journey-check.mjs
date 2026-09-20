@@ -29,9 +29,12 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   await page.locator("#main").waitFor({ state: "visible" });
   const member = Object.values(state().members).find(person => person.displayName === "Journey guest");
   assert.ok(member); assert.deepEqual(member.permissions, []);
-  // Consent-bound DMs: the owner sends a reply-request DM to the joined guest.
+  // Consent-bound DMs: the owner sends a reply-request DM to the joined guest,
+  // and the guest replies. Consent is directional — approve both ways.
   f.store.dmConsents.request("commons", "owner", member.id, "browser test");
   f.store.dmConsents.decide("commons", member.id, "owner", "approve");
+  f.store.dmConsents.request("commons", member.id, "owner", "browser test");
+  f.store.dmConsents.decide("commons", "owner", member.id, "approve");
   await openCatchUp(page);
   await page.locator("#contribution-open").focus();
   send("message.posted", { messageId: "journey-background", body: "A little more room context." });
