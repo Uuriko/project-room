@@ -61,8 +61,10 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await guestContext.close();
     // Consent-bound DMs: the owner’s request-reply to the guest needs approval.
     // The guest’s memberId is the value of their option in the owner’s message-to select.
-    await page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' }).waitFor();
-    const guestId = await page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' }).getAttribute('value');
+    // (options are never "visible" — wait for attached.)
+    const guestOption = page.locator('#message-to-select option').filter({ hasText: 'Recovery guest' });
+    await guestOption.waitFor({ state: 'attached' });
+    const guestId = await guestOption.getAttribute('value');
     await context.request.post(origin + '/__test-dm-consent', { data: { fromMemberId: 'owner', toMemberId: guestId } });
     const options = async () => { if (!await page.locator('#remember-drafts').isVisible()) await page.locator('#composer-options > summary').click(); };
     await options(); await page.locator('#remember-drafts').check();
