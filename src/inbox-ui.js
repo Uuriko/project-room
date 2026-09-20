@@ -9,6 +9,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null,
     nextCursor = null, paging = false, searchQuery = null, searching = false;
+  // Busy reads hold their epoch, so an old completion cannot unlock a newer read.
   let navigationEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
@@ -92,14 +93,14 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + destination);
   }
   function showRoomList(push = false) {
-    navigationEpoch++; remember(); active = false; browsing = true;
+    navigationEpoch++; remember(); active = false; browsing = true; paging = searching = false;
     writeDestination("room-list", push);
     $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
     $("#inbox-panel").hidden = true; $("#main").hidden = true;
     $("#account-rooms-panel").hidden = false; onNavigate(); onRooms();
   }
   function show(place, updateLocation = true, push = false) {
-    navigationEpoch++;
+    navigationEpoch++; paging = searching = false;
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
     onNavigate();
     active = place === "inbox";
@@ -229,17 +230,17 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   // keyed by id so a repeated cursor can never duplicate a row.
   async function more() {
     if (!owns() || !nextCursor || paging) return;
-    paging = true; text("#inbox-status", "Loading more…");
-    const turn = ++epoch;
+    const turn = ++epoch, navigation = navigationEpoch;
+    paging = turn; text("#inbox-status", "Loading more…");
     try {
-      const result = await api.list({ cursor: nextCursor }); if (!owns() || turn !== epoch) return;
+      const result = await api.list({ cursor: nextCursor }); if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;
       const seen = new Set(rows.map(source => source.id));
       rows.push(...result.sources.filter(source => !seen.has(source.id)));
       nextCursor = result.nextCursor ?? null;
       renderFilters(); renderList();
       text("#inbox-status", rows.length ? "" : "No messages yet.");
-    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
-    paging = false;
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
+    finally { if (paging === turn) paging = false; }
   }
   $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
   $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
@@ -271,16 +272,16 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (!owns() || searching) return;
     const q = query.trim();
     if (!q) { clearSearch(); return; }
-    searching = true; searchQuery = q; text("#inbox-status", `Searching for “${q}”…`);
-    const turn = ++epoch;
+    const turn = ++epoch, navigation = navigationEpoch;
+    searching = turn; searchQuery = q; text("#inbox-status", `Searching for “${q}”…`);
     try {
-      const result = await api.search({ query: q }); if (!owns() || turn !== epoch) return;
+      const result = await api.search({ query: q }); if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;
       rows = result.results.map(r => r.source); nextCursor = null;
       renderFilters(); renderList();
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
       text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
-    } catch (error) { if (owns() && turn === epoch) { searchQuery = null; text("#inbox-status", errorText(error)); } }
-    searching = false;
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    finally { if (searching === turn) searching = false; }
   }
   function clearSearch() {
     if (searchQuery === null) return;
@@ -768,7 +769,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   });
   $("#inbox-share-confirm").addEventListener("click", async () => {
     if (!sharing || sharingBusy || !owns()) return;
-    const current = sharing, c = current.context;
+    const current = sharing, c = current.context, startedAtNavigation = navigationEpoch;
     if (!current.request && current.source.adapter !== "synthetic" && !current.selection) return;
     current.request ??= { action: current.source.adapter !== "synthetic" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
@@ -779,7 +780,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;
-      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false; show("rooms");
+      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false;
+      if (startedAtNavigation !== navigationEpoch) { await onShared(result.receipt, () => false); return; }
+      show("rooms");
       const navigation = navigationEpoch;
       text("#inbox-status", "Shared"); await onShared(result.receipt, () => owns() && navigation === navigationEpoch
         && !active && !browsing && getRoom()?.room.id === result.receipt.roomId);

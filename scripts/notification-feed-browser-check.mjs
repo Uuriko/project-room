@@ -9,7 +9,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUpPanel } from "./room-chrome.mjs";
+import { openCatchUpPanel, closeCatchUp } from "./room-chrome.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -82,11 +82,14 @@ for (const mobile of [false, true]) {
     assert.equal(f.store.snapshot(f.keys.owner, "commons").cursor, sequenceBefore, "the marker was stored");
     assert.equal(await page.locator("#notification-status").textContent(), "", "no failed-save message for a stored marker");
     await badge.waitFor({ state: "hidden" });
+    await closeCatchUp(page);
     await page.locator("#status .status-dismiss").click();
     // Reset the marker so the ordinary path is exercised on the same page.
     f.store.db.prepare("DELETE FROM cursors WHERE room_id='commons' AND member_id='owner'").run();
     writes.length = 0;
+    await closeCatchUp(page);
     await page.locator("#refresh-button").click();
+    await openCatchUpPanel(page, "notification-panel");
     await badge.waitFor({ state: "visible" });
     assert.equal(await badge.textContent(), "2 for you");
 
@@ -103,7 +106,9 @@ for (const mobile of [false, true]) {
 
     // A new mention after the marker is unread again; refresh picks it up without a reload.
     send("guest", T.MESSAGE_POSTED, { messageId: "mention-later", body: "@Room owner one more thing." });
+    await closeCatchUp(page);
     await page.locator("#refresh-button").click();
+    await openCatchUpPanel(page, "notification-panel");
     await badge.waitFor({ state: "visible" });
     assert.equal(await badge.textContent(), "1 for you");
     await items.first().waitFor();
@@ -117,6 +122,7 @@ for (const mobile of [false, true]) {
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
     // Sign-out clears the feed and badge.
+    await closeCatchUp(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click();
     await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#notification-list").textContent(), "");

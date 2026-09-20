@@ -1214,3 +1214,97 @@ test('late Inbox disconnect completion does not reopen Inbox over current room w
   await f.inbox();
   await p.locator(`[data-connection-id="${mail.raw.connection.id}"]`).filter({ hasText: 'Disconnected' }).waitFor();
 });
+
+for (const action of ['search', 'pagination']) test(`Inbox ${action} can restart after leaving a pending request`, { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  // Exercise real service cursors using small pages instead of a large fixture.
+  await p.route('**/api/inbox?*', async route => {
+    const url = new URL(route.request().url()); url.searchParams.set('limit', '1');
+    await route.fulfill({ response: await route.fetch({ url: url.href }) });
+  });
+  await f.inbox();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  const pattern = action === 'search' ? '**/api/inbox/search?*' : '**/api/inbox?*cursor=*';
+  await p.route(pattern, async route => {
+    const url = new URL(route.request().url()); if (action === 'pagination') url.searchParams.set('limit', '1');
+    const response = await route.fetch({ url: url.href }); reached(); await held; await route.fulfill({ response });
+  }, { times: 1 });
+  const run = async () => {
+    if (action === 'search') { await p.locator('#inbox-search-input').fill('Friday'); await p.locator('#inbox-search-form button[type=submit]').click(); }
+    else await p.locator('.inbox-show-more').click();
+  };
+  await run(); await started;
+  await p.locator('#nav-rooms').click(); await p.locator('#message-input').fill('Keep my room writing');
+  await f.inbox(); release(); await p.waitForLoadState('networkidle');
+  await run();
+  if (action === 'search') await p.locator('#inbox-status').filter({ hasText: 'result' }).waitFor();
+  else await p.waitForFunction(() => document.querySelectorAll('#inbox-list [data-source-id]').length === 2);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep my room writing');
+});
+
+test('late share acknowledgment respects a newer room chooser destination', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  await f.inbox(); await f.pick('note'); await p.locator('#inbox-draft').fill('Keep private writing');
+  await p.locator('#inbox-ask').click(); await p.locator('#inbox-share-paragraphs input').first().check();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route('**/api/inbox/commands', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
+  await p.locator('#inbox-share-confirm').click(); await started;
+  await p.locator('#inbox-share-close').click(); await p.locator('#nav-rooms').click(); await p.locator('#choose-room').click();
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#account-rooms-panel').isVisible(), true);
+  assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.share'").get().n, 1);
+  await f.inbox(); await f.pick('note');
+  assert.equal(await p.locator('#inbox-draft').inputValue(), 'Keep private writing');
+});
+
+test('an abandoned search cannot unlock or overwrite a newer pending search', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page; await f.inbox();
+  const releases = [], starts = [], started = [0, 1].map(i => new Promise(resolve => { starts[i] = resolve; }));
+  let requests = 0, finishOld;
+  const oldFinished = new Promise(resolve => { finishOld = resolve; });
+  t.after(() => releases.forEach(release => release()));
+  await p.route('**/api/inbox/search?*', async route => {
+    const n = requests++, response = await route.fetch();
+    if (n < 2) { const held = new Promise(resolve => { releases[n] = resolve; }); starts[n](); await held; }
+    await route.fulfill({ response }); if (n === 0) finishOld();
+  });
+  const search = async q => { await p.locator('#inbox-search-input').fill(q); await p.locator('#inbox-search-form button[type=submit]').click(); };
+  await search('launch'); await started[0];
+  await p.locator('#nav-rooms').click(); await f.inbox();
+  await search('Friday'); await started[1];
+  releases[0](); await oldFinished;
+  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.match(await p.locator('#inbox-status').textContent(), /Searching for “Friday”/);
+  await search('Friday');
+  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(requests, 2, 'older completion must not release the newer request lock');
+  releases[1](); await p.waitForLoadState('networkidle');
+  assert.match(await p.locator('#inbox-status').textContent(), /result.*Friday/);
+  assert.equal(await p.locator('#inbox-list [data-source-id="second"]').count(), 1);
+  assert.equal(await p.locator('#inbox-list [data-source-id="note"]').count(), 0);
+});
+
+for (const mobile of [false, true]) test(`late sample send ${mobile ? 'mobile' : 'desktop'} preserves room writing and dispatches once`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile, true), p = f.page;
+  await f.inbox(); await f.pick('note'); await previewReply(f);
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route('**/api/inbox/simulation', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
+  await p.locator('#inbox-send-confirm').click(); await started;
+  await p.locator('#inbox-send-close').click(); await p.locator('#nav-rooms').click();
+  await p.locator('#message-input').fill('Keep writing during send confirmation');
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#main').isVisible(), true);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep writing during send confirmation');
+  assert.equal(await p.locator('#message-input').evaluate(el => el === document.activeElement), true);
+  await f.inbox(); await f.pick('note');
+  await p.getByText('Sample accepted · delivery unconfirmed', { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
+  assert.equal(await p.locator('#inbox-send-preview').isVisible(), false);
+});
