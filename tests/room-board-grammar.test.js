@@ -66,3 +66,29 @@ test("render does not hardcode watcher=paused", () => {
   const res = spawnSync("grep", ["-c", "watcher=paused", room], { encoding: "utf8" });
   assert.equal(res.stdout.trim(), "0", "scripts/room must not contain a hardcoded watcher=paused signal");
 });
+
+test("prose-terminal DONE resolves the task-id from the marker line, not the whole body", () => {
+  const fixture = JSON.stringify([
+    {
+      // Regression for room-watch false positive (2026-09-20): comment
+      // 5748168322 is a prose DONE about unrelated PR #718 that only
+      // mentions RC-2026-09-19-068 downstream. It must NOT close that
+      // task terminally.
+      id: 101, created_at: "2026-09-20T06:37:12Z",
+      body: "[QA-UX] DONE — first-paint calming merged (PR #718, merge 2dea7916c29bb34748124ee383c7a8e182e82c68).\n\nRebased over #717 with conflicts resolved by hand; QA-Browser owns the suite redness (RC-2026-09-19-068).\n\nDeploying to room.trydemigod.com next."
+    },
+    {
+      // Intended behavior preserved: a task-id named ON the DONE marker
+      // line closes the claim; downstream mentions of other RC ids do not
+      // hijack the resolution.
+      id: 102, created_at: "2026-09-20T07:00:00Z",
+      body: "[quill] DONE task-id: RC-2026-09-19-071 — sweep terminal-claim fix.\n\n- PR: #697\n- Merge SHA: 99ab3341\n\nThe decay enforcer still watches RC-2026-09-19-068 for heartbeats."
+    }
+  ]);
+  const events = run(["_parse"], fixture);
+  const byId = Object.fromEntries(events.map(e => [e.id, e]));
+  assert.equal(byId[101].kind, "prose");
+  assert.equal(byId[102].kind, "done");
+  assert.equal(byId[102].ref, "RC-2026-09-19-071");
+  assert.equal(byId[102].via, "prose-terminal");
+});
