@@ -108,7 +108,13 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {
     assert.equal(await catalog.locator(`[data-agent-type="${id}"]`).count(), 1, id);
   }
-  assert.match(await catalog.innerText(), /Best for local coding sessions</);
+  // UI calming #8 simplified the agent-type descriptions ("Best for local coding
+  // sessions with MCP tools" became "Best for local coding sessions"). The
+  // catalog text comes from innerText, which never contains markup, so assert
+  // the shortened copy positively and the old suffix negatively instead.
+  const catalogText = await catalog.innerText();
+  assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
+  assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
   await f.page.locator('[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");

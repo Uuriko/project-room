@@ -240,8 +240,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-to-work, .text-button { padding: 0; border: 0; background: transparent; color: var(--blue); font-size: .69rem; font-weight: 700; }
 .message-to-work:hover, .text-button:hover { text-decoration: underline; }
 /* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
-   work / Record decision / moderation; it fades in with the other actions. */
+   work / Record decision / moderation; it fades in with the other actions.
+   The fade targets the summary only, never the <details> itself: opacity < 1
+   on the details would trap the absolutely-positioned menu inside its own
+   stacking context, painting it UNDER the following message so the menu can
+   never be hovered or clicked. An open menu also lifts above later messages. */
 .message-more { position: relative; }
+.message-more[open] { z-index: 40; }
 .message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }
@@ -250,8 +255,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-more-menu .message-to-work { padding: .5rem .6rem; text-align: left; font-size: .78rem; }
 .message-more[open] .message-more-menu .message-to-work { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
-  .message-links .message-to-work:not([data-message-action="reply"]), .message-links .message-more { opacity: 0; }
-  .message:is(:hover, :focus-within) .message-links .message-to-work, .message:is(:hover, :focus-within) .message-links .message-more { opacity: 1; }
+  .message-links .message-to-work:not([data-message-action="reply"]), .message-links .message-more > summary { opacity: 0; }
+  .message:is(:hover, :focus-within) .message-links .message-to-work, .message:is(:hover, :focus-within) .message-links .message-more > summary { opacity: 1; }
 }
 .composer-toolbar { display: flex; align-items: center; gap: .55rem; margin-bottom: .5rem; }
 .composer-toolbar label { white-space: nowrap; }
