@@ -12,8 +12,12 @@ export function openRequestJournal(filename) {
   closeSync(openSync(filename, "a", 0o600)); chmodSync(filename, 0o600);
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS request_runs (id TEXT PRIMARY KEY, response TEXT, delivered INTEGER NOT NULL DEFAULT 0)");
-  if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "attempt_id"))
-    db.exec("ALTER TABLE request_runs ADD COLUMN attempt_id TEXT");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "attempt_id"))
+      db.exec("ALTER TABLE request_runs ADD COLUMN attempt_id TEXT");
+    db.exec("COMMIT");
+  } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
 }
 
@@ -34,7 +38,13 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     ...basis }, { signal: reportSignal });
   const deliver = async record => {
     const input = JSON.parse(record.response);
-    const receipt = await client.replyAction("room_respond_to_request", input, { signal });
+    let receipt;
+    try { receipt = await client.replyAction("room_respond_to_request", input, { signal }); }
+    catch (error) {
+      if (record.attempt_id && [409, 422].includes(error?.status))
+        await report(record.attempt_id, "needs_attention", {}, AbortSignal.timeout(5000)).catch(() => {});
+      throw error;
+    }
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
     db.prepare("UPDATE request_runs SET delivered=1 WHERE id=?").run(id);
     if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
@@ -70,7 +80,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   catch (error) {
     // A definite refusal happened before invocation. Network uncertainty keeps
     // the intent: even a retry must not infer that a reservation was absent.
-    if ([403, 409, 422].includes(error?.status)) db.prepare("DELETE FROM request_runs WHERE id=? AND response IS NULL").run(id);
+    if (error?.status >= 400 && error.status < 500) db.prepare("DELETE FROM request_runs WHERE id=? AND response IS NULL").run(id);
     throw error;
   }
   const controller = new AbortController();
@@ -120,15 +130,20 @@ export async function runRequestQueue({ connection, db, execute, signal, emit = 
       const { requests } = await client.replyRequests({ status: "all", signal });
       const { runs } = await client.requestRuns(undefined, { signal });
       const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
-      const eligible = requests.filter(request => request.status === "open" && !runs[request.id]
+      const owned = request => Object.hasOwn(runs, request.id);
+      const eligible = requests.filter(request => request.status === "open" && !owned(request)
         || runs[request.id]?.state !== "needs_attention" && pending(request));
       for (const request of eligible.slice(0, 50)) {
         signal?.throwIfAborted();
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
-        if (runs[request.id] && !pending(request)) continue;
+        if (owned(request) && !pending(request)) continue;
         try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, signal })); }
-        catch { emit({ status: "needs_attention", requestMessageId: request.id }); }
+        catch (error) {
+          emit({ status: "needs_attention", requestMessageId: request.id });
+          if ([401, 429].includes(error?.status) || error?.status >= 500
+            || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
+        }
       }
       delay = intervalMs;
     } catch { if (!signal?.aborted) emit({ status: "connection_unavailable" }); delay = Math.min(delay * 2, 60000); }

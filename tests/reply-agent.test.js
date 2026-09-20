@@ -386,7 +386,7 @@ test("automatic mode ignores ordinary chat and delivers an addressed request wit
   const queue = runRequestQueue({ ...a, signal: controller.signal, intervalMs: 1000,
     execute: async () => { calls++; return { body: "Automatically picked up" }; }, emit: result => { if (result.status === "delivered") controller.abort(); } });
   await new Promise(resolve => setTimeout(resolve, 150)); assert.equal(calls, 0);
-  const requestMessageId = f.open("automatic").command.data.messageId;
+  const requestMessageId = f.open("automatic", { messageId: "toString" }).command.data.messageId;
   await queue;
   assert.equal(calls, 1); assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
 });
@@ -425,4 +425,34 @@ test("heartbeat detects new clarification and signals the running host to stop",
   await refused;
   assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
   assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
+});
+
+
+test("rate-limited reservation is a definite refusal, not an uncertain execution", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("throttled-host").command.data.messageId;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs"))
+      return new Response(JSON.stringify({ error: { code: "rate_limited", message: "Try later" } }), { status: 429 });
+    return fetch(url, options);
+  } };
+  let calls = 0; const execute = async () => { calls++; return { body: "Retried after throttling" }; };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute }), { status: 429 });
+  assert.equal(calls, 0);
+  await runRequestOnce({ ...a, requestMessageId, execute }); assert.equal(calls, 1);
+});
+
+
+test("saved-answer recovery stops retrying when clarification arrived while the host was offline", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("offline-steering").command.data.messageId;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("offline");
+    return fetch(url, options);
+  } };
+  let calls = 0; const execute = async () => { calls++; return { body: "Saved before clarification" }; };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute }));
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "result_ready");
+  await f.client.replyAction("room_reply", { requestId: "offline-clarification", replyToId: requestMessageId, body: "The requirement changed." });
+  await assert.rejects(runRequestOnce({ ...a, requestMessageId, execute }), { status: 409 });
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
+  assert.equal(calls, 1);
 });
