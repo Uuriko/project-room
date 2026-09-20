@@ -184,6 +184,8 @@
             <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
             <p id="inbox-origin" class="form-hint"></p>
           </form>
+          <section id="inbox-review-region" class="inbox-review-region" aria-label="Review &amp; send" hidden>
+            <h3 class="inbox-review-heading">Review &amp; send</h3>
           <section id="inbox-reply-panel" class="inbox-send-panel" aria-label="Sample email review" hidden>
             <p id="inbox-reply-status" class="form-hint" role="status"></p>
             <button id="inbox-reply-open" class="button secondary" type="button">Review reply</button>
@@ -201,6 +203,7 @@
           <section id="inbox-conflict" class="inbox-conflict" aria-label="Draft changes" hidden>
             <h3>Saved draft</h3><pre id="inbox-remote-draft"></pre>
             <div><button id="inbox-use-saved" class="button secondary" type="button">Use saved</button><button id="inbox-use-mine" class="button secondary" type="button">Keep mine</button></div>
+          </section>
           </section>
         </article>
       </section>

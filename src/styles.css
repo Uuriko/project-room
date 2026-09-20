@@ -803,6 +803,13 @@ summary { overflow-wrap: anywhere; }
 .inbox-draft-form textarea { width: 100%; box-sizing: border-box; font: inherit; line-height: 1.5; padding: 1rem; resize: vertical; }
 .inbox-draft-actions { flex-wrap: wrap; justify-content: flex-end; }
 .inbox-draft-actions [role="status"] { margin-right: auto; color: var(--muted); font-size: .85rem; }
+/* UI calming #4: the reply-review / send / conflict steps share one visible
+   "Review & send" region. Each step keeps its own gating; the region shows
+   only while at least one step is visible (see syncInboxReviewRegion). */
+.inbox-review-region { margin-top: 1.25rem; border-top: 1px solid var(--line-soft); padding-top: .6rem; }
+.inbox-review-heading { margin: 0 0 .35rem; font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.inbox-review-region .inbox-send-panel { margin-top: .25rem; }
+.inbox-review-region .inbox-conflict { margin-top: .75rem; }
 .inbox-conflict { border-left: 2px solid currentColor; padding-left: 1rem; margin-top: 2rem; }
 .inbox-conflict h3 { font-size: 1rem; }
 .inbox-conflict pre { white-space: pre-wrap; font: inherit; }
