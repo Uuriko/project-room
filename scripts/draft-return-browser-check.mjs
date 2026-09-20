@@ -147,6 +147,9 @@ test("posted draft returns to its exact conversation record and work link preser
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId);
   assert.equal(await page.locator("#message-input").inputValue(), "Private root composer draft");
   assert.equal(await posted.getByRole("button", { name: "Make this work", exact: true }).count(), 0);
+  // Per-message actions live in the "⋯" overflow menu (UI calming #2): open it
+  // on the welcome message before counting the work affordance.
+  await welcome.locator(".message-more > summary").click();
   assert.equal(await welcome.getByRole("button", { name: "Make this work", exact: true }).count(), 1);
   await f.card.locator(".work-details > summary").click();
   const link = f.card.getByRole("link", { name: "View latest draft", exact: true });

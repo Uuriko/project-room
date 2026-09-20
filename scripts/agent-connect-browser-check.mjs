@@ -87,6 +87,7 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.equal(f.store.room("commons").sequence, before);
   await f.page.locator("#agent-private-details > summary").click();
   await f.page.locator("#agent-connect-done").click();
+  await f.page.locator("#agent-connect-advanced > summary").click();
   await f.page.getByText("Manage connections", { exact: true }).click();
   f.page.on("dialog", dialog => dialog.accept());
   await f.page.getByRole("button", { name: /Replace key/ }).click();
@@ -107,7 +108,7 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {
     assert.equal(await catalog.locator(`[data-agent-type="${id}"]`).count(), 1, id);
   }
-  assert.match(await catalog.innerText(), /Best for local coding sessions with MCP tools/);
+  assert.match(await catalog.innerText(), /Best for local coding sessions</);
   await f.page.locator('[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
@@ -136,6 +137,8 @@ test("named roster fills Muse and Grok Build; Grok Build shows import checklist"
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "packet");
   assert.equal(await f.page.locator("#agent-packet-today").isVisible(), true);
   assert.equal(await f.page.locator("#agent-create").isHidden(), true);
+  // "Need a Room key later" moved into the collapsed Advanced group (UI calming #5).
+  await f.page.locator("#agent-connect-advanced > summary").click();
   assert.equal(await f.page.locator("#agent-key-later").isVisible(), true);
   assert.match(await f.page.locator("#agent-roster-hint").innerText(), /has not contributed/);
   await f.page.locator('[data-roster="grok-build"]').click();
@@ -230,6 +233,7 @@ test("a rotation ahead of an older inactive snapshot keeps the new private setup
     data: { memberId: original.memberId, expectedMemberRevision: revision, permissions: [], active } });
   change(0, false); await frozenReady; change(1, true);
   await f.page.locator("#agent-connect-close").click(); await f.open();
+  await f.page.locator("#agent-connect-advanced > summary").click();
   await f.page.getByText("Manage connections", { exact: true }).click();
   f.page.once("dialog", dialog => dialog.accept());
   await f.page.getByRole("button", { name: /Replace key/ }).click();

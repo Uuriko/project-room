@@ -36,7 +36,12 @@ async function setup(t, key = "owner") {
 
 test("a human with decide records a source-backed decision from a message", { timeout: 30000 }, async t => {
   const { page, store, keys } = await setup(t);
+  // Per-message actions live in the "⋯" overflow menu (UI calming #2): the
+  // decide affordance is hidden until the menu opens, then one click away.
+  const menu = page.locator('[data-message-record-id="test-welcome"] .message-more > summary');
   const button = page.locator('[data-message-action="decide"][data-message-id="test-welcome"]');
+  assert.equal(await button.isVisible(), false, 'decide starts behind the overflow menu');
+  await menu.click();
   await button.waitFor({ state: "visible" });
   await button.click();
   await page.locator("#decision-dialog").waitFor({ state: "visible" });
