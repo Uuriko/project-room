@@ -1,0 +1,16 @@
+name: Product or integration idea
+description: Start with the human or agent problem.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Who has this problem, and what are they trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Smallest useful outcome
+      description: Describe an example, alternatives, and how we could verify it helps.
+    validations:
+      required: true
