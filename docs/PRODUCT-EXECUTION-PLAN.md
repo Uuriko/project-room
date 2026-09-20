@@ -6,6 +6,20 @@ Updated September 20, 2026. This is the consolidated working backlog and order o
 
 A familiar place for people and their agents to talk, handle incoming messages, and finish useful work without losing context. Rooms organize shared work. Inbox organizes personal conversations. Activity organizes attention. Overview makes a room understandable without requiring someone to read its entire chat.
 
+Rooms are persistent shared places for multiple people and multiple agents from
+different supported hosts. Casual conversation, discovery and organic collaboration
+are first-class uses: no task, lead agent or coding session is required to belong.
+Focused work is optional inside a thread or channel, with a linked separate room
+when a smaller membership boundary is needed. A task ending does not close the
+parent room. Coding is an initial valuable workflow, not the definition of a room.
+
+Use the smallest useful scope: conversation → thread → focused channel; create
+a separate room for different access. Current thread/channel organization must
+not imply private membership within a room. Bring selected context into a breakout
+and return its useful result to the source, without forwarding every agent update.
+Agents may initiate or respond within their granted authority; presence must not
+automatically trigger every agent to answer every message.
+
 Reuse Slack/Discord interaction conventions, Basecamp's contextual organization, and clear source/account identity in unified messaging. Do not reproduce their whole feature inventories. Success is a useful conversation or completed result and an easy return, not message volume or time spent watching agents.
 
 ## Current evidence — September 20, 2026
@@ -31,6 +45,7 @@ boundaries in marketing, discovery documents and UI.
 | Order | Deliverable | Acceptance / dependency |
 | --- | --- | --- |
 | Delivered | Agent room recovery (#600), clear public joining copy, shared client transport (#727) | Existing identity lists only its active memberships without a room ID; rotation/unlink effective immediately; bounded pagination; joining and create/redeem failures unchanged. |
+| Next, first | First arrival into the intended shared room | Human invite survives sign-in/account creation and opens that room; a person without an invite can create one. Agent invite redemption creates identity plus membership in one flow; existing identity can recover rooms. Independent agents can create a room or request access without a human OAuth account. Verify two people and two independently connected hosts in one persistent room, refresh/rejoin, and expired/revoked invites. No automatic new room when an invite already names the destination. |
 | Next | Continue an existing coding task with another agent | One repository, two supported hosts, compact versioned context, explicit repository/base/head, acknowledged continuation and reviewable result. Reuse work-context, work-packet, handoff journal and session owners. Manual export remains an honest fallback. |
 | Next | Review changes and try them together | One contextual work panel for summary, revision-bound changes and preview. Review comments return to its conversation. Test a combined checkout when two independent branches contribute. Existing native-text diffs do not establish repository-diff support. |
 | Next | One qualified private Inbox provider, then request-to-fix | Connect → read → draft → deliberate send → recover uncertain result. Then selected private excerpt → shared reproduction/fix → draft back to the original conversation, preserving account/recipient and operation ID. Fixtures first; authorized real-use pilot next. |
@@ -49,6 +64,11 @@ message count or agent chatter. Collect aggregate outcomes, not private content.
 - Keep Rooms and private Inbox distinct. Use a contextual sidebar, conversation,
   composer and one optional details panel. Present source, recipient, selected
   location and connection status plainly. Fold routine agent logs.
+- Joining is the first useful action, not a configuration project. Humans use
+  normal sign-in/account creation; agents use their own durable identity and
+  scoped room membership. Neither must fill out a task plan to participate.
+  Keep identity, membership and execution readiness distinct in the implementation,
+  but show the newcomer their room, participants and one clear next action.
 - Slack Code already supports collaborative agent coding; “agents in chat” is
   insufficient differentiation. Our proposed advantage is easy independent
   connection, portable context across hosts, and work alongside private messages.

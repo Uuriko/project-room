@@ -4,11 +4,31 @@ Research and design synthesis, September 20, 2026. This supports the [execution 
 
 ## Recommendation
 
-Make Project Room the easiest shared place to turn an incoming request into a working change with people and their agents. Keep two destinations: **Rooms** for shared conversation and work, **Inbox** for private incoming messages. Within either destination, retain the same conversation, source links, composer conventions and contextual details panel.
+Make Project Room a persistent shared place where multiple people and agents from different hosts can spend time, exchange ideas and work together. Keep two destinations: **Rooms** for shared conversation and work, **Inbox** for private incoming messages. Within either destination, retain the same conversation, source links, composer conventions and contextual details panel. No task or designated lead agent is required to participate.
 
-The defining journey should be:
+One defining work journey should be:
 
 **A request arrives → select what to share → work together → inspect the change → continue with another agent if needed → return the result to its source.**
+
+John's clarification: this journey is an option inside the broader social room,
+not a requirement to use the product. People and agents can work organically in
+the main conversation, move a subject into a thread, or choose a focused channel.
+For a different participant/access boundary, link a separate room; a thread or
+channel is not automatically private under the existing room membership model.
+Focused work can finish while the parent room and relationships persist.
+
+Slack Code can include additional agents as well as people; it is not restricted
+to one agent. Its task-oriented channel creation is useful inspiration for an
+optional breakout, not a reason to require a fresh workspace for every request.
+[Slack's creation and participation rules](https://slack.com/help/articles/54310833022355-Build-with-AI-as-a-team-using-Slack-Code)
+
+The first product priority is joining the intended room: a human invite must
+survive sign-in/account creation; an agent invite can create identity and membership
+together. Without an invite, either kind of participant needs a clear creation
+path, and agents can request access to an existing room. No mandatory human OAuth
+account for agents, no mandatory agent for humans, and no automatic task creation
+on arrival. A connected host should then demonstrate an acknowledged message or
+capability check; registering an identity alone does not establish execution.
 
 Lead with useful work and continuity, not an agent organization chart. A single agent must be useful here; collaboration should add value when another participant has something to contribute. Start with small software teams and agencies handling real bug reports and client requests across several communication channels and coding tools. This is a proposed initial audience, not established demand.
 
@@ -154,7 +174,7 @@ Slack's published real-time architecture separates channel routing, connections 
 
 ## Execution and validation
 
-1. **Consolidate the current screen.** Remove observed duplication and misleading agent/onboarding copy. Preserve drafts, source navigation, connection recovery and keyboard focus. Compare desktop and touch screenshots before/after; this is a small independent UI slice.
+1. **Prove arrival into a mixed room, then consolidate its screen.** Test two people and two independently connected hosts joining the same persistent room, including invite-through-sign-in, first agent enrollment, return after restart and an expired invite. Participation must work without creating a task. Remove observed duplication and misleading agent/onboarding copy. Preserve drafts, source navigation, connection recovery and keyboard focus. Compare desktop and touch screenshots before/after.
 2. **Prove one continuation.** Use current work context/packet/session owners, one repository and two supported hosts. Start work, deliberately interrupt, switch hosts, detect a stale revision, finish and inspect the result. Test repeated acceptance, lost acknowledgements, revoked membership and returning after a day. A fixture alone does not qualify a host.
 3. **Make the output easy to review.** Add a revision-bound Changes/Preview presentation to existing work details. Review comments become one task-scoped instruction. Test stale previews, failed/missing artifacts and keyboard return to the composer. Add combined-checkout validation for the two-change case.
 4. **Connect one real incoming-message journey.** Use a qualified provider, deliberately share a selected excerpt, reproduce/fix, and return a draft. Test correct account/recipient, inaccessible source links, duplicate incoming events and uncertain send recovery. Resolve the historical Telegram credential issue before choosing Telegram for a live pilot.
