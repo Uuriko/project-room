@@ -11,6 +11,14 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { fillAccessKey } from "./auth-signin.mjs";
 
+// UI calming #2 moved "Make this work" into the per-message "⋯" overflow menu;
+// open it first, exactly as a member does.
+async function openMessageMenu(message) {
+  const menu = message.locator('details.message-more');
+  if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  await message.evaluate(node => node.classList.add('message-menu-open'));
+}
+
 for (const touch of [false, true]) {
   test(`first use ${touch ? 'touch' : 'desktop'}: guest suggestion becomes accountable work`, { timeout: 60000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'room-first-use-'));
@@ -65,6 +73,7 @@ for (const touch of [false, true]) {
     const message = owner.locator('[data-message-record-id]').filter({ hasText: suggestion });
     await message.waitFor();
     assert.equal(await message.locator('.message-meta strong').textContent(), 'Maya');
+    await openMessageMenu(message);
     await message.locator('[data-message-action="work"]').click();
     assert.equal(await owner.locator('#work-title-input').inputValue(), suggestion);
     await owner.locator('#work-done-input').fill('Three agenda items with an owner for each.');
@@ -107,6 +116,7 @@ for (const touch of [false, true]) {
     await owner.evaluate(() => document.documentElement.style.fontSize = '100%');
 
     // Suggested titles stay editable and never survive cancelling a new-work form.
+    await openMessageMenu(message);
     await message.locator('[data-message-action="work"]').click();
     await owner.locator('#work-title-input').fill('An edited suggestion');
     await owner.locator('#cancel-work-button').click();
@@ -126,6 +136,7 @@ for (const touch of [false, true]) {
     store.command(ownerKey, 'commons', { id: crypto.randomUUID(), type: T.MESSAGE_POSTED,
       data: { messageId: 'emoji-title', body: 'a'.repeat(99) + '🚀 next' } });
     const emojiMessage = owner.locator('[data-message-record-id="emoji-title"]');
+    await openMessageMenu(emojiMessage);
     await emojiMessage.locator('[data-message-action="work"]').click();
     assert.equal(await owner.locator('#work-title-input').inputValue(), 'a'.repeat(99), 'title limit does not split an emoji');
     await owner.locator('#cancel-work-button').click();

@@ -113,8 +113,11 @@ function provenanceHtml(provenance) {
 
 function lifecycleTrailHtml(receipt) {
   const history = Array.isArray(receipt?.history) ? receipt.history : [];
-  if (!history.length) return "";
-  return `<ol class="handoff-trail" aria-label="Envelope lifecycle">${history.map(entry => {
+  // UI calming: the card shows the three most recent entries by default; the
+  // full journal stays available in the Envelope sections below.
+  const recent = history.slice(-3);
+  if (!recent.length) return "";
+  return `<ol class="handoff-trail" aria-label="Envelope lifecycle">${recent.map(entry => {
     const note = entry?.note ? ` — ${esc(entry.note)}` : "";
     const by = entry?.by ? ` by ${esc(entry.by)}` : "";
     return `<li><span class="handoff-badge handoff-badge-${statusTone(entry?.status)}">${esc(statusLabel(entry?.status))}</span>`

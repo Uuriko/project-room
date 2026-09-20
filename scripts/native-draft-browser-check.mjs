@@ -66,6 +66,10 @@ for (const touch of [false, true]) test("selected helper to reviewed native resu
   const message = f.state().messages.find(m => m.workItemId === f.workItemId);
   assert.equal(message.body, body); assert.equal(message.authorId, "guest"); assert.equal(message.proposal.basisRevision, 1);
   assert.deepEqual(f.item(), original); assert.equal(f.state().helpOffers["human-offer"].status, "selected");
+  // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+  const resultRow69 = owner.page.locator(`[data-message-record-id="${message.id}"]`);
+  const resultMenu69 = resultRow69.locator('details.message-more');
+  if (!(await resultMenu69.evaluate(node => node.open))) await resultMenu69.locator('summary').click();
   await owner.page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
   await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, body);
   assert.equal(await owner.page.locator('[name="producerId"]').inputValue(), "", "Producer is not inferred from author or selection");
@@ -140,6 +144,10 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   const label = async (message, expected) => guest.page.waitForFunction(({ id, expected }) =>
     document.querySelector('[data-message-record-id="' + id + '"] .draft-state')?.textContent === expected, { id: message.id, expected });
   const adopt = async message => {
+    // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+    const adoptRow = owner.page.locator(`[data-message-record-id="${message.id}"]`);
+    const adoptMenu = adoptRow.locator('details.message-more');
+    if (!(await adoptMenu.evaluate(node => node.open))) await adoptMenu.locator('summary').click();
     await owner.page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
     await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
     await owner.page.locator('[name="producerId"]').selectOption("guest");

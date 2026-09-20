@@ -78,13 +78,20 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await openCatchUp(page);
+  // The offer row must be in the DOM before revealMessage can focus it.
+  await page.locator(`[data-message-record-id="${question.requestMessageId}"]`).waitFor({ state: 'attached' });
   await page.locator('#contribution-open').click();
   assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
   await page.screenshot({ path: `${prefix}-offer.png` });
-  assert.equal(await page.locator(`[data-message-record-id="${question.requestMessageId}"]`).evaluate(row => {
-    const list = document.querySelector('#message-list').getBoundingClientRect(), bounds = row.getBoundingClientRect();
-    return bounds.top >= list.top - 1 && bounds.top < Math.min(list.bottom, innerHeight);
-  }), true, 'Opening an offer shows its beginning, not only its bottom action buttons');
+  // Poll the scroll position instead of asserting it once: revealMessage scrolls
+  // synchronously, but layout (content-visibility, font loading) may lag a frame.
+  await page.waitForFunction((id) => {
+    const list = document.querySelector('#message-list');
+    const row = document.querySelector(`[data-message-record-id="${CSS.escape(id)}"]`);
+    if (!list || !row) return false;
+    const lr = list.getBoundingClientRect(), bounds = row.getBoundingClientRect();
+    return bounds.height > 0 && bounds.top >= lr.top - 1 && bounds.top < Math.min(lr.bottom, innerHeight);
+  }, question.requestMessageId, { timeout: 8000 });
   await page.locator(`[data-message-id="${question.requestMessageId}"][data-message-action="request-answered"]`).click();
   await page.waitForFunction(() => !document.querySelector('#message-input').disabled);
   const answer = 'Yes, draft those two steps here. I remain accountable and will inspect and adopt the result; the reviewer will check it.';
@@ -179,7 +186,9 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     await choices.locator('summary').click();
     await openCatchUp(page);
   }
-  await page.locator('#return-brief-panel > summary').click();
+  // The contribution button lives inside #return-brief-panel (UI calming #7):
+  // ensure the panel is open instead of toggling it closed.
+  await page.locator('#return-brief-panel').evaluate(node => { node.open = true; });
   await page.locator('#contribution-open').focus();
   await page.locator('#contribution-open').press('Enter');
   if (multiple) {
@@ -199,9 +208,15 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
     await choices.locator(`[data-open-message="${draft.messageId}"]`).click();
   }
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), draft.messageId);
+  // Poll for focus instead of asserting it once: the Enter keypress activates the
+  // contribution step synchronously, but focus may land a frame later.
+  await page.waitForFunction((id) => document.activeElement?.dataset?.messageRecordId === id, draft.messageId, { timeout: 8000 });
   await page.screenshot({ path: `${prefix}-return-draft.png` });
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Returning and opening a draft do not change work or read markers');
+  // UI calming #2 moved "Save as result" into the per-message "⋯" overflow menu.
+  const draftRow = page.locator(`[data-message-record-id="${draft.messageId}"]`);
+  const draftMenu = draftRow.locator('details.message-more');
+  if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
   await page.locator(`[data-message-id="${draft.messageId}"][data-message-action="result"]`).click();
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   await page.locator('#action-fields [name=producerId]').selectOption('producer');

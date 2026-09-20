@@ -98,7 +98,7 @@ test("Add agent markup renders the catalog with roster aliases on the four named
   for (const id of ROOM_ROSTER.map(row => row.id)) {
     assert.match(html, new RegExp(`data-roster="${id}"`));
   }
-  assert.match(html, /Best for local coding sessions with MCP tools/);
+  assert.match(html, /Best for local coding sessions</);
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /\.agent-type-catalog/);
   assert.match(css, /\.agent-type-card/);

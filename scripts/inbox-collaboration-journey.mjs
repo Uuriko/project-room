@@ -99,6 +99,10 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
     await page.locator("#inbox-share-dialog").waitFor({ state: "hidden" }); await page.locator("#main").waitFor();
     const shared = state().messages.find(m => m.body.includes(source.paragraphs[0]));
     assert.ok(shared); assert.equal(shared.body.includes("ORCHID-482"), false);
+    // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+    const sharedRow = page.locator(`[data-message-record-id="${shared.id}"]`);
+    const sharedMenu = sharedRow.locator('details.message-more');
+    if (!(await sharedMenu.evaluate(node => node.open))) await sharedMenu.locator('summary').click();
     await page.locator(`[data-message-id="${shared.id}"][data-message-action="work"]`).click();
     await page.locator("#work-title-input").fill("A warm invitation reply");
     await page.locator("#work-done-input").fill("A warm reply of at most 60 words, based only on the shared excerpt, with one small next step and no invented claims. Keep it as a draft; do not send.");
@@ -120,6 +124,10 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       } else if (name === "adopt") {
         const draft = state().messages.find(m => m.id === input.messageId);
         assert.equal(draft?.authorId, helperId); assert.equal(draft?.body, input.expectedBody);
+        // Per-message actions live in the "⋯" overflow menu (UI calming #2).
+        const draftRow = page.locator(`[data-message-record-id="${input.messageId}"]`);
+        const draftMenu = draftRow.locator('details.message-more');
+        if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
         await page.locator(`[data-message-id="${input.messageId}"][data-message-action="result"]`).click();
         await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, input.expectedBody);
         await page.locator("#action-fields [name=producerId]").selectOption(helperId);

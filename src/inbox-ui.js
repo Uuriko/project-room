@@ -1,5 +1,5 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
-import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
+import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from "./inbox-send-ui.js";
 import { installQuarantineReview } from "./inbox-quarantine-ui.js";
 import { validId } from "./events.js";
 
@@ -136,7 +136,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-panel").classList.remove("reading");
     $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
     for (const selector of ["#inbox-list", "#inbox-source-body", "#inbox-subject", "#inbox-addresses", "#inbox-draft-status", "#inbox-status", "#inbox-remote-draft", "#inbox-share-paragraphs", "#inbox-share-audience", "#inbox-share-status"]) $(selector).replaceChildren();
-    $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
+    $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true; syncInboxReviewRegion();
     $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
     $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true; $("#inbox-addressed").hidden = true;
     attachmentEpoch++; $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
@@ -536,7 +536,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-save").textContent = d.busy ? "Saving…" : d.pending ? "Confirm save" : "Save draft";
     $("#inbox-review").hidden = Boolean(d.conflict) || (d.reviewedSource === d.source.revision && !d.note?.includes("review changes"));
     $("#inbox-review").disabled = Boolean(d.busy || d.pending);
-    $("#inbox-conflict").hidden = !d.conflict;
+    $("#inbox-conflict").hidden = !d.conflict; syncInboxReviewRegion();
     text("#inbox-remote-draft", d.conflict?.draft?.body || "No saved draft");
     text("#inbox-draft-status", d.note ?? (d.pending ? "Save unconfirmed. Confirm before editing." : d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent"));
     const saved = positions.get(selected);

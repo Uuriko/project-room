@@ -1,5 +1,15 @@
 // Contextual private reply controls. Only the explicitly enabled local simulator
 // is exposed; no global composer shortcut can submit an external-style reply.
+// The three review/send steps (reply review, send panel, draft conflict) share
+// one visible "Review & send" region; each step keeps its own gating, and this
+// helper only shows the region while at least one step is visible.
+export function syncInboxReviewRegion() {
+  const region = document.getElementById("inbox-review-region");
+  if (!region) return;
+  const anyVisible = ["inbox-reply-panel", "inbox-send-panel", "inbox-conflict"]
+    .some(id => { const el = document.getElementById(id); return el && !el.hidden; });
+  region.hidden = !anyVisible;
+}
 export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend = () => {} }) {
   const $ = id => document.getElementById(id), states = new Map();
   const storageKey = "project-room:pending-private-send:v1";
@@ -43,7 +53,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     if (!sourceId || !ownerKey()) return;
     if (draft && !sendable(draft)) {
       // Email (and a bot connection without send capability) has no browser send path.
-      $("inbox-send-panel").hidden = true; $("inbox-save").hidden = false; return;
+      $("inbox-send-panel").hidden = true; $("inbox-save").hidden = false; syncInboxReviewRegion(); return;
     }
     const s = state(sourceId), send = latest(s), unresolved = send && ["queued", "unknown"].includes(send.status);
     $("inbox-send-panel").setAttribute("aria-label", live(s) ? "Telegram reply" : isChannel(draft) ? "Sample Telegram reply" : "Sample reply");
@@ -66,6 +76,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     const previous = send && (send.envelope.draftRevision !== draft?.base?.revision || send.envelope.body !== draft?.body);
     $("inbox-send-status").textContent = s.note || (s.pending ? "Reply unconfirmed. Check status." : send
       ? previous ? "Previous " + labels[send.status].toLowerCase() : labels[send.status] : "");
+    syncInboxReviewRegion();
   }
   async function load(id) {
     if (!ownerKey()) return;
@@ -210,7 +221,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     reset({ preservePending = false } = {}) {
       generation++; modalTurn++; sourceId = null; draft = null; preview = null; states.clear();
       if (!preservePending) try { storage?.removeItem(storageKey); } catch {}
-      $("inbox-send-dialog").close(); $("inbox-send-panel").hidden = true;
+      $("inbox-send-dialog").close(); $("inbox-send-panel").hidden = true; syncInboxReviewRegion();
       $("inbox-save").hidden = false; $("inbox-send-title").textContent = "Sample reply"; $("inbox-send-confirm").textContent = "Send sample";
       for (const id of ["inbox-send-addresses", "inbox-send-subject", "inbox-send-body", "inbox-send-status", "inbox-send-dialog-status"]) $(id).textContent = "";
     },
@@ -271,6 +282,7 @@ export function installInboxReplyReview({ api, ownerKey }) {
     $("inbox-reply-confirm").disabled = busy || Boolean(pending) || !matches || !clean(preview) || !preview?.canReview || !a?.canReview;
     if ($("inbox-reply-dialog").open && preview && (!matches || previewBasis !== localBasis()))
       $("inbox-reply-dialog-status").textContent = "Reply changed or unavailable. Close and review again.";
+    syncInboxReviewRegion();
   }
   async function load(id = sourceId) {
     if (!ownerKey() || id !== sourceId || draft?.source.adapter !== "email") return false;
@@ -395,7 +407,7 @@ export function installInboxReplyReview({ api, ownerKey }) {
     reset({ preservePending = false } = {}) {
       generation++; readTurn++; modalTurn++; sourceId = null; draft = null; data = null; busy = false; verified = false; note = "";
       if (!preservePending) retain(null); pending = null;
-      $("inbox-reply-dialog").close(); clearPreview(); $("inbox-reply-panel").hidden = true; $("inbox-reply-status").textContent = "";
+      $("inbox-reply-dialog").close(); clearPreview(); $("inbox-reply-panel").hidden = true; $("inbox-reply-status").textContent = ""; syncInboxReviewRegion();
     },
     hasPending: () => Boolean(pending || busy)
   };

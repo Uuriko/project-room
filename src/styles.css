@@ -14,15 +14,12 @@
   --red: #ff7b7b;
   --violet: #ad8cff;
   --shadow: 0 20px 70px rgb(0 0 0 / 32%);
-  /* One-inspired tokens for future quiet chrome. Not the live theme. */
-  --room-ground: #f7f7f7;
+  /* One-inspired tokens. The unused ones were dropped (UI calming #10); the
+     rest back specific components (presence, usage headings, type cards). */
   --room-paper: #fff;
   --room-ink: #262523;
-  --room-muted: #5c5c5c;
   --room-quiet: #8b8985;
-  --room-line: #ebebe9;
   --room-rule: #e7e4df;
-  --room-hover: #4d4a46;
   --room-dark: #171715;
   --room-green: #48a16b;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -96,7 +93,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-content p { margin-bottom: .4rem; color: #dfe5ed; font-size: .9rem; line-height: 1.55; overflow-wrap: anywhere; }
 .message-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; margin-bottom: .25rem; }
 .message-meta strong { font-size: .84rem; }
-.message-meta span { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: .62rem; text-transform: uppercase; }
+/* UI calming #6: the uppercase "AGENT" pill is gone (the square agent avatar
+   already marks agent messages); this rule now styles only the Pinned chip. */
+.pinned-chip { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--violet); font-size: .62rem; text-transform: uppercase; }
 .message-meta time { margin-left: auto; color: #738092; font-size: .7rem; }
 .mention { padding: 0; border: 0; background: transparent; color: var(--violet); font: inherit; font-weight: 650; cursor: pointer; }
 .mention.agent { color: var(--text); font-weight: 850; }
@@ -130,16 +129,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .work-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; max-height: 72vh; padding: 1rem; overflow-y: auto; }
 .work-card { padding: 1rem; border: 1px solid var(--line); background: var(--panel-raised); scroll-margin-top: 6rem; }
 .work-card-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.state, .mode { font-size: .65rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
-.state { padding: .25rem .45rem; border: 1px solid #3c526f; background: #172335; color: #bcd5ff; }
+/* UI calming #10: .state/.mode consolidated here (was split with a second
+   .state rule later in the file); the later rule's values win. */
+.state, .mode { font-weight: 800; }
+.state { padding: .25rem .45rem; border: 0; border-radius: .35rem; background: #172335; color: #bcd5ff; font-size: .75rem; }
 .state-completed { border-color: #2e795e; background: #112b23; color: #7ce2b7; }
 .state-blocked { border-color: #855a35; background: #2d2015; color: #ffbe7c; }
-/* Round-2 #117: done chip — marks terminally finished work at a glance. */
-.done-chip { display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .5rem; border-radius: 999px;
-  border: 1px solid #2e795e; background: #112b23; color: #7ce2b7; font-size: .7rem; font-weight: 800; white-space: nowrap; }
-.work-card-header .done-chip { margin-left: .5rem; }
-.message-links .done-chip { margin-left: .4rem; }
-.mode { color: var(--muted); }
+.mode { font-size: .65rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .definition { color: var(--muted); font-size: .8rem; line-height: 1.5; }
 .work-facts { display: grid; gap: .35rem; margin: .8rem 0; }
 .work-next-step { margin: .6rem 0; color: var(--muted); font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
@@ -186,7 +182,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 #room-sidebar { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; max-height: calc(100vh - 4.5rem); padding: 1rem .8rem 1.5rem; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
 .sidebar-head { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 #room-title { margin: 0; font-size: 1rem; font-weight: 800; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.room-kind-badge { flex: none; font-size: .62rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: .1rem .45rem; }
+/* UI calming #10: .room-kind-badge consolidated here (was defined twice; the
+   later rule's values win). */
+.room-kind-badge { display: inline-block; flex: none; margin: .15rem 0 .35rem; font-size: .7rem; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: .4rem; padding: .05rem .4rem; }
 .room-archived-note { margin: 0; font-size: .75rem; color: var(--muted); }
 .sidebar-label { margin: 0 0 .4rem; color: var(--muted); font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .channel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem; }
@@ -236,14 +234,36 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .composer-add { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .composer-add:hover { background: rgb(255 255 255 / 6%); }
 #sidebar-toggle { display: none; }
-.message { scroll-margin-top: 6rem; content-visibility: auto; contain-intrinsic-size: auto 4.5rem; }
+.message { scroll-margin-top: 6rem; }
+/* content-visibility removed: it breaks the "⋯" menu positioning by skipping
+   off-screen messages. The menu needs the message rendered to position correctly. */
 .audience-chip { display: inline-block; margin: 0 0 .2rem; color: #8195af; font-size: .66rem; }
 .message-links { display: flex; align-items: center; gap: .8rem; min-height: 1.25rem; }
 .message-to-work, .text-button { padding: 0; border: 0; background: transparent; color: var(--blue); font-size: .69rem; font-weight: 700; }
 .message-to-work:hover, .text-button:hover { text-decoration: underline; }
+/* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
+   work / Record decision / moderation; it fades in with the other actions.
+   The fade targets the summary only, never the <details> itself: opacity < 1
+   on the details would trap the absolutely-positioned menu inside its own
+   stacking context, painting it UNDER the following message so the menu can
+   never be hovered or clicked. An open menu also lifts above later messages. */
+.message-more { position: relative; }
+.message-more[open] { z-index: 40; }
+/* The .message-menu-open class is no longer needed (content-visibility removed).
+   Kept for test helpers that add it manually; it has no visual effect. */
+.message-menu-open { position: relative; z-index: 40; }
+.message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
+.message-more > summary::-webkit-details-marker { display: none; }
+.message-more > summary:hover { background: rgb(255 255 255 / 6%); }
+.message-more > summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.message-more-menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 30; display: grid; gap: .1rem; min-width: 12rem; padding: .35rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised); box-shadow: var(--shadow); }
+/* Flipped upward by JavaScript when there isn't room below (near the composer). */
+.message-more-up .message-more-menu { top: auto; bottom: calc(100% + .25rem); }
+.message-more-menu .message-to-work { padding: .5rem .6rem; text-align: left; font-size: .78rem; }
+.message-more[open] .message-more-menu .message-to-work { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
-  .message-links .message-to-work:not([data-message-action="reply"]) { opacity: 0; }
-  .message:is(:hover, :focus-within) .message-links .message-to-work { opacity: 1; }
+  .message-links .message-to-work:not([data-message-action="reply"]), .message-links .message-more > summary { opacity: 0; }
+  .message:is(:hover, :focus-within) .message-links .message-to-work, .message:is(:hover, :focus-within) .message-links .message-more > summary { opacity: 1; }
 }
 .composer-toolbar { display: flex; align-items: center; gap: .55rem; margin-bottom: .5rem; }
 .composer-toolbar label { white-space: nowrap; }
@@ -264,7 +284,11 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .presence-online { background: var(--room-green); }
 .presence-away { background: var(--room-quiet); }
 .presence-offline { background: var(--room-rule); }
-.done-chip { flex: 0 0 auto; display: inline-grid; place-items: center; min-height: 1.15rem; padding: .05rem .38rem; border: 1px solid var(--room-rule); border-radius: 99px; background: color-mix(in srgb, var(--room-green) 16%, var(--room-dark)); color: var(--room-green); font-size: .58rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+/* Round-2 #117: done chip — marks terminally finished work at a glance.
+   UI calming #10: consolidated here (was defined twice; the later rule won). */
+.done-chip { flex: 0 0 auto; display: inline-grid; place-items: center; gap: .25rem; min-height: 1.15rem; padding: .05rem .38rem; border: 1px solid var(--room-rule); border-radius: 99px; background: color-mix(in srgb, var(--room-green) 16%, var(--room-dark)); color: var(--room-green); font-size: .58rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.work-card-header .done-chip { margin-left: .5rem; }
+.message-links .done-chip { margin-left: .4rem; }
 /* Muse-lane motion (transitions.dev badge steal, tip #11): Done receipt chip
    spring. Transform/opacity only. Instant under prefers-reduced-motion.
    No People-rail unread indicator exists; this language is chip-only. */
@@ -424,7 +448,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 }
 .request-state { display: inline-block; margin-right: .5rem; color: var(--muted); font-size: .875rem; }
 .message-content p { font-size: 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.form-hint, .prototype-note, .source-link, .audience-chip, .message-meta span, .message-meta time, .member-status, .work-facts, .definition, .receipt p, .receipt a, .blocker p, .decision p, .source-context { font-size: .875rem; }
+.form-hint, .prototype-note, .source-link, .audience-chip, .pinned-chip, .message-meta time, .member-status, .work-facts, .definition, .receipt p, .receipt a, .blocker p, .decision p, .source-context { font-size: .875rem; }
 label, input, textarea, select { font-size: 1rem; }
 .presence-member details { font-size: .875rem; color: var(--muted); max-width: 16rem; overflow-wrap: anywhere; }
 .presence-member details p { font-size: .875rem; line-height: 1.5; }
@@ -631,7 +655,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .conversation-search { border: 0; }
 .conversation-search input { border-color: transparent; background: var(--bg); }
 .message-list { padding-inline: 1.25rem; }
-.message-meta span { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
+.pinned-chip { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
 .message-links { display: inline-flex; flex-wrap: wrap; gap: .75rem; vertical-align: top; }
 .reaction { border-color: var(--line-soft); }
 .reaction:hover { background: var(--panel-raised); }
@@ -648,7 +672,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .work-card { border: 0; border-top: 1px solid var(--line-soft); padding: 1.25rem 0; background: transparent; }
 .work-card:first-child { border-top: 0; }
 .work-card h3 { margin-top: .65rem; }
-.state { border: 0; border-radius: .35rem; text-transform: none; letter-spacing: 0; font-size: .75rem; }
+/* UI calming #10: the duplicate .state rule lived here; consolidated above. */
 .work-details { margin-top: .5rem; }
 .work-drafts, .work-help { overflow-wrap: anywhere; }
 .help-offers { list-style: none; margin: .5rem 0; padding: 0; }
@@ -713,6 +737,11 @@ summary { overflow-wrap: anywhere; }
 .agent-capabilities { margin: .2rem 0 .6rem; padding-left: 1.1rem; }
 .agent-capabilities li { margin: .15rem 0; }
 #agent-host-snippets pre { overflow-x: auto; font-size: .78rem; }
+/* UI calming #5: the four advanced disclosures fold into one group; the
+   nested ones stay collapsible so the dialog opens on name + type picker. */
+.agent-advanced { margin: .75rem 0; border-top: 1px solid var(--line-soft); padding-top: .25rem; }
+.agent-advanced > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-weight: 600; }
+.agent-advanced details { margin-top: .6rem; }
 .pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }
 #room-instructions-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; }
 #room-instructions-dialog p { overflow-wrap: anywhere; }
@@ -803,6 +832,13 @@ summary { overflow-wrap: anywhere; }
 .inbox-draft-form textarea { width: 100%; box-sizing: border-box; font: inherit; line-height: 1.5; padding: 1rem; resize: vertical; }
 .inbox-draft-actions { flex-wrap: wrap; justify-content: flex-end; }
 .inbox-draft-actions [role="status"] { margin-right: auto; color: var(--muted); font-size: .85rem; }
+/* UI calming #4: the reply-review / send / conflict steps share one visible
+   "Review & send" region. Each step keeps its own gating; the region shows
+   only while at least one step is visible (see syncInboxReviewRegion). */
+.inbox-review-region { margin-top: 1.25rem; border-top: 1px solid var(--line-soft); padding-top: .6rem; }
+.inbox-review-heading { margin: 0 0 .35rem; font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.inbox-review-region .inbox-send-panel { margin-top: .25rem; }
+.inbox-review-region .inbox-conflict { margin-top: .75rem; }
 .inbox-conflict { border-left: 2px solid currentColor; padding-left: 1rem; margin-top: 2rem; }
 .inbox-conflict h3 { font-size: 1rem; }
 .inbox-conflict pre { white-space: pre-wrap; font: inherit; }
@@ -915,7 +951,7 @@ summary { overflow-wrap: anywhere; }
 .account-room-form label { font-size: .8rem; color: var(--muted); }
 .account-room-form input, .account-room-form textarea, .account-room-form select { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; }
 .account-room-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
-.room-kind-badge { display: inline-block; margin: .15rem 0 .35rem; font-size: .7rem; letter-spacing: .02em; text-transform: uppercase; padding: .05rem .4rem; border-radius: .4rem; border: 1px solid var(--line); color: var(--muted); }
+/* UI calming #10: the duplicate .room-kind-badge rule lived here; consolidated above. */
 .room-archived-note { margin: .5rem 0 0; padding: .4rem .75rem; border-left: 2px solid currentColor; color: var(--muted); font-size: .875rem; max-width: 46rem; }
 .room-archived #message-form { opacity: .6; }
 .room-lifecycle-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
@@ -933,11 +969,12 @@ summary { overflow-wrap: anywhere; }
 .handoff-envelope-list { display: grid; gap: .7rem; }
 .handoff-envelope { padding: .75rem; border: 1px solid var(--line); background: #151d2a; }
 .handoff-envelope-header { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-.handoff-badge { padding: .2rem .5rem; border: 1px solid #3c526f; border-radius: 999px; background: #172335; color: #bcd5ff; font-size: .65rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
-.handoff-badge-warn { border-color: #855a35; background: #2d2015; color: #ffbe7c; }
-.handoff-badge-info { border-color: #2f5a85; background: #14202e; color: #9cc8ff; }
-.handoff-badge-done { border-color: #2e795e; background: #112b23; color: #7ce2b7; }
-.handoff-badge-alert { border-color: #85352f; background: #2e1414; color: #ff9c9c; }
+/* UI calming #10: badge tones map to the four semantic accents. */
+.handoff-badge { padding: .2rem .5rem; border: 1px solid #3c526f; border-radius: 999px; background: #172335; color: var(--blue); font-size: .65rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.handoff-badge-warn { border-color: #855a35; background: #2d2015; color: var(--amber); }
+.handoff-badge-info { border-color: #2f5a85; background: #14202e; color: var(--blue); }
+.handoff-badge-done { border-color: #2e795e; background: #112b23; color: var(--green); }
+.handoff-badge-alert { border-color: #85352f; background: #2e1414; color: var(--red); }
 .handoff-badge-muted { border-color: #3c526f; background: #172335; color: #8a94a3; }
 .handoff-route { font-size: .75rem; color: var(--muted); }
 .handoff-objective { margin: .6rem 0; font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
@@ -981,8 +1018,7 @@ summary { overflow-wrap: anywhere; }
 .spend-allowance-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .spend-panel[data-spend-allowance="over"] #spend-summary, .spend-panel[data-spend-allowance="full"] #spend-summary { color: var(--warning, #d9a441); }
 
-/* Issue #6 B2: pinned messages */
-.pinned-chip { color: var(--violet); }
+/* Issue #6 B2: pinned messages (chip styling consolidated above with .pinned-chip). */
 .pinned-panel { margin: 0 1rem .25rem; padding: 0 .75rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: rgb(255 255 255 / 2%); }
 .pinned-panel > .section-summary { min-height: 40px; }
 .pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }

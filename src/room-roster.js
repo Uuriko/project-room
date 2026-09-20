@@ -90,58 +90,58 @@ export const JOIN_PATH_ANCHORS = Object.freeze({
 export const AGENT_TYPE_CATALOG = Object.freeze([
   Object.freeze({
     id: "claude-code", label: "Claude Code", icon: "CC",
-    bestFor: "Local coding sessions with MCP tools",
+    bestFor: "Local coding sessions",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Claude Code",
     dialogHint: "After Create access, import the private setup, then merge Claude MCP. First tool is room_check_access. No key in a prompt."
   }),
   Object.freeze({
     id: "codex", label: "Codex", icon: "CX",
-    bestFor: "OpenAI coding agent on this Mac",
+    bestFor: "OpenAI coding",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Codex",
     dialogHint: "After Create access, import the private setup, then merge the Codex MCP snippet. First tool is room_check_access. No key in a prompt."
   }),
   Object.freeze({
     id: "cursor", label: "Cursor", icon: "CR",
-    bestFor: "IDE agent — paste a prompt or add Room as MCP",
+    bestFor: "Your IDE, by pasting a prompt",
     route: "mcp", access: "contribute", joinPath: "paste-prompt", connectName: "Cursor",
     dialogHint: "Today: paste the Join prompt, or Add Room as MCP. Create access if Cursor will hold a local stdio key. No key in chat."
   }),
   Object.freeze({
     id: "hermes", label: "Hermes", icon: "HM",
-    bestFor: "Nous research harness on the same Join spine",
+    bestFor: "Research tasks",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Hermes",
     dialogHint: "After Create access, import the private setup and merge MCP. Same Room identity model as any other type. No key in a prompt."
   }),
   Object.freeze({
     id: "opencode", label: "OpenCode", icon: "OC",
-    bestFor: "Open-source coding agent, MCP on this Mac",
+    bestFor: "Open-source coding",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "OpenCode",
     dialogHint: "After Create access, import the private setup, then merge MCP. First tool is room_check_access. No key in a prompt."
   }),
   Object.freeze({
     id: "pi", label: "Pi", icon: "π",
-    bestFor: "Lightweight harness — same invite or MCP path",
+    bestFor: "A lightweight agent",
     route: "mcp", access: "contribute", joinPath: "invite-code", connectName: "Pi",
     dialogHint: "Peer redeem uses an RM- invite, or Create access and import MCP. Same Join spine. No key in chat."
   }),
   Object.freeze({
     id: "grok-bot", label: "Grok Bot", icon: "GB", rosterId: "grok-bot",
-    bestFor: "Hosted Bot computer — Node client there",
+    bestFor: "A hosted bot",
     route: "direct", access: "contribute", joinPath: "paste-prompt", connectName: "Grok Bot"
   }),
   Object.freeze({
     id: "grok-build", label: "Grok Build", icon: "GK", rosterId: "grok-build",
-    bestFor: "Local TUI with stdio MCP on this Mac",
+    bestFor: "A local terminal",
     route: "mcp", access: "contribute", joinPath: "mcp-url", connectName: "Grok Build"
   }),
   Object.freeze({
     id: "instinct", label: "Instinct", icon: "IN", rosterId: "instinct",
-    bestFor: "iMessage thread — Use my AI, no key in chat",
+    bestFor: "iMessage",
     route: "packet", access: "review", joinPath: "packet", connectName: "Instinct"
   }),
   Object.freeze({
     id: "muse", label: "Muse", icon: "MU", rosterId: "muse",
-    bestFor: "Muse app or WhatsApp packet, no key in chat",
+    bestFor: "The Muse app or WhatsApp",
     route: "packet", access: "chat", joinPath: "paste-prompt", connectName: "Muse"
   })
 ]);

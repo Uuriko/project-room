@@ -107,7 +107,11 @@ for (const touch of [false, true]) {
     assert.equal(await card.locator(".work-details").evaluate(e => e.open), true);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.focusKey), "work-details:test-handoff");
     if (!touch) {
-      const reveal = page.locator('[data-message-record-id="quiet-update"] [data-message-action="work"]');
+      // The work action lives in the "⋯" overflow menu (UI calming #2); open it first.
+      const quietRow = page.locator('[data-message-record-id="quiet-update"]');
+      const quietMenu = quietRow.locator('details.message-more');
+      if (!(await quietMenu.evaluate(node => node.open))) await quietMenu.locator('summary').click();
+      const reveal = quietRow.locator('[data-message-action="work"]');
       await reveal.evaluate(e => e.focus());
       assert.equal(await reveal.evaluate(e => document.activeElement === e), true, "keyboard focus lands on the action");
       assert.equal(await reveal.evaluate(e => getComputedStyle(e).opacity), "1", "keyboard focus reveals the action");

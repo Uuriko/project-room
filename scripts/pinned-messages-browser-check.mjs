@@ -13,6 +13,16 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+
+// UI calming #2 moved Pin/Unpin into the per-message "⋯" overflow menu;
+// open it first, exactly as a member does.
+async function openPinMenu(row) {
+  const menu = row.locator('details.message-more');
+  if (!(await menu.evaluate(node => node.open))) await menu.locator('summary').click();
+  // The MutationObserver in app.js adds .message-menu-open asynchronously;
+  // add it synchronously here so the menu is clickable immediately.
+  await row.evaluate(node => node.classList.add('message-menu-open'));
+}
 import { openSearch } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
@@ -54,13 +64,21 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await f.post("Meeting room is B-204 from Thursday");
     await f.post("Parking code is 4411");
-    const pinButton = f.row("Meeting room is B-204").getByRole("button", { name: "Pin", exact: true });
+    const pinRow = f.row("Meeting room is B-204");
+    await openPinMenu(pinRow);
+    const pinButton = pinRow.getByRole("button", { name: "Pin", exact: true });
     assert.equal(await pinButton.getAttribute("aria-pressed"), "false");
     // Keyboard only: focus the control and press Enter.
     await pinButton.focus(); await page.keyboard.press("Enter");
     await f.panel.waitFor({ state: "visible" });
-    await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).waitFor({ state: "visible" });
-    assert.equal(await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).getAttribute("aria-pressed"), "true");
+    // The menu closed behind the pin; reopen it for the unpin.
+    await openPinMenu(pinRow);
+    const unpinButton = pinRow.getByRole("button", { name: "Unpin", exact: true });
+    await unpinButton.waitFor({ state: "visible" });
+    assert.equal(await unpinButton.getAttribute("aria-pressed"), "true");
+    // The menu closed behind the action, so focus was lost; restore it to the
+    // control to verify keyboard operability.
+    await unpinButton.focus();
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.messageAction === "pin" && document.activeElement.textContent), "Unpin", "focus stays on the control that was pressed");
     assert.equal(await f.row("Meeting room is B-204").locator(".pinned-chip").textContent(), "Pinned");
     assert.equal(await f.row("Parking code is 4411").locator(".pinned-chip").count(), 0, "only the pinned message carries the chip");
@@ -108,7 +126,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => document.querySelectorAll("#pinned-list .pinned-item").length === 2);
     assert.deepEqual(await f.items.locator(".pinned-body").allTextContents(), ["Meeting room is B-204 from Thursday", "Parking code is 4411"]);
     assert.equal(await page.evaluate(() => document.activeElement?.closest("#pinned-panel") !== null), true, "focus did not fall off the page after the item went");
-    assert.equal(await f.row("Bring the projector adapter").getByRole("button", { name: "Pin", exact: true }).getAttribute("aria-pressed"), "false");
+    const adapterRow = f.row("Bring the projector adapter");
+    await openPinMenu(adapterRow);
+    assert.equal(await adapterRow.getByRole("button", { name: "Pin", exact: true }).getAttribute("aria-pressed"), "false");
     assert.deepEqual(f.pins().map(p => p.messageId), [f.messageId("Meeting room is B-204 from Thursday"), f.messageId("Parking code is 4411")]);
     // The pinned-only search followed the unpin live, and Clear drops the toggle with the term.
     await page.waitForFunction(() => document.querySelector("#search-count")?.textContent === "2 pinned messages in this room");

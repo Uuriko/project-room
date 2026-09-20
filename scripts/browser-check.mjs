@@ -139,7 +139,13 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#thread-bar").isVisible(), true);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
     await page.locator("#clear-search").click();
-    await page.locator(`[data-message-record-id="${posted[0].id}"] [data-message-action="work"]`).click();
+    // Per-message actions live in the "⋯" overflow menu (UI calming #2): the
+    // work affordance is hidden until the menu opens, then one click away.
+    const workMenu = page.locator(`[data-message-record-id="${posted[0].id}"] .message-more > summary`);
+    const workButton = page.locator(`[data-message-record-id="${posted[0].id}"] [data-message-action="work"]`);
+    assert.equal(await workButton.isVisible(), false, 'work starts behind the overflow menu');
+    await workMenu.click();
+    await workButton.click();
     await page.locator("#work-title-input").fill("Pick our first book");
     await page.locator("#work-done-input").fill("A shared reading choice with its original discussion.");
     await page.locator("#assignee-select").selectOption("maya");

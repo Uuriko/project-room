@@ -1450,6 +1450,7 @@ function render() {
   renderRoomOverview();
   renderSpendAllowance();
   syncReports();
+  syncRoomHealth();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -1658,6 +1659,25 @@ function draftFeedbackHTML(message) {
   const label = feedback?.label ?? "Draft";
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
+// UI calming #2: per-message actions collapse to Reply + replies-count inline;
+// Save as result, Pin, Make this work, Record decision and moderation move into
+// one keyboard- and hover-reachable "⋯" overflow menu. Every action keeps its
+// data-message-action wiring, so the work loop is untouched.
+function messageLinksHTML(m, { linked, moderation, count, muted }) {
+  if (muted) return `<div class="message-links">${moderation}</div>`;
+  const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
+    ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
+  const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>`;
+  const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
+  const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : "";
+  const workHtml = !m.deletedAt && can("steer") && !(m.proposal && m.workItemId)
+    ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
+  const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
+    ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
+  const overflow = [saveHtml, pinHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
+  const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+}
 function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
@@ -1680,7 +1700,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div><div class="message-links">${muted ? moderation : `${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : ""}${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}${moderation}`}</div></div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -1884,7 +1904,11 @@ function revealMessage(id) {
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
-  row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  // Scroll first: content-visibility: auto skips off-screen rows, and focusing
+  // a skipped row is a no-op. Scrolling makes it relevant (rendered), so the
+  // subsequent focus lands.
+  row?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  row?.focus({ preventScroll: true });
   // Nearest can leave a tall message clipped at its bottom. Align its beginning
   // inside the conversation without moving the surrounding page unnecessarily.
   const list = $("#message-list");
@@ -2814,6 +2838,8 @@ function submitRequest(form) {
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
 }
+// The menu lifting click listener is no longer needed (content-visibility
+// removed from .message). The menu positions correctly without it.
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
@@ -2821,6 +2847,8 @@ $("#message-list").addEventListener("click", e => {
   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
+  // An action picked from the "⋯" overflow menu closes the menu behind it.
+  button.closest("details.message-more")?.removeAttribute("open");
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "decide") openDecision(id);
@@ -3429,6 +3457,15 @@ function syncReports() {
   $("#reports-section").hidden = !owner;
   if (!owner) { reportsSequence = -1; return; }
   if ($("#reports-section").open && (reportsSequence !== client.sequence || reportsGeneration !== client.generation)) loadReports();
+}
+// UI calming #9: Usage + Spend sit under one collapsed, owner-only "Room
+// health" group. About stays open; the spend allowance form keeps its behavior.
+function syncRoomHealth() {
+  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
+  const panel = $("#room-health");
+  if (!panel) return;
+  panel.hidden = !owner;
+  if (!owner) panel.open = false;
 }
 function loadReports() {
   if (reportsFlight) return;
