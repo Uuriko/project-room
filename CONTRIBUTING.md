@@ -18,11 +18,12 @@ Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and
 3. Make the smallest cohesive change. Reuse existing domain operations; keep
    private Inbox data separate from room content and test authorization failures
    as well as the happy path. Add meaningful regression tests for behavior changes.
-4. Run `npm run check`. For UI changes, install Chromium with
+4. Run `npm run check` (including `npm run lint`). For UI changes, install Chromium with
    `npx playwright install --with-deps chromium` and run the affected browser
    checks; the full suite is `npm run test:browser`. Workers changes also need
    the checks in [cloudflare/README.md](cloudflare/README.md).
 5. Open a PR explaining the problem, resulting behavior, tests and limitations.
+   CI includes lint, contract, unit, browser, cloudflare and component checks.
    Required CI must pass on the final revision. Maintainers handle merging and
    releases. Repository access never grants permission to access user data or
    deploy another person's service.
