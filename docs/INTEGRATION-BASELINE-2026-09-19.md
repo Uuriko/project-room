@@ -1,5 +1,7 @@
 # Integration baseline — September 19, 2026
 
+**Current status:** the later candidate `4a2490b` passes the complete configured browser suite **399/399**, the full core suite **4,577 passed / zero failed / one existing TODO**, and repository checks. The failure inventory below is historical and resolved. See [final reliability gate](RELIABILITY-GATE-2026-09-19.md) for fixes, exact scope and packaged fallback evidence.
+
 Runtime: Node v24.19.0. Production-code checkpoint: `64691c5` in `codex/fable-handoff-review-20260919`. No push or deployment. This is a development candidate, not a release-ready declaration.
 
 ## Results and accounting
@@ -42,3 +44,10 @@ A real mobile reading-position defect was reproduced: a background message moved
 The new full core run reports **4,574 passed, one failed, one TODO**. The previously intermittent oversized-import `EPIPE` recurred in `tests/route-hardening.test.js`; the prior green run does not establish that it is fixed. The complete route-hardening file also reproduced it (12 passed, one failed). No upload code was changed. Treat this as an additional unresolved integration gate, separate from the six browser checks.
 
 See [work-journey checkpoint](WORK-JOURNEYS-2026-09-19.md) for final verification and next steps.
+
+
+## Final gate
+
+All eight remaining browser checks and the oversized-upload core failure are resolved. The final core run additionally includes a deterministic Telegram token-scanner boundary regression discovered during qualification. Final full-suite evidence on `4a2490b`: browser 399/399; core 4,577 passed, zero failed, one existing TODO. Repository checks pass; lint has zero errors and 79 existing warnings. Packaged desktop/touch fallback passes against both `299ac45` and the prior checkpoint `82cd33e`.
+
+The next implementation is [the first Activity slice](ACTIVITY-FIRST-SLICE-2026-09-19.md). No deployment or live-provider readiness is implied by these local gates.
