@@ -287,3 +287,16 @@ test("public feed edges: limits clamp, unknown cursor restarts, HEAD is 405", as
   assert.equal(head.status, 405);
   assert.equal((await post(origin, `/api/public/rooms/${code}/feed`, {})).status, 405);
 });
+
+test("join identity + first-room creation is atomic (no orphan identity)", async t => {
+  const { store } = await serve(t);
+  const count = () => store.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
+  const before = count();
+  // The /join handler composes these two calls inside one store.transaction;
+  // a room-side failure must roll the identity insert back with it.
+  assert.throws(() => store.transaction(() => {
+    store.identities.create("Atomic");
+    throw new Error("simulated room failure");
+  }), /simulated room failure/);
+  assert.equal(count(), before, "a failed room creation must not leave an orphan identity");
+});

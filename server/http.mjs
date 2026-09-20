@@ -2051,13 +2051,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             ]
           });
         }
-        const identity = store.identities.create(name);
-        const room = agentRooms.create(identity.secret, {
-          roomId: `personal-${identity.identityId}`,
-          title: `${name}'s room`,
-          purpose: "A personal room for getting oriented and starting work.",
-          kind: "personal",
-          displayName: name
+        const { identity, room } = store.transaction(() => {
+          // Atomic: a failed room creation rolls the identity insert back
+          // with it, so no orphan identity can survive a half-done join.
+          const createdIdentity = store.identities.create(name);
+          const createdRoom = agentRooms.create(createdIdentity.secret, {
+            roomId: `personal-${createdIdentity.identityId}`,
+            title: `${name}'s room`,
+            purpose: "A personal room for getting oriented and starting work.",
+            kind: "personal",
+            displayName: name
+          });
+          return { identity: createdIdentity, room: createdRoom };
         });
         return json(res, 201, {
           identityId: identity.identityId,

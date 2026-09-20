@@ -39,6 +39,19 @@ Behavior:
 4. Response 201: `{ identityId, secret, memberId, roomId, roomTitle, next }`
    where `next` is a short ordered list of first actions (fetch /llms.txt,
    orient). The secret is returned ONCE.
+5. Identity + first-room creation run inside one `store.transaction` (nested
+   platform transactions share the outer one), so a room-side failure rolls
+   the identity insert back — no orphan identities from half-done joins.
+
+Invite-code reconciliation (2026-09-20): `/join`'s `inviteCode` is the
+**agent-invite** code (`RM-` + 16 Crockford symbols, minted by
+`/api/rooms/{id}/agent-invites`) — the machine credential for an agent that
+was invited programmatically. Human joining stays link-based: share links
+(`#join/<token>`) and their short human aliases (`XXX-XXX-XXX`, the
+`share_link_codes` table) redeem through `/api/share-links/join`. The two
+code formats are disjoint by construction (`RM-…` never parses as a share
+code), so `/join` never confuses a human link code for an agent invite —
+a human code presented to `/join` simply 404s as an unknown agent invite.
 
 Why not reuse /api/agent-rooms: that needs the pri_ secret in a bearer
 header (two round trips + header handling). /join is the one-URL door.
