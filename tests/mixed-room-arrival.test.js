@@ -36,6 +36,9 @@ test("two people and two enrolled agents share a persistent room without a task"
   };
   const a = await enroll("First agent"), b = await enroll("Second agent");
   assert.notEqual(a.identityId, b.identityId);
+  // Consent-bound DMs: the first agent's DM to the second needs approval.
+  store.dmConsents.request("commons", a.memberId, b.memberId, "test fixture");
+  store.dmConsents.decide("commons", b.memberId, a.memberId, "approve");
   const first = client(a.secret, a.memberId), second = client(b.secret, b.memberId);
   for (const [participant, body] of [[owner, "Welcome everyone"], [person, "An idea to discuss"],
     [first, "First perspective"], [second, "Second perspective"]]) await participant.say(body);
