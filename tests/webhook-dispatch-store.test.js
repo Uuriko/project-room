@@ -15,6 +15,12 @@ import { verifyDeliverySignature } from "../server/webhook-dispatch.mjs";
 const SECRET = "signing-secret-0123456789abcdef";
 const okFetch = (status = 200) => async () => ({ status, text: async () => "ok" });
 const errorFetch = message => async () => { throw new Error(message); };
+// QA-Sec 2026-09-19: dispatch re-validates the target (incl. DNS) before
+// every POST, so drains inject a resolver that answers "public" for the
+// test hostname. No network in tests.
+const publicDns = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
+const drain = (store, extra = {}) =>
+  store.agentPlugin.drainWebhookDeliveries({ dnsResolvers: publicDns, ...extra });
 
 function freshFixture(t) {
   const f = createAcceptanceFixture();
@@ -71,7 +77,7 @@ test("drain signs each delivery per the wire contract", async t => {
   const { subscription } = subscribe(t, f.store);
   postMessage(f.store, f.keys);
   const captured = [];
-  await f.store.agentPlugin.drainWebhookDeliveries({
+  await drain(f.store, {
     fetchImpl: async (url, opts) => {
       captured.push({ url, headers: opts.headers, body: JSON.parse(opts.body) });
       return { status: 200, text: async () => "ok" };
@@ -108,7 +114,7 @@ test("drain delivers with a fake fetch and records delivered", async t => {
   const f = freshFixture(t);
   const { subscription } = subscribe(t, f.store);
   postMessage(f.store, f.keys);
-  const summary = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200) });
+  const summary = await drain(f.store, { fetchImpl: okFetch(200) });
   assert.deepEqual(summary, { processed: 1, delivered: 1, retried: 0, deadLettered: 0, skipped: 0 });
   const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(entry.state, "delivered");
@@ -125,7 +131,7 @@ test("retryable failures back off and then deliver within 3 attempts", async t =
     ? { status: 503, text: async () => "busy" }
     : { status: 200, text: async () => "ok" });
   const now = Date.now();
-  const first = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: flaky, now });
+  const first = await drain(f.store, { fetchImpl: flaky, now });
   assert.equal(first.retried, 1);
   let [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(entry.state, "failed");
@@ -133,15 +139,15 @@ test("retryable failures back off and then deliver within 3 attempts", async t =
   assert.match(entry.error, /HTTP 503/);
   assert.ok(entry.nextAttemptAt > now, "next attempt is scheduled in the future");
   // A sweep before the backoff elapses does nothing.
-  const early = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: flaky, now: now + 1000 });
+  const early = await drain(f.store, { fetchImpl: flaky, now: now + 1000 });
   assert.equal(early.processed, 0);
   // After the backoff, the second attempt also fails; the third succeeds.
-  const second = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: flaky, now: entry.nextAttemptAt + 1 });
+  const second = await drain(f.store, { fetchImpl: flaky, now: entry.nextAttemptAt + 1 });
   assert.equal(second.retried, 1);
   [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(entry.state, "failed");
   assert.equal(entry.attempts, 2);
-  const third = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: flaky, now: entry.nextAttemptAt + 1 });
+  const third = await drain(f.store, { fetchImpl: flaky, now: entry.nextAttemptAt + 1 });
   assert.equal(third.delivered, 1);
   [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(entry.state, "delivered");
@@ -153,12 +159,54 @@ test("permanent rejections dead-letter immediately without retry", async t => {
   const f = freshFixture(t);
   const { subscription } = subscribe(t, f.store);
   postMessage(f.store, f.keys);
-  const summary = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(400) });
+  const summary = await drain(f.store, { fetchImpl: okFetch(400) });
   assert.deepEqual(summary, { processed: 1, delivered: 0, retried: 0, deadLettered: 1, skipped: 0 });
   const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(entry.state, "dead_letter");
   assert.equal(entry.attempts, 1);
   assert.match(entry.error, /not retried/);
+});
+
+test("drain dead-letters a delivery whose hostname resolves private at dispatch (DNS rebinding)", async t => {
+  const f = freshFixture(t);
+  const { identity, subscription } = subscribe(t, f.store);
+  postMessage(f.store, f.keys);
+  // The name passed the subscribe-time checks; at dispatch it resolves to
+  // the cloud metadata address. The fetch must never fire.
+  let fetched = 0;
+  const summary = await drain(f.store, {
+    fetchImpl: async () => { fetched++; return { status: 200, text: async () => "ok" }; },
+    dnsResolvers: { resolve4: async () => ["169.254.169.254"], resolve6: async () => [] },
+  });
+  assert.deepEqual(summary, { processed: 1, delivered: 0, retried: 0, deadLettered: 1, skipped: 0 });
+  assert.equal(fetched, 0);
+  const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
+  assert.equal(entry.state, "dead_letter");
+  assert.match(entry.error, /private or reserved/);
+  void identity;
+});
+
+test("drain never follows a redirect downgrade to an internal http target", async t => {
+  const f = freshFixture(t);
+  const { subscription } = subscribe(t, f.store);
+  postMessage(f.store, f.keys);
+  const seen = [];
+  const summary = await drain(f.store, {
+    fetchImpl: async url => {
+      seen.push(url);
+      if (url === "https://hooks.example.test/agent") {
+        return { status: 307,
+          headers: { get: name => (name === "location" ? "http://127.0.0.1:8444/internal-callback" : null) },
+          text: async () => "" };
+      }
+      throw new Error("redirect target must never be fetched: " + url);
+    },
+  });
+  assert.deepEqual(summary, { processed: 1, delivered: 0, retried: 0, deadLettered: 1, skipped: 0 });
+  assert.deepEqual(seen, ["https://hooks.example.test/agent"]);
+  const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
+  assert.equal(entry.state, "dead_letter");
+  assert.match(entry.error, /downgrade/);
 });
 
 test("exhausted retries dead-letter after 5 attempts", async t => {
@@ -168,7 +216,7 @@ test("exhausted retries dead-letter after 5 attempts", async t => {
   let now = Date.now();
   let summary;
   for (let i = 0; i < 5; i++) {
-    summary = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(500), now });
+    summary = await drain(f.store, { fetchImpl: okFetch(500), now });
     const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
     now = entry.nextAttemptAt + 1;
   }
@@ -178,7 +226,7 @@ test("exhausted retries dead-letter after 5 attempts", async t => {
   assert.equal(entry.attempts, 5);
   assert.match(entry.error, /gave up after 5 attempts/);
   // Dead letters are not swept again.
-  const again = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200), now: now + 1_000_000 });
+  const again = await drain(f.store, { fetchImpl: okFetch(200), now: now + 1_000_000 });
   assert.equal(again.processed, 0);
 });
 
@@ -186,7 +234,7 @@ test("network failures are retryable and counted as attempts", async t => {
   const f = freshFixture(t);
   subscribe(t, f.store);
   postMessage(f.store, f.keys);
-  const summary = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: errorFetch("connect ECONNREFUSED") });
+  const summary = await drain(f.store, { fetchImpl: errorFetch("connect ECONNREFUSED") });
   assert.equal(summary.retried, 1);
 });
 
@@ -194,7 +242,7 @@ test("redrive returns a dead letter to pending with a clean counter", async t =>
   const f = freshFixture(t);
   const { identity, subscription } = subscribe(t, f.store);
   postMessage(f.store, f.keys);
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(400) });
+  await drain(f.store, { fetchImpl: okFetch(400) });
   const [dead] = f.store.agentPlugin.deadLettersFor({ identityId: identity.identityId });
   assert.equal(dead.state, "dead_letter");
   const redriven = f.store.agentPlugin.redriveDeadLetter({ identityId: identity.identityId, deliveryId: dead.deliveryId });
@@ -202,7 +250,7 @@ test("redrive returns a dead letter to pending with a clean counter", async t =>
   assert.equal(redriven.attempts, 0);
   assert.equal(redriven.error, null);
   // It delivers on the next sweep.
-  const summary = await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200) });
+  const summary = await drain(f.store, { fetchImpl: okFetch(200) });
   assert.equal(summary.delivered, 1);
   // Redriving a live delivery is rejected; cross-identity reads 404.
   const { identity: stranger } = subscribe(t, f.store, "stranger-agent");
@@ -224,7 +272,7 @@ test("metrics measure the falsifiable claim; zero-sample is honestly null", asyn
   assert.match(empty.claim, /99%/);
   postMessage(f.store, f.keys, "first");
   postMessage(f.store, f.keys, "second");
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200) });
+  await drain(f.store, { fetchImpl: okFetch(200) });
   const metrics = f.store.agentPlugin.deliveryMetricsFor({ identityId: identity.identityId });
   assert.equal(metrics.totalTerminal, 2);
   assert.equal(metrics.delivered, 2);
@@ -238,7 +286,7 @@ test("deliveries survive a store restart", async t => {
   const f = createAcceptanceFixture();
   const { identity, subscription } = subscribe(t, f.store);
   postMessage(f.store, f.keys);
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(500) });
+  await drain(f.store, { fetchImpl: okFetch(500) });
   f.store.close();
   const reopened = new RoomStore(join(f.directory, "room.sqlite"), { now: () => Date.now() });
   t.after(() => { try { reopened.close(); } catch {} });
@@ -248,7 +296,7 @@ test("deliveries survive a store restart", async t => {
   assert.equal(journal[0].attempts, 1);
   // The reopened store can keep dispatching: the failed delivery is due.
   const summary = await reopened.agentPlugin.drainWebhookDeliveries({
-    fetchImpl: okFetch(200), now: journal[0].nextAttemptAt + 1 });
+    fetchImpl: okFetch(200), now: journal[0].nextAttemptAt + 1, dnsResolvers: publicDns });
   assert.equal(summary.delivered, 1);
   const metrics = reopened.agentPlugin.deliveryMetricsFor({ identityId: identity.identityId });
   assert.equal(metrics.deliveryRateWithin3Attempts, 1);
@@ -328,7 +376,7 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
 
   // The process endpoint sweeps the caller's own deliveries. With nothing
   // due it reports an honest zero sweep without touching the network.
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200) });
+  await drain(f.store, { fetchImpl: okFetch(200) });
   const processed = await (await post(origin, "/api/agent-webhooks/process", secret)).json();
   assert.deepEqual(processed.summary, { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 });
   const deliveredLog = await (await get(origin, "/api/agent-webhooks/deliveries?state=delivered", secret)).json();
@@ -344,7 +392,7 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
   // Dead-letter queue and redrive: a second message, then a deterministic
   // receiver rejection (400) at the store level.
   postMessage(f.store, f.keys, "second message");
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(400) });
+  await drain(f.store, { fetchImpl: okFetch(400) });
   const dlq = await (await get(origin, "/api/agent-webhooks/dead-letter", secret)).json();
   assert.equal(dlq.deliveries.length, 1);
   assert.equal(dlq.deliveries[0].state, "dead_letter");
@@ -358,7 +406,7 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
   // Redriving a non-dead delivery is a 422.
   assert.equal((await post(origin, `/api/agent-webhooks/deliveries/${deliveryId}/redrive`, secret)).status, 422);
   // And the redriven delivery completes on the next sweep.
-  await f.store.agentPlugin.drainWebhookDeliveries({ fetchImpl: okFetch(200) });
+  await drain(f.store, { fetchImpl: okFetch(200) });
   const redelivered = await (await get(origin, "/api/agent-webhooks/deliveries?state=delivered", secret)).json();
   assert.equal(redelivered.deliveries.length, 2);
 });

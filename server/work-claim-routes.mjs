@@ -8,9 +8,12 @@
 //
 // Identity: the caller is the authenticated room member (auth.member.id).
 // Claim/update/release/reassign are owner-gated by the pure state machine;
-// the done transition additionally enforces the item's review policy via
-// canCloseWork (independent_principal consults the room's live membership
-// for the verify permission).
+// review attestations are caller-bound (any member may attest; the record
+// always names the caller). The done transition additionally enforces the
+// item's review policy via canCloseWork (independent_principal consults the
+// room's live membership for the verify permission), and for non-self
+// policies requires a recorded attestation from the named reviewer —
+// naming a reviewer who never attested is rejected (QA-Sec 2026-09-19).
 //
 // Persistence is the later slice: items live in a per-process, per-room
 // in-memory registry (createWorkClaimRegistry). Lease expiry is evaluated
@@ -28,7 +31,7 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
   roomWorkClaimConfig, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
 
@@ -160,19 +163,53 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
     if (data.state === "done") {
+      // QA-Sec 2026-09-19: the reviewer must be authenticated. For
+      // self_attested the reviewer is the owner (the caller). For the
+      // stronger policies the named reviewer must have recorded an
+      // attestation from their own session via the review route — naming
+      // another member without their attestation is rejected (confused
+      // deputy). canCloseWork then applies the policy (distinct member /
+      // verify permission) to the attested reviewer.
       const policy = item.reviewPolicy ?? config.reviewPolicy;
-      const reviewer = data.reviewedBy ?? caller;
-      if (typeof reviewer !== "string" || reviewer.length === 0 || reviewer.length > 128) invalidInput(reject, "reviewedBy as a member id");
-      const verifiers = verifiersOf(store, roomId);
-      if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers })) {
-        reject(403, "work_review_rejected",
-          `Review policy "${policy}" not satisfied for "${item.id}": ${reviewer === caller ? "the attestation" : `attestation by ${reviewer}`} does not close this work`);
+      if (policy === "self_attested") {
+        const reviewer = data.reviewedBy ?? caller;
+        if (reviewer !== caller) {
+          reject(403, "work_review_rejected",
+            `Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work`);
+        }
+      } else {
+        const reviewer = data.reviewedBy;
+        if (typeof reviewer !== "string" || reviewer.length === 0 || reviewer.length > 128) {
+          reject(403, "work_review_rejected",
+            `Review policy "${policy}" not satisfied for "${item.id}": reviewedBy must name the member who attested this work`);
+        }
+        const attested = (item.attestations ?? []).some(entry => entry.memberId === reviewer);
+        if (!attested) {
+          reject(403, "work_review_rejected",
+            `Review policy "${policy}" not satisfied for "${item.id}": no review attestation recorded by ${reviewer}`);
+        }
+        const verifiers = verifiersOf(store, roomId);
+        if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers })) {
+          reject(403, "work_review_rejected",
+            `Review policy "${policy}" not satisfied for "${item.id}": attestation by ${reviewer} does not close this work`);
+        }
       }
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy, now: nowMs }));
     registry.set(roomId, updated);
     return json(res, 200, updated);
+  }
+  if (workClaimRoute === "review" && req.method === "POST") {
+    // QA-Sec 2026-09-19: the attestation endpoint. Any room member records
+    // their own review of an active claim; the attestation is bound to the
+    // caller's authenticated member id — it can never name someone else.
+    const data = await body(req);
+    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
+    registry.set(roomId, attested);
+    return json(res, 200, attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = await body(req);

@@ -1564,9 +1564,13 @@ paths:
         otherwise). The `done` transition accepts `deliveryMode` (how the
         work was delivered: `result`, `merged`, or `production`) and
         `reviewedBy` (the attesting member), and enforces the item's review
-        policy: `self_attested` lets the claimant close; `distinct_member`
-        needs a different member's attestation; `independent_principal`
-        needs a different member holding the `verify` permission. A failing
+        policy: `self_attested` lets the claimant close (reviewedBy, when
+        given, must be the owner); `distinct_member` needs a different
+        member's attestation; `independent_principal` needs a different
+        member holding the `verify` permission. For the stronger policies
+        the named reviewer must have recorded an attestation via the
+        `/review` route from their own session first — naming a member who
+        never attested is rejected with 403 `work_review_rejected`. A failing
         attestation gets 403 `work_review_rejected`. API keys need
         `rooms:write`.
       parameters:
@@ -1593,7 +1597,7 @@ paths:
                   description: Only on the done transition
                 reviewedBy:
                   type: string
-                  description: Attesting member id; only on the done transition
+                  description: Attesting member id; only on the done transition. For distinct_member/independent_principal the named member must have attested via /review first
       responses:
         '200':
           description: The updated item
@@ -1603,6 +1607,42 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_not_owner or work_review_rejected }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/review:
+    post:
+      summary: Record a review attestation
+      description: |
+        Any room member records their own review of an active claim. The
+        attestation is always bound to the caller's authenticated member id
+        — it can never name someone else. One attestation per member (latest
+        wins); attestations are cleared when the claim is released or
+        reassigned. The `done` transition consults these records for the
+        `distinct_member` and `independent_principal` policies. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200':
+          description: The updated item, with the attestation recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_review_rejected (review policy not satisfied) }
         '404': { description: work_claim_not_found }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/release:
@@ -5443,7 +5483,10 @@ components:
         `leaseExpiresAt`; null `leaseExpiresAt` means no lease and the claim
         never expires). The `done` transition records `deliveryMode` (how
         the work was delivered) and `reviewedBy` (the attesting member, per
-        the item's `reviewPolicy`).
+        the item's `reviewPolicy`). For the `distinct_member` and
+        `independent_principal` policies the attestation must be recorded
+        via the `/review` route from the reviewer's own session first; the
+        `attestations` array holds those caller-bound records.
       type: object
       properties:
         id: { type: string }
@@ -5455,6 +5498,14 @@ components:
         deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
         reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }
         reviewedBy: { type: [string, 'null'] }
+        attestations:
+          type: array
+          items:
+            type: object
+            properties:
+              memberId: { type: string }
+              at: { type: string, format: date-time }
+              note: { type: [string, 'null'] }
         history:
           type: array
           items:

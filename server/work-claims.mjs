@@ -29,6 +29,13 @@
 // permission (supplied as verifyMembers) to attest. Enforcement lives with
 // the caller (the HTTP layer applies it); the state machine itself only
 // records the attestation (reviewedBy) on the done transition.
+//
+// SECURITY (QA-Sec 2026-09-19): attestations are first-class records, not
+// caller-supplied names. attestWork records a review attestation from the
+// authenticated caller's own session; the done transition only accepts a
+// reviewedBy that has such a recorded attestation (for non-self policies).
+// Naming another member without their attestation is rejected — the
+// previous "name anyone" behavior was a confused-deputy flaw.
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
 const TRANSITIONS = {
   unclaimed: ["claimed"],
@@ -60,6 +67,14 @@ const idOf = (value, what, max) => {
   return value;
 };
 
+const attestationOf = value => {
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "attestation must be an object");
+  check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "attestation memberId must be 1..128 characters");
+  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "attestation at must be an ISO timestamp");
+  if (value.note !== undefined && value.note !== null) check(typeof value.note === "string" && value.note.length <= 512, "attestation note must be at most 512 characters");
+  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null });
+};
+
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -69,11 +84,12 @@ const workOf = value => {
   if (value.deliveryMode !== undefined && value.deliveryMode !== null) check(DELIVERY_MODES.includes(value.deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
   if (value.reviewPolicy !== undefined && value.reviewPolicy !== null) check(REVIEW_POLICIES.includes(value.reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   if (value.reviewedBy !== undefined && value.reviewedBy !== null) check(typeof value.reviewedBy === "string" && value.reviewedBy.length > 0 && value.reviewedBy.length <= 128, "reviewedBy must be 1..128 characters");
+  const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     claimedAt: value.claimedAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
-    reviewedBy: value.reviewedBy ?? null };
+    reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -105,7 +121,7 @@ export function createWork({ id, title, reviewPolicy, note } = {}, { now } = {})
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
     claimedAt: null, leaseExpiresAt: null, deliveryMode: null,
-    reviewPolicy: reviewPolicy ?? null, reviewedBy: null };
+    reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]) };
   return withHistory(item, atMs, "system", "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
@@ -144,16 +160,35 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   const next = state === undefined ? item : { ...item, state,
     owner: released ? null : item.owner,
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
+    // a released claim drops its reviews too — attestations belong to the
+    // lapsed owner's round of work, never to whoever claims next
+    attestations: released ? Object.freeze([]) : item.attestations,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
+// Record a review attestation from the caller's own authenticated session.
+// One attestation per member (latest wins); the done transition consults
+// these records rather than trusting a caller-supplied reviewedBy name.
+// Refused on unclaimed work (nothing to review) and on done work (immutable).
+export function attestWork(work, agentId, { note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
+  const attestation = Object.freeze({ memberId: agent, at: isoOf(atMs), note: note ?? null });
+  const attestations = Object.freeze([
+    ...item.attestations.filter(entry => entry.memberId !== agent),
+    attestation,
+  ]);
+  return withHistory({ ...item, attestations }, atMs, agent, "reviewed", note);
+}
 // Reassign: the owner hands work to another agent (stays in the same state).
+// Attestations are cleared — reviews belong to the previous owner's round.
 export function reassignWork(work, agentId, newOwner, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
-  return withHistory({ ...item, owner: target }, atMs, agent, `reassigned:${target}`, note);
+  return withHistory({ ...item, owner: target, attestations: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
