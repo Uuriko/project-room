@@ -345,12 +345,15 @@
 
         <dialog id="catchup-dialog" aria-labelledby="catchup-title">
           <div class="dialog-head"><h2 id="catchup-title">Catch up</h2><button id="catchup-close" class="button ghost" type="button">Close</button></div>
-          <section id="contribution-next" class="contribution-next" aria-label="For you" hidden>
+          <details id="return-brief-panel" class="panel return-brief-panel">
+            <summary id="return-brief-heading" class="section-summary"><span class="section-label"><strong>Catch up</strong></span><span class="notification-dot" id="notification-count" hidden></span><span class="notification-dot" id="reminder-count" hidden></span></summary>
+            <h3 id="rb-current-heading">Needs you</h3>
+            <ul id="rb-attention-list" class="rb-list"></ul>
+            <button id="rb-show-all" class="text-button" type="button">Show all</button>
+            <section id="contribution-next" class="contribution-next" aria-label="For you" hidden>
             <div><span id="contribution-label" class="form-hint"></span><p id="contribution-title"></p></div>
             <div class="contribution-actions"><button id="contribution-open" class="button secondary" type="button"></button><button id="contribution-more" class="text-button" type="button" hidden></button></div>
           </section>
-          <details id="return-brief-panel" class="panel return-brief-panel">
-            <summary id="return-brief-heading" class="section-summary"><span class="section-label"><strong>Catch up</strong></span><span class="notification-dot" id="notification-count" hidden></span><span class="notification-dot" id="reminder-count" hidden></span></summary>
             <div id="summary-grid" class="summary-grid"></div>
             <p id="rb-status" class="status form-status" role="status"></p>
             <details id="notification-panel" class="rb-panel">
@@ -371,9 +374,6 @@
               <ol id="reminder-scheduled" class="reminder-list"></ol>
               <div id="reminder-upcoming"></div>
             </details>
-            <h3 id="rb-current-heading">Needs you</h3>
-            <ul id="rb-attention-list" class="rb-list"></ul>
-            <button id="rb-show-all" class="text-button" type="button">Show all</button>
             <details id="rb-involving-section">
               <summary id="rb-involving-heading" class="section-summary"><span class="section-label"><strong>Ongoing</strong></span></summary>
               <ul id="rb-involving-list" class="rb-list"></ul>
