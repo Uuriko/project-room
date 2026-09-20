@@ -669,22 +669,22 @@
         <p class="form-hint">Types for this Room only. Picking one fills the name and recommended access — same join path (packet, invite code, paste prompt, or MCP URL). It does not create a key or list the agent publicly.</p>
         <div id="agent-type-catalog" class="agent-type-catalog" role="list">
           <div id="agent-roster" class="agent-type-grid agent-roster">
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions with MCP tools</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CX</span><span class="agent-type-copy"><strong>Codex</strong><span>Best for OpenAI coding agent on this Mac</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">CR</span><span class="agent-type-copy"><strong>Cursor</strong><span>Best for IDE agent — paste a prompt or add Room as MCP</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">HM</span><span class="agent-type-copy"><strong>Hermes</strong><span>Best for Nous research harness on the same Join spine</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">OC</span><span class="agent-type-copy"><strong>OpenCode</strong><span>Best for open-source coding agent, MCP on this Mac</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-icon" aria-hidden="true">π</span><span class="agent-type-copy"><strong>Pi</strong><span>Best for lightweight harness — same invite or MCP path</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">GB</span><span class="agent-type-copy"><strong>Grok Bot</strong><span>Best for hosted Bot computer — Node client there</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for local TUI with stdio MCP on this Mac</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-icon" aria-hidden="true">IN</span><span class="agent-type-copy"><strong>Instinct</strong><span>Best for iMessage thread — Use my AI, no key in chat</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for Muse app or WhatsApp packet, no key in chat</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CX</span><span class="agent-type-copy"><strong>Codex</strong><span>Best for OpenAI coding</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">CR</span><span class="agent-type-copy"><strong>Cursor</strong><span>Best for your IDE, by pasting a prompt</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">HM</span><span class="agent-type-copy"><strong>Hermes</strong><span>Best for research tasks</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">OC</span><span class="agent-type-copy"><strong>OpenCode</strong><span>Best for open-source coding</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-icon" aria-hidden="true">π</span><span class="agent-type-copy"><strong>Pi</strong><span>Best for a lightweight agent</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">GB</span><span class="agent-type-copy"><strong>Grok Bot</strong><span>Best for a hosted bot</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-icon" aria-hidden="true">IN</span><span class="agent-type-copy"><strong>Instinct</strong><span>Best for iMessage</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
           </div>
         </div>
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
-        <details id="agent-connect-more"><summary>More</summary>
+        <details id="agent-connect-advanced" class="agent-advanced"><summary>Advanced</summary>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
             <option value="packet">Chat packet — no Room key</option>
             <option value="mcp" selected>MCP on this Mac</option>
@@ -696,20 +696,25 @@
             <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
+          <details id="agent-key-later" hidden><summary>Need a Room key later</summary>
+            <p class="form-hint">Only if this host can store a secret outside chat. Do not paste a key into iMessage, WhatsApp, or Muse.</p>
+            <button type="button" id="agent-create-later" class="button ghost">Create access</button>
+          </details>
+          <details id="agent-host-snippets" hidden><summary>MCP hosts</summary>
+            <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
+            <pre><code id="agent-mcp-toml"></code></pre>
+            <pre><code id="agent-mcp-json"></code></pre>
+            <pre><code id="agent-mcp-cli"></code></pre>
+          </details>
+          <details><summary>Manage connections</summary>
+            <p class="form-hint">Already connected: <strong>Replace key</strong> issues a new setup on the same routes. The old key stops. Addressing in chat still does not start a model.</p>
+            <p id="agent-list-status" role="status"></p><ul id="agent-connect-list" class="share-link-list"></ul>
+          </details>
+          <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi can redeem an invite code; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
         </details>
         <p id="agent-create-note" class="form-hint">Issues a private key. The browser sends only a digest.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
-        <details id="agent-key-later" hidden><summary>Need a Room key later</summary>
-          <p class="form-hint">Only if this host can store a secret outside chat. Do not paste a key into iMessage, WhatsApp, or Muse.</p>
-          <button type="button" id="agent-create-later" class="button ghost">Create access</button>
-        </details>
       </form>
-      <details id="agent-host-snippets" hidden><summary>MCP hosts</summary>
-        <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
-        <pre><code id="agent-mcp-toml"></code></pre>
-        <pre><code id="agent-mcp-json"></code></pre>
-        <pre><code id="agent-mcp-cli"></code></pre>
-      </details>
       <section id="agent-setup" hidden>
         <ol id="agent-import-checklist"></ol>
         <p id="agent-import-route" class="form-hint"></p>
@@ -723,11 +728,7 @@
       </section>
       <p id="agent-connect-status" role="status" aria-live="polite"></p>
       <button id="agent-retry" type="button" class="button primary" hidden>Retry original</button>
-      <details><summary>Manage connections</summary>
-        <p class="form-hint">Already connected: <strong>Replace key</strong> issues a new setup on the same routes. The old key stops. Addressing in chat still does not start a model.</p>
-        <p id="agent-list-status" role="status"></p><ul id="agent-connect-list" class="share-link-list"></ul>
-      </details>
-      <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi can redeem an invite code; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
+
     </dialog>
     <dialog id="agent-invite-dialog" aria-labelledby="agent-invite-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-invite-title">Invite agents</h2><button id="agent-invite-close" type="button" class="button ghost">Close</button></div>

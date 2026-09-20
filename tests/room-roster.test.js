@@ -189,7 +189,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Chat packet — no Room key/);
   assert.match(html, /id="agent-copy-checklist"/);
   assert.match(html, /id="agent-key-later"/);
-  assert.match(html, /id="agent-connect-more"/);
+  assert.match(html, /id="agent-connect-advanced"/);
   assert.doesNotMatch(html, /id="agent-copy-json"/);
   assert.match(html, /id="agent-import-checklist"/);
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");

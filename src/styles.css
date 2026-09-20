@@ -713,6 +713,11 @@ summary { overflow-wrap: anywhere; }
 .agent-capabilities { margin: .2rem 0 .6rem; padding-left: 1.1rem; }
 .agent-capabilities li { margin: .15rem 0; }
 #agent-host-snippets pre { overflow-x: auto; font-size: .78rem; }
+/* UI calming #5: the four advanced disclosures fold into one group; the
+   nested ones stay collapsible so the dialog opens on name + type picker. */
+.agent-advanced { margin: .75rem 0; border-top: 1px solid var(--line-soft); padding-top: .25rem; }
+.agent-advanced > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-weight: 600; }
+.agent-advanced details { margin-top: .6rem; }
 .pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }
 #room-instructions-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; }
 #room-instructions-dialog p { overflow-wrap: anywhere; }
