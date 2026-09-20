@@ -53,7 +53,8 @@ test("the Telegram card says not configured, names the bindings, and Reconnect i
   await card.getByText(/^Webhook: secret stored /).waitFor();
   await card.getByText("Last update received: none yet").waitFor();
   await card.getByText("Last send: none yet").waitFor();
-  assert.match(await f.page.locator("#inbox-empty").textContent(), /Telegram can go live once/);
+  assert.equal(await f.page.locator("#inbox-empty").isVisible(), true);
+  assert.match(await f.page.locator("#inbox-empty").textContent(), /Nothing here yet/);
   const text = await card.textContent();
   for (const secret of [WEBHOOK_SECRET, ChannelWebhookInbox.hash(WEBHOOK_SECRET), "7000000001"]) assert.equal(text.includes(secret), false, secret);
   // Nothing pending yet: the trigger says so instead of failing.

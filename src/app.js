@@ -424,7 +424,7 @@ function showAccountWorkspace() {
   }
   inboxUI.sync();
   if (!state) {
-    if (location.hash === "#pr-view/rooms") inboxUI.showRoomList();
+    if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
     else inboxUI.open();
   }
 }
@@ -608,7 +608,7 @@ $("#account-room-form").addEventListener("submit", async event => {
         : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
-$("#choose-room").addEventListener("click", () => inboxUI.showRoomList());
+$("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
@@ -1868,6 +1868,7 @@ function revealLocationHash() {
       inboxUI?.showRoomList();
       return;
     }
+    if (hash === "#pr-view/room-list") { inboxUI?.showRoomList(); return; }
     if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
     if (hash === "#pr-view/rooms") {
       if (accountHomeFromLocation()) inboxUI?.showRoomList();

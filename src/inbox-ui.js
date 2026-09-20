@@ -83,23 +83,28 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     // Per-tab navigation metadata only: never source text, addresses or draft text.
     try { storage?.setItem(positionKey, JSON.stringify({ owner, sourceId: selected, ...point })); } catch {}
   }
+  function writeDestination(place, push = false) {
+    const destination = "#pr-view/" + place;
+    const url = new URL(location.href), roomId = getRoom()?.room?.id;
+    if (roomId && place !== "room-list") { url.searchParams.set("room", roomId); url.searchParams.delete("account"); }
+    if (location.hash === destination && location.search === url.search) return;
+    if (push && !location.hash) history.replaceState(null, "", "#pr-view/rooms");
+    history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + destination);
+  }
+  function showRoomList(push = false) {
+    navigationEpoch++; remember(); active = false; browsing = true;
+    writeDestination("room-list", push);
+    $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
+    $("#inbox-panel").hidden = true; $("#main").hidden = true;
+    $("#account-rooms-panel").hidden = false; onNavigate(); onRooms();
+  }
   function show(place, updateLocation = true, push = false) {
     navigationEpoch++;
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
     onNavigate();
     active = place === "inbox";
     browsing = false;
-    if (updateLocation) {
-      const destination = "#pr-view/" + (active ? "inbox" : "rooms");
-      const url = new URL(location.href), roomId = getRoom()?.room?.id;
-      if (roomId) { url.searchParams.set("room", roomId); url.searchParams.delete("account"); }
-      if (location.hash !== destination || location.search !== url.search) {
-        // Give the initial room URL a destination before the first explicit
-        // visit. Back must restore the room, not leave the workspace.
-        if (push && !location.hash) history.replaceState(null, "", "#pr-view/rooms");
-        history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + destination);
-      }
-    }
+    if (updateLocation) writeDestination(active ? "inbox" : "rooms", push);
     $("#main").hidden = active || !getRoom();
     $("#inbox-panel").hidden = !active;
     $("#account-rooms-panel").hidden = active || Boolean(getRoom());
@@ -367,11 +372,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   async function disconnect(c, button, note) {
     if (!owns() || button.disabled) return;
+    const navigation = navigationEpoch;
     button.disabled = true; note.textContent = "Removing…";
     try {
       await api.applyConnection({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: c.id, expectedRevision: c.revision }); if (!owns()) return;
       removing.delete(c.id); connectionNotes.set(c.id, "Removed · saved copies stay in the inbox");
-      await loadConnections(); load();
+      await loadConnections(); if (active && navigation === navigationEpoch) load();
     } catch (error) {
       if (!owns()) return;
       removing.delete(c.id);
@@ -441,12 +447,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   });
   async function reconnect(connectionId, button, note) {
     if (!owns() || button.disabled) return;
+    const navigation = navigationEpoch;
     button.disabled = true; note.textContent = "Reconnecting…";
     try {
       const result = await api.reconnectConnection(connectionId, crypto.randomUUID()); if (!owns()) return;
       const parts = [result.registered ? "Webhook secret registered" : "", result.imported ? `Imported ${result.imported} ${result.imported === 1 ? "update" : "updates"}` : ""].filter(Boolean);
       connectionNotes.set(connectionId, parts.length ? parts.join(" · ") : "No new updates yet");
-      await loadConnections(); if (result.imported) load();
+      await loadConnections(); if (result.imported && active && navigation === navigationEpoch) load();
     } catch (error) {
       if (!owns()) return;
       connectionNotes.set(connectionId, error.code === "channel_webhook_unavailable" ? "Webhook delivery is not configured here." : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : "Couldn’t reconnect. Try again.");
@@ -456,11 +463,11 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   async function load(push = false) {
     sync(); if (!owns()) return;
     show("inbox", true, push); text("#inbox-status", "Loading…");
-    const turn = ++epoch;
+    const turn = ++epoch, navigation = navigationEpoch;
     loadConnections();
     quarantineUI.refresh();
     try {
-      const result = await api.list(); if (!owns() || turn !== epoch) return;
+      const result = await api.list(); if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;
       rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
       renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
@@ -470,7 +477,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
       if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
-    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
   }
   async function open(sourceId) {
     if (!owns()) return;
@@ -480,16 +487,16 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-panel").classList.add("reading");
     if (drafts.has(sourceId)) { render(); loadResults(sourceId); loadAttachments(sourceId); return; }
     $("#inbox-reader").hidden = true; text("#inbox-status", "Loading…");
-    const turn = ++epoch;
+    const turn = ++epoch, navigation = navigationEpoch;
     try {
-      const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
+      const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId || navigation !== navigationEpoch || !active) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
       text("#inbox-status", ""); render(); remember(); loadResults(sourceId); loadAttachments(sourceId);
-    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
   }
   function render() {
-    const d = drafts.get(selected); if (!d || !owns()) return;
+    const d = drafts.get(selected); if (!d || !owns() || !active) return;
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
     readToggle.hidden = false;
@@ -811,10 +818,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
       sync();
     },
-    showRoomList: () => { navigationEpoch++; remember(); active = false; browsing = true; history.replaceState(null, "", "#pr-view/rooms");
-      $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
-      $("#inbox-panel").hidden = true; $("#main").hidden = true;
-      $("#account-rooms-panel").hidden = false; onNavigate(); onRooms(); },
+    showRoomList,
     showRooms: () => { if (active || browsing) show("rooms", false); },
     hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending() || replyUI.hasPending()) };
 }
