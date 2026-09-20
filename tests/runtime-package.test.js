@@ -153,9 +153,13 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 227); // Includes the live asset manifest and three redistribution notices.
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 230); // Includes host runner, process adapter and CLI.
+  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
+    import { configuredHost } from ${JSON.stringify(pathToFileURL(join(destination, "client/host-process.mjs")).href)};
+    import { runRequestOnce } from ${JSON.stringify(pathToFileURL(join(destination, "client/request-runner.mjs")).href)};
+    if (typeof configuredHost !== "function" || typeof runRequestOnce !== "function") throw new Error("Missing host bridge");
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
     import { currentAttention } from ${JSON.stringify(pathToFileURL(join(destination, "client/attention-inbox.mjs")).href)};
