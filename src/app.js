@@ -1274,6 +1274,66 @@ function restoreDisclosures(container, snap) {
     : null;
   (exact || fallback)?.focus({ preventScroll: true });
 }
+// Quiet Focus A3: a live update that reorders timeline nodes must not silently
+// discard the user's text selection. Chromium collapses a selection when its
+// containing node is moved (even when the node itself survives), so capture the
+// range as the stable row key plus descendant paths + offsets inside that row,
+// and restore it after the reorder. Paths resolve against equivalent
+// replacement content, so a selection inside a node whose innerHTML was
+// refreshed comes back too. A selection outside the list is never touched, and
+// if the selected row is gone the selection is left alone.
+function captureTimelineSelection(list) {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!list.contains(range.commonAncestorContainer)) return null;
+  const row = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+    ? range.commonAncestorContainer.closest(":scope > *")
+    : range.commonAncestorContainer.parentElement?.closest(":scope > *");
+  const key = row?.dataset?.key;
+  if (!row || !key) return null;
+  const pathOf = node => {
+    const path = [];
+    let current = node;
+    while (current && current !== row) {
+      const parent = current.parentNode;
+      if (!parent) return null;
+      path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
+      current = parent;
+    }
+    return current === row ? path : null;
+  };
+  const start = pathOf(range.startContainer), end = pathOf(range.endContainer);
+  if (!start || !end) return null;
+  return { key, start, startOffset: range.startOffset, end, endOffset: range.endOffset };
+}
+function restoreTimelineSelection(list, saved) {
+  if (!saved) return;
+  const row = list.querySelector(`:scope > [data-key="${CSS.escape(saved.key)}"]`);
+  if (!row) return;
+  const nodeAt = path => {
+    let node = row;
+    for (const index of path) {
+      node = node.childNodes[index];
+      if (!node) return null;
+    }
+    return node;
+  };
+  const clampOffset = (node, offset) => {
+    const max = node.nodeType === Node.TEXT_NODE ? (node.nodeValue || "").length : node.childNodes.length;
+    return Math.max(0, Math.min(offset, max));
+  };
+  const startNode = nodeAt(saved.start), endNode = nodeAt(saved.end);
+  if (!startNode || !endNode) return;
+  try {
+    const range = document.createRange();
+    range.setStart(startNode, clampOffset(startNode, saved.startOffset));
+    range.setEnd(endNode, clampOffset(endNode, saved.endOffset));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch { /* selected content changed shape; leave the selection alone */ }
+}
 function renderContent(selector, html) {
   const container = $(selector);
   if (container._content === html) return;
@@ -1488,6 +1548,9 @@ function renderMessages() {
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
+  // Chromium collapses a selection when its containing node is moved, so the
+  // selection is captured up front and restored after the reorder below.
+  const savedSelection = captureTimelineSelection(list);
   const keep = new Set(messages.map(m => m.id));
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
   const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
@@ -1561,6 +1624,7 @@ function renderMessages() {
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
     while (list.children.length > merged.length) list.lastChild.remove();
   }
+  restoreTimelineSelection(list, savedSelection);
   list.dataset.view = view;
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
@@ -2527,6 +2591,7 @@ $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;
     if (inboxUI.hasPending() && !window.confirm("Sign out and clear unsent drafts? Saved replies stay.")) return;
+    recovery.clear();
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
     try {
@@ -2550,6 +2615,7 @@ $("#signout-button").addEventListener("click", async () => {
   if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
+  recovery.clear();
   const operationId = ++signoutOperationId;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   const isCurrentOperation = () => operationId === signoutOperationId && sameSession(generation, roomId, memberId);
@@ -3423,7 +3489,10 @@ function openWork(sourceId = null, reuseId = null) {
   $("#source-message-id").value = sourceId || "";
   if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
   if (definition) {
-    $("#work-title-input").value = definition.title;
+    // The title field is a single-line input: HTML value sanitization strips newlines,
+    // silently joining words ("Weekly\nagenda" -> "Weeklyagenda"). Normalize whitespace
+    // runs to single spaces instead, matching the message-source path above.
+    $("#work-title-input").value = definition.title.replace(/\s+/g, " ");
     $("#work-done-input").value = definition.definitionOfDone;
   }
   $("#work-reuse-hint").hidden = !definition;
@@ -3473,7 +3542,8 @@ $("#work-recipe-select").addEventListener("change", event => {
   if (!item) return;
   try {
     const recipe = reusableWorkDefinition(item);
-    $("#work-title-input").value = recipe.title;
+    // Single-line title input strips newlines; normalize to spaces (see openWork).
+    $("#work-title-input").value = recipe.title.replace(/\s+/g, " ");
     $("#work-done-input").value = recipe.definitionOfDone;
   } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
 });

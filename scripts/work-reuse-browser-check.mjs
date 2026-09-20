@@ -53,6 +53,10 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
   test(`reuse ${name}: definition-only preview, fresh proposal, stable drafts and keyboard focus`, { timeout: 60000 }, async t => {
     const f = await setup(t, viewport), { page } = f;
     const sourceId = "finished-write", sourceTitle = "Repeat a useful weekly summary\n" + "A".repeat(110), criteria = "Check sources and name an owner.\n" + "Long acceptance criteria. ".repeat(18);
+    // The reuse title field is a single-line input: HTML value sanitization strips newlines,
+    // so the form normalizes whitespace runs to single spaces (bare sanitization would join
+    // words: "summary\nAAAA" -> "summaryAAAA"). The done textarea keeps newlines.
+    const singleLineTitle = "Repeat a useful weekly summary " + "A".repeat(110);
     f.send(T.WORK_PROPOSED, { workItemId: sourceId, title: sourceTitle, definitionOfDone: criteria, accountableMemberId: "owner", mode: "write", sourceMessageId: "test-request", independentVerificationRequired: false, ownerDecisionRequired: false });
     const mutate = (type, data = {}) => f.send(type, { workItemId: sourceId, expectedRevision: f.snapshot().state.workItems[sourceId].revision, ...data });
     mutate(T.WORK_ACCEPTED);
@@ -61,7 +65,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     const before = f.snapshot(), card = page.locator(`[data-work-record-id="${sourceId}"]`);
     await card.waitFor(); assert.equal(await card.locator("[data-reuse-work]").isVisible(), false);
     await f.open(sourceId);
-    assert.equal(await f.title.inputValue(), sourceTitle); assert.equal(await f.done.inputValue(), criteria);
+    assert.equal(await f.title.inputValue(), singleLineTitle); assert.equal(await f.done.inputValue(), criteria);
     assert.equal(await f.title.evaluate(node => document.activeElement === node), true);
     assert.equal(await page.locator("#assignee-select").inputValue(), ""); assert.equal(await page.locator("#verifier-select").inputValue(), "");
     assert.equal(await page.locator("#work-mode-select").inputValue(), "read");
@@ -111,7 +115,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     await f.open(sourceId); await f.people();
     await f.form.locator('button[type="submit"]').click(); await f.form.waitFor({ state: "hidden" });
     const after = f.snapshot(), fresh = Object.values(after.state.workItems).find(work => !Object.hasOwn(before.state.workItems, work.id));
-    assert.equal(fresh.title, sourceTitle); assert.equal(fresh.definitionOfDone, criteria);
+    assert.equal(fresh.title, singleLineTitle); assert.equal(fresh.definitionOfDone, criteria);
     assert.equal(fresh.state, "proposed"); assert.equal(fresh.revision, 0); assert.equal(fresh.mode, "read");
     assert.equal(fresh.independentVerificationRequired, true); assert.equal(fresh.ownerDecisionRequired, true);
     for (const key of ["sourceMessageId", "claim", "receipt", "verification", "decision", "blocker"]) assert.equal(fresh[key], null);
@@ -219,7 +223,10 @@ test("reuse keyboard cycle and CR line endings stay usable without changing the 
   f.send(T.WORK_PROPOSED, { workItemId: "line-endings", title: "Weekly\r\nagenda\rreview", definitionOfDone: "First\r\nsecond\rthird", accountableMemberId: "owner" });
   const original = structuredClone(f.snapshot().state.workItems["line-endings"]);
   await f.open("line-endings");
-  assert.equal(await f.title.inputValue(), "Weekly\nagenda\nreview"); assert.equal(await f.done.inputValue(), "First\nsecond\nthird");
+  // CR line endings in the original become plain newlines in the textarea, and single
+  // spaces in the single-line title input (which cannot hold newlines per HTML value
+  // sanitization). Opening never rewrites the original.
+  assert.equal(await f.title.inputValue(), "Weekly agenda review"); assert.equal(await f.done.inputValue(), "First\nsecond\nthird");
   await page.evaluate(() => document.documentElement.style.fontSize = "200%");
   await page.keyboard.press("Shift+Tab");
   assert.equal(await f.form.locator('button[type="submit"]').evaluate(node => document.activeElement === node), true);
