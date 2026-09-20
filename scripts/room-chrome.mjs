@@ -64,7 +64,13 @@ export async function openSettings(page, panelId) {
     await page.locator("#topbar-settings").click();
   }
   await dialog.waitFor({ state: "visible" });
-  if (panelId) await page.locator(`#${panelId}`).evaluate(node => { node.open = true; });
+  if (panelId) {
+    // UI calming #9 nests spend-panel under room-health; unhide and open the parent first.
+    if (panelId === "spend-panel") {
+      await page.locator("#room-health").evaluate(node => { node.hidden = false; node.open = true; });
+    }
+    await page.locator(`#${panelId}`).evaluate(node => { node.open = true; });
+  }
 }
 
 // Settings is a modal: anything it is left open over cannot be clicked. A
