@@ -1,3 +1,4 @@
+import { generateKeyPairSync, sign } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -16,5 +17,13 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   assert.equal(url.searchParams.get('scope'), 'openid email profile');
   assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   assert.match(res.headers.get('Set-Cookie'), /HttpOnly/);
+  const keys = generateKeyPairSync('rsa', {modulusLength: 2048});
+  const jwk = {...keys.publicKey.export({format: 'jwk'}), kid: 'fixture', alg: 'RS256', use: 'sig'};
+  const now = Math.floor(Date.now()/1000);
+  const encode = x => Buffer.from(JSON.stringify(x)).toString('base64url');
+  const input = encode({alg: 'RS256', kid: 'fixture'}) + '.' + encode({iss: 'https://accounts.google.com', aud: '123-example.apps.googleusercontent.com', sub: '123456789', iat: now, exp: now+3600});
+  const token = input + '.' + sign('RSA-SHA256', Buffer.from(input), keys.privateKey).toString('base64url');
+  const verified = await mf.dispatchFetch(origin + '/__verify', {method: 'POST', headers: {'CF-Connecting-IP': '192.0.2.1'}, body: JSON.stringify({token, jwk})});
+  assert.equal(verified.status, 200, await verified.clone().text());
  } finally { await mf.dispose(); }
 });

@@ -655,7 +655,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // The error path is reserved for genuine failures (denied consent,
           // bad state), which the client surfaces with a real message.
           return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
-        } catch {
+        } catch (error) {
+          // Log only a bounded error identifier, never callback URLs, tokens,
+          // provider bodies, emails, or arbitrary exception messages.
+          const reason = /^[a-z][a-z0-9_]{0,63}$/.test(error?.code || "") ? error.code : "internal_error";
+          console.warn(`google callback failed: ${reason}`);
           return finishGoogle("/?google=error");
         }
       }
