@@ -251,8 +251,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    content-visibility: auto would otherwise skip the (off-screen) message,
    leaving the absolutely positioned menu painted in the wrong place or
    hit-tested through; and the auto stacking context would trap the menu's
-   z-index, letting a later <li> intercept its clicks. */
-.message:has(.message-more[open]) { content-visibility: visible; position: relative; z-index: 40; }
+   z-index, letting a later <li> intercept its clicks. The class is added by
+   the toggle listener in app.js (avoids the expensive :has() selector). */
+.message-menu-open { content-visibility: visible; position: relative; z-index: 40; }
 .message-more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: .78rem; font-weight: 700; padding: .1rem .3rem; border-radius: .35rem; }
 .message-more > summary::-webkit-details-marker { display: none; }
 .message-more > summary:hover { background: rgb(255 255 255 / 6%); }

@@ -2843,8 +2843,16 @@ $("#message-list")?.addEventListener("toggle", e => {
   // is absolutely positioned inside the scroll container, so opening downward
   // from a message near the composer would slide it under the composer form
   // (or out of the clipped area) where its buttons can never be clicked.
+  // Also mark the message so CSS can force it to render (content-visibility)
+  // and lift it above later messages.
   const details = e.target.closest?.("details.message-more");
-  if (!details || !details.open) return;
+  if (!details) return;
+  const message = details.closest(".message");
+  message?.classList.toggle("message-menu-open", details.open);
+  if (!details.open) {
+    details.classList.remove("message-more-up");
+    return;
+  }
   const menu = details.querySelector(".message-more-menu");
   if (!menu) return;
   const summaryRect = details.querySelector("summary").getBoundingClientRect();
