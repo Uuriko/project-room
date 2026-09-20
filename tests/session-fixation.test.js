@@ -156,6 +156,34 @@ test("store: rotation refuses anonymous slots and unknown tokens", async t => {
   assert.equal(kept.account.id, "acct-legacy");
 });
 
+test("store: account-key login + rotation is failure-atomic (QA-Auth 2026-09-19)", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "session-fixation-"));
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => 1700000000000 });
+  t.after(() => store.close());
+  const slot = store.createAccountSessionSlot();
+  store.createAccount("acct-atomic", "test");
+  const accessKey = store.issueAccountAccessKey("acct-atomic");
+  // Fault injection: the rotation throws after the login UPDATE ran. The
+  // shared transaction must roll the login back too — the planted token
+  // must not be left authenticated.
+  const realRotate = store.rotateAccountSessionSlot.bind(store);
+  store.rotateAccountSessionSlot = () => { throw Object.assign(new Error("boom"), { code: "injected" }); };
+  try {
+    assert.throws(() => store.loginAccountSession(slot.token, accessKey, 0, { rotateSlot: true }), /boom/);
+  } finally {
+    store.rotateAccountSessionSlot = realRotate;
+  }
+  const view = store.accountSessionSlot(slot.token);
+  assert.equal(view.account, null, "the failed login leaves the slot anonymous");
+  assert.equal(view.sessionRevision, 0, "the failed login leaves the revision untouched");
+  assert.throws(() => store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+  // And the non-faulted path still rotates atomically.
+  const { token: fresh, session } = store.loginAccountSession(slot.token, accessKey, 0, { rotateSlot: true });
+  assert.notEqual(fresh, slot.token);
+  assert.equal(session.account.id, "acct-atomic");
+  assert.throws(() => store.authenticateAccountSession(slot.token), { code: "unauthenticated" });
+});
+
 test("recovery-code redeem mints a fresh slot token and kills the planted one (QA-Auth 2026-09-19)", async t => {
   const { origin, store } = await startServer(t);
   store.createAccount("acct-recovery-fix", "test");

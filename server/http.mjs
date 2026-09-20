@@ -1598,14 +1598,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
           rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
-          store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
-            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: rotate the slot
+          // atomically with the login (same store transaction). The pre-login
+          // token is dead on success; on failure nothing is upgraded.
+          const { token: freshSlotToken, session: loggedIn } = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+            rotateSlot: true
           });
-          // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: the account-key
-          // path never rotated the slot — a token planted before login stayed
-          // valid after it. Mint a fresh slot token and invalidate the
-          // pre-login one, like every other login path.
-          const { token: freshSlotToken, session: loggedIn } = store.rotateAccountSessionSlot(slotToken);
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           return json(res, 201, accountView(loggedIn));
         }
