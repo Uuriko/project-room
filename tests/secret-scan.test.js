@@ -60,6 +60,18 @@ test("telegram bot token shape is detected with a redacted preview", () => {
   assert.ok(!hit.preview.includes(token.slice(5)), "preview must be redacted");
 });
 
+test("telegram token detection includes non-word endings without partial matches", () => {
+  const pattern = PATTERNS.find(p => p.id === "telegram-bot-token").regex;
+  for (const length of [34, 35]) for (const ending of ["-", "_", "a", "0"]) {
+    const token = [String(123456789), "A".repeat(length - 1) + ending].join(":");
+    for (const wrapped of [token, `https://api.telegram.org/bot${token}/sendMessage`, `"${token}"`]) {
+      assert.equal(pattern.exec(wrapped)?.[0].replace(/^bot/, ""), token);
+      assert.ok(scanText(wrapped).some(f => f.rule === "telegram-bot-token"));
+    }
+    assert.equal(pattern.test(token + "AA"), false, "do not match only a prefix of a longer alphabet run");
+  }
+});
+
 test("regression: telegram fixtures carry no real-shaped bot token", () => {
   const pattern = PATTERNS.find(p => p.id === "telegram-bot-token");
   const globalShape = new RegExp(pattern.regex.source, "g");

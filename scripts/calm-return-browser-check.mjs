@@ -110,7 +110,7 @@ for (const mobile of [false, true]) {
     // attention list is inside a closed dialog by now and focusing it is a
     // no-op - which left focus on the work card and quietly turned the
     // assertion below into a check of the wrong element.
-    await openCatchUp(page);
+    await openCatchUp(page); await ready();
     await attention("return-1").focus();
     now += 600100; await page.clock.fastForward(600100);
     await page.waitForFunction(() => document.querySelector("#catchup-count").textContent.startsWith("8 need you"));
