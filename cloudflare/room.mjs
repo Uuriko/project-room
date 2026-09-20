@@ -155,7 +155,10 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
-    return env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+    const response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+    const authFailure = response.headers.get('X-Room-Auth-Failure');
+    if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}; ${response.headers.get("X-Room-Auth-Diagnostic") || ""}`);
+    return response;
   },
 
   // E1 — Cloudflare Email Routing calls this for every message a routing rule

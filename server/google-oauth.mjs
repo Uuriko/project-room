@@ -64,7 +64,8 @@ export class GoogleSignIn {
     this.#clientId = clientId;
     this.#clientSecret = clientSecret;
     this.#redirectUri = redirect.href;
-    this.#fetch = fetchImpl;
+    // Workers fetch rejects a class instance as its receiver.
+    this.#fetch = (...args) => fetchImpl(...args);
     this.#now = now;
     // Persistent PKCE state store (SQLite-backed in production). Without it
     // the in-memory Map loses state when the Worker isolate is evicted
@@ -104,7 +105,7 @@ export class GoogleSignIn {
 
   async #json(url, init) {
     try {
-      const response = await this.#fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) });
+      const response = await this.#fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15000) });
       if (!response.ok) { await response.body?.cancel(); fail('google_provider_rejected'); }
       if (!response.body) fail('google_provider_invalid');
       const reader = response.body.getReader();

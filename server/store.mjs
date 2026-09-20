@@ -194,6 +194,24 @@ const invitationView = (row, now, { includeScope = false } = {}) => ({
     invitedByMemberId: row.issuer_member_id
   } : {})
 });
+const oauthPendingSchema = `
+  -- OAuth PKCE pending states (google/github). Must survive Worker isolate
+  -- eviction between the provider redirect and the callback, so they live in
+  -- SQLite instead of server memory. Short-lived (10min); pruned on write.
+  CREATE TABLE IF NOT EXISTS oauth_pending_states (
+    state_hash TEXT PRIMARY KEY,
+    provider TEXT NOT NULL CHECK(provider IN ('google','github')),
+    slot_token TEXT NOT NULL,
+    expected_revision INTEGER NOT NULL CHECK(expected_revision>=0),
+    verifier TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    link INTEGER NOT NULL DEFAULT 0 CHECK(link IN (0,1)),
+    used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS oauth_pending_states_expires ON oauth_pending_states(expires_at);
+`;
+
 const invitationSchema = `
   CREATE TABLE IF NOT EXISTS account_credentials (
     hash TEXT PRIMARY KEY,
@@ -220,21 +238,7 @@ const invitationSchema = `
     )
   );
   CREATE INDEX IF NOT EXISTS account_session_slot_account ON account_session_slots(account_id);
-  -- OAuth PKCE pending states (google/github). Must survive Worker isolate
-  -- eviction between the provider redirect and the callback, so they live in
-  -- SQLite instead of server memory. Short-lived (10min); pruned on write.
-  CREATE TABLE IF NOT EXISTS oauth_pending_states (
-    state_hash TEXT PRIMARY KEY,
-    provider TEXT NOT NULL CHECK(provider IN ('google','github')),
-    slot_token TEXT NOT NULL,
-    expected_revision INTEGER NOT NULL CHECK(expected_revision>=0),
-    verifier TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    link INTEGER NOT NULL DEFAULT 0 CHECK(link IN (0,1)),
-    used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS oauth_pending_states_expires ON oauth_pending_states(expires_at);
+  ${oauthPendingSchema}
   CREATE TABLE IF NOT EXISTS membership_invitations (
     id TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
@@ -753,6 +757,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // have no code path to them, and method rows are always scoped to an
       // existing account.
       this.db.exec(accountLoginMethodsSchema);
+      // Existing v35 databases predate persistent OAuth state. Converge this
+      // unfenced additive table on every open, not only invitation migration.
+      this.db.exec(oauthPendingSchema);
       // Direct channel-send journal: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
@@ -1352,8 +1359,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 90 * 86400000) fail(422, "invalid_expiry", "Account session slots expire within 90 days");
     return this.transaction(() => {
       const now = this.now();
-      this.db.prepare("DELETE FROM account_session_slots WHERE expires_at <= ?").run(now);
-      if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots").get().n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
+      this.db.prepare("DELETE FROM account_session_slots WHERE expires_at <= ? AND NOT EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)").run(now);
+      if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots WHERE expires_at > ?").get(now).n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
       const token = key();
       this.db.prepare("INSERT INTO account_session_slots(hash,revision,expires_at,created_at) VALUES(?,0,?,?)").run(hash(token), now + lifetimeMs, now);
       return { token, session: this.accountSessionSlot(token) };
@@ -1490,7 +1497,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         VALUES(?,?,?,?,?,?,?,?)`)
         .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
           row.expires_at, row.authenticated_until, this.now());
-      this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
+      if (this.db.prepare("SELECT 1 FROM share_link_joins WHERE slot_hash=? LIMIT 1").get(slot.credentialHash)) {
+        // Invitation receipts are immutable and retain this foreign key.
+        // Leave an expired, unauthenticated tombstone: the old token cannot
+        // resolve or authenticate, while its historical receipt stays valid.
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
+      } else {
+        this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
+      }
       return { token, session: this.authenticateAccountSession(token) };
     });
   }

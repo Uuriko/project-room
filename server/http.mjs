@@ -627,22 +627,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
           return res.end(bytes);
         };
+        let stage = "provider";
         try {
           const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
           // runs (existing OAuth link → verified-email match → new account).
+          stage = "account_link";
           const subject = String(completed.claims.sub);
           const email = typeof completed.claims.email === "string" ? completed.claims.email : null;
           const linked = completed.link
             ? linkGoogleSubjectToAccount({ subject, email, slotToken: completed.slotToken })
             : linkGoogleSubject({ subject, email });
+          stage = "method_touch";
           store.accountLogins.touchMethodByOAuth("google", subject);
           const oldRoomToken = cookie(req, roomCookieName);
           // QAS-702 (RC-2026-09-19-069): the login mints a fresh slot token
           // and invalidates the pre-login one — a planted token can never
           // authenticate after the victim signs in.
+          stage = "account_session";
           const { token: freshSlotToken, session: loggedIn } = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
             completed.expectedRevision, { method: { kind: "oauth", ref: linked.methodRef },
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
@@ -655,7 +659,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // The error path is reserved for genuine failures (denied consent,
           // bad state), which the client surfaces with a real message.
           return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
-        } catch {
+        } catch (error) {
+          // Log only a bounded error identifier, never callback URLs, tokens,
+          // provider bodies, emails, or arbitrary exception messages.
+          const reason = /^[a-z][a-z0-9_]{0,63}$/.test(error?.code || "") ? error.code : "internal_error";
+          const schema = /(?:no such (?:table|column): |(?:NOT NULL|UNIQUE) constraint failed: )([a-z_][a-z0-9_.]*)/i.exec(error?.message || "");
+          res.setHeader("X-Room-Auth-Diagnostic", `${stage}:${schema ? schema[0] : /FOREIGN KEY constraint failed|CHECK constraint failed|writer fence|writer version/i.exec(error?.message || "")?.[0] || (error?.name === "TypeError" ? "type_error" : "error")}`);
+          res.setHeader("X-Room-Auth-Failure", reason);
+          console.warn(`google callback failed: ${reason}`);
           return finishGoogle("/?google=error");
         }
       }
