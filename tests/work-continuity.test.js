@@ -75,3 +75,19 @@ test("untrusted storage cannot substitute a command and missing targets are not 
   const unavailable = new DraftRecovery({ setItem() { throw Error("quota"); } });
   assert.equal(unavailable.write("scope", f.drafts, "thread"), false);
 });
+
+test("legacy draft channel comes from the exact validated pending payload", () => {
+  const f = fixture();
+  const data = { messageId: "legacy-message", body: "Keep this", toMemberId: "a", replyToId: "thread", channelId: "general" };
+  const pending = draftCommand(null, "message.posted", data);
+  // Live's older writer omitted draft.channelId while saving it in contents.
+  f.drafts.save("thread", { body: data.body, toMemberId: data.toMemberId, replyToId: data.replyToId, pending });
+  f.recovery.write("scope", f.drafts, "thread");
+  const saved = JSON.parse(f.memory.get(f.recovery.key));
+  assert.equal(saved.entries[0][1].channelId, undefined);
+  assert.deepEqual(f.recovery.read("scope", f.state).drafts.get("thread").pending, pending);
+  // Inferring channel is not permission to accept altered command contents.
+  saved.entries[0][1].pending.contents = JSON.stringify({ type: "message.posted", data: { ...data, body: "Substituted" }, causationId: null });
+  f.memory.set(f.recovery.key, JSON.stringify(saved));
+  assert.equal(f.recovery.read("scope", f.state).drafts.get("thread").pending, null);
+});

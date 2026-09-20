@@ -11,7 +11,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openSettings } from "./room-chrome.mjs";
+import { ensureSidebarClosed, ensureSidebarOpen, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport) {
   const f = createAcceptanceFixture();
@@ -76,8 +76,13 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#room-archive-button").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-leave-button").isHidden(), true, "the owner cannot leave");
     await page.locator("#room-archive-button").click();
+    // The note lives in the sidebar, which is behind the Menu button on a
+    // phone, so on mobile the archived state is one tap away rather than on
+    // screen. The toast the archive raises is the immediate signal there.
+    await ensureSidebarOpen(page);
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
     assert.match(await page.locator("#room-archived-note").textContent(), /^Archived .+ · read only\. Reading and export stay available; nothing new is recorded\.$/);
+    await ensureSidebarClosed(page);
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), true);
     assert.equal(await page.locator("#new-work-button").isHidden(), true);
@@ -98,6 +103,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await commons.locator("span").textContent(), "Open", "the other room is unchanged");
     await row.click();
     await page.locator("#main").waitFor({ state: "visible" });
+    await ensureSidebarOpen(page);
     await page.locator("#room-archived-note").waitFor({ state: "visible" });
     assert.equal(await page.locator("#message-input").isDisabled(), true);
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
@@ -131,8 +137,12 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await page.locator("#account-room-title").fill("Not allowed");
   await page.locator("#account-room-purpose").fill("A guest account cannot spawn rooms.");
   await page.locator("#account-room-name").fill("Guest");
+  // The refusal still holds - leaving sets the membership inactive and keeps
+  // its member_accounts row, so this account is a member who does not
+  // administer, not a stranger with no rooms. Only its wording changed, with
+  // RC-2026-09-19-080's "your first room is free".
   await page.locator("#account-room-submit").click();
-  await page.getByText("Creating a room needs membership administration in one of your rooms.", { exact: true }).waitFor();
+  await page.getByText("Your first room is free to create, but more rooms need membership administration in one of your rooms.", { exact: true }).waitFor();
   assert.equal(f.roomCount(), before, "no room was created");
   assert.equal(await page.locator("#account-room-title").inputValue(), "Not allowed", "the form keeps what was typed");
 });

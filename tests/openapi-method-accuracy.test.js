@@ -43,3 +43,14 @@ test("every documented operation is served with its documented method", async ()
   assert.deepEqual(failures.map(f => `${f.method} ${f.path}: ${f.detail}`), []);
   assert.ok(checked >= 100, `checked ${checked}`);
 });
+
+test("concrete() uses a declared vocabulary where the server constrains the segment", () => {
+  assert.equal(
+    concrete("/api/agent-keys/{keyId}/{action}", { keyId: "rak_example", action: "rotate" }),
+    "/api/agent-keys/rak_example/rotate");
+  assert.equal(concrete("/api/agent-keys/{keyId}/{action}"), "/api/agent-keys/probe-id/probe-id",
+    "with nothing declared it is still the dummy, and still matches nothing");
+  assert.equal(concrete("/api/rooms/{roomId}/x", { roomId: "ignored" }), "/api/rooms/commons/x",
+    "the seeded room wins over a declared sample");
+  assert.equal(concrete("/api/x/{id}", { id: "a b/c" }), "/api/x/a%20b%2Fc", "samples are escaped");
+});

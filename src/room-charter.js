@@ -72,19 +72,54 @@ export async function confirmsCharter(receipt, command, roomId, actorId) {
 // Check the entire retained history, including domain state hidden by an old
 // checkpoint. Do not replay unrelated legacy work under today's work rules.
 export function auditCharters(state, history, checkpoint = null) {
-  let current = null, atCheckpoint = null, ownerId = null, owner = null;
+  // Two things this has to model, because the room really does them and the
+  // projection really reflects them. Getting either wrong is not a cosmetic
+  // audit failure: this runs inside auditRecovery, which gates backupRoom and
+  // loops every room, so one unreadable room stops the whole database being
+  // backed up, permanently, with nothing actually corrupt.
+  //
+  // 1. The owner can change. ownership.transferred is a shipped feature. This
+  //    tracked ownerId from room.created alone and never moved it, so the final
+  //    ownerId === state.room.ownerId check failed from the first transfer on.
+  // 2. The owner is not always a human. POST /api/agent-rooms creates a room
+  //    whose founding member is the agent identity itself, kind "agent". The
+  //    owner's member.added used to be checked for kind === "human", so every
+  //    self-serve agent room failed this audit the moment it was created.
+  //
+  // The rule that only a human owner may write room instructions is unchanged.
+  // It was just being asserted in the wrong place: on the owner's membership,
+  // where it condemns the whole room, instead of on the charter event, where it
+  // refuses only that write. It is still enforced below, at CHARTER_TYPE.
+  let current = null, atCheckpoint = null, ownerId = null;
+  const members = new Map(); // memberId -> { kind, active }, so a new owner is known
+  const remember = event => {
+    if (!id(event.data.memberId)) return;
+    members.set(event.data.memberId, { kind: event.data.kind ?? "human", active: true });
+  };
   for (const row of history) {
     const e = typeof row.body === "string" ? JSON.parse(row.body) : row.event;
     if (e.type === "room.created") {
       check(ownerId === null && id(e.data.ownerId) && e.actorId === e.data.ownerId && e.roomId === state.room.id && e.data.roomId === e.roomId);
       ownerId = e.data.ownerId;
     }
-    if (e.type === "member.added" && e.data.memberId === ownerId) {
-      check(owner === null && e.actorId === ownerId && e.data.kind === "human" && e.roomId === state.room.id);
-      owner = { kind: e.data.kind, active: true };
+    if (e.type === "member.added") {
+      if (e.data.memberId === ownerId) {
+        check(!members.has(ownerId) && e.actorId === ownerId && e.roomId === state.room.id);
+      }
+      remember(e);
     }
-    if (e.type === "member.access_changed" && e.data.memberId === ownerId) { check(owner && typeof e.data.active === "boolean"); owner.active = e.data.active; }
+    // An invited member can later be handed the room, so they have to be known.
+    if (e.type === "member.joined_via_invitation") remember(e);
+    if (e.type === "member.access_changed" && members.has(e.data.memberId) && typeof e.data.active === "boolean") {
+      members.get(e.data.memberId).active = e.data.active;
+    }
+    if (e.type === "ownership.transferred") {
+      check(ownerId !== null && e.actorId === ownerId && id(e.data.toMemberId) && members.has(e.data.toMemberId),
+        "Invalid ownership transfer");
+      ownerId = e.data.toMemberId;
+    }
     if (e.type === CHARTER_TYPE) {
+      const owner = members.get(ownerId);
       check(e.roomId === state.room.id && e.actorId === ownerId && owner?.kind === "human" && owner.active === true, "Invalid room instructions author");
       current = charterFromEvent(e, current);
     }

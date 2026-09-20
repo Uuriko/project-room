@@ -12,22 +12,16 @@ import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mj
 import { fillAccessKey } from "./auth-signin.mjs";
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-// Pins track the current store schema, not fixed commits: a packaged runtime can only
-// open a fixture of its own schema generation (writer fence), so static pins age out at
-// every schema bump. The candidate defaults to HEAD and the fallback to the most recent
-// first-parent ancestor with the same schema. Explicit env pins still qualify an exact pair.
+// A schema number does not imply browser-format compatibility. In GitHub's
+// synthetic merge commit, first-parent selected main rather than our qualified
+// checkpoint. Keep this development compatibility baseline explicit. Production
+// recovery uses the retained maintenance version; this is not a provider receipt.
 const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
 const schemaOf = ref => Number(/export const STORE_SCHEMA_VERSION = (\d+);/.exec(git('show', `${ref}:server/writer-fence.mjs`))?.[1]);
 const headCommit = git('rev-parse', 'HEAD');
 const currentSchema = schemaOf(headCommit);
-const sameSchemaAncestor = () => {
-  for (const sha of git('log', '--first-parent', '--format=%H', '-n', '120', `${headCommit}~1`).split('\n').filter(Boolean)) {
-    try { if (schemaOf(sha) === currentSchema) return sha; } catch { /* writer-fence path predates this history */ }
-  }
-  return null;
-};
 const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? headCommit;
-const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? sameSchemaAncestor();
+const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? '4a2490bdef0be2858901f1675b3177454181d87e';
 
 for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'touch' : 'desktop'}: drafts survive and sign-out clears private state`, { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-draft-switch-')), fixture = createAcceptanceFixture();
@@ -38,10 +32,6 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   };
   t.after(async () => { await browser?.close(); await stop(); fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
-  if (!fallbackCommit) {
-    t.skip(`no packaged same-schema (v${currentSchema}) fallback ancestor yet; the gate re-engages on the next main commit`);
-    return;
-  }
   assert.notEqual(candidateCommit, fallbackCommit, 'Qualify a genuinely distinct fallback');
   const packages = new Map([['candidate', candidateCommit], ['fallback', fallbackCommit]].map(([name, commit]) => {
     const path = join(directory, name), receipt = createRuntimePackage({ repository, commit, destination: path });

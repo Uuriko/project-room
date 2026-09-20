@@ -15,6 +15,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `GET /api/guest-agent-links` | none | static contract documents, no room data |
 | `POST /api/agent-identities` | none | creates a bare identity; an identity alone grants no room access; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`, no row written) |
 | `POST /api/identity-create` | none | alias of `POST /api/agent-identities` (same handler and rate bucket; www `/room/api/identity-create`) |
+| `GET /api/agent-identities/{identityId}/verification` | none | read-only verification tier; discloses only whether an identity id the caller already holds is attested, and by whom; grants no room access |
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
 | `GET /api/agent-invites/preview` | capability (invite code) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 for unknown codes |
 | `POST /api/access-requests` | none (identity must exist) | creates a pending request; nothing auto-approves; 5 per identity per hour; unknown identity/room is a bare 404 |

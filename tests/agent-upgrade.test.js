@@ -11,6 +11,22 @@ import { RoomStore } from "../server/store.mjs";
 import { AgentConnections } from "../server/agent-connections.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
+// Channels arrived after these baselines were frozen, and opening an old
+// database materialises the default "general" channel into each room's stored
+// projection. That is the one intended change an upgrade makes to a stored
+// projection. It is asserted exactly rather than waved through, and stripped so
+// that every other byte still has to match: the point of these tests is that an
+// upgrade does not quietly rewrite data.
+function projectionWithoutAddedChannel(afterJson, beforeJson) {
+  const after = JSON.parse(afterJson), before = JSON.parse(beforeJson);
+  if (Object.hasOwn(before, "channels") || !Object.hasOwn(after, "channels")) return afterJson;
+  assert.deepEqual(Object.keys(after.channels), ["general"], "an upgrade may add the default channel and nothing else");
+  assert.equal(after.channels.general.name, "general");
+  assert.equal(after.channels.general.archivedAt, null);
+  delete after.channels;
+  return JSON.stringify(after);
+}
+
 for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, "33c817a911ebb9fb0310592cac77d8e61380541d"], [26, v26IdentitiesBaseline], [27, v27LifecycleBaseline]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v35`, async t => {
   const root = mkdtempSync(join(tmpdir(), "room-agent-upgrade-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -23,6 +39,8 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   const before = oldAudit(f.store), catalog = () => f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const oldCatalog = catalog(), cached = f.store.db.prepare("UPDATE accounts SET revision=revision WHERE id=?");
   const roomsBefore = f.store.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
+  const hasAccounts = Boolean(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'").get());
+  const accountsBefore = hasAccounts ? f.store.db.prepare("SELECT * FROM accounts ORDER BY id").all() : [];
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const verify = AgentConnections.prototype.verifyHistory;
   let observedVersion;
@@ -35,9 +53,62 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
   // v28 adds rooms.archived_at, so the rooms digest differs by construction; its rows are compared column-wise below.
-  assert.deepEqual(current.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all(), roomsBefore);
+  // Channels arrived after these baselines were frozen, and opening an old
+  // database materialises the default "general" channel into each room's
+  // stored projection. That is a real, intended migration, so it is asserted
+  // exactly rather than tolerated: every other byte of a stored projection
+  // must still survive an upgrade untouched, which is what this check is for.
+  const roomsAfter = current.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
+  assert.equal(roomsAfter.length, roomsBefore.length, "an upgrade neither adds nor drops rooms");
+  roomsAfter.forEach((row, index) => {
+    const original = roomsBefore[index];
+    assert.equal(row.id, original.id);
+    assert.equal(row.sequence, original.sequence, "an upgrade never moves a room's sequence");
+    assert.deepEqual(
+      JSON.parse(projectionWithoutAddedChannel(row.projection, original.projection)),
+      JSON.parse(original.projection),
+      `${row.id}: nothing but the default channel may change in a stored projection`);
+  });
   assert.deepEqual(current.db.prepare("SELECT id FROM rooms WHERE archived_at IS NOT NULL").all(), []);
-  const comparable = row => row.table !== "rooms" && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
+  // accounts gained display_name, avatar_url and onboarded, so its digest
+  // differs by construction exactly as the rooms digest does. Both are left out
+  // of the blanket digest comparison below and compared row by row here, which
+  // is the stronger statement: a column the baseline had must survive an
+  // upgrade untouched, and a column the upgrade adds must carry the value the
+  // migration promises rather than whatever SQLite defaulted to.
+  if (hasAccounts) {
+    const accountsAfter = current.db.prepare("SELECT * FROM accounts ORDER BY id").all();
+    const memberAccounts = new Set(current.db.prepare("SELECT account_id FROM member_accounts").all().map(row => row.account_id));
+    // What a row that predates each added column must carry. A function rather
+    // than a value because ever_had_room is backfilled from existing
+    // memberships instead of taking its declared default. A column with no
+    // entry here fails on purpose and says so: a migration writing into rows
+    // that already existed is the thing this test is here to notice.
+    const promised = {
+      display_name: () => null,
+      avatar_url: () => null,
+      onboarded: () => 1, // already been through whatever onboarding existed
+      ever_had_room: row => memberAccounts.has(row.id) ? 1 : 0,
+    };
+    assert.deepEqual(accountsAfter.map(row => row.id), accountsBefore.map(row => row.id), "an upgrade neither adds nor drops accounts");
+    accountsAfter.forEach((row, index) => {
+      const original = accountsBefore[index];
+      for (const column of Object.keys(row).filter(column => !Object.hasOwn(original, column))) {
+        assert.ok(promised[column], `accounts.${column} is new since v${version}; say here what a row older than it must carry`);
+        assert.deepEqual(row[column], promised[column](row), `${row.id}.${column}`);
+      }
+      for (const column of Object.keys(original)) assert.deepEqual(row[column], original[column], `${row.id}.${column} changed during the upgrade`);
+    });
+  }
+  // A table the baseline never had has nothing to compare against, so the set
+  // is derived from the baseline rather than listed. The hand-maintained list
+  // below is kept for a different reason - those tables exist in the baseline
+  // but this test mutates them - but it had also been absorbing every new
+  // table, and three (share_link_codes, handoff_envelopes,
+  // agent_webhook_deliveries) had landed without being added, failing all
+  // twenty versions on that alone. Deriving existence cannot rot the same way.
+  const baselineTables = new Set(before.tables.map(entry => entry.table));
+  const comparable = row => row.table !== "rooms" && row.table !== "accounts" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
@@ -135,7 +206,10 @@ test("genuine v11 legacy request-like fields stay ordinary, while reserved marke
           for (const [table, rows] of Object.entries(before.tables)) {
             if (table !== "rooms") { assert.deepEqual(records().tables[table], rows); continue; }
             // v28 adds rooms.archived_at, null for every pre-v28 room; every other column is unchanged.
-            const after = records().tables.rooms.map(({ archived_at, ...rest }) => (assert.equal(archived_at, null), rest));
+            const after = records().tables.rooms.map(({ archived_at, ...rest }, index) => {
+              assert.equal(archived_at, null);
+              return { ...rest, projection: projectionWithoutAddedChannel(rest.projection, rows[index].projection) };
+            });
             assert.deepEqual(after, rows.map(row => ({ ...row })));
           }
           assert.ok(Object.entries(records().tables).filter(([table]) => table.startsWith("private_inbox_")).every(([, rows]) => rows.length === 0));

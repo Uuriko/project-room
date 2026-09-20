@@ -129,9 +129,6 @@ export class AccessRequests {
     const rid = requestId ?? `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
     if (!REQUEST_ID_PATTERN.test(rid)) fail(422, "invalid_request", "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
 
-    const limit = this.rateLimiter.check(`access-request:${identityId}`);
-    if (!limit.allowed) fail(429, "rate_limited", limit.message);
-
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid);
       if (existing) {
@@ -144,6 +141,15 @@ export class AccessRequests {
       // same to the caller.
       const identity = this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=?").get(identityId);
       if (!identity) fail(404, "not_found", "No such room or identity");
+      // Past the idempotent retry and past the existence check, deliberately.
+      // identityId is caller-supplied on an unauthenticated route, so keying
+      // the limiter on it before proving the identity exists let one address
+      // void the documented 5/hour bound by changing a character per request,
+      // and allocated a bucket per made-up value that was never released.
+      // Keyed here, the space is bounded by the identities table. A retry that
+      // returns the original request creates nothing, so it costs nothing.
+      const limit = this.rateLimiter.check(`access-request:${identityId}`);
+      if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId);
       if (!roomExists) fail(404, "not_found", "No such room or identity");
       // Already a member? Then there is nothing to request.

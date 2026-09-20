@@ -49,7 +49,13 @@ export function routeDocsDrift({ http, pluginRoutes, openapi }) {
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
-  if (pluginRoutes !== undefined) {
+  // Required, not optional. Routes live in two files now, and a caller that
+  // passed only http.mjs got a clean-looking report in which every plugin
+  // route was "documented but not served" - which is how the test beside this
+  // drifted into failing on a dozen phantom routes while the gate itself was
+  // green. An omission should be an error, not a wrong answer.
+  if (typeof pluginRoutes !== "string") throw new Error("routeDocsDrift needs server/agent-plugin-routes.mjs; routes are served from two files");
+  {
     for (const template of pluginRouteTemplates(pluginRoutes)) {
       const key = templateKey(template);
       if (!served.has(key)) served.set(key, template);

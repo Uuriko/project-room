@@ -1,5 +1,5 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
-import { validId, WORK_REVISION_TYPES } from "../src/events.js";
+import { PERMISSIONS, validId, WORK_REVISION_TYPES } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "../src/help-offers.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
@@ -54,6 +54,27 @@ export function auditWorkHelp(state, history, checkpoint = null) {
   for (const { sequence, event: e } of events) {
     const d = e.data;
     if (e.type === "room.created") { check(!projected.room); projected.room = { id: e.roomId, ownerId: d.ownerId }; }
+    // The owner can change, and compare() holds actual.room.ownerId against
+    // this one. Taking it from room.created alone meant the first
+    // ownership.transferred in a room that uses help failed this audit
+    // permanently - the same mistake auditCharters made, found the same way.
+    if (e.type === "ownership.transferred") {
+      check(projected.room && validId(d.toMemberId) && own(projected.members, d.toMemberId) && e.actorId === projected.room.ownerId);
+      // A transfer is not only a new ownerId. src/events.js transferOwnership
+      // gives the new owner the full permission set and bumps their revision,
+      // and strips manage_members and decide from an outgoing AGENT owner,
+      // bumping theirs. compare() holds permissions and revision for every
+      // participant, so all of it has to be replayed or none of it matches.
+      const incomingOwner = projected.members[d.toMemberId];
+      const outgoingOwner = projected.members[projected.room.ownerId];
+      incomingOwner.permissions = [...PERMISSIONS];
+      incomingOwner.revision += 1;
+      if (outgoingOwner && outgoingOwner.kind === "agent") {
+        outgoingOwner.permissions = outgoingOwner.permissions.filter(name => !["manage_members", "decide"].includes(name));
+        outgoingOwner.revision += 1;
+      }
+      projected.room.ownerId = d.toMemberId;
+    }
     if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
       check(validId(d.memberId) && !own(projected.members, d.memberId) && Array.isArray(d.permissions));
       projected.members[d.memberId] = { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",

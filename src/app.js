@@ -267,8 +267,18 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     $("#work-dialog").close();
+    $("#room-overview-dialog").close();
+    $("#room-overview-title").textContent = "Room overview";
+    $("#room-overview-purpose").textContent = "";
+    $("#room-overview-content").replaceChildren();
+    delete $("#room-overview-content")._content;
     if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    // Every disclosure goes back to how index.html authored it. All of these
+    // are authored closed except People, which is authored open - closing that
+    // one was not a reset, it left the next person to sign in on this browser
+    // with a collapsed rail the markup says should be open.
+    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    $("#people-panel").open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
     agentPauses = new Map(); armedRemoval = null;
@@ -414,7 +424,7 @@ function showAccountWorkspace() {
   }
   inboxUI.sync();
   if (!state) {
-    if (location.hash === "#pr-view/rooms") inboxUI.showRoomList();
+    if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
     else inboxUI.open();
   }
 }
@@ -542,7 +552,13 @@ $("#room-archive-button").addEventListener("click", async () => {
   button.disabled = true;
   try {
     await client.send({ id: crypto.randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
-    if (sameSession(generation, roomId, memberId)) notice("Room archived. It is read only now; export stays available.");
+    if (sameSession(generation, roomId, memberId)) {
+      // Everything this changed is outside the dialog the button lives in: the
+      // read-only note in the room chrome, the composer, the switcher. Leaving
+      // the modal up hides its own result behind itself.
+      if ($("#settings-dialog")?.open) $("#settings-dialog").close();
+      notice("Room archived. It is read only now; export stays available.");
+    }
   } catch (error) {
     if (!sameSession(generation, roomId, memberId)) return;
     notice(error.code === "room_archived" ? "This room is already archived." : "Couldn’t archive the room. Refresh and try again.", true);
@@ -558,6 +574,9 @@ $("#room-leave-button").addEventListener("click", async () => {
   try {
     await client.send({ id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
       data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } });
+    // Same reason as archiving: access to this room has ended, and what the
+    // member sees next is the account's room list, not this dialog.
+    if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   } catch (error) {
     if (!sameSession(generation, roomId, member.id)) return;
     notice(error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
@@ -589,7 +608,7 @@ $("#account-room-form").addEventListener("submit", async event => {
         : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
-$("#choose-room").addEventListener("click", () => inboxUI.showRoomList());
+$("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
@@ -827,7 +846,10 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "your Second / their agents / one Room. @mention uses Connect Wake/Pull once Quill's RC-051 lands. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
+  // QA-UX 2026-09-19: keep the calm merged hint (plain language, no
+  // codenames/API docs). The @mention + receipts loop is taught by the
+  // wake line and room guide instead of this one sentence.
+  if (hint) hint.textContent = "Invite people or add an agent to work together.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -838,6 +860,10 @@ function showRoomGuide() {
   if (!guide) return;
   try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
   if (state?.messages?.length) { dismissRoomGuide(); return; }
+  // QA-UX 2026-09-19: the inbox sentence is noise for room-key members —
+  // they have no inbox (account sessions only). Hide it there.
+  const inboxNote = $("#room-guide-inbox");
+  if (inboxNote) inboxNote.hidden = !accountClient.session?.authenticated;
   guide.hidden = false;
 }
 function syncComposerChrome() {
@@ -1345,6 +1371,7 @@ function render() {
   syncChannelChrome();
   renderMessages();
   syncRequestComposer();
+  renderRoomOverview();
   renderSpendAllowance();
   syncReports();
   $("#event-count").textContent = `${client.sequence}`;
@@ -1408,13 +1435,24 @@ function renderMessages() {
   const sameView = list.dataset.view === view;
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
-  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-  const anchor = [...list.children].find(e => e.getBoundingClientRect().bottom > list.getBoundingClientRect().top);
+  const pageScroll = list.scrollHeight <= list.clientHeight;
+  const listTop = Math.max(0, list.getBoundingClientRect().top);
+  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
+    : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const anchor = [...list.children].find(e => {
+    const bounds = e.getBoundingClientRect();
+    return bounds.bottom > listTop && (!pageScroll || bounds.top < innerHeight);
+  });
   const anchorOffset = anchor?.getBoundingClientRect().top;
   const focused = list.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
   const focusedFeedback = focused?.closest(".draft-feedback");
+  // A control inside a work card is restored by setTimelineWorkNode when that
+  // card is re-rendered, but the interleave can then move the card, and moving
+  // a node drops focus. Remembered here, restored once at the end, when every
+  // node is in its final place.
+  const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
@@ -1477,7 +1515,11 @@ function renderMessages() {
       }
       node._content = html;
     }
-    if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    // Position is settled once, below, after work cards are interleaved.
+    // Placing message nodes at their message index here put them in front of
+    // the work cards, which the interleave then had to undo - two moves per
+    // render for nodes that were already in the right place, and a focused
+    // control inside a moved node loses focus.
     ordered.push(node);
   });
   // Interleave work cards chronologically into the single timeline.
@@ -1507,7 +1549,7 @@ function renderMessages() {
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
   else {
-    if (anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
+    if (!pageScroll && anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
     newVisibleMessages += newCount;
   }
   if (focused && !focused.isConnected) {
@@ -1516,9 +1558,18 @@ function renderMessages() {
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
     replacement?.focus({ preventScroll: true });
   }
+  // Only when the update dropped focus to the body: a member who moved focus
+  // themselves while the render was in flight keeps it.
+  if (focusedKey && document.activeElement === document.body) {
+    [...list.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusedKey)?.focus({ preventScroll: true });
+  }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   renderPinned();
+  // On narrow screens the page scrolls instead of the timeline. Keep the
+  // visible row steady after both message and new-message controls change.
+  if (sameView && pageScroll && (!nearBottom || focused) && anchor?.isConnected)
+    window.scrollBy({ top: anchor.getBoundingClientRect().top - anchorOffset, behavior: "instant" });
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
 function draftFeedbackHTML(message) {
@@ -1580,7 +1631,7 @@ function renderSearch(now = Date.now()) {
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: activeChannelId, pending: pendingMessage,
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage,
     ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
@@ -1749,6 +1800,7 @@ function revealMessage(id) {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   inboxUI?.showRooms();
   const message = conversation.byId.get(id);
+  if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
@@ -1767,20 +1819,30 @@ function focusRecord(node) {
 function workRecord(id) {
   return $(`#message-list [data-work-record-id="${CSS.escape(id)}"]`);
 }
-function revealWork(id) {
-  if (!state?.workItems[id] || busy) return;
+// A work destination is on the room timeline, never inside the current
+// message thread. Leave the thread through the normal draft-saving path before
+// looking up its card; close attention/settings overlays before focusing it.
+function revealWorkTimeline(id) {
+  if (!state?.workItems[id] || busy) return null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-  const card = workRecord(id);
-  if (card) card.querySelector(".work-details").open = true;
+  inboxUI?.showRooms();
+  switchThread(null);
+  const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
+  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
+  return workRecord(id);
+}
+function revealWork(id) {
+  const card = revealWorkTimeline(id);
+  if (!card) return;
+  card.querySelector(".work-details").open = true;
   focusRecord(card);
 }
 function revealDrafts(id) {
-  if (!state?.workItems[id] || busy) return;
-  selectWorkView("work");
-  const choices = workRecord(id)?.querySelector('.work-drafts');
+  const card = revealWorkTimeline(id);
+  if (!card) return;
+  const choices = card.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }
-  inboxUI?.showRooms();
   choices.open = true;
   const summary = choices.querySelector('summary');
   summary.focus({ preventScroll: true });
@@ -1810,8 +1872,28 @@ function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
 function revealLocationHash() {
-  if (!state || !location.hash) return;
+  if (!location.hash) return;
   const hash = location.hash;
+  // Account destinations also work before any room has been opened.
+  if (accountClient.session?.authenticated) {
+    const requestedRoom = selectedRoomFromLocation();
+    // Destination history must not show the current room under another room's
+    // URL or silently clear drafts to switch sessions. Re-enter via the picker,
+    // whose existing room-switch flow confirms pending writing and access.
+    if (state && requestedRoom && requestedRoom !== session.roomId && hash === "#pr-view/rooms") {
+      history.replaceState(null, "", "?account=1#pr-view/rooms");
+      inboxUI?.showRoomList();
+      return;
+    }
+    if (hash === "#pr-view/room-list") { inboxUI?.showRoomList(); return; }
+    if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
+    if (hash === "#pr-view/rooms") {
+      if (accountHomeFromLocation()) inboxUI?.showRoomList();
+      else inboxUI?.showRooms();
+      return;
+    }
+  }
+  if (!state) return;
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {
@@ -1820,8 +1902,6 @@ function revealLocationHash() {
     }
     return;
   }
-  if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
-  if (hash === "#pr-view/rooms") { inboxUI?.showRooms(); return; }
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
@@ -2075,39 +2155,12 @@ function setTimelineWorkNode(wnode, html) {
   wnode.innerHTML = html; wnode._content = html;
   restoreDisclosures(wnode, saved);
 }
-// Syncs work cards into the message timeline without disturbing messages.
-// Used by renderReturnBrief for work updates that bypass renderMessages.
+// Use the same interleave for background card refreshes and message arrivals.
+// Different tie rules moved unchanged cards twice and discarded text selection.
 function syncTimelineWork() {
-  const list = $("#message-list");
-  if (!list || !state) return;
+  if (!state) return;
   ensureHandoffEnvelopes();
-  if (currentThreadId) { list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => n.remove()); return; }
-  const entries = timelineWorkEntries().filter(e => e.channelId === activeChannelId);
-  const byId = new Map(entries.map(e => [e.item.id, e]));
-  const stale = [];
-  list.querySelectorAll(":scope > [data-work-timeline]").forEach(n => {
-    const id = n.getAttribute("data-work-timeline");
-    if (byId.has(id)) byId.get(id).node = n; else stale.push(n);
-  });
-  stale.forEach(n => n.remove());
-  const tsById = new Map(state.messages.map(m => [m.id, Date.parse(m.createdAt) || 0]));
-  const workTs = new Map(entries.map(e => [e.item.id, e.ts]));
-  const childTs = child => child.hasAttribute("data-work-timeline")
-    ? workTs.get(child.getAttribute("data-work-timeline")) ?? 0
-    : tsById.get(child.dataset.key) ?? 0;
-  for (const entry of entries) {
-    let wnode = entry.node;
-    if (!wnode) { wnode = makeTimelineWorkNode(entry); entry.node = wnode; }
-    setTimelineWorkNode(wnode, entry.html);
-    let ref = null;
-    for (const child of list.children) {
-      if (child === wnode) continue;
-      if (childTs(child) > entry.ts) { ref = child; break; }
-    }
-    if (wnode.parentNode !== list || wnode.nextSibling !== ref) list.insertBefore(wnode, ref);
-  }
-  const emptyNote = list.querySelector(":scope > .empty-note");
-  if (emptyNote && (entries.length || list.querySelector(":scope > [data-message-record-id]"))) emptyNote.remove();
+  renderMessages();
 }
 async function submit(form, fn, { failureHint } = {}) {
   if (busy) return;
@@ -2330,6 +2383,46 @@ $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"))
 $("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
 $("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
 $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
+// Connecting an agent is the thing this room does that a chat app does not,
+// and the sign-in screen showed no sign of it: "Welcome.", one Google button,
+// and a More options disclosure hiding everything else. So the prompt sits
+// here, outside that disclosure, readable before anything is clicked, and the
+// explanation is what goes behind a summary instead.
+//
+// The address is built from location.origin rather than written down, so it
+// always names the host the reader is actually on. A hardcoded one goes stale
+// the first time this is served elsewhere, and a staging address in
+// agent-facing copy is already something live-audit fails the build for.
+const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and follow it to join my Project Room.`;
+function fillJoinAgent() {
+  const field = $("#join-agent-prompt");
+  if (!field) return;
+  field.value = joinAgentPrompt();
+  for (const [id, path] of [["#join-agent-packet", "/llms.txt"], ["#join-agent-card", "/.well-known/agent.json"], ["#join-agent-kits", "/kits.txt"]]) {
+    const link = $(id);
+    if (link) link.href = `${location.origin}${path}`;
+  }
+}
+fillJoinAgent();
+$("#join-agent-copy")?.addEventListener("click", async () => {
+  const field = $("#join-agent-prompt"), status = $("#join-agent-status");
+  // .form-status is display:none until it carries .visible, so setting the
+  // text alone writes a message nobody sees.
+  const say = text => { if (status) { status.textContent = text; status.classList.add("visible"); } };
+  try {
+    const write = navigator.clipboard?.writeText?.(field.value);
+    if (!write) throw new Error("clipboard");
+    // The same bound the rest of the app uses: a clipboard promise that never
+    // settles must not leave the control looking stuck.
+    await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 800))]);
+    say("Copied. Paste it into your agent.");
+  } catch {
+    // This fallback works precisely because the prompt is visible: select it
+    // for them and say so, rather than failing with nothing to copy.
+    field.select?.();
+    say("Copy the selected text.");
+  }
+});
 $("#access-key-reveal")?.addEventListener("click", () => {
   const field = $("#access-key"), show = field.type === "password";
   field.type = show ? "text" : "password";
@@ -2508,8 +2601,9 @@ $("#message-form").addEventListener("submit", e => {
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
   const previous = pendingMessage?.command?.data;
-  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && previous.channelId === content.channelId;
-  const data = { messageId: unchanged ? previous.messageId : crypto.randomUUID(), ...content };
+  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId;
+  // Preserve the exact legacy payload, including an omitted default channel.
+  const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
   const generation = client.generation, threadId = currentThreadId;
@@ -3034,6 +3128,11 @@ $("#main").addEventListener("click", e => {
     revealRoom();
   }
 });
+// History can change the room query as well as the fragment. Those entries
+// need popstate dispatch even when the browser does not emit hashchange.
+window.addEventListener("popstate", () => {
+  if (location.hash.startsWith("#pr-view/")) revealLocationHash();
+});
 window.addEventListener("hashchange", () => {
   const fragment = consumeInvitationFragment();
   if (fragment) openInvitation(fragment);
@@ -3315,7 +3414,7 @@ function openWork(sourceId = null, reuseId = null) {
   const recipeSelect = $("#work-recipe-select");
   if (definition || sourceId) $("#work-recipe-field").hidden = true;
   else {
-    const recipes = workRecipeOptions(state.workItems);
+    const recipes = workRecipeOptions(state.workItems, { eventLog: state.eventLog });
     recipeSelect.replaceChildren(new Option("Blank outcome", ""));
     for (const recipe of recipes) recipeSelect.add(new Option(recipe.title.replace(/\s+/g, " ").slice(0, 80), recipe.workItemId));
     $("#work-recipe-field").hidden = recipes.length === 0;
@@ -3468,6 +3567,37 @@ let resultView = null;
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
+// Overview is a read-only projection of the authorized room snapshot. Keep
+// discussion and work canonical: each entry opens the existing source surface.
+function renderRoomOverview() {
+  if (!state || !$("#room-overview-dialog").open) return;
+  setText("#room-overview-title", `${state.room.title} · Overview`);
+  setText("#room-overview-purpose", state.room.purpose || "No purpose recorded yet.");
+  const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
+  const steps = contributionSteps(state, session.member.id).slice(0, 3);
+  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED).slice(-3).reverse();
+  const results = completedResults(state).slice(0, 3);
+  const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
+  renderContent("#room-overview-content",
+    section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
+    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.data.statement)}</p>${link("message", e.data.sourceMessageId, "Open discussion", e.id)}<p class="form-hint">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet."));
+}
+$("#room-overview-open").addEventListener("click", () => {
+  if (!state || busy) return;
+  $("#room-overview-dialog").showModal();
+  renderRoomOverview();
+});
+$("#room-overview-close").addEventListener("click", () => $("#room-overview-dialog").close());
+$("#room-overview-dialog").addEventListener("click", event => {
+  // Close before the existing source-link handler moves focus to the timeline.
+  if (!busy && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+    && event.target.closest("[data-open-work], [data-open-message]")) {
+    $("#room-overview-dialog").close();
+    $("#main").classList.remove("sidebar-open");
+    $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  }
+});
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;
@@ -3501,12 +3631,13 @@ function resultStatus() {
   const item = state.workItems[view.workItemId];
   const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
   $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
+    : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
 }
 function closeResult(restore = true) {
   const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
-  $("#result-status").textContent = ""; $("#result-body").textContent = "";
+  $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true;
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
@@ -3535,7 +3666,7 @@ function readResult(e) {
     if (fromResults && !currentResult(item)) return;
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
       fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
+    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
     $("#result-original").hidden = true;
     const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
     $("#result-dialog").showModal();
@@ -3543,7 +3674,12 @@ function readResult(e) {
     client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
       if (!owns() || !value) return;
       if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
-      $("#result-body").textContent = value.result.text.body;
+      // Text taken out of the room is served as an absence, so say so rather
+      // than showing an empty box: the result was still reported and verified,
+      // and the receipt still names what it was verified against.
+      view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
+      $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+      $("#result-body").hidden = Boolean(view.withdrawn);
       const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === item.id
         && message.body === value.result.text.body);
       const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
@@ -3557,6 +3693,14 @@ function readResult(e) {
           if (!owns() || !previous) return;
           if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
           const before = previous.result?.text?.body;
+          if (previous.result?.text?.withdrawnAt || view.withdrawn) {
+            diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
+              previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
+                : "This version's text has been withdrawn, so the two cannot be compared."
+            } Previous approval never carries over.</p>`;
+            diffBox.hidden = false;
+            return;
+          }
           if (typeof before !== "string") throw new Error("Previous version has no exact text");
           const rows = diffResultLines(before, value.result.text.body);
           const note = "Previous approval never carries over; review the exact new text.";

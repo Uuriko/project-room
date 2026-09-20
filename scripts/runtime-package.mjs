@@ -62,6 +62,7 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-quarantine-ui.js"); // quarantine review surface (imported by src/inbox-ui.js)
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
+optional.push("deploy/public-assets.mjs"); // Shared live manifest; historical packages predate it.
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("server/agent-identities.mjs");

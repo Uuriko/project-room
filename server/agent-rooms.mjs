@@ -93,8 +93,6 @@ export class AgentRooms {
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
       if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
-      const limit = this.createLimiter.check(identity.identityId);
-      if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const memberId = identity.identityId;
       if (this.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
@@ -104,6 +102,17 @@ export class AgentRooms {
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true, next: roomCreateNext(roomId) };
       }
+      // The creation budget is spent here, past the idempotency short-circuit,
+      // because it is a budget on rooms created and a replay creates none.
+      // Charging it above meant a client retrying a dropped response - the one
+      // thing the roomId idempotency key exists for - paid for rooms it never
+      // made: with the production capacity of 3 and a refill of one token per
+      // eight hours, one real creation plus two identical retries locked the
+      // identity out of creating rooms for eight hours. Flooding is already
+      // bounded before this point by the per-address limit on the route, and
+      // the duplicate lookup above is a single indexed read.
+      const limit = this.createLimiter.check(identity.identityId);
+      if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;
       if (createdCount >= AGENT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
       const at = new Date(this.store.now()).toISOString();

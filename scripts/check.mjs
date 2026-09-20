@@ -51,9 +51,7 @@ if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
 // Room Wiki gate (D2): the experience-compiler planes stay schema-valid and ordered.
 const wiki = spawnSync(process.execPath, ["scripts/check-wiki.mjs"], { stdio: "inherit" });
 if (wiki.status !== 0) process.exit(wiki.status || 1);
-// Full test suite: skipped in CI (the dedicated test jobs already run the
-// suite split across runners; running it again here in one process hits a
-// pre-existing Node test-runner promise-resolution issue).
+// CI runs the root suite in the dedicated unit job; local check runs it here.
 if (process.env.CI) {
   console.log("check: skipping node --test in CI (covered by test jobs)");
   process.exit(0);

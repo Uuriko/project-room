@@ -177,11 +177,16 @@ test("L4: the NDJSON import refuses an oversized Content-Length before reading",
   assert.equal(oversized.timedOut, undefined, "the refusal arrives without waiting for the body");
   assert.equal(status(oversized), 413);
   assert.match(oversized.response, /"code":"too_large"/);
-  // Streamed bytes past the cap are refused too, and a well-formed small import still works.
-  const chunked = await fetch(`${origin}/api/rooms/commons/import`, { method: "POST", headers: { Origin: origin, ...headers },
-    body: Buffer.alloc(8 * 1024 * 1024 + 16, 0x20) });
-  assert.equal(chunked.status, 413);
-  assert.equal((await chunked.json()).error.code, "too_large");
+  // Exercise both an upload already in flight when its length is rejected,
+  // and real chunked transfer (fetch adds Content-Length for a Buffer).
+  async function* chunks() {
+    for (let i = 0; i < 33; i++) yield Buffer.alloc(256 * 1024, 0x20);
+  }
+  for (const body of [Buffer.alloc(8 * 1024 * 1024 + 16, 0x20), chunks()]) {
+    const response = await fetch(`${origin}/api/rooms/commons/import`, { method: "POST", headers: { Origin: origin, ...headers }, body, duplex: "half" });
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).error.code, "too_large");
+  }
   const wrongType = await fetch(`${origin}/api/rooms/commons/import`, { method: "POST", headers: { Origin: origin, Authorization: headers.Authorization, "Content-Type": "application/json" }, body: "{}\n" });
   assert.equal(wrongType.status, 415);
 });

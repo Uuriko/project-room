@@ -12,7 +12,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openCatchUp, openSearch } from "./room-chrome.mjs";
+import { openCatchUp, closeCatchUp, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = [], traffic = [], errors = [];
@@ -78,6 +78,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   assert.equal(auditRecovery(f.store).dataSha256, beforeRead, 'Opening the whole queue is read-only');
   mkdirSync('test-results', { recursive: true });
   const prefix = `test-results/simultaneous-attention-${touch ? 'touch' : 'desktop'}`;
+  await openCatchUp(page);
   await page.locator('#return-brief-panel > summary').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${prefix}-queue.png` });
   const link = index => page.locator(`#rb-attention-list [data-open-message="${questions[index].requestMessageId}"]`);
@@ -110,6 +111,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
     if (i === 2) assert.match(result.page.items.at(-1).message.body, /^Friday\./);
   }
   assert.equal(auditRecovery(f.store).dataSha256, beforeAgentRead);
+  await openCatchUp(page);
   await page.locator('#return-brief-panel > summary').scrollIntoViewIfNeeded();
   assert.equal(await page.locator('#rb-attention-list a').count(), 8);
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
@@ -353,6 +355,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   }
   assert.deepEqual(errors, []);
   await page.locator('#cancel-action').click();
+  await closeCatchUp(page);
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   for (const id of ['decision-review-label', 'decision-review-by', 'decision-review-text', 'decision-review-version']) {
     assert.equal(await page.locator(`#${id}`).textContent(), '', 'sign-out clears review context');

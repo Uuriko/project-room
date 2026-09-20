@@ -106,6 +106,11 @@ for (const mobile of [false, true]) {
 
     // No event arrives when permission scope expires. Both places must agree,
     // without shifting the focused second item to the first or marking anything read.
+    // Opening the work card from catch-up closes the catch-up dialog, so the
+    // attention list is inside a closed dialog by now and focusing it is a
+    // no-op - which left focus on the work card and quietly turned the
+    // assertion below into a check of the wrong element.
+    await openCatchUp(page); await ready();
     await attention("return-1").focus();
     now += 600100; await page.clock.fastForward(600100);
     await page.waitForFunction(() => document.querySelector("#catchup-count").textContent.startsWith("8 need you"));
@@ -167,6 +172,7 @@ for (const mobile of [false, true]) {
     }), true, "large-text acknowledgement remains reachable without horizontal scrolling");
     await capture("large-text-controls"); await page.evaluate(() => document.documentElement.style.fontSize = "");
     page.once("dialog", dialog => dialog.accept()); // Explicit synthetic consent to discard our draft.
+    await closeCatchUp(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");

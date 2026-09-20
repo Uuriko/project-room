@@ -33,7 +33,7 @@ function seedEmail(f) {
   return { raw, importMessage, disconnect: () => apply({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 1 }) };
 }
 
-async function setup(t, mobile = false, simulate = false) {
+async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), accountKey = f.store.issueAccountAccessKey(account.id);
   const slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, accountKey, 0);
   const apply = request => f.store.inbox.apply(slot.token, request, session.sessionBinding);
@@ -53,9 +53,9 @@ async function setup(t, mobile = false, simulate = false) {
   page.on("pageerror", e => errors.push(e.message));
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin + "/?room=commons");
+  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
   await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
   // the reader rendered, and the connection list rendered (the product unhides the add-connection
@@ -1066,4 +1066,245 @@ test("reviewed reply: mismatched preview text never enables adoption", { timeout
   await p.locator("[data-inbox-result]").click();
   await p.getByText("Couldn’t verify the result. Close and try again.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-result-use").isEnabled(), false); assert.equal(f.saved().draft, null);
+});
+
+for (const mobile of [false, true]) test(`workspace continuity ${mobile ? 'mobile' : 'desktop'}: work links return from Inbox without losing private writing`, { timeout: 20000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await p.locator('#message-input').fill('Unsent room note');
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('Unsent private reply');
+  await p.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
+  await p.locator('#main').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Unsent room note');
+  assert.equal(await p.locator('#main').textContent().then(s => s.includes('Unsent private reply')), false);
+  await f.inbox();
+  assert.equal(await p.locator('#inbox-draft').inputValue(), 'Unsent private reply');
+  assert.equal(f.saved().draft, null, 'navigation neither saves nor sends a private draft');
+});
+
+for (const mobile of [false, true]) test(`workspace history ${mobile ? 'mobile' : 'desktop'}: Back and Forward preserve destination, selection and unsaved drafts`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await p.locator('#message-input').fill('Room draft across history');
+  const before = await p.evaluate(() => history.length);
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('Private draft across history');
+  assert.equal(await p.evaluate(() => history.length), before + 1);
+  await p.locator('#nav-inbox').click();
+  assert.equal(await p.evaluate(() => history.length), before + 1, 'reselecting the current destination does not add history');
+  await p.locator('#nav-rooms').click();
+  assert.equal(await p.evaluate(() => history.length), before + 2);
+  await p.goBack(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Private draft across history');
+  assert.equal(await p.locator('#inbox-list [aria-current=true]').getAttribute('data-source-id'), 'note');
+  assert.equal(await p.locator('#nav-inbox').getAttribute('aria-current'), 'page');
+  await p.goBack(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#message-input').inputValue(), 'Room draft across history');
+  await p.goForward(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Private draft across history');
+  await p.goForward(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#message-input').inputValue(), 'Room draft across history');
+  assert.equal(await p.evaluate(() => history.length), before + 2, 'restoring history does not rewrite the stack');
+  assert.equal(f.saved().draft, null, 'navigation never saves or sends the private draft');
+  const urls = await p.evaluate(() => ({ url: location.href, state: history.state }));
+  assert(!JSON.stringify(urls).includes('Private draft'));
+});
+
+test('workspace history without an open room restores account destinations', { timeout: 25000 }, async t => {
+  const f = await setup(t, false, false, true), p = f.page;
+  const before = await p.evaluate(() => history.length);
+  await f.inbox(); await f.pick('note'); await p.locator('#inbox-draft').fill('Account-only draft');
+  await p.goBack(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false);
+  assert.equal(await p.locator('#inbox-panel').isVisible(), false);
+  await p.goForward(); await p.locator('#inbox-reader').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Account-only draft');
+  assert.equal(await p.evaluate(() => history.length), before + 1);
+  assert.equal(await p.locator('#main').isVisible(), false);
+  assert.equal(f.saved().draft, null);
+});
+
+test('workspace history across room contexts opens the chooser without clearing current writing', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  await p.locator('#message-input').fill('Do not discard this room draft');
+  // A previous room entry can remain after the user explicitly switches rooms.
+  await p.evaluate(() => {
+    history.pushState(null, '', '?room=previous-room#pr-view/rooms');
+    history.pushState(null, '', '?room=commons#pr-view/inbox');
+  });
+  await f.inbox(); await p.goBack();
+  await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false, 'never present commons as the previous room');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
+  assert.equal(new URL(p.url()).searchParams.get('room'), null);
+  assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
+  await p.locator('#nav-rooms').click(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(new URL(p.url()).searchParams.get('room'), 'commons');
+  assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
+});
+
+for (const mobile of [false, true]) test(`room browser ${mobile ? 'mobile' : 'desktop'}: history distinguishes the chooser from the open room`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await p.locator('#message-input').fill('Keep this room draft');
+  await p.locator('#choose-room').click();
+  await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('Keep this private draft');
+  await p.goBack(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false);
+  await p.goBack(); await p.locator('#main').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep this room draft');
+  await p.goForward(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  await p.goForward(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Keep this private draft');
+});
+
+for (const phase of ['list', 'read']) test(`late Inbox ${phase} response leaves room reading position and focus alone`, { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route(phase === 'list' ? '**/api/inbox?view=email-excerpt-v1' : '**/api/inbox/sources/*?view=email-excerpt-v1', async route => {
+    const response = await route.fetch(); reached(); await held; await route.fulfill({ response });
+  }, { times: 1 });
+  await p.locator('#nav-inbox').click(); await started;
+  await p.locator('#nav-rooms').click();
+  await p.locator('#message-input').fill('Writing while the Inbox request finishes');
+  // Count viewport scroll requests: even a no-op at scrollY=0 is an unwanted
+  // attempt to restore the hidden Inbox's position over the current room.
+  await p.evaluate(() => { window.inboxScrollCalls = 0; const original = window.scrollTo; window.scrollTo = function (...args) { window.inboxScrollCalls++; return original.apply(this, args); }; });
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#main').isVisible(), true);
+  assert.equal(await p.locator('#inbox-panel').isVisible(), false);
+  assert.equal(await p.evaluate(() => window.inboxScrollCalls), 0);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Writing while the Inbox request finishes');
+  assert.equal(await p.locator('#message-input').evaluate(el => el === document.activeElement), true);
+  await f.inbox(); await f.pick('note');
+  await p.locator('#inbox-draft').fill('The Inbox still works');
+});
+
+for (const accountOnly of [false, true]) test(`room browser reload restores the chooser ${accountOnly ? 'without' : 'with'} an open room`, { timeout: 25000 }, async t => {
+  const f = await setup(t, false, false, accountOnly), p = f.page;
+  if (!accountOnly) await p.locator('#choose-room').click();
+  await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
+  await p.reload(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
+  assert.equal(await p.locator('#main').isVisible(), false);
+  assert.equal(await p.locator('#inbox-panel').isVisible(), false);
+  await p.locator('[data-account-room="commons"]').waitFor({ state: 'visible' });
+});
+
+test('late Inbox disconnect completion does not reopen Inbox over current room writing', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page, mail = seedEmail(f);
+  mail.importMessage(); await f.inbox();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route('**/api/inbox/connections/commands', async route => {
+    const response = await route.fetch(); reached(); await held; await route.fulfill({ response });
+  }, { times: 1 });
+  const remove = p.locator(`[data-remove="${mail.raw.connection.id}"]`);
+  await remove.click(); await remove.click(); await started;
+  await p.locator('#nav-rooms').click(); await p.locator('#message-input').fill('Still writing here');
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#main').isVisible(), true);
+  assert.equal(await p.locator('#inbox-panel').isVisible(), false);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Still writing here');
+  await f.inbox();
+  await p.locator(`[data-connection-id="${mail.raw.connection.id}"]`).filter({ hasText: 'Disconnected' }).waitFor();
+});
+
+for (const action of ['search', 'pagination']) test(`Inbox ${action} can restart after leaving a pending request`, { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  // Exercise real service cursors using small pages instead of a large fixture.
+  await p.route('**/api/inbox?*', async route => {
+    const url = new URL(route.request().url()); url.searchParams.set('limit', '1');
+    await route.fulfill({ response: await route.fetch({ url: url.href }) });
+  });
+  await f.inbox();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  const pattern = action === 'search' ? '**/api/inbox/search?*' : '**/api/inbox?*cursor=*';
+  await p.route(pattern, async route => {
+    const url = new URL(route.request().url()); if (action === 'pagination') url.searchParams.set('limit', '1');
+    const response = await route.fetch({ url: url.href }); reached(); await held; await route.fulfill({ response });
+  }, { times: 1 });
+  const run = async () => {
+    if (action === 'search') { await p.locator('#inbox-search-input').fill('Friday'); await p.locator('#inbox-search-form button[type=submit]').click(); }
+    else await p.locator('.inbox-show-more').click();
+  };
+  await run(); await started;
+  await p.locator('#nav-rooms').click(); await p.locator('#message-input').fill('Keep my room writing');
+  await f.inbox(); release(); await p.waitForLoadState('networkidle');
+  await run();
+  if (action === 'search') await p.locator('#inbox-status').filter({ hasText: 'result' }).waitFor();
+  else await p.waitForFunction(() => document.querySelectorAll('#inbox-list [data-source-id]').length === 2);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep my room writing');
+});
+
+test('late share acknowledgment respects a newer room chooser destination', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  await f.inbox(); await f.pick('note'); await p.locator('#inbox-draft').fill('Keep private writing');
+  await p.locator('#inbox-ask').click(); await p.locator('#inbox-share-paragraphs input').first().check();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route('**/api/inbox/commands', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
+  await p.locator('#inbox-share-confirm').click(); await started;
+  await p.locator('#inbox-share-close').click(); await p.locator('#nav-rooms').click(); await p.locator('#choose-room').click();
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#account-rooms-panel').isVisible(), true);
+  assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.share'").get().n, 1);
+  await f.inbox(); await f.pick('note');
+  assert.equal(await p.locator('#inbox-draft').inputValue(), 'Keep private writing');
+});
+
+test('an abandoned search cannot unlock or overwrite a newer pending search', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page; await f.inbox();
+  const releases = [], starts = [], started = [0, 1].map(i => new Promise(resolve => { starts[i] = resolve; }));
+  let requests = 0, finishOld;
+  const oldFinished = new Promise(resolve => { finishOld = resolve; });
+  t.after(() => releases.forEach(release => release()));
+  await p.route('**/api/inbox/search?*', async route => {
+    const n = requests++, response = await route.fetch();
+    if (n < 2) { const held = new Promise(resolve => { releases[n] = resolve; }); starts[n](); await held; }
+    await route.fulfill({ response }); if (n === 0) finishOld();
+  });
+  const search = async q => { await p.locator('#inbox-search-input').fill(q); await p.locator('#inbox-search-form button[type=submit]').click(); };
+  await search('launch'); await started[0];
+  await p.locator('#nav-rooms').click(); await f.inbox();
+  await search('Friday'); await started[1];
+  releases[0](); await oldFinished;
+  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.match(await p.locator('#inbox-status').textContent(), /Searching for “Friday”/);
+  await search('Friday');
+  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(requests, 2, 'older completion must not release the newer request lock');
+  releases[1](); await p.waitForLoadState('networkidle');
+  assert.match(await p.locator('#inbox-status').textContent(), /result.*Friday/);
+  assert.equal(await p.locator('#inbox-list [data-source-id="second"]').count(), 1);
+  assert.equal(await p.locator('#inbox-list [data-source-id="note"]').count(), 0);
+});
+
+for (const mobile of [false, true]) test(`late sample send ${mobile ? 'mobile' : 'desktop'} preserves room writing and dispatches once`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile, true), p = f.page;
+  await f.inbox(); await f.pick('note'); await previewReply(f);
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route('**/api/inbox/simulation', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
+  await p.locator('#inbox-send-confirm').click(); await started;
+  await p.locator('#inbox-send-close').click(); await p.locator('#nav-rooms').click();
+  await p.locator('#message-input').fill('Keep writing during send confirmation');
+  release(); await p.waitForLoadState('networkidle');
+  assert.equal(await p.locator('#main').isVisible(), true);
+  assert.equal(await p.locator('#message-input').inputValue(), 'Keep writing during send confirmation');
+  assert.equal(await p.locator('#message-input').evaluate(el => el === document.activeElement), true);
+  await f.inbox(); await f.pick('note');
+  await p.getByText('Sample accepted · delivery unconfirmed', { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
+  assert.equal(await p.locator('#inbox-send-preview').isVisible(), false);
 });

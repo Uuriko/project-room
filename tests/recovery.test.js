@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 67 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 71 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -47,6 +47,38 @@ test("online capture preserves all 67 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
     VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
     .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);
+  // Seed one typed handoff envelope so the capture comparison covers
+  // handoff_envelopes. The table arrived with the envelope journal and had no
+  // fixture row, which the "every table has substantive data" assertion below
+  // is there to catch - it is a coverage gate, not a formality.
+  // A complete envelope, not startEnvelope's template: that helper leaves
+  // inputs, authority.permissions and the acceptance checks empty, all of
+  // which its own validator refuses, so it cannot be journalled as-is.
+  f.store.handoffEnvelopes.create("commons", {
+    to: "recovery-partner",
+    objective: "Seeded so the capture covers handoff_envelopes.",
+    inputs: [{ kind: "message", ref: "recovery-reported", label: "the reported message" }],
+    authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] }, expiresAt: new Date(f.now() + 24 * 3600 * 1000).toISOString() },
+    expectedOutput: { kind: "text_result", description: "A short synthetic result" },
+    acceptanceTest: { checks: [{ kind: "result_submitted", workId: "recovery-work" }] },
+    termination: { expiresAt: new Date(f.now() + 24 * 3600 * 1000).toISOString(), onExpiry: "release", escalateTo: null },
+    provenance: { claimId: null, taskId: null, chain: [] }
+  }, { from: "recovery-agent" });
+  // Seed one webhook delivery so the capture comparison covers
+  // agent_webhook_deliveries. Written directly, like room_attachments and
+  // access_requests above: the only store API that creates one is a wake ping
+  // fan-out, which needs a live subscription this fixture has no reason to own.
+  f.store.db.prepare(`INSERT INTO agent_webhook_deliveries
+    (delivery_id,idempotency_key,subscription_id,agent_id,event_id,event_type,room_id,payload_json,signature,state,attempts,next_attempt_at,last_error,created_at,updated_at)
+    VALUES('recovery-delivery','recovery-delivery-key','recovery-subscription','recovery-agent',NULL,'wake.ping','commons','{"kind":"wake.ping"}','sha256=recovery','pending',0,?,NULL,?,?)`)
+    .run(f.now() + 1000, f.now(), f.now());
+  // Seed one pending OAuth state so the capture covers oauth_pending_states
+  // (RC-2026-09-19: PKCE state moved into SQLite so a Worker isolate can be
+  // evicted between the provider redirect and the callback). It is short-lived
+  // and it is not room data, but the audit's claim is that it covers every
+  // table, so a table with no fixture row is a hole in the claim.
+  f.store.oauthPendingStateCreate({ provider: "google", stateHash: "1".repeat(64), slotToken: "recovery-slot",
+    expectedRevision: 0, verifier: "recovery-pkce-verifier", expiresAt: f.now() + 600000, link: false });
   // Seed one read marker so the capture comparison covers private_inbox_reads.
   f.store.inbox.apply(f.owner.token, { action: "source.read", requestId: "recovery-inbox-read", sourceId: "recovery-source", expectedRevision: 1 }, f.owner.session.sessionBinding);
   f.cursor = f.store.room("commons").sequence;
@@ -140,7 +172,8 @@ test("online capture preserves all 67 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 67); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 71,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

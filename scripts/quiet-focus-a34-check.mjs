@@ -13,7 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { ensurePeopleOpen } from "./room-chrome.mjs";
+import { ensurePeopleOpen, ensureSidebarClosed } from "./room-chrome.mjs";
 
 test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + retry, explicit disconnect state", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-a34-"));
@@ -54,6 +54,9 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   assert.equal(await page.evaluate(() => document.activeElement.tagName), "SUMMARY", "closing does not strand focus");
 
   // A3 narrow: composer usable at 390px - multiline via Enter, send via Ctrl+Enter.
+  // Below 900px the People rail is an overlay; it has to go before the composer
+  // underneath it can be typed in.
+  await ensureSidebarClosed(page);
   const input = page.locator("#message-input");
   await input.click();
   await input.pressSequentially("line one");

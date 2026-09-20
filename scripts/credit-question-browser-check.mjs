@@ -43,11 +43,15 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   await page.goto(owner.origin); await fillAccessKey(page, reviewer);
   await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
   const input = page.locator("#message-input"), card = page.locator('[data-work-record-id="' + workId + '"]');
+  const openWork = async () => {
+    if (await page.locator('#thread-back').isVisible()) await page.locator('#thread-back').click();
+    if (!await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
+  };
   await input.fill("Keep ordinary room writing.");
   await page.locator("#composer-options > summary").click(); await page.locator("#remember-drafts").check();
   await page.locator("#request-reply").click(); await input.fill("Keep my general question.");
   await page.locator("#request-exit").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
-  await card.locator(".work-details > summary").click(); await card.locator("[data-ask-credit]").click();
+  await openWork(); await card.locator("[data-ask-credit]").click();
   assert.match(await page.locator("#request-mode-label").textContent(), /Ask about credit/);
   assert.equal(await page.locator("#message-to-select").inputValue(), "owner");
   await page.locator("#message-to-select").selectOption("helper");
@@ -58,18 +62,18 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   assert.equal(await input.inputValue(), "Keep ordinary room writing.");
   if (!await page.locator("#composer-options").evaluate(node => node.open)) await page.locator("#composer-options > summary").click();
   await page.locator("#request-reply").click(); assert.equal(await input.inputValue(), "Keep my general question.");
-  await page.locator("#request-exit").click(); await card.locator("[data-ask-credit]").click();
+  await page.locator("#request-exit").click(); await openWork(); await card.locator("[data-ask-credit]").click();
   assert.equal(await input.inputValue(), "Who wrote the original draft, and which parts used AI?");
   result("second-text", "A newer outside draft.");
   await page.waitForFunction(() => document.querySelector("#request-mode-label").textContent.includes("Earlier result"));
   await page.locator("#request-exit").click();
-  if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
+  await openWork();
   await card.locator("[data-ask-credit]").click();
   assert.match(await input.inputValue(), /Who contributed to this result/);
   await input.fill("A separate question about the newer result.");
   await page.locator("#request-exit").click();
   await page.screenshot({ path: join(directory, "resume.png") });
-  await card.locator("[data-resume-credit]").click();
+  await openWork(); await card.locator("[data-resume-credit]").click();
   assert.equal(await input.inputValue(), "Who wrote the original draft, and which parts used AI?");
   await page.screenshot({ path: join(directory, "earlier-question.png") });
   const before = structuredClone(f.store.room("commons").state.workItems), beforeMembers = structuredClone(f.store.room("commons").state.members);

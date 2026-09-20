@@ -85,6 +85,30 @@ export function isStorageUnavailable(error) {
   return storageFailureText.test(String(error.errstr ?? error.message ?? ""));
 }
 export const STORAGE_FAILURE_THRESHOLD = 3;
+// Legacy projections stored before channels existed gain #general, so a stored
+// projection, a retained checkpoint and a fresh replay all describe the same
+// room. Mirrors ensureDefaultChannel in src/events.js. Returns true when it
+// added one, which is how the open-time repair knows to persist.
+//
+// This is one function because it was previously two ideas and one
+// implementation: the open-time repair backfilled rooms.projection, the
+// checkpoint replay did not, and a room whose checkpoint predated channels
+// therefore rebuilt without one while its stored projection had one. That
+// disagreement fails auditRecovery, which gates backupRoom across every room.
+function ensureDefaultChannelState(state) {
+  if (!state?.room) return false;
+  state.channels ??= {};
+  if (state.channels[DEFAULT_CHANNEL_ID]) return false;
+  state.channels[DEFAULT_CHANNEL_ID] = {
+    id: DEFAULT_CHANNEL_ID,
+    name: DEFAULT_CHANNEL_ID,
+    createdBy: state.room.ownerId,
+    createdAt: state.room.createdAt ?? null,
+    archivedAt: null
+  };
+  return true;
+}
+
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
@@ -318,7 +342,7 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
@@ -1053,19 +1077,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Phase 2 channels: legacy projections (stored before channels existed)
         // gain #general so the stored projection matches a replay. Mirrors
         // ensureDefaultChannel in src/events.js.
-        if (state.room) {
-          state.channels ??= {};
-          if (!state.channels[DEFAULT_CHANNEL_ID]) {
-            state.channels[DEFAULT_CHANNEL_ID] = {
-              id: DEFAULT_CHANNEL_ID,
-              name: DEFAULT_CHANNEL_ID,
-              createdBy: state.room.ownerId,
-              createdAt: state.room.createdAt ?? null,
-              archivedAt: null
-            };
-            changed = true;
-          }
-        }
+        if (ensureDefaultChannelState(state)) changed = true;
         for (const item of missing) {
           const proposer = proposers.get(item.id);
           if (proposer) { item.proposedById = proposer; changed = true; }
@@ -1208,6 +1220,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // segments before replaying, so a checkpoint with no later events still
     // rebuilds to the current shape (mirrors ensureDefaultChannel).
     ensureWorkControlDefaults(state);
+    ensureDefaultChannelState(state);
     if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
     const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
     for (const row of rows) {
@@ -2506,7 +2519,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          AND (? IS NULL OR json_extract(body,'$.at')<=?)
          ORDER BY sequence LIMIT ?`
       ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      const next = events.at(-1)?.sequence ?? after;
+      // The cursor advances by what was SCANNED, not by what was returned.
+      // A filter can match nothing in a stretch of the log: taking `next` from
+      // the last returned row left it at the caller's own `after`, while
+      // hasMore was measured against the room's unfiltered sequence - so a
+      // client following the documented next/hasMore contract asked for the
+      // same empty page forever. Fewer rows than the limit means the scan
+      // reached the end of the log, so the cursor belongs at that end.
+      //
+      // This is computed before the DM filter below on purpose: the cursor
+      // must describe what was scanned, not what this viewer was allowed to
+      // see, or two members would page the same log at different speeds.
+      const reachedEnd = events.length < limit;
+      const next = reachedEnd ? sequence : events.at(-1).sequence;
       // RC-2026-09-18-012: targeted-DM privacy. A message.posted event
       // carrying data.toMemberId is a direct message: only its sender and
       // its addressed member may read it. Other events (including

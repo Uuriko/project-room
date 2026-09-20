@@ -15,7 +15,7 @@ const SKIP_FILES = [/package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /se
   /-fixture\.mjs$/, /-check\.mjs$/, /README\.md$/];
 // Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
 // and variable assignments (not hardcoded values).
-const ALLOWLIST = [
+export const ALLOWLIST = [
   /AKIA[0-9A-Z]{16}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
   /gh[op]_[A-Za-z0-9]{36}/, // scanner's own GitHub pattern doc
   /xox[baprs]-[A-Za-z0-9-]+/, // scanner's own Slack pattern doc
@@ -27,6 +27,10 @@ const ALLOWLIST = [
   // `token: f.keys[actor]`, `token = store.issueAccessKey('x', y)`, `password = foo`
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*[a-zA-Z_$][\w$]*(\s*(\.\s*[a-zA-Z_$][\w$]*|\[[^\]]+\]))*(\s*\([^)]*\))?\s*([,;)\]}]|$)/i,
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*["'][^"']{0,11}["']/, // short placeholders
+  // Template literals assembled at runtime: `token = `${a}.${b}``. Allowed only
+  // when every character outside an interpolation is a separator, so a literal
+  // run long enough to be a credential is still caught.
+  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*`(?:\$\{[^{}`]*\}|[\s.\-_:/+,;=&?#|])*`/i,
   // Verified false positives (2026-09-16 audit):
   /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
   /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets

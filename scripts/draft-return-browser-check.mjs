@@ -130,6 +130,8 @@ test("posted draft returns to its exact conversation record and work link preser
   await page.locator("#message-input").fill("Private root composer draft");
   await welcome.locator('[data-message-action="thread"]').click();
   await page.locator("#message-input").fill("Private unrelated thread draft");
+  // Work cards live on the room timeline; return through the visible control.
+  await page.locator('#thread-back').click();
   await f.open(); await f.input.fill(f.answer());
   // An already-open draft cannot be replaced by another opening event.
   await f.card.locator('[data-portable-work]').first().evaluate(node => node.click());
@@ -157,6 +159,7 @@ test("posted draft returns to its exact conversation record and work link preser
   assert.equal(await choices.evaluate(node => node.open), false);
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator("#message-input").inputValue(), "Private unrelated thread draft");
+  await page.locator('#thread-back').click();
   await choices.locator('summary').click();
   await choices.locator('[data-open-message="later-work-draft"]').click();
   await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "later-work-draft");
@@ -203,3 +206,48 @@ for (const outcome of ["success", "failure"]) {
     assert.doesNotMatch(await page.locator("#status").textContent(), /Draft posted|Obsolete/);
   });
 }
+
+for (const mobile of [false, true]) test(`work destination ${mobile ? 'mobile' : 'desktop'}: leaving a thread restores the work card and keeps both drafts`, { timeout: 20000 }, async t => {
+  const f = await setup(t, { mobile }), { page } = f;
+  f.send(T.MESSAGE_POSTED, { messageId: 'navigation-reply', body: 'Existing thread reply', replyToId: 'test-welcome' });
+  const welcome = page.locator('[data-message-record-id="test-welcome"]');
+  await page.locator('#message-input').fill('Keep my room draft');
+  await welcome.locator('[data-message-action="thread"]').click();
+  await page.locator('#message-input').fill('Keep my thread draft');
+  await page.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
+  await f.card.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
+  assert.equal(await f.card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my room draft');
+  await welcome.locator('[data-message-action="thread"]').click();
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my thread draft');
+});
+
+test('work destination follows its proposal channel', { timeout: 20000 }, async t => {
+  const f = await setup(t), { page } = f;
+  f.send(T.CHANNEL_CREATED, { channelId: 'design', name: 'design' });
+  const receipt = f.send(T.MESSAGE_POSTED, { messageId: 'design-draft', channelId: 'design', workItemId: 'test-handoff', packetId: 'manual-packet', basisRevision: 0, body: 'A draft in the design channel.' });
+  await page.locator(`[data-event-record-id="${receipt.event.id}"]`).waitFor({ state: 'attached' });
+  await page.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
+  await f.card.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#conversation-title').textContent(), '# design');
+  await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
+});
+
+for (const mobile of [false, true]) test(`draft choices ${mobile ? 'mobile' : 'desktop'}: catch-up opens the timeline and releases modal focus`, { timeout: 20000 }, async t => {
+  const f = await setup(t, { mobile, humanWork: true }), { page } = f;
+  f.send(T.WORK_ACCEPTED, { workItemId: 'human-handoff', expectedRevision: 0 });
+  for (const id of ['draft-one', 'draft-two']) {
+    const receipt = f.send(T.MESSAGE_POSTED, { messageId: id, workItemId: 'human-handoff', packetId: 'manual-packet', basisRevision: 1, body: 'Proposal ' + id }, 'guest');
+    await page.locator(`[data-event-record-id="${receipt.event.id}"]`).waitFor({ state: 'attached' });
+  }
+  await page.locator('#message-input').fill('Keep my unsent note');
+  await page.locator('#topbar-catchup').click();
+  await page.locator('#rb-attention-list [data-view-drafts][data-open-work="human-handoff"]').click();
+  await page.locator('#catchup-dialog').waitFor({ state: 'hidden' });
+  const choices = f.card.locator('.work-drafts');
+  assert.equal(await choices.evaluate(node => node.open), true);
+  assert.equal(await choices.locator('a[data-open-message]').count(), 2);
+  assert.equal(await choices.locator('summary').evaluate(node => document.activeElement === node), true);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent note');
+});

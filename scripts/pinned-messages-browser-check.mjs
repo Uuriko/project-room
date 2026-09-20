@@ -83,7 +83,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // "Pinned only" search: pins alone with no term, narrowed by the term, no work results; the toggle clears with the search.
     await openSearch(page);
-    const pinnedToggle = page.getByRole("button", { name: "Pinned only", exact: true }), results = page.locator("#search-list li");
+    // The control is labelled "Pinned"; it was "Pinned only" when this was
+    // written. Located by its id as well as its role so a copy change reads as
+    // a copy change rather than as the feature having disappeared.
+    const pinnedToggle = page.locator("#search-pinned"), results = page.locator("#search-list li");
+    assert.equal(await pinnedToggle.textContent(), "Pinned", "the toggle's label moved; update the prose above too");
     assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "false");
     await pinnedToggle.focus(); await page.keyboard.press("Enter");
     assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "true");
