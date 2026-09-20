@@ -20,6 +20,7 @@ import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
+import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -548,6 +549,7 @@ export class RoomStore {
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.replyRequests = new ReplyRequests(this);
+    this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
     this.publicFace = new PublicFace(this);
     this.inbox = new Inbox(this, { stitch });
@@ -584,6 +586,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // additive at v27, so a backup taken before them is still a valid v27
         // file. Read-only never migrates, so verify them only when present.
         this.wakeQueue.verifySchema({ allowAbsent: true });
+        this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.agentConnections.verify();
@@ -768,6 +771,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Existing v35 databases predate persistent OAuth state. Converge this
       // unfenced additive table on every open, not only invitation migration.
       this.db.exec(oauthPendingSchema);
+      this.db.exec(requestRunSchema);
+      this.requestRuns.verifySchema();
       // Direct channel-send journal: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.

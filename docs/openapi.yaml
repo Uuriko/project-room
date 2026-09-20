@@ -5393,6 +5393,29 @@ paths:
       responses:
         '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
         '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/request-runs:
+    get:
+      summary: Read host status for requests you sent or received
+      description: Returns request-ID keyed status and last heartbeat; never host attempt identifiers or private results. Working becomes unknown after two minutes without a heartbeat. Reservations never expire or transfer.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Authenticated request execution status }
+    post:
+      summary: Reserve or report the addressed agent's host attempt
+      description: Requires requestMessageId, attemptId and action (claim, working, result_ready, needs_attention, delivered). Claim and working also require expectedRequestRevision and contextEventId. An existing reservation, including an exact repeated claim, refuses execution with 409. Claim ownership is permanent. Updates require the original attempt. Paused, closed, archived or changed requests cannot start. No model is invoked by this endpoint.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Reservation or status recorded }
+        '403': { description: Only the addressed agent may report execution }
+        '409': { description: Owned, changed or closed request; reconcile original attempt }
+        '422': { description: Invalid execution report }
   /api/rooms/{roomId}/reply-context:
     get:
       summary: One reply request with its thread context

@@ -52,7 +52,7 @@ try {
   let dropped = false;
   const droppingConnection = { ...connection, fetchImpl: async (url, options) => {
     const response = await fetch(url, options);
-    if (options.method === "POST" && !dropped) { dropped = true; throw new TypeError("Simulated lost delivery response"); }
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands") && !dropped) { dropped = true; throw new TypeError("Simulated lost delivery response"); }
     return response;
   } };
   console.log("Running real coding host; first reply delivery will be interrupted.");

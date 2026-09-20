@@ -44,3 +44,13 @@ test("unserializable input never starts a host with side effects", async () => {
     assert.equal(existsSync(marker), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+
+test("different host processes cannot write the same checkout concurrently", async () => {
+  const controller = new AbortController();
+  const first = host("setInterval(()=>{},1000)")({ signal: controller.signal });
+  const stopped = assert.rejects(first, /cancelled/);
+  try { await assert.rejects(host("console.log(JSON.stringify({body:'collision'}))")({}), /active or unresolved host/); }
+  finally { controller.abort(); await stopped; }
+  assert.equal((await host("console.log(JSON.stringify({body:'released'}))")({})).body, "released");
+});

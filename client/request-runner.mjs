@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
@@ -12,6 +12,8 @@ export function openRequestJournal(filename) {
   closeSync(openSync(filename, "a", 0o600)); chmodSync(filename, 0o600);
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS request_runs (id TEXT PRIMARY KEY, response TEXT, delivered INTEGER NOT NULL DEFAULT 0)");
+  if (!db.prepare("PRAGMA table_info(request_runs)").all().some(column => column.name === "attempt_id"))
+    db.exec("ALTER TABLE request_runs ADD COLUMN attempt_id TEXT");
   return db;
 }
 
@@ -28,11 +30,14 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     connection.origin, connection.roomId, connection.memberId, requestMessageId,
     context.roomCreatedEventId, context.request.openingEventId
   ])).digest("hex");
+  const report = (attemptId, action, basis = {}, reportSignal = signal) => client.requestRuns({ requestMessageId, attemptId, action,
+    ...basis }, { signal: reportSignal });
   const deliver = async record => {
     const input = JSON.parse(record.response);
     const receipt = await client.replyAction("room_respond_to_request", input, { signal });
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
     db.prepare("UPDATE request_runs SET delivered=1 WHERE id=?").run(id);
+    if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
     return { status: "delivered", requestId: id, receipt, hostExecuted: false };
   };
   const prior = db.prepare("SELECT * FROM request_runs WHERE id=?").get(id);
@@ -55,16 +60,81 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   if (Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation })) > 262144)
     throw new Error("Request exceeds the automatic preparation limit; inspect it directly");
   signal?.throwIfAborted();
-  const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id) VALUES (?)").run(id).changes;
+  const attemptId = randomUUID();
+  const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
-  const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
-    preparation: context.preparation, signal });
-  if (typeof result?.body !== "string" || !result.body.trim() || result.body.length > 4096 || !result.body.isWellFormed())
-    throw new Error("Host must return a nonempty reply of at most 4096 characters; reconcile this attempt");
-  const response = { requestId: id, responseToRequestId: requestMessageId,
-    ...context.current.answerBasis, responseOutcome: "answered", toMemberId: context.request.requesterId,
-    workItemId: context.request.workItemId, body: result.body };
-  db.prepare("UPDATE request_runs SET response=? WHERE id=?").run(JSON.stringify(response), id);
-  const delivered = await deliver({ response: JSON.stringify(response) });
-  return { ...delivered, hostExecuted: true };
+  const basis = { expectedRequestRevision: context.current.answerBasis.expectedRequestRevision,
+    contextEventId: context.current.answerBasis.contextEventId };
+  // Persist intent first. An ambiguous reservation response never starts a host.
+  try { await report(attemptId, "claim", basis); }
+  catch (error) {
+    // A definite refusal happened before invocation. Network uncertainty keeps
+    // the intent: even a retry must not infer that a reservation was absent.
+    if ([403, 409, 422].includes(error?.status)) db.prepare("DELETE FROM request_runs WHERE id=? AND response IS NULL").run(id);
+    throw error;
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  let heartbeat = null;
+  const timer = setInterval(() => {
+    if (heartbeat) return;
+    heartbeat = report(attemptId, "working", basis, AbortSignal.timeout(10000))
+      .catch(error => controller.abort(error)).finally(() => { heartbeat = null; });
+  }, 30000);
+  try {
+    controller.signal.throwIfAborted();
+    const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
+      preparation: context.preparation, signal: controller.signal });
+    controller.signal.throwIfAborted();
+    if (typeof result?.body !== "string" || !result.body.trim() || result.body.length > 4096 || !result.body.isWellFormed())
+      throw new Error("Host must return a nonempty reply of at most 4096 characters; reconcile this attempt");
+    const response = { requestId: id, responseToRequestId: requestMessageId,
+      ...context.current.answerBasis, responseOutcome: "answered", toMemberId: context.request.requesterId,
+      workItemId: context.request.workItemId, body: result.body };
+    db.prepare("UPDATE request_runs SET response=? WHERE id=?").run(JSON.stringify(response), id);
+    clearInterval(timer); await heartbeat;
+    await report(attemptId, "result_ready");
+    const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId });
+    return { ...delivered, hostExecuted: true };
+  } catch (error) {
+    clearInterval(timer); await heartbeat;
+    const saved = db.prepare("SELECT response FROM request_runs WHERE id=?").get(id)?.response;
+    const state = saved && ![409, 422].includes(error?.status) ? "result_ready" : "needs_attention";
+    await report(attemptId, state, {}, AbortSignal.timeout(5000)).catch(() => {});
+    throw error;
+  } finally {
+    clearInterval(timer); signal?.removeEventListener("abort", abort);
+  }
+}
+
+// Explicit execution mode, separate from the notify-only watcher. Each scan is
+// bounded; work is serialized and every invocation re-reads its eligibility.
+export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000 }) {
+  if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
+  const client = new RoomAgentClient(connection);
+  let delay = intervalMs;
+  while (!signal?.aborted) {
+    try {
+      const { requests } = await client.replyRequests({ status: "all", signal });
+      const { runs } = await client.requestRuns(undefined, { signal });
+      const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
+      const eligible = requests.filter(request => request.status === "open" && !runs[request.id]
+        || runs[request.id]?.state !== "needs_attention" && pending(request));
+      for (const request of eligible.slice(0, 50)) {
+        signal?.throwIfAborted();
+        // A saved response may be retried only by its original local journal.
+        // Another host's ownership is never a lease that can be stolen.
+        if (runs[request.id] && !pending(request)) continue;
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, signal })); }
+        catch { emit({ status: "needs_attention", requestMessageId: request.id }); }
+      }
+      delay = intervalMs;
+    } catch { if (!signal?.aborted) emit({ status: "connection_unavailable" }); delay = Math.min(delay * 2, 60000); }
+    if (!signal?.aborted) await new Promise(resolve => {
+      const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
+      const timer = setTimeout(done, delay); signal?.addEventListener("abort", done, { once: true });
+    });
+  }
 }

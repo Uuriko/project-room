@@ -1,4 +1,4 @@
-import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
+import { openRequestJournal, runRequestOnce, runRequestQueue } from "../client/request-runner.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -248,7 +248,7 @@ test("lost delivery response reuses saved answer without executing host again", 
   let calls = 0, lost = false;
   const connection = { ...f.config, fetchImpl: async (url, options) => {
     const response = await fetch(url, options);
-    if (options.method === "POST" && !lost) { lost = true; throw new TypeError("lost response"); }
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands") && !lost) { lost = true; throw new TypeError("lost response"); }
     return response;
   } };
   const execute = async () => { calls++; return { body: "Persisted result" }; };
@@ -326,4 +326,103 @@ test("one command drives a separate host process and repeat invocation reuses it
   assert.equal(JSON.parse(second.out).hostExecuted, false);
   assert.equal(readFileSync(counter, "utf8"), "1");
   assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+});
+
+
+test("separate journals racing one request start exactly one host and disclose status only to participants", async t => {
+  const f = await fixture(t), a = runner(t, f), second = openRequestJournal(join(f.directory, "other.sqlite"));
+  t.after(() => second.close());
+  const requestMessageId = f.open("distributed").command.data.messageId;
+  let calls = 0;
+  const execute = async () => { calls++; await new Promise(resolve => setTimeout(resolve, 30)); return { body: "Only one host" }; };
+  const results = await Promise.allSettled([a, { connection: f.config, db: second }].map(args => runRequestOnce({ ...args, requestMessageId, execute })));
+  assert.equal(calls, 1); assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(f.store.requestRuns.list(f.keys.owner, "commons").runs[requestMessageId].state, "delivered");
+  assert.deepEqual(f.store.requestRuns.list(f.keys.guest, "commons").runs, {});
+  assert.equal(JSON.stringify(f.store.requestRuns.list(f.keys.owner, "commons")).includes("attemptId"), false);
+});
+test("a lost reservation response cannot launch or relaunch a host", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("lost-claim").command.data.messageId;
+  let calls = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")) throw new TypeError("lost claim response");
+    return response;
+  } };
+  const execute = async () => { calls++; return { body: "Must not execute" }; };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute }));
+  await assert.rejects(runRequestOnce({ ...a, requestMessageId, execute }), /unknown/);
+  const second = openRequestJournal(join(f.directory, "new-machine.sqlite")); t.after(() => second.close());
+  await assert.rejects(runRequestOnce({ connection: f.config, db: second, requestMessageId, execute }), /owns/);
+  assert.equal(calls, 0);
+});
+test("stale heartbeats show unknown without transferring ownership; status does not change answer basis", async t => {
+  const f = await fixture(t), requestMessageId = f.open("status").command.data.messageId;
+  const before = await f.client.replyContext(requestMessageId), attemptId = "original-host";
+  const basis = { expectedRequestRevision: before.request.revision, contextEventId: before.request.contextEventId };
+  const send = action => f.client.requestRuns({ requestMessageId, attemptId, action, ...basis });
+  await send("claim"); await send("working");
+  assert.deepEqual((await f.client.replyContext(requestMessageId)).current.answerBasis, before.current.answerBasis);
+  const now = f.store.now; f.store.now = () => now() + 120001;
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "unknown");
+  await assert.rejects(f.client.requestRuns({ requestMessageId, attemptId: "new-host", action: "claim", ...basis }), /owns/);
+  await assert.rejects(send("delivered"), /recorded answer/);
+  await send("needs_attention"); await assert.rejects(send("working"), /silently resume/);
+});
+test("paused agents cannot start and a definite preflight refusal can be retried after resume", async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("paused-host").command.data.messageId;
+  f.store.wakeQueue.pause(f.keys.producer, "commons", { requestId: "pause-run", reason: null });
+  let calls = 0; const execute = async () => { calls++; return { body: "Resumed" }; };
+  await assert.rejects(runRequestOnce({ ...a, requestMessageId, execute }), /paused/);
+  assert.equal(calls, 0);
+  f.store.wakeQueue.resume(f.keys.producer, "commons", { requestId: "resume-run" });
+  await runRequestOnce({ ...a, requestMessageId, execute }); assert.equal(calls, 1);
+});
+test("automatic mode ignores ordinary chat and delivers an addressed request without a per-request command", async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController();
+  t.after(() => controller.abort());
+  f.store.command(f.keys.owner, "commons", { id: "plain", type: "message.posted", data: { messageId: "plain", body: "Just chatting" } });
+  let calls = 0;
+  const queue = runRequestQueue({ ...a, signal: controller.signal, intervalMs: 1000,
+    execute: async () => { calls++; return { body: "Automatically picked up" }; }, emit: result => { if (result.status === "delivered") controller.abort(); } });
+  await new Promise(resolve => setTimeout(resolve, 150)); assert.equal(calls, 0);
+  const requestMessageId = f.open("automatic").command.data.messageId;
+  await queue;
+  assert.equal(calls, 1); assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
+
+
+test("automatic restart delivers a saved response without another model call", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("queue-recovery").command.data.messageId;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("delivery offline");
+    return fetch(url, options);
+  } };
+  let calls = 0;
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId,
+    execute: async () => { calls++; return { body: "Saved while offline" }; } }));
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "result_ready");
+  const reopened = openRequestJournal(join(f.directory, "host-requests.sqlite")); t.after(() => reopened.close());
+  const controller = new AbortController(); t.after(() => controller.abort());
+  await runRequestQueue({ connection: f.config, db: reopened, signal: controller.signal,
+    execute: async () => { calls++; throw new Error("Must not invoke again"); },
+    emit: result => { if (result.status === "delivered") controller.abort(); } });
+  assert.equal(calls, 1); assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
+
+test("heartbeat detects new clarification and signals the running host to stop", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("heartbeat-steering").command.data.messageId;
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const pending = runRequestOnce({ ...a, requestMessageId, execute: ({ signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true }); entered();
+  }) });
+  const refused = assert.rejects(pending, /changed, paused or closed/);
+  await started;
+  await f.client.replyAction("room_reply", { requestId: "new-direction", replyToId: requestMessageId, body: "A new constraint changes the task." });
+  t.mock.timers.tick(30000);
+  await refused;
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "needs_attention");
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
 });

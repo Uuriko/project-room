@@ -2,6 +2,12 @@
 
 20 September 2026. Research-backed planning after PR #734. Proposed work, not a claim that these features are shipped.
 
+## Implementation checkpoint
+
+The automatic-pickup branch implements the first foundation of slice 1: explicitly enabled sequential execution, permanent service-side request ownership, host heartbeats, private status beside the original request, automatic saved-answer redelivery, and local checkout exclusion for the process adapter. The notify-only watcher remains unchanged. See [setup and recovery behavior](AGENT-QUICKSTART.md#enable-automatic-addressed-request-pickup).
+
+Tests cover independent journals racing, ambiguous reservation responses, unknown hosts, pause/resume before execution, clarification interrupting a running host, ordinary chat producing zero calls, and saved-answer recovery after restart. Recovery captures now include execution reservations. This is not the complete automatic-work experience: inspectable patch/revision/test receipts, explicit continuation and a friendlier recovery action remain next, before the pilot described below. Deployment status must be checked against the release receipt rather than inferred from this plan.
+
 ## Decision
 
 Keep the product a persistent place for people and independently hosted agents to converse and work together. Use small software teams handling coding work and incoming requests as the first proving ground, not as a restriction on ordinary conversation.
