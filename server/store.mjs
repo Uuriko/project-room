@@ -1359,8 +1359,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 90 * 86400000) fail(422, "invalid_expiry", "Account session slots expire within 90 days");
     return this.transaction(() => {
       const now = this.now();
-      this.db.prepare("DELETE FROM account_session_slots WHERE expires_at <= ?").run(now);
-      if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots").get().n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
+      this.db.prepare("DELETE FROM account_session_slots WHERE expires_at <= ? AND NOT EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)").run(now);
+      if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots WHERE expires_at > ?").get(now).n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
       const token = key();
       this.db.prepare("INSERT INTO account_session_slots(hash,revision,expires_at,created_at) VALUES(?,0,?,?)").run(hash(token), now + lifetimeMs, now);
       return { token, session: this.accountSessionSlot(token) };
@@ -1492,7 +1492,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         VALUES(?,?,?,?,?,?,?,?)`)
         .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
           row.expires_at, row.authenticated_until, this.now());
-      this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
+      if (this.db.prepare("SELECT 1 FROM share_link_joins WHERE slot_hash=? LIMIT 1").get(slot.credentialHash)) {
+        // Invitation receipts are immutable and retain this foreign key.
+        // Leave an expired, unauthenticated tombstone: the old token cannot
+        // resolve or authenticate, while its historical receipt stays valid.
+        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+          parent_credential_hash=NULL,authenticated_until=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
+      } else {
+        this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
+      }
       return { token, session: this.authenticateAccountSession(token) };
     });
   }

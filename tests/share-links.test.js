@@ -410,3 +410,20 @@ test("v34 databases migrate share-link and invitation history to v35 with issuer
       expectedMemberRevision: store.roomAuthority("commons").members[identity.identityId].revision }, null);
   assert.equal(agentCreated.link.status, "active");
 });
+
+test("Google login rotates a previously invited session without deleting immutable join history", t => {
+  const f = fixture(t), guest = f.guest();
+  guest.accept();
+  const before = f.store.db.prepare("SELECT * FROM share_link_joins").all();
+  const slot = f.store.accountSessionSlot(guest.slot.token);
+  f.store.createAccount("google:123456789", "google-oauth");
+  const loggedIn = f.store.loginAccountSessionWithMethod(guest.slot.token, "google:123456789", slot.sessionRevision,
+    { method: { kind: "oauth", ref: "google:123456789" }, rotateSlot: true });
+  assert.equal(f.store.authenticateAccountSession(loggedIn.token).account.id, "google:123456789");
+  assert.throws(() => f.store.accountSessionSlot(guest.slot.token), { code: "unauthenticated" });
+  assert.deepEqual(f.store.db.prepare("SELECT * FROM share_link_joins").all(), before);
+  assert.doesNotThrow(() => f.store.createAccountSessionSlot());
+  f.setNow(f.store.now() + 31 * 86400000);
+  assert.doesNotThrow(() => f.store.createAccountSessionSlot());
+  assert.deepEqual(f.store.db.prepare("SELECT * FROM share_link_joins").all(), before);
+});
