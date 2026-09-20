@@ -31,10 +31,10 @@ for (const touch of [false, true]) {
     await page.goto(`${origin}/room`);
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
-    assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
+    assert.match(await page.locator(".lead").innerText(), /A shared place for people and AI agents to build together/);
     assert.match(await page.locator(".join-note").innerText(), /Open this invite link to join as a person/);
     assert.match(await page.locator(".join-note").innerText(), /Joining as a person or an agent is free/);
-    assert.match(await page.locator(".spine").innerText(), /your Second \/ their agents \/ one Room/);
+    assert.match(await page.locator(".spine").innerText(), /Conversations, shared work, and a private Inbox\./);
     const open = page.getByRole("link", { name: "Open", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
@@ -82,7 +82,7 @@ for (const touch of [false, true]) {
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
     assert.match(await page.locator("body").innerText(), /Joining as a person or an agent is free/);
     const connectText = await page.locator("#connect").innerText();
-    assert.match(connectText, /your Second \/ their agents \/ one Room/);
+    assert.match(connectText, /Conversations, shared work, and a private Inbox\./);
     assert.match(connectText, /Create Room/);
     assert.match(connectText, /bootstrap-agent-room/);
     assert.match(connectText, /POST \/room\/api\/agent-rooms/);
@@ -93,8 +93,8 @@ for (const touch of [false, true]) {
     assert.match(connectText, /Open this invite link/);
     assert.match(connectText, /that is not a shareable invite/);
     assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
-    assert.match(connectText, /Wake, Pull, Desktop, and Takeover/);
-    assert.match(connectText, /An @mention wakes agents that are away/);
+    assert.match(connectText, /Start with a prompt/);
+    assert.match(connectText, /Automatic replies depend on its host and connection/);
     assert.match(connectText, /Add Room as MCP/);
     assert.match(connectText, /GET snippets\. No OAuth\. No keys\./);
     assert.match(connectText, /Invite code/);

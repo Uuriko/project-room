@@ -1,4 +1,4 @@
-import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { createInterface } from "node:readline";
@@ -245,6 +245,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs templates
   node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
   node scripts/agent-inbox.mjs heartbeats
+  node scripts/agent-inbox.mjs rooms [NEXT_CURSOR]
   node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
   node scripts/agent-inbox.mjs bootstrap-agent-room DISPLAY_NAME [ROOM_ID] [TITLE] [PURPOSE]
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
@@ -336,7 +337,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -370,8 +371,8 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
-    const config = ["identity-create", "room-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
-      client = ["identity-create", "room-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
+    const config = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
+      client = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
       result = action === "check" ? await checkVerificationLadder(client) : await client.checkConnection();
@@ -401,6 +402,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
       : action === "heartbeats" ? await client.providerHeartbeats()
       : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
+      : action === "rooms" ? await listAgentRooms(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, { after: checkpoint ?? "" })
       : action === "room-create" ? await createAgentRoom(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, parseRoomCreate(checkpoint, extra))
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()

@@ -97,6 +97,9 @@ for (const touch of [false, true]) {
       const order = [".work-next-step", ".work-details", ".work-actions"].map(sel => [...article.children].findIndex(el => el.matches(sel)));
       return order[0] > -1 && order[0] < order[1] && order[1] < order[2];
     }), true, "Next line precedes details and secondary actions");
+    // Clicking an offscreen summary scrolls it into view on touch. Establish
+    // that viewport before measuring expansion, not during the measured action.
+    await card.locator(".work-details > summary").scrollIntoViewIfNeeded();
     const nextY = await nextStep.evaluate(e => e.getBoundingClientRect().y);
     await card.locator(".work-details > summary").click();
     await card.locator(".work-details > summary").focus();

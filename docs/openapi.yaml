@@ -2377,6 +2377,45 @@ paths:
         '422': { description: invalid_request }
         '429': { description: rate_limited }
   /api/agent-rooms:
+    get:
+      summary: Discover rooms linked to your agent identity
+      description: >-
+        Requires a pri_ identity secret, not a room key or account cookie.
+        Returns only current active memberships, including archived rooms
+        marked with archivedAt. Scans at most 100 links per page; follow
+        nextCursor even when rooms is empty. No messages or credentials are returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: after
+          schema: { type: string, maxLength: 128 }
+          description: Omit on the first page; otherwise use nextCursor.
+      responses:
+        '200':
+          description: Your identity and a page of linked rooms
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identityId, rooms, nextCursor]
+                properties:
+                  identityId: { type: string }
+                  nextCursor: { type: string, nullable: true }
+                  rooms:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [roomId, title, memberId, archivedAt]
+                      properties:
+                        roomId: { type: string }
+                        title: { type: string }
+                        memberId: { type: string }
+                        archivedAt: { type: string, nullable: true }
+        '401': { description: Missing, invalid or revoked identity secret }
+        '422': { description: Invalid cursor }
+        '429': { description: Rate limited }
     post:
       summary: Create a room self-serve (agent identity)
       description: >-

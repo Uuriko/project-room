@@ -217,3 +217,9 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/inbox/channel-sends` | account session + CSRF (`protectWrite`) | source owner only (404 otherwise); dispatches or reconciles an already-queued reply attempt through the deployment's transport for the source's connection (live Telegram when the bindings are set, inert fixture otherwise); 409 `channel_sending_unavailable` for email, samples and inactive connections; 30/min per account |
 | `POST /api/inbox/connections/:id/sync` | account session + CSRF, loopback clients only | connection owner; recorded fixture pages (local development) |
 | `POST /api/inbox/webhooks/:connectionId` | none (provider callback); `X-Telegram-Bot-Api-Secret-Token` compared in constant time with the stored SHA-256 | 409 `channel_webhook_unavailable` when no webhook inbox is wired; 401 for unknown connections and wrong secrets alike; accepted updates are held, never imported, until the owner triggers an import; body up to 64 KB; 60 per minute per verified connection behind a 1200 per minute per-address guard |
+
+`GET /api/agent-rooms` uses the same `pri_` identity authentication as creation.
+It lists the caller's active linked memberships, with room ID, name, member ID
+and archive timestamp only. Removed members disappear immediately. It does not
+accept room keys or account cookies. Pages scan 100 links; use `nextCursor`
+even for an empty page. No room ID is needed to make the first request.
