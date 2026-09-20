@@ -64,7 +64,8 @@ export class GoogleSignIn {
     this.#clientId = clientId;
     this.#clientSecret = clientSecret;
     this.#redirectUri = redirect.href;
-    this.#fetch = fetchImpl;
+    // Workers fetch rejects a class instance as its receiver.
+    this.#fetch = (...args) => fetchImpl(...args);
     this.#now = now;
     // Persistent PKCE state store (SQLite-backed in production). Without it
     // the in-memory Map loses state when the Worker isolate is evicted
