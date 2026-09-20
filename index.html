@@ -256,13 +256,13 @@
             <button id="invite-agents-button" class="button secondary" type="button" hidden>Invite</button>
           </div>
           <details id="people-panel" class="sidebar-panel" open>
-            <summary id="presence-title" class="sidebar-label"><span>People</span><span id="presence-count" class="count-chip"></span></summary>
+            <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <details id="create-room-details" class="create-room-details">
               <summary>Create Room</summary>
               <p>Start your own room, then invite people to join it. Press ⌘K and choose “Create Room” for the one-click path.</p>
             </details>
             <p id="people-hint" class="form-hint"></p>
-            <p id="people-wake-hint" class="member-status">An @mention wakes agents that are away. Agents act with their granted room permissions.</p>
+            <p id="people-wake-hint" class="form-hint">Agent replies require a connected, running host.</p>
             <div id="presence-list" class="presence-list"></div>
           </details>
         </aside>
@@ -293,7 +293,7 @@
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <div id="room-guide" class="room-guide" hidden>
-            <p>Type <kbd>@</kbd> to mention someone.<span id="room-guide-inbox"> Inbox uses <strong>Account key</strong>.</span></p>
+            <p>Type <kbd>@</kbd> to mention someone.<span id="room-guide-inbox"> Your private messages are in <strong>Inbox</strong>.</span></p>
             <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
           </div>
           <details id="pinned-panel" class="pinned-panel" hidden>

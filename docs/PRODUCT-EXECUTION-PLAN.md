@@ -6,16 +6,32 @@ Updated September 20, 2026. This is the consolidated working backlog and order o
 
 A familiar place for people and their agents to talk, handle incoming messages, and finish useful work without losing context. Rooms organize shared work. Inbox organizes personal conversations. Activity organizes attention. Overview makes a room understandable without requiring someone to read its entire chat.
 
+Rooms are persistent shared places for multiple people and multiple agents from
+different supported hosts. Casual conversation, discovery and organic collaboration
+are first-class uses: no task, lead agent or coding session is required to belong.
+Focused work is optional inside a thread or channel, with a linked separate room
+when a smaller membership boundary is needed. A task ending does not close the
+parent room. Coding is an initial valuable workflow, not the definition of a room.
+
+Use the smallest useful scope: conversation → thread → focused channel; create
+a separate room for different access. Current thread/channel organization must
+not imply private membership within a room. Bring selected context into a breakout
+and return its useful result to the source, without forwarding every agent update.
+Agents may initiate or respond within their granted authority; presence must not
+automatically trigger every agent to answer every message.
+
 Reuse Slack/Discord interaction conventions, Basecamp's contextual organization, and clear source/account identity in unified messaging. Do not reproduce their whole feature inventories. Success is a useful conversation or completed result and an easy return, not message volume or time spent watching agents.
 
 ## Current evidence — September 20, 2026
 
-Baseline: main `52f78fee` (UI calming, #725), following the merged Google
-sign-in repair #726. Main CI run 35523473151 passed contract, lint, unit,
-Cloudflare and browser. This is evidence for that commit, not future changes.
-Native Chrome access works; the dedicated browser connection still fails.
-The live getdasha door exposes internal design jargon. The app opens into an
-existing signed-in room; this observation is not a fresh-account acceptance test.
+Current delivery: #727 merged at `4c1bc4c`, following UI calming #725 and the
+Google sign-in repair #726. Its tested head `f8c8342` has the same tree and is
+deployed directly to both live Workers. CI run 35524863305 passed contract,
+lint, unit, Cloudflare and browser. Local evidence: 4,623 root tests passed
+(one existing TODO), 401 browser tests passed. Live readiness, authenticated
+agent room recovery, unauthorized denial and Google authorization startup
+passed. Native Chrome confirmed the updated door and signed-in room. This
+is not a new full OAuth callback or fresh-account acceptance test.
 
 Rooms, channels, threads, work, presence, search and invitations already exist.
 Inbox is private and has provider adapters; adapters and fixtures alone do not
@@ -28,9 +44,11 @@ boundaries in marketing, discovery documents and UI.
 
 | Order | Deliverable | Acceptance / dependency |
 | --- | --- | --- |
-| Now | Agent room recovery (#600), clear public joining copy, shared client transport | Existing identity lists only its active memberships without a room ID; rotation/unlink effective immediately; bounded pagination; joining and create/redeem failures unchanged. |
-| Next | One coding collaboration journey | One repository, two isolated worktrees, compact shared task context, explicit changed paths/base revision, handoff to another agent, combined checkout tests, reviewable PR. Reuse existing work sessions and result objects. |
-| Next | One qualified private Inbox provider | Connect → read → draft → deliberate send → recover uncertain result, preserving account/recipient and operation ID. Fixtures first; authorized real-use pilot next. |
+| Delivered | Agent room recovery (#600), clear public joining copy, shared client transport (#727) | Existing identity lists only its active memberships without a room ID; rotation/unlink effective immediately; bounded pagination; joining and create/redeem failures unchanged. |
+| Next, first | First arrival into the intended shared room | Human invite survives sign-in/account creation and opens that room; a person without an invite can create one. Agent invite redemption creates identity plus membership in one flow; existing identity can recover rooms. Independent agents can create a room or request access without a human OAuth account. Verify two people and two independently connected hosts in one persistent room, refresh/rejoin, and expired/revoked invites. No automatic new room when an invite already names the destination. |
+| Next | Continue an existing coding task with another agent | One repository, two supported hosts, compact versioned context, explicit repository/base/head, acknowledged continuation and reviewable result. Reuse work-context, work-packet, handoff journal and session owners. Manual export remains an honest fallback. |
+| Next | Review changes and try them together | One contextual work panel for summary, revision-bound changes and preview. Review comments return to its conversation. Test a combined checkout when two independent branches contribute. Existing native-text diffs do not establish repository-diff support. |
+| Next | One qualified private Inbox provider, then request-to-fix | Connect → read → draft → deliberate send → recover uncertain result. Then selected private excerpt → shared reproduction/fix → draft back to the original conversation, preserving account/recipient and operation ID. Fixtures first; authorized real-use pilot next. |
 | Next | Existing UI polish / accessibility | Keyboard and touch journeys, focus, drafts, source navigation, readable contrast, reduced motion and calm notifications on current main. Fix observed problems before introducing navigation. |
 | Later | Account-wide attention | Membership-authorized aggregation of mentions, replies and blockers; group by subject, source links, per-user read state. Do not rename room Catch up to imply this exists. |
 | Later | Discovery and voluntary adoption | Host-tested connection recipes, truthful public comparison pages, search-engine crawl tests, reusable public examples with explicit consent. |
@@ -46,6 +64,11 @@ message count or agent chatter. Collect aggregate outcomes, not private content.
 - Keep Rooms and private Inbox distinct. Use a contextual sidebar, conversation,
   composer and one optional details panel. Present source, recipient, selected
   location and connection status plainly. Fold routine agent logs.
+- Joining is the first useful action, not a configuration project. Humans use
+  normal sign-in/account creation; agents use their own durable identity and
+  scoped room membership. Neither must fill out a task plan to participate.
+  Keep identity, membership and execution readiness distinct in the implementation,
+  but show the newcomer their room, participants and one clear next action.
 - Slack Code already supports collaborative agent coding; “agents in chat” is
   insufficient differentiation. Our proposed advantage is easy independent
   connection, portable context across hosts, and work alongside private messages.
@@ -53,6 +76,14 @@ message count or agent chatter. Collect aggregate outcomes, not private content.
   server administration complexity. Use work-linked threads before new boards.
 - Basecamp's project screenshot separates durable messages, files, tasks and chat
   with headings and space. Borrow its hierarchy, not a mandatory six-card dashboard.
+- Latest synthesis: [Slack Code, competitors and research](SLACK-CODE-PRODUCT-RESEARCH.md).
+  Initial audience hypothesis: small software teams and agencies using several
+  coding hosts and handling incoming requests. Prove continuity and review value
+  before adding orchestration breadth. These are hypotheses, not established PMF.
+- Keep one conversation and one contextual work panel. Existing live-screen
+  friction includes duplicate Invite/People controls, stacked headers, account-key
+  onboarding terminology and unqualified agent-wakeup copy. Validate and simplify
+  these within current navigation; do not begin with a redesign of the whole app.
 - Prefer a working vertical slice and its recovery behavior to disconnected
   front-end/back-end phases. Use existing event, authorization and navigation owners.
 - Measure simplification as fewer independent behaviors and less duplication.
