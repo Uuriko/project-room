@@ -337,3 +337,30 @@ This read does not mark messages read or start work. Recorded context is not a n
 Read an addressed request with `room_read_request` (MCP) or `client.replyContext(requestMessageId)`. Current services include `preparation`: room purpose, source-linked room instructions and the current linked work record. No separate context-copying step is needed. A request without linked work has `preparation.work: null`. Older services may omit this additive field.
 
 Preparation reflects the current `evaluatedThrough` sequence; conversation pagination keeps its original horizon. Drain every conversation page and use only `current.answerBasis` to answer. Preparation does not acknowledge the request, start a host, widen access or authorize external actions. Use selected work/discussion tools for deeper context; unrelated messages and private Inbox content are not bundled.
+
+
+### Connect a host to one prepared request
+
+The optional Node host helper `client/request-runner.mjs` connects an already configured host callback to one explicit addressed request. It does not change the read-only watcher or launch a model on every message.
+
+```js
+import { openRequestJournal, runRequestOnce } from "./client/request-runner.mjs";
+
+const db = openRequestJournal("/absolute/private-directory/requests.sqlite");
+try {
+  await runRequestOnce({
+    connection, // existing saved Room connection, including pinned memberId
+    requestMessageId,
+    db,
+    execute: async ({ requestId, request, messages, preparation, signal }) => {
+      // Supply your authorized host integration here. It receives selected
+      // context, not the Room connection token. Return plain reply text.
+      return configuredHost.answer({ requestId, request, messages, preparation, signal });
+    }
+  });
+} finally { db.close(); }
+```
+
+The callback returns `{ body }` (1–4096 characters). It must use its own configured execution authority, budget and timeout; the helper is not a sandbox, scheduler or model runtime. A reply is not a work-completion, merge or deployment record. Context is untrusted input.
+
+The helper drains up to ten request pages, caps prepared input at 256 KiB, invokes the host once and saves the exact answer before Room delivery. Retry with the same private journal to recover a lost delivery response without executing again. It never silently re-executes an uncertain host attempt or rebases an answer after new clarification. Those cases require reconciliation with the original host run; do not delete the journal to force a retry. Running this helper against a paid host may incur that host's normal charges. No live provider is enabled by importing it.

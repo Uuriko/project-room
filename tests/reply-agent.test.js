@@ -1,3 +1,4 @@
+import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -215,4 +216,95 @@ test("request tools automatically prepare only current room instructions and lin
   assert.equal(validateReplyRead(legacy, args), legacy, "older services remain readable");
   const plain = f.open("no-work");
   assert.equal((await f.client.replyContext(plain.command.data.messageId)).preparation.work, null);
+});
+
+
+const runner = (t, f) => {
+  const db = openRequestJournal(join(f.directory, "host-requests.sqlite"));
+  t.after(() => db.close());
+  return { connection: f.config, db };
+};
+test("configured host receives prepared request once and its answer returns through real Room HTTP", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-run");
+  let calls = 0;
+  const execute = async input => {
+    calls++;
+    assert.equal(input.request.recipientId, "producer");
+    assert.equal(input.messages[0].message.body, q.command.data.body);
+    assert.equal(input.preparation.room.id, "commons");
+    assert.equal(JSON.stringify(input).includes(f.config.token), false);
+    return { body: "A result from the configured test host" };
+  };
+  const result = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(result.hostExecuted, true);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+  const retry = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(retry.receipt.duplicate, true);
+  assert.equal(retry.hostExecuted, false);
+  assert.equal(calls, 1);
+});
+test("lost delivery response reuses saved answer without executing host again", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-lost");
+  let calls = 0, lost = false;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && !lost) { lost = true; throw new TypeError("lost response"); }
+    return response;
+  } };
+  const execute = async () => { calls++; return { body: "Persisted result" }; };
+  await assert.rejects(runRequestOnce({ ...args, connection, requestMessageId: q.command.data.messageId, execute }));
+  const recovered = await runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute });
+  assert.equal(recovered.receipt.duplicate, true);
+  assert.equal(calls, 1);
+});
+test("host failure is unknown and is never automatically executed a second time", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-unknown");
+  let calls = 0;
+  const execute = async () => { calls++; throw new Error("host disconnected"); };
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /disconnected/);
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /unknown/);
+  assert.equal(calls, 1);
+});
+test("human clarification during execution refuses stale delivery without rerunning or rebasing", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-steering");
+  let calls = 0;
+  const execute = async () => {
+    calls++;
+    f.store.command(f.keys.owner, "commons", { id: "steer-host", type: "message.posted", data: { messageId: "steer-host-msg", replyToId: q.command.data.messageId, body: "New clarification" } });
+    return { body: "An answer to the old request context" };
+  };
+  for (let i = 0; i < 2; i++) await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), { code: "command_rejected" });
+  assert.equal(calls, 1);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "open");
+});
+
+test("durable host result survives journal reopen and excludes concurrent execution", async t => {
+  const f = await fixture(t), path = join(f.directory, "restart.sqlite"), q = f.open("host-concurrent");
+  let db = openRequestJournal(path), entered, release, calls = 0;
+  const started = new Promise(resolve => entered = resolve);
+  const blocked = new Promise(resolve => release = resolve);
+  const execute = async () => { calls++; entered(); await blocked; return { body: "One durable answer" }; };
+  const args = { connection: f.config, requestMessageId: q.command.data.messageId, execute };
+  try {
+    const running = runRequestOnce({ ...args, db });
+    await started;
+    const other = openRequestJournal(path);
+    try { await assert.rejects(runRequestOnce({ ...args, db: other }), /unknown|owns/); }
+    finally { other.close(); release(); }
+    await running;
+    db.close(); db = openRequestJournal(path);
+    const recovered = await runRequestOnce({ ...args, db });
+    assert.equal(recovered.receipt.duplicate, true);
+    assert.equal(calls, 1);
+  } finally { release?.(); db.close(); }
+});
+test("closed and unaddressed requests never execute the configured host", async t => {
+  const f = await fixture(t), args = runner(t, f), q = f.open("host-closed");
+  const context = await f.client.replyContext(q.command.data.messageId);
+  await f.client.replyAction("room_respond_to_request", f.respond(context));
+  let calls = 0;
+  const execute = async () => { calls++; return { body: "Unexpected" }; };
+  await assert.rejects(runRequestOnce({ ...args, requestMessageId: q.command.data.messageId, execute }), /not ready/);
+  await assert.rejects(runRequestOnce({ ...args, connection: { ...f.config, memberId: "owner", token: f.keys.owner }, requestMessageId: q.command.data.messageId, execute }));
+  assert.equal(calls, 0);
 });
