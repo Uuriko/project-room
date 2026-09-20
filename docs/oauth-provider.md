@@ -57,6 +57,14 @@ Token endpoint. Form-encoded body with `grant_type`:
 Returns `{ access_token, refresh_token, token_type: "Bearer", expires_in, scope }`.
 Access tokens live 1 hour; refresh tokens 30 days and rotate on use.
 
+> **Connector note (QA-Auth 2026-09-19):** OAuth access tokens are minted and
+> validated at the provider level (introspection/revocation), but room API
+> routes do not currently accept them as bearer credentials — a room route
+> presented with an `oat_...` token answers 401. Third-party connectors use
+> the scoped agent keys documented in `connectors/muse.md`. Wiring OAuth
+> access tokens into room authorization is a tracked follow-up, not a
+> property of this build.
+
 ### POST /oauth/revoke
 
 RFC 7009 revocation. Form-encoded body: `token`. Revokes access or refresh

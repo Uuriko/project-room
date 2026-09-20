@@ -155,3 +155,42 @@ test("store: rotation refuses anonymous slots and unknown tokens", async t => {
   assert.equal(store.authenticateAccountSession(anon.token).account.id, "acct-legacy");
   assert.equal(kept.account.id, "acct-legacy");
 });
+
+test("recovery-code redeem mints a fresh slot token and kills the planted one (QA-Auth 2026-09-19)", async t => {
+  const { origin, store } = await startServer(t);
+  store.createAccount("acct-recovery-fix", "test");
+  store.accountLogins.linkPasswordMethod("acct-recovery-fix", { email: "recovery-fix@example.com", verifier: "scrypt$fixture-never-real" });
+  const { codes } = store.accountLogins.generateRecoveryCodes("acct-recovery-fix");
+
+  const planted = await openSlot(origin);
+  const redeem = await post(origin, "/api/auth/recovery-codes/redeem", {
+    cookie: planted.cookie,
+    csrf: planted.csrf,
+    body: { email: "recovery-fix@example.com", code: codes[0], sessionToken: planted.cookie, sessionRevision: planted.revision }
+  });
+  assert.equal(redeem.status, 200);
+  const fresh = accountCookie(redeem);
+  assert.ok(fresh, "redeem sets the fresh slot cookie");
+  assert.notEqual(fresh, planted.cookie, "the slot token rotates at redeem");
+  assert.throws(() => store.authenticateAccountSession(planted.cookie), { code: "unauthenticated" });
+  assert.equal(store.authenticateAccountSession(fresh).account.id, "acct-recovery-fix");
+});
+
+test("account-key login mints a fresh slot token and kills the planted one (QA-Auth 2026-09-19)", async t => {
+  const { origin, store } = await startServer(t);
+  store.createAccount("acct-key-fix", "test");
+  const accessKey = store.issueAccountAccessKey("acct-key-fix");
+
+  const planted = await openSlot(origin);
+  const login = await post(origin, "/api/account-session", {
+    cookie: planted.cookie,
+    csrf: planted.csrf,
+    body: { accountAccessKey: accessKey, expectedSessionRevision: planted.revision }
+  });
+  assert.equal(login.status, 201);
+  const fresh = accountCookie(login);
+  assert.ok(fresh, "account-key login sets the fresh slot cookie");
+  assert.notEqual(fresh, planted.cookie, "the slot token rotates at account-key login");
+  assert.throws(() => store.authenticateAccountSession(planted.cookie), { code: "unauthenticated" });
+  assert.equal(store.authenticateAccountSession(fresh).account.id, "acct-key-fix");
+});
