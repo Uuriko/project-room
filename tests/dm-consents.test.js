@@ -128,7 +128,7 @@ test("migration: prior DM exchange seeds approved; explicit revoke is never over
   assert.equal(err.code, "dm_consent_required"); // seed does not resurrect
 });
 
-test("list: participants see own pairs; owner sees all metadata; handles not ids", () => {
+test("list: participants see own pairs; owner sees all metadata; ids alongside handles", () => {
   const store = makeStore({ r1: baseState() });
   const dms = new DmConsents(store);
   dms.request("r1", "alice", "bob", "sync?");
@@ -137,7 +137,11 @@ test("list: participants see own pairs; owner sees all metadata; handles not ids
   assert.equal(aliceList[0].requester, "Alice");
   assert.equal(aliceList[0].target, "Bob");
   assert.equal(aliceList[0].outgoing, true);
-  assert.ok(!("requesterId" in aliceList[0]));
+  // Display names are not unique per room: rows carry the authoritative
+  // member ids so browser actions never guess an ambiguous target. Member
+  // ids are not a new disclosure — members already see them in presence.
+  assert.equal(aliceList[0].requesterId, "alice");
+  assert.equal(aliceList[0].targetId, "bob");
   const ownerList = dms.list("r1", "owner");
   assert.equal(ownerList.length, 1);
   const bobList = dms.list("r1", "bob");
@@ -199,4 +203,41 @@ test("migration against a real RoomStore projection: persisted DM seeds approved
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("block proactively refuses future requests; unblock reopens the flow", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  const blocked = dms.block("r1", "bob", "alice");
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.requesterId, "alice");
+  assert.equal(blocked.targetId, "bob");
+  // Alice cannot even ask now.
+  assert.equal(errOf(() => dms.request("r1", "alice", "bob")).code, "dm_blocked");
+  assert.equal(errOf(() => dms.requireApproved("r1", "alice", "bob")).code, "dm_blocked");
+  // Idempotent.
+  assert.equal(dms.block("r1", "bob", "alice").status, "blocked");
+  // Unblock returns the row to rejected; Alice may ask again.
+  assert.equal(dms.unblock("r1", "bob", "alice").status, "rejected");
+  assert.equal(dms.request("r1", "alice", "bob").status, "pending");
+});
+
+test("block flips an existing approved consent to blocked", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  dms.request("r1", "alice", "bob");
+  dms.decide("r1", "bob", "alice", "approve");
+  assert.equal(dms.block("r1", "bob", "alice").status, "blocked");
+  assert.equal(errOf(() => dms.requireApproved("r1", "alice", "bob")).code, "dm_blocked");
+  // Directional: bob → alice is untouched (no row ever existed).
+  assert.equal(errOf(() => dms.requireApproved("r1", "bob", "alice")).code, "dm_consent_required");
+});
+
+test("block rejects self, unknown and inactive members", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  assert.equal(errOf(() => dms.block("r1", "bob", "bob")).code, "invalid_dm_block");
+  assert.equal(errOf(() => dms.block("r1", "bob", "ghost")).code, "blocked_not_found");
+  assert.equal(errOf(() => dms.block("r1", "bob", "zed")).code, "blocked_not_found");
+  assert.equal(errOf(() => dms.block("nope", "bob", "alice")).code, "room_not_found");
 });

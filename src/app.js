@@ -8,6 +8,7 @@ import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
+import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage } from "./dm-consents.js";
 import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
@@ -206,6 +207,7 @@ const client = new RoomClient({
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
+      void refreshDmConsents();
     }
     instructionsUI?.sync();
     resultCopyUI?.sync();
@@ -237,6 +239,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    dmConsents = []; dmConsentSeq++;
     accessPreviews.clear();
     handoffEnvelopes.receipts = null; handoffEnvelopes.loading = false;
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
@@ -892,9 +895,19 @@ function syncComposerChrome() {
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
     // two parties — say so truthfully where the sender picks the recipient.
-    const recipient = to && state?.members?.[to] ? state.members[to].displayName : null;
+    // Consent-bound DMs (PR #731): also say whether the recipient has
+    // approved DMs from you, so a refusal is never a surprise.
+    const recipient = to && state?.members?.[to] ? state.members[to] : null;
     if (recipient) {
-      note.textContent = `Private — only you and ${recipient} can see this message.`;
+      note.textContent = `Private — only you and ${recipient.displayName} can see this message.`;
+      const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
+      if (consent && consent.outgoing && consent.outgoing !== "approved") {
+        note.textContent += consent.outgoing === "pending"
+          ? " Your DM request is still pending."
+          : consent.outgoing === "blocked"
+            ? " They aren't accepting DMs from you."
+            : " They haven't approved DMs from you yet — request from their profile in the People panel.";
+      }
       note.hidden = false;
     } else note.hidden = true;
   }
@@ -1433,14 +1446,38 @@ function render() {
     const typeChip = m.kind === "agent" && m.agentType
       ? `<span class="agent-type-chip" data-agent-type="${esc(m.agentType)}">${esc(catalogById(m.agentType)?.label || m.agentType)}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details>${dmConsentDetails(m)}</div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
+  // DM consent (consent-bound DMs, PR #731): directional state + actions for
+  // the signed-in member's pair with each other active member. Never rendered
+  // for yourself or for the public read-only face (session is null there).
+  const dmConsentDetails = m => {
+    if (!session || m.id === session.member.id || m.active === false) return "";
+    const summary = dmConsentPeerSummary(dmConsents, state.members, session.member.id, m.id);
+    const lines = dmConsentPairDescription(summary, m.displayName).map(line => `<p>${esc(line)}</p>`).join("");
+    const actions = dmConsentActionsForPeer(summary).map(a => a.disabled
+      ? `<span class="dm-consent-note">${esc(a.label)}</span>`
+      : `<button type="button" class="text-button" data-dm-consent-action="${a.action}" data-dm-consent-peer="${esc(m.id)}">${esc(a.label)}</button>`).join("");
+    return `<details class="dm-consent"><summary data-focus-key="member-dm:${esc(m.id)}">Direct messages</summary><div class="dm-consent-body">${lines}<div class="dm-consent-actions">${actions}</div></div></details>`;
+  };
+  // Incoming DM requests surface at the top of the People panel so they are
+  // visible without opening any one member's details.
+  const dmRequestInbox = () => {
+    if (!session) return "";
+    const requests = incomingDmRequests(dmConsents, state.members, session.member.id);
+    if (!requests.length) return "";
+    const rows = requests.map(r => {
+      const member = state.members[r.requesterId];
+      return `<li class="dm-request"><div><strong>${esc(member ? member.displayName : r.requester)}</strong>${r.reason ? `<p class="dm-request-reason">&ldquo;${esc(r.reason)}&rdquo;</p>` : ""}</div><div class="dm-consent-actions"><button type="button" class="text-button" data-dm-consent-action="approve" data-dm-consent-peer="${esc(r.requesterId)}">Approve</button><button type="button" class="text-button" data-dm-consent-action="reject" data-dm-consent-peer="${esc(r.requesterId)}">Reject</button><button type="button" class="text-button" data-dm-consent-action="block" data-dm-consent-peer="${esc(r.requesterId)}">Block</button></div></li>`;
+    }).join("");
+    return `<div class="dm-requests"><p class="presence-heading">Direct message requests (${requests.length})</p><ul>${rows}</ul></div>`;
+  };
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
-  renderContent("#presence-list", `${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
   const proposing = can("steer") && !isRoomArchived(state); // Issue #6 A2: no new work in an archived room.
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
@@ -2857,6 +2894,12 @@ function submitRequest(form) {
       if ((!hadPending && [400, 404, 409, 413, 422].includes(error.status))
         || error.code === "command_rejected" && [409, 422].includes(error.status)) pendingMessage = null;
       saveComposer();
+      // A DM refused by the consent gate names the recipient and the next
+      // step, instead of surfacing the raw gate message.
+      if (command?.data?.toMemberId && ["dm_consent_required", "dm_blocked"].includes(error.code)) {
+        const peer = state.members[command.data.toMemberId];
+        throw Object.assign(new Error(dmConsentFailureMessage(error, peer?.displayName)), { code: error.code, status: error.status });
+      }
       throw error;
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
@@ -3023,7 +3066,7 @@ async function refreshAgentPauses() {
     render();
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
-$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) refreshAgentPauses(); });
+$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); } });
 $("#presence-list").addEventListener("click", async e => {
   const pauseButton = e.target.closest("[data-member-pause]"), removeButton = e.target.closest("[data-member-remove]"), keepButton = e.target.closest("[data-member-remove-cancel]");
   if (!pauseButton && !removeButton && !keepButton) return;
@@ -3474,6 +3517,12 @@ async function setMute(memberId, muted) {
 $("#presence-list").addEventListener("click", e => {
   const button = e.target.closest("[data-mute-member]");
   if (button && state) setMute(button.dataset.muteMember, button.dataset.muted !== "true");
+});
+$("#presence-list").addEventListener("click", async e => {
+  const consentButton = e.target.closest("[data-dm-consent-action]");
+  if (!consentButton || !state || !session || dmConsentBusy) return;
+  e.preventDefault();
+  await runDmConsentAction(consentButton.dataset.dmConsentAction, consentButton.dataset.dmConsentPeer, consentButton);
 });
 function syncReports() {
   const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
@@ -4185,6 +4234,10 @@ function loadReturnBrief() { return briefView.refresh(); }
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
 // evaluated through, so items arriving later stay unread.
 let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
+// DM consent pairs for the signed-in member (consent-bound DMs, PR #731).
+// Refreshed on room open, when the People panel opens, and after every
+// consent action. Never loaded for the public read-only face.
+let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0;
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
 const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
@@ -4261,7 +4314,69 @@ function syncNotifications() {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "hidden" && ownsNotifications(notificationOwner) && notificationOwner.stale) { notificationOwner.stale = false; scheduleNotifications(0); }
+  // Consent changes emit no room event; re-sync the side table when the tab
+  // comes back so the People panel never shows a stale gate.
+  if (document.visibilityState === "visible") void refreshDmConsents();
 });
+// ---- DM consent ---------------------------------------------------------------
+// The signed-in member's consent pairs drive the People panel's Direct
+// messages sections and the composer's DM recipient hint. Load failures stay
+// silent (a stale list is worse than none); every action reports loudly.
+async function refreshDmConsents() {
+  if (!state || !session || $("#main").hidden || dmConsentBusy) return;
+  const seq = ++dmConsentSeq, generation = client.generation, room = state;
+  dmConsentBusy = true;
+  try {
+    const result = await fetchDmConsents(client);
+    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    dmConsents = Array.isArray(result) ? result : [];
+  } catch {
+    // A failed refresh keeps the last known list: wiping it would flash the
+    // whole People panel back to "no consent" while the failed action
+    // already reported loudly through the notice banner.
+    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+  } finally {
+    dmConsentBusy = false;
+    if (seq === dmConsentSeq && generation === client.generation && state === room) render();
+  }
+}
+async function runDmConsentAction(action, peerId, button) {
+  if (!state || !session || dmConsentBusy) return;
+  const peer = state.members[peerId];
+  if (!peer || peer.active === false) return;
+  const seq = ++dmConsentSeq, generation = client.generation, room = state;
+  dmConsentBusy = true;
+  if (button) button.disabled = true;
+  try {
+    if (action === "request") await requestDmConsent(client, peerId);
+    else if (["approve", "reject"].includes(action)) {
+      const pending = incomingDmRequests(dmConsents, state.members, session.member.id).find(r => r.requesterId === peerId);
+      if (!pending) throw Object.assign(new Error("That DM request is no longer pending."), { code: "dm_no_pending_request" });
+      await decideDmConsent(client, pending.requesterId, action);
+    } else if (action === "block") {
+      // A pending request from them is blocked on the request itself (keeps
+      // the request's row and reason); otherwise the proactive block route.
+      const pending = incomingDmRequests(dmConsents, state.members, session.member.id).find(r => r.requesterId === peerId);
+      if (pending) await decideDmConsent(client, pending.requesterId, "block");
+      else await blockDmMember(client, peerId);
+    }
+    else if (action === "unblock") await unblockDmMember(client, peerId);
+    else if (action === "revoke") await revokeDmConsent(client, peerId);
+    else return;
+    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    notice(action === "request" ? `DM request sent to ${peer.displayName}.`
+      : action === "approve" ? `${peer.displayName} can now message you directly.`
+      : action === "reject" ? `Declined ${peer.displayName}'s DM request.`
+      : action === "block" ? `${peer.displayName} blocked — they can't message you or send new requests.`
+      : action === "unblock" ? `${peer.displayName} unblocked — they can send a DM request again.`
+      : `DM consent with ${peer.displayName} revoked.`);
+  } catch (error) {
+    if (seq === dmConsentSeq && generation === client.generation && state === room) notice(dmConsentFailureMessage(error, peer.displayName), true);
+  } finally {
+    dmConsentBusy = false;
+    if (seq === dmConsentSeq && generation === client.generation && state === room) await refreshDmConsents();
+  }
+}
 $("#notification-read-button").addEventListener("click", async () => {
   const ticket = notificationOwner, feed = notificationFeed;
   if (!ownsNotifications(ticket) || !feed?.unread || notificationBusy) return;

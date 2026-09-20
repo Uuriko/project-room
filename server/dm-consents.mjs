@@ -200,10 +200,42 @@ export class DmConsents {
     });
   }
 
+  // ---- block ----------------------------------------------------------------
+  // Proactive block: blockerId refuses DMs from blockedId without waiting
+  // for a pending request. Recorded as (blockedId → blockerId, 'blocked')
+  // so the request path's 403 dm_blocked refusal applies and the requester
+  // cannot ask again until unblocked. Directional: the reverse direction
+  // (blocker → blocked) is untouched. Idempotent on an existing block.
+  block(roomId, blockerId, blockedId) {
+    if (typeof blockedId !== "string" || !blockedId) fail(422, "invalid_dm_block", "blockedMemberId is required");
+    if (blockerId === blockedId) fail(422, "invalid_dm_block", "You cannot block yourself");
+    return this.store.transaction(() => {
+      const state = this._roomState(roomId);
+      this._requireActiveMember(state, blockerId, "member_not_found");
+      this._requireActiveMember(state, blockedId, "blocked_not_found");
+      const existing = this._get(roomId, blockedId, blockerId);
+      const at = nowMs();
+      if (existing) {
+        if (existing.status === "blocked") return rowToPair(existing);
+        this.db.prepare(
+          "UPDATE dm_consents SET status='blocked', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
+        ).run(at, roomId, blockedId, blockerId);
+      } else {
+        this.db.prepare(
+          "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,'blocked','',?,?)"
+        ).run(roomId, blockedId, blockerId, at, at);
+      }
+      return rowToPair(this._get(roomId, blockedId, blockerId));
+    });
+  }
+
   // ---- read -----------------------------------------------------------------
   // list: participants see pairs involving them (both directions); the room
-  // owner additionally sees every pair's metadata for moderation. Handles,
-  // never member ids, in the output.
+  // owner additionally sees every pair's metadata for moderation. Rows carry
+  // display handles for rendering plus the authoritative member ids, because
+  // display names are not unique per room and browser actions must never
+  // guess an ambiguous target. Member ids are not a new disclosure: every
+  // room member already sees them in presence and message events.
   list(roomId, viewerId) {
     const state = this._roomState(roomId);
     this._requireActiveMember(state, viewerId, "viewer_not_found");
@@ -216,6 +248,8 @@ export class DmConsents {
     return Object.freeze(rows.map(row => Object.freeze({
       requester: this._handleOf(state, row.requester_id),
       target: this._handleOf(state, row.target_id),
+      requesterId: row.requester_id,
+      targetId: row.target_id,
       status: row.status,
       reason: row.reason,
       createdAt: row.created_at,

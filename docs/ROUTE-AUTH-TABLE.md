@@ -41,10 +41,11 @@ the body is read.
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/spend-allowance` | room Bearer / session | room owner only (403 `owner_required` before the command is built); the `room.spend_allowance_set` reducer refuses non-owners on the generic command path as well |
-| `POST /api/rooms/:id/dm-consents` | room Bearer / session | member; request DM consent toward another active member (directional, forward-looking; `{ targetId, reason? }`); the requester is implicit — responses carry display handles, never member ids |
+| `POST /api/rooms/:id/dm-consents` | room Bearer / session | member; request DM consent toward another active member (directional, forward-looking; `{ targetId, reason? }`); the requester is implicit — list responses carry display handles plus the authoritative member ids |
 | `POST /api/rooms/:id/dm-consents/:requesterId/decide` | room Bearer / session | the targeted member (or room owner) approves / rejects / blocks (`{ decision }`); blocked pairs need an explicit unblock |
 | `POST /api/rooms/:id/dm-consents/revoke` | room Bearer / session | either participant revokes an approved direction (`{ peerId }`); old DM history stays readable |
 | `POST /api/rooms/:id/dm-consents/unblock` | room Bearer / session | the blocking member lifts a block (`{ peerId }`) |
+| `POST /api/rooms/:id/dm-consents/block` | room Bearer / session | member proactively blocks DMs from another active member (`{ peerId }`); directional and sticky — the blocked member's requests are refused with 403 `dm_blocked` until unblocked |
 | `POST /api/rooms/:id/public-face` | room Bearer / session | room owner only (`{ enabled }`); enables/disables the opt-in public read-only face and mints the unguessable `pub1.*` code |
 | `POST /api/rooms/:id/public-face/rotate` | room Bearer / session | room owner only; replaces the public code (old code 404s immediately) |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
