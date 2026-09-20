@@ -104,7 +104,7 @@ export class GoogleSignIn {
 
   async #json(url, init) {
     try {
-      const response = await this.#fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) });
+      const response = await this.#fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15000) });
       if (!response.ok) { await response.body?.cancel(); fail('google_provider_rejected'); }
       if (!response.body) fail('google_provider_invalid');
       const reader = response.body.getReader();

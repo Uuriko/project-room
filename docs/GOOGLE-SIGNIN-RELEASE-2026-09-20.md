@@ -9,3 +9,5 @@ Activation revealed an existing database-upgrade defect: `oauth_pending_states` 
 The Workers regression boots both a fresh database and a synthetic existing v35 database without the table. The existing-database case reproduced HTTP500 before the fix. Both must return Google redirects with the expected callback, basic identity scopes, PKCE, and an HttpOnly account session cookie. The check is included in local and CI Workers gates.
 
 Release this narrow repair from the deployed 5ca5196 source; do not pull unrelated main changes into production. Confirm live start302, real Google callback/account home, health/version, and unchanged public assets. Keep the qualified emergency maintenance version e3f46087-8f86-4146-bb72-de81be1e0b8e available; never use incompatible old7db as rollback.
+
+Real provider callback testing also exposed an unsupported Workers fetch option: `redirect: error`. Use `manual` and retain the existing non-2xx refusal. The Workers JWT fixture constructs real runtime Requests before serving synthetic keys and checks provider redirects are rejected. Callback diagnostics forward only bounded error codes, never provider bodies, tokens or identities.

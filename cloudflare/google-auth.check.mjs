@@ -25,5 +25,8 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const token = input + '.' + sign('RSA-SHA256', Buffer.from(input), keys.privateKey).toString('base64url');
   const verified = await mf.dispatchFetch(origin + '/__verify', {method: 'POST', headers: {'CF-Connecting-IP': '192.0.2.1'}, body: JSON.stringify({token, jwk})});
   assert.equal(verified.status, 200, await verified.clone().text());
+  const rejected = await mf.dispatchFetch(origin + '/__verify', {method: 'POST', headers: {'CF-Connecting-IP': '192.0.2.1'}, body: JSON.stringify({token, jwk, redirect: true})});
+  assert.equal(rejected.status, 500);
+  assert.deepEqual(await rejected.json(), {error: 'google_provider_rejected'});
  } finally { await mf.dispose(); }
 });
