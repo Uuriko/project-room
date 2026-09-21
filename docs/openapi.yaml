@@ -5415,6 +5415,23 @@ paths:
       responses:
         '200': { description: "{ format, exportedAt, service: { sourceRevision, buildId, mode }, room, diagnostics }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/needs-attention:
+    get:
+      summary: Owner "needs your attention" rollup (#662)
+      description: >-
+        Room owner with `manage_members`, by room Bearer <redacted> or signed-in
+        account session (the CLI uses the bearer). Aggregates every place an
+        owner decision is required: pending access requests (inline approve/deny
+        via the decide path), work awaiting verification or an owner decision,
+        spend-allowance headroom below 20% (or over), and claim leases expiring
+        within 24h. 403 owner_required for anyone else. Each item carries the
+        concrete next action so approvals live in the conversation surface
+        instead of a separate admin area.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '403': { description: owner_required }
   /api/rooms/{roomId}/guest-agent-links:
     post:
       summary: Mint a guest invite

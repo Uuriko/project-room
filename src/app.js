@@ -13,6 +13,7 @@ import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
+import { createNeedsAttentionCard } from "./needs-attention.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
@@ -214,6 +215,12 @@ const client = new RoomClient({
     portableWorkUI?.sync();
     inboxUI?.sync();
     if (firstSnapshot) {
+      // #662: the owner card loads once per room session; everyone else never sees it.
+      if (session?.member?.kind === "human" && state.room?.ownerId === session.member.id && can("manage_members")) {
+        void ownerAttentionCard.refresh();
+      } else {
+        ownerAttentionCard.hide();
+      }
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
@@ -352,6 +359,8 @@ remindersUI = installReminders({ client, getState: () => state, onSaved: text =>
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
+// #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
+const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
