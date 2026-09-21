@@ -62,7 +62,7 @@ test('decide permission delegation follows #643 owner-grant rules', t => {
   assert.ok(member.permissions.includes('decide'));
   // A non-owner (viewer) cannot grant decide to an agent.
   assert.throws(() => store.command(keys.viewer, 'commons', command(T.MEMBER_ADDED, {
-    memberId: 'agent-c', displayName: 'agent-c', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] })), /cannot be delegated|access_denied|owner_required/);
+    memberId: 'agent-c', displayName: 'agent-c', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] })), /cannot be delegated|lacks manage_members|access_denied|owner_required/);
   assert.equal(decisions().length, 0);
 });
 
