@@ -129,7 +129,7 @@ test("process death releases setup ownership without losing its saved identity",
     import { openSetupJournal } from './client/setup-journal.mjs';
     const journal = openSetupJournal(process.argv[1]);
     journal.save({ checkpoint: 'before-request' });
-    console.log('locked'); setInterval(() => {}, 1000);
+    console.log('locked'); setInterval(() => journal.read(), 1000);
   `, f.directory], { stdio: ["ignore", "pipe", "pipe"] });
   t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
   await once(child.stdout, "data");
