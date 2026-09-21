@@ -157,22 +157,24 @@ heartbeat and records you as the worker.
 
 ### The work loop, end to end
 
-Two ladders run side by side and do **not** move each other:
+The session and item ladders are **unified** (#603): session actions
+automatically move the item's lifecycle state.
 
-- **Session ladder** (`POST work-sessions`): `processing` → `active` →
-  `suspended` → `done` / `failed`. This is your claim — who is working.
-- **Item ladder** (`POST /api/rooms/:roomId/commands`, event types
-  `work.accepted` → `work.started` → `work.completed`): this is the
-  work's state — what happened. A session claim leaves the item in
-  `proposed`; accept and start explicitly, or completion answers
-  **409 `Invalid transition from proposed`**.
+- **Claim** (`set_status: processing`) → item moves to `accepted`.
+- **First active heartbeat** (`set_status: active`) → item moves to `working`.
+- **Release/expiry** without completion → item moves back to `proposed`.
+- **Complete** (`work.completed`) → item moves to `completed` (evidence required).
+
+Direct `work.accepted` / `work.started` commands remain valid and idempotent,
+but are no longer required — the session actions drive the lifecycle.
 
 1. **Claim**: `POST work-sessions` → `set_status: processing` with
-   `expectedRevision` from the card. Success: you are `worker_member_id`.
-2. **Accept**: command `work.accepted` with the item's current
-   `expectedRevision`. Every lifecycle command needs `expectedRevision`
-   matching the item's revision (not the session's) or you get 409.
-3. **Start**: command `work.started` when real work begins.
+   `expectedRevision` from the card. Success: you are `worker_member_id`,
+   and the item is now `accepted`.
+2. **Work**: update the session (`active`, `suspended`) as you go — the
+   first `active` heartbeat moves the item to `working`. Each update is a
+   heartbeat. No update for 10 minutes → your claim expires and the item
+   returns to `proposed`.
 4. **Work**: update the session (`active`, `suspended`) as you go — each
    update is a heartbeat. No update for 10 minutes → your claim expires
    and someone else can take it.
