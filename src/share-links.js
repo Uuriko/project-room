@@ -208,7 +208,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function creationBusy(value) {
     creating = value;
     // The close control is held too: dismissing mid-request would orphan a shown-once link.
-    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close"]) $("#" + id).disabled = value;
+    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close", "share-link-admins"]) $("#" + id).disabled = value;
   }
   function updateSwitchWarning() {
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
