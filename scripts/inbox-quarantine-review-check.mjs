@@ -62,6 +62,15 @@ async function setup(t) {
 
 const card = (page, n) => page.locator(".inbox-quarantine-item").nth(n);
 
+// refresh() swaps the card list only after the quarantine fetch lands, so a
+// waitFor on the old card is a race: it resolves on the stale card while the
+// new filter's fetch is still in flight. The status line flips Loading… -> ""
+// around the swap, so wait for the full transition at every filter switch.
+async function waitForRefresh(page) {
+  await page.waitForFunction(() => document.querySelector("#inbox-quarantine-status-line")?.textContent === "Loading…");
+  await page.waitForFunction(() => document.querySelector("#inbox-quarantine-status-line")?.textContent === "");
+}
+
 test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dismisses", { timeout: 60000 }, async t => {
   const { page, origin, key } = await setup(t);
   await page.goto(origin + "/?account=1");
@@ -88,6 +97,7 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   await page.waitForFunction(() => document.querySelectorAll(".inbox-quarantine-item").length === 1);
   assert.equal(await page.locator("#inbox-quarantine-count").textContent(), "1 held");
   await page.locator("#inbox-quarantine-status").selectOption("released");
+  await waitForRefresh(page);
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
   assert.ok((await card(page, 0).textContent()).includes("Score 80/100"));
@@ -95,6 +105,7 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   // Back to held: Dismiss arms on the first click (nothing changes), then
   // dismisses on the second click.
   await page.locator("#inbox-quarantine-status").selectOption("held");
+  await waitForRefresh(page);
   await card(page, 0).waitFor();
   const dismiss = card(page, 0).getByRole("button", { name: "Dismiss", exact: true });
   await dismiss.click();
@@ -107,6 +118,7 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   await page.waitForFunction(() => document.querySelectorAll(".inbox-quarantine-item").length === 0);
   assert.equal(await page.locator("#inbox-quarantine-count").textContent(), "0 held");
   await page.locator("#inbox-quarantine-status").selectOption("dismissed");
+  await waitForRefresh(page);
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
 });
