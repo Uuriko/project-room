@@ -279,6 +279,14 @@
               <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings">&#9881;</button>
             </div>
           </header>
+          <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
+            <header class="attention-header">
+              <h3><span class="attention-icon" aria-hidden="true">!</span> Needs your attention <span id="attention-count" class="count-chip"></span></h3>
+              <button id="attention-refresh" class="button ghost" type="button">Refresh</button>
+            </header>
+            <ol id="attention-list" class="attention-list"></ol>
+            <p id="attention-status" class="status form-status" role="status"></p>
+          </section>
           <form id="search-form" class="topbar-search" role="search" aria-label="Search this room" hidden>
             <label class="sr-only" for="message-search">Search messages and work</label>
             <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentions</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>

@@ -509,6 +509,25 @@ export class RoomClient {
       throw error;
     }
   }
+  async needsAttention() {
+    // #662: owner-only rollup of everything awaiting an owner decision.
+    // 403 owner_required means the viewer is not the owner — not a failure.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/needs-attention"));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if (error.status === 403 && error.code === "owner_required") return null;
+      if ([401].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
   async charter(revision) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
