@@ -4782,11 +4782,20 @@ document.addEventListener("click", event => {
   const shell = $("#main");
   if (!shell.classList.contains("sidebar-open")) return;
   if (event.target.closest("#room-sidebar") || event.target.closest("#sidebar-toggle")) return;
+  // Every dialog opens modal, so a dialog sits in the top layer above the inert
+  // sidebar overlay: clicks inside it are dialog interactions, not "outside"
+  // clicks. Dismissing the sidebar under them hides the dialog trigger while it
+  // still holds restored focus, dropping focus to <body> on mobile.
+  if (event.target.closest("dialog")) return;
   shell.classList.remove("sidebar-open");
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
+  // Let an open modal dialog consume Escape itself: its native close restores
+  // focus to the trigger, which the sidebar dismissal below would strand the
+  // same way the click path did.
+  if (document.querySelector("dialog[open]")) return;
   const shell = $("#main");
   if (!shell.classList.contains("sidebar-open")) return;
   shell.classList.remove("sidebar-open");
