@@ -36,6 +36,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
   paths.add('deploy/agent-discovery.mjs');
+  paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');

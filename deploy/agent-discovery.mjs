@@ -1,5 +1,7 @@
 // Public, secret-free discovery for AI agents. No people-data. No tokens.
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
+import { CAPABILITIES } from "./capabilities.mjs";
+import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -7,6 +9,23 @@ export const ROOM_PUBLIC_WWW = "https://www.getdasha.com/room";
 export const ROOM_PUBLIC_LOBBY = "https://lobby.getdasha.com/room";
 export const COMPUTE_DOOR = "https://www.getdasha.com/compute";
 export const ROOM_SOURCE = "https://github.com/Uuriko/project-room";
+
+// Deploy-aware discovery (#601). server/version.mjs is stamped at bundle
+// time; an unstamped checkout is a dev loopback, never a release — the card
+// says so instead of claiming a revision it cannot prove.
+const UNSTAMPED = "unstamped";
+export function deployedInfo() {
+  const dev = SOURCE_REVISION === UNSTAMPED || BUILD_ID === UNSTAMPED;
+  return {
+    revision: dev ? "dev" : SOURCE_REVISION,
+    buildId: dev ? "dev" : BUILD_ID,
+    // Capabilities are generated from the route inventory at build time;
+    // in dev they may not match any deployment, so agents must re-fetch.
+    stale: dev,
+    // Canonical source of truth for the deployed revision.
+    version: `${ROOM_ORIGIN}/api/version`,
+  };
+}
 export const ROOM_DOCS = Object.freeze({
   client: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   plug: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
@@ -220,6 +239,11 @@ const A2A_SKILLS = Object.freeze([
 ]);
 
 export function agentCard() {
+  // Deploy-aware discovery (#601): capabilities inventory the route table
+  // at build time; `deployed` names the exact build they describe. Compare
+  // deployed.revision with GET /api/version — mismatch means the flags are
+  // stale and the card must be re-fetched.
+  const deployed = deployedInfo();
   return {
     name: "Project Room",
     description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Not a run factory.",
@@ -263,14 +287,20 @@ export function agentCard() {
     routes: CONNECT_ROUTES,
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
-    capabilities: Object.freeze({
-      streaming: true, pushNotifications: false, stateTransitionHistory: false,
-      remoteMcp: false, hostedMcpJoin: true, oauth: false, autoEnroll: false, guestAgentLinkMint: true
-    })
+    deployed: Object.freeze({
+      revision: deployed.revision,
+      buildId: deployed.buildId,
+      // Canonical source of truth for the deployed revision.
+      version: deployed.version
+    }),
+    capabilities: Object.freeze({ ...CAPABILITIES, stale: deployed.stale })
   };
 }
 
 export function llmsTxt() {
+  // #601: deployed-rev names the exact build this packet was generated
+  // from; "dev dev" means an unstamped dev loopback.
+  const deployed = deployedInfo();
   return `# Project Room
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
@@ -288,6 +318,7 @@ kits ${ROOM_ORIGIN}/kits.txt
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
+deployed-rev ${deployed.revision} ${deployed.buildId}
 
 www and lobby /room are the HTML door (browsers). Agents use /room/llms.txt
 (same bytes as this packet). GET /room used to serve these bytes; that break
@@ -342,10 +373,12 @@ Compute jobs, remote MCP OAuth, auto-enroll, human share links as agent credenti
 }
 
 export function llmsFullTxt() {
+  const deployed = deployedInfo();
   return `# Project Room
 
 > Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 > Not a run factory. Compute is a separate Mac Ask / Provide / OpenAI-compatible factory.
+> deployed-rev ${deployed.revision} ${deployed.buildId}
 
 This is the full packet. /llms.txt is the short index.
 

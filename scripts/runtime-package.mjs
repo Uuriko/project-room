@@ -68,6 +68,7 @@ optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/public-assets.mjs"); // Shared live manifest; historical packages predate it.
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
+optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
