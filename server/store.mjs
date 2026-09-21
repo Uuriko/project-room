@@ -33,6 +33,7 @@ import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
@@ -549,6 +550,7 @@ export class RoomStore {
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
+    this.delegation = new MembershipDelegation(this);
     this.invites = new AgentInvites(this);
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
@@ -787,6 +789,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      // Owner-granted membership administration for agent identities
+      // (RC-2026-09-18-038): purely additive, intentionally outside the
+      // writer fence like access_requests — older writers have no code path
+      // to the table, and the grant journal's grant→revoke transitions plus
+      // the owner-only grant rule are the integrity gate.
+      this.db.exec(membershipDelegationSchema);
       this.db.exec(agentRoomSchema);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers

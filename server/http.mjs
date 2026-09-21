@@ -2203,6 +2203,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      // RC-2026-09-18-038: owner-granted membership administration for agent
+      // identities (server/membership-delegation.mjs). Grant and revoke are
+      // owner-only; the list is owner-only like the sibling audit lists.
+      const delegationGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/grant$/.exec(url.pathname);
+      const delegationRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/revoke$/.exec(url.pathname);
+      const delegationListMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
       // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
       const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
@@ -2264,10 +2270,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -2275,11 +2281,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide"
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
-        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";
-      const selected = roomCredentials(req, url);
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
         : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -2748,6 +2753,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_request", "decision, permissions, note are the accepted fields");
         }
         return json(res, 200, accessRequests.decide(selected.token, roomId, accessRequestId, data, fence));
+      }
+      // RC-2026-09-18-038: owner-granted membership administration for agent
+      // identities. Grant/revoke/list are owner-only; a grant lets the
+      // holder's identity list and decide access requests (see
+      // server/membership-delegation.mjs). The holder cannot grant further.
+      if (route === "delegation-list" && req.method === "GET") {
+        return json(res, 200, { roomId, grants: store.delegation.list(selected.token, roomId, fence) });
+      }
+      if (route === "delegation-grant" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.delegation.grant(selected.token, roomId, data, fence));
+      }
+      if (route === "delegation-revoke" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.delegation.revoke(selected.token, roomId, data, fence));
       }
       if (route === "ownership-transfer" && req.method === "POST") {
         // Agent room ownership, appointment path: the current room owner

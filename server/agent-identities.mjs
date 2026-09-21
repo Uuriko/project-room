@@ -121,10 +121,13 @@ export class AgentIdentities {
 
   // Owner-only: link an identity into a room, creating one member record
   // bound to it. The agent then uses its single identity secret here.
+  // RC-2026-09-18-038: a membership-administration delegate may also link,
+  // because decide() drives link() with the approver's token — approving an
+  // access request is exactly what the delegation exists for.
   link(token, roomId, { identityId, memberId, displayName, permissions }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");

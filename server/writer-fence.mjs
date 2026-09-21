@@ -29,6 +29,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
+  // membership_delegation_grants (owner-granted membership administration
+  // for agent identities, RC-2026-09-18-038): purely additive and
+  // intentionally NOT fenced — older writers have no code path to it, and
+  // the grant journal's grant→revoke transitions plus the owner-only grant
+  // rule are the integrity gate.
+  "membership_delegation_grants",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path

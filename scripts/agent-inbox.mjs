@@ -273,6 +273,9 @@ if (action === "join") {
   node scripts/agent-inbox.mjs request-access ROOM_ID IDENTITY_ID DISPLAY_NAME PERM1,PERM2 [NOTE]
   node scripts/agent-inbox.mjs access-requests [STATUS]
   node scripts/agent-inbox.mjs access-decide REQUEST_ID approve|deny [PERM1,PERM2] [NOTE]
+  node scripts/agent-inbox.mjs membership-grant IDENTITY_ID
+  node scripts/agent-inbox.mjs membership-revoke IDENTITY_ID
+  node scripts/agent-inbox.mjs membership-grants
   node scripts/agent-inbox.mjs doctor
   node scripts/agent-inbox.mjs support-export
   node scripts/agent-inbox.mjs sessions [STATUS]
@@ -344,7 +347,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -358,7 +361,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys"].includes(action) ? false
+        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
@@ -375,6 +378,9 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "request-access" && (checkpoint === undefined || extra.length < 3 || extra.length > 4))
       || (action === "access-requests" && (checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint) || extra.length))
       || (action === "access-decide" && (checkpoint === undefined || !["approve", "deny"].includes(extra[0])))
+      || (action === "membership-grant" && (checkpoint === undefined || checkpoint.startsWith("--") || extra.length))
+      || (action === "membership-revoke" && (checkpoint === undefined || checkpoint.startsWith("--") || extra.length))
+      || (action === "membership-grants" && (checkpoint !== undefined || extra.length))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
@@ -434,6 +440,9 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
           ...(extra[1] === undefined ? {} : { permissions: extra[1].split(",").map(p => p.trim()).filter(Boolean) }),
           ...(extra[2] === undefined ? {} : { note: extra[2] })
         })
+      : action === "membership-grant" ? await client.grantMembershipAdministration(checkpoint)
+      : action === "membership-revoke" ? await client.revokeMembershipAdministration(checkpoint)
+      : action === "membership-grants" ? await client.membershipAdministrationGrants()
       : action === "support-export" ? await client.diagnosticsExport()
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint,
