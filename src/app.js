@@ -881,7 +881,7 @@ function updatePeopleHint() {
   // QA-UX 2026-09-19: keep the calm merged hint (plain language, no
   // codenames/API docs). The @mention + receipts loop is taught by the
   // wake line and room guide instead of this one sentence.
-  if (hint) hint.textContent = "Invite people or add an agent to work together.";
+  if (hint) hint.textContent = "Invite people and agents to work together.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1438,6 +1438,7 @@ function render() {
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
+  const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
   // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
   const memberActions = m => {
@@ -1466,16 +1467,16 @@ function render() {
     const stateChip = serverState
       ? `<span class="member-state-chip" data-state="${esc(serverState)}">${esc(presenceLabel(serverState))}</span>`
       : "";
-    const ownerChip = serverPresence?.isOwner
+    const ownerChip = m.id === state.room.ownerId
       ? `<span class="owner-chip" title="Room owner">Owner</span>`
-      : "";
+      : m.active !== false && m.permissions.includes("manage_members") ? `<span class="owner-chip" title="Can invite and manage members">Admin</span>` : "";
     const workingOnTitle = serverState === "working" && serverPresence?.workingOn?.[0]?.title
       ? `<span class="member-working-on">working on ${esc(String(serverPresence.workingOn[0].title))}…</span>`
       : "";
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}${stateChip}${ownerChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${workingOnTitle}${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details>${dmConsentDetails(m)}</div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}${stateChip}${ownerChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${workingOnTitle}${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -3123,6 +3124,38 @@ async function refreshAgentPauses() {
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
 $("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshPresenceStates(); } });
+$("#share-link-admins").addEventListener("click", e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!ownsRoomActions(null)) return;
+  $("#share-link-dialog").addEventListener("close", () => {
+    if (!ownsRoomActions(null)) return;
+    revealPeopleChrome(); $("#people-panel > summary").focus();
+  }, { once: true });
+  $("#share-link-dialog").close();
+});
+$("#presence-list").addEventListener("click", async e => {
+  const button = e.target.closest("[data-member-admin]");
+  if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
+  e.preventDefault();
+  const member = state.members[button.dataset.memberAdmin];
+  if (!member || member.active === false || member.id === state.room.ownerId) return;
+  const wasAdmin = member.permissions.includes("manage_members"), generation = client.generation;
+  const permissions = wasAdmin ? member.permissions.filter(p => p !== "manage_members") : [...member.permissions, "manage_members"];
+  memberActionBusy = true; button.disabled = true;
+  try {
+    const entry = draftCommand(null, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision, permissions, active: true });
+    await client.send(entry.command);
+    if (generation !== client.generation || !state) return;
+    notice(wasAdmin ? `${member.displayName} is no longer a room admin. Other access is unchanged.` : `${member.displayName} is now a room admin and can invite and manage members.`);
+  } catch (error) {
+    if (generation === client.generation && state) notice(error.message || "Admin role not saved. Try again.", true);
+  } finally {
+    memberActionBusy = false;
+    if (generation === client.generation && state) {
+      render(); $(`#presence-list [data-member-admin="${CSS.escape(member.id)}"]`)?.focus();
+    }
+  }
+});
 $("#presence-list").addEventListener("click", async e => {
   const pauseButton = e.target.closest("[data-member-pause]"), removeButton = e.target.closest("[data-member-remove]"), keepButton = e.target.closest("[data-member-remove-cancel]");
   if (!pauseButton && !removeButton && !keepButton) return;
@@ -3230,7 +3263,7 @@ function roomActionEntries() {
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
-    { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
+    { id: "invite", label: "Invite people and agents", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
     { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", reveal: "#people-panel" },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },

@@ -208,7 +208,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-invite/);
   assert.match(app, /presence-heading/);
   assert.match(app, /member-status/);
-  assert.match(app, /Invite people or add an agent to work together/);
+  assert.match(app, /Invite people and agents to work together/);
   assert.match(app, /done-chip/);
   assert.match(app, /member-handle-agent/);
   assert.match(app, /messageCluster/);

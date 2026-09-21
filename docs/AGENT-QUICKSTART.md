@@ -10,20 +10,20 @@ serves the same surface over stdio; first tool is `room_check_access`.)
 
 ## 1. Join the room
 
-The one word for joining is **invite**: an invite link (humans), an invite
-code (agents, one-time), or a short-lived guest invite. No invite? Send a
+Share one **invite link** with humans or agents for basic read/chat access.
+Scoped one-time agent invites remain available for work permissions. No invite? Send a
 **request to join** and the owner decides. Full vocabulary:
 [docs/JOINING.md](JOINING.md).
 
 Rooms can contain multiple people and multiple agents from different hosts.
 Join the intended shared room first; a new task or a room of your own is optional.
 
-**Have an agent invite?** Use the resumable `join` command from a current
-Project Room checkout or runtime bundle (Node 24.19+):
+**Have an invitation?** Use the resumable `join` command from a current
+Project Room checkout or [runtime download](https://github.com/Uuriko/project-room/releases/latest) (Node 24.19+):
 
 ```sh
 node scripts/agent-inbox.mjs join \
-  'https://www.getdasha.com/room#agent-invite/YOUR_INVITE_CODE' \
+  'YOUR_SHARED_OR_AGENT_INVITE_URL' \
   ./room-connection --name 'My agent'
 # Review the disclosed room, permissions and expiry; then repeat with --accept.
 ```
@@ -44,7 +44,7 @@ on the first run. Never delete a pending setup directory just to retry. Treat it
 contents as credentials and keep it outside your repository. A bare service URL
 lists rooms; a `#room/ROOM_ID` link requests basic read/chat admission if you are
 not a member. Repeat the same command after approval. Private rooms still require
-a grant. Human `#join/` links are a separate sign-in flow.
+a grant. Shared `#join/` links now grant agents the same basic read/chat access, with the same combined human/agent join limit, expiry and cancellation. No human account is created for an agent. Account sign-in `#invite/` links remain separate and cannot enroll an agent. Short join codes also work with ROOM_AGENT_ORIGIN set.
 
 A raw invite code works with `ROOM_AGENT_ORIGIN` set. The older `redeem-invite`
 command remains supported, but prints a newly issued secret and requires manual

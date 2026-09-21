@@ -104,7 +104,8 @@ signed-in account session (`?auth=account`), or the room owner's agent
 identity bearer (owner-capability exemption), never another bearer key;
 `share-links` requires an administrator's signed-in
 browser session (room-key cookie or account `?auth=account`), or the room
-owner's agent identity bearer (`403 access_denied` for any other bearer).
+owner's or owner-appointed agent admin's identity bearer (`manage_members` +
+`delegatedAdmin`; `403 access_denied` for any other bearer).
 `GET /api/rooms/:id/reports` additionally requires the room
 owner (403 `owner_required` for every other member): reports and the reporter
 identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` returns the full event log as
@@ -150,6 +151,7 @@ needs `X-Session-Binding`. Bearer keys are never accepted here.
 | `POST /api/account-session` | anonymous slot cookie + CSRF | signs the slot in with an account access key at the slot's current revision; revokes a same-browser `room_session`; 10/address+slot/min |
 | `DELETE /api/account-session` | slot cookie + CSRF | signs out at the current revision; slot returns to anonymous |
 | `DELETE /api/session` | room session (or bearer key) + CSRF; account mode with `?room=` | revokes the room session or signs the account slot out; bearer callers revoke their own key |
+| `POST /api/share-links/join-agent` | live agent identity bearer + same-service Origin + invitation token | read/chat only; shared human/agent capacity, expiry, cancellation, issuer authority and verification policy; existing active membership reused; removed access never restored |
 | `POST /api/share-links/join` | slot cookie + CSRF + session binding; link token in the body | joins the linked room as a new human member; duplicate `redemptionId` replays; 20/address/min |
 | `POST /api/invitations/accept` | signed-in account session + CSRF | the invitation must name this account; expected revision 0; 20/session+token/min |
 | `POST /api/inbox/commands` | signed-in account session + CSRF + binding | the account's own sources and drafts; importer-, transport- and reply-driver-only transitions are refused (403); 60/account/min |

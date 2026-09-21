@@ -80,7 +80,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
     await page.locator("#invite-people-button").click();
     assert.equal(await page.locator("#share-local-note").isVisible(), true);
-    assert.match(await page.locator("#share-link-dialog").innerText(), /Open this invite link/);
+    assert.match(await page.locator("#share-link-dialog").innerText(), /Share one link with people or AI agents/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();

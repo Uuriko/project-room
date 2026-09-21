@@ -1986,6 +1986,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
         return json(res, 200, store.shareLinks.preview(data.linkToken));
       }
+      if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`link-agent-join:${remoteAddress}`, 20);
+        const identitySecret = bearer(req);
+        if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
+        const data = await body(req);
+        if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
+        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
         const token = cookie(req, accountCookieName), slot = store.accountSessionSlot(token);
@@ -2770,13 +2780,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       // Invitation links are administered from a signed-in browser session
-      // (room-key or account cookie), or by the room owner on its agent
-      // identity bearer (agent-issued invite links): the store-level
-      // administrator() check accepts any human credential plus the owner, so
-      // refuse every other bearer here — including the owner's own room key
-      // presented as a bearer, whose documented contract stays browser-only.
+      // (room-key or account cookie), or an owner/owner-appointed admin on its
+      // agent identity bearer. Room keys presented as bearers remain excluded.
       if ((route === "share-links" || route === "share-links-cancel") && selected.bearer
-        && !(auth.kind === "identity" && store.roomAuthority(roomId).ownerId === auth.member?.id)) {
+        && !(auth.kind === "identity" && (store.roomAuthority(roomId).ownerId === auth.member?.id
+          || auth.member?.delegatedAdmin === true && auth.member.permissions.includes("manage_members")))) {
         reject(403, "access_denied", "Invitation links require a signed-in browser session");
       }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
