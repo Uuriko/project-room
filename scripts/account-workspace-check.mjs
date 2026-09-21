@@ -231,6 +231,9 @@ test("shared invitation: Google handoff preserves invitation and purpose, guest 
   await p.locator("#join-account-signin").click(); await p.locator("#join-account-back").click();
   assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
   await p.locator("#join-account-create").click();
+  const scopeBounds = await p.locator("#join-link-scope").boundingBox();
+  const googleBounds = await p.locator("#join-account-google").boundingBox();
+  assert.ok(googleBounds.y >= scopeBounds.y + scopeBounds.height, "Google sign-in does not overlap the invitation text");
   // Capture navigation intent without calling a real identity provider.
   await p.locator("#join-account-google").evaluate(el => el.addEventListener("click", e => e.preventDefault()));
   await p.locator("#join-account-google").click();

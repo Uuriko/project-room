@@ -1123,3 +1123,5 @@ summary { overflow-wrap: anywhere; }
 
 .join-account-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
 #join-account-choices { padding-bottom: .75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
+
+#join-account-google { display: inline-flex; margin: .75rem 0; }
