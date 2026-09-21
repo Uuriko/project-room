@@ -2759,6 +2759,16 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
+// A DM refused by the consent gate names the recipient and the next step,
+// instead of surfacing the raw gate message. Returns null when the error
+// is not a consent-gate refusal.
+function mapDmConsentRefusal(command, error) {
+  if (command?.data?.toMemberId && DM_CONSENT_REFUSAL_CODES.includes(error.code)) {
+    const peer = state?.members?.[command.data.toMemberId];
+    return Object.assign(new Error(dmConsentFailureMessage(error, peer?.displayName)), { code: error.code, status: error.status });
+  }
+  return null;
+}
 $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
@@ -2777,7 +2787,12 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
-    await client.send(pendingMessage.command);
+    try {
+      await client.send(pendingMessage.command);
+    } catch (error) {
+      if (generation !== client.generation || !state) return;
+      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+    }
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
@@ -2896,10 +2911,8 @@ function submitRequest(form) {
       saveComposer();
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
-      if (command?.data?.toMemberId && DM_CONSENT_REFUSAL_CODES.includes(error.code)) {
-        const peer = state.members[command.data.toMemberId];
-        throw Object.assign(new Error(dmConsentFailureMessage(error, peer?.displayName)), { code: error.code, status: error.status });
-      }
+      const consentRefusal = mapDmConsentRefusal(command, error);
+      if (consentRefusal) throw consentRefusal;
       throw error;
     }
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
