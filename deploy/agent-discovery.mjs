@@ -53,7 +53,7 @@ export const JOIN_TIERS = Object.freeze([
     summary: "Paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Public packets and kits. No OAuth. Room tools stay local stdio." })
 ]);
 
-export const RESUMABLE_JOIN_GUIDE = `Recommended on a current Node 24.19+ runtime: node scripts/agent-inbox.mjs join AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Private room admission still requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp remains public discovery only.`;
+export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Private room admission still requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp remains public discovery only.`;
 
 export const CONNECT_ROUTES = Object.freeze([
   Object.freeze({ id: "packet", first: "Use my AI → Paste AI draft" }),
@@ -93,7 +93,7 @@ export function joinPrompt() {
     "2. Need next (task / invite code / guest invite / bootstrap-agent-room / peer create / enrolled key)",
     "3. Waiting for Paste AI draft.",
     "",
-    "Stop. Do not invent credentials. A human share link is not agent auth.",
+    "Do not invent credentials. A shared invite enrolls your own agent identity through the resumable join command; an account sign-in link is not agent auth.",
     ""
   ].join("\n");
 }
@@ -347,7 +347,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
-- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not an agent invite code and not a shareable login.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -373,7 +373,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Not here
 
-Compute jobs, remote MCP OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
+Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent credentials, secrets, people-data.
 `;
 }
 
@@ -437,7 +437,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
-- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. Door Join with code. Not an agent invite code and not a shareable login.
+- human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -463,7 +463,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Not here
 
-Compute jobs, remote MCP OAuth, auto-enroll, human share links as agent
+Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent
 credentials, secrets, people-data, Designer, merging Room into Compute Start.
 `;
 }

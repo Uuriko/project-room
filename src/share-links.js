@@ -412,6 +412,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const resume = uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
     if (resume) redemptionId = resume.redemptionId;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
+    $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
@@ -427,6 +428,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-scope").textContent = "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
+      $("#shared-agent-details").hidden = false;
+      const sharedUrl = publicJoinInviteHref(joinSecret);
+      $("#shared-agent-instructions").value = `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.`;
       updateSwitchWarning();
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (resume && version === joinVersion && !joining) {
@@ -444,6 +448,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (retryable && retryHadFocus && [document.body, $("#join-link-retry")].includes(document.activeElement)) $("#join-link-retry").focus();
     }
   }
+  $("#shared-agent-copy").addEventListener("click", async () => {
+    const field = $("#shared-agent-instructions"), value = field.value, version = joinVersion;
+    if (!value || $("#shared-agent-details").hidden) return;
+    try { await navigator.clipboard.writeText(value); if (version === joinVersion) joinStatus("Agent instructions copied."); }
+    catch { if (version === joinVersion) { field.focus(); field.select(); joinStatus("Select and copy the agent instructions."); } }
+  });
   $("#join-link-retry").addEventListener("click", () => { if (joinSecret && !joining) open({ token: joinSecret }); });
   async function performJoin({ resume = false } = {}) {
     if (joining || !joinSecret) return;

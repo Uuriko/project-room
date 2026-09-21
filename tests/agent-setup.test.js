@@ -199,3 +199,47 @@ test("a returning entry-origin journal accepts a canonical room link without rep
   assert.deepEqual(readAgentConnection(result.configDirectory), config);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
 });
+
+test("the same human invitation previews and durably connects an agent, including a lost join response", async t => {
+  const f = await fixture(t), linkToken = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(f.keys.commons, "commons", { requestId: "universal-invite", linkToken, expiresAt: Date.now()+3600000, maxJoins: 2, expectedMemberRevision: 0 });
+  const target = f.origin + '/#join/' + linkToken;
+  const preview = await f.connect({ target, accept: false });
+  assert.equal(preview.status, "approval_required"); assert.deepEqual(preview.preview.permissions, []);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+  let lose = true;
+  await assert.rejects(f.connect({ target, fetchImpl: async (url, options) => {
+    const result = await fetch(url, options);
+    if (lose && new URL(url).pathname.endsWith('/join-agent')) { lose = false; throw new TypeError('response lost'); }
+    return result;
+  } }));
+  const result = await f.connect({ target }); assert.equal(result.status, "connected"); assert.equal(result.roomId, "commons");
+  assert.deepEqual(result.permissions, []);
+  assert.equal(f.store.shareLinks.list(f.keys.commons, "commons").links[0].joins, 1);
+  assert.equal((await f.connect({ target })).identityId, result.identityId);
+  const mcp = await openMcpTestClient(result.configDirectory);
+  try { assert.equal((await mcp.call('room_check_access')).result.isError, undefined); } finally { await mcp.close(); }
+  const identity = JSON.parse(readFileSync(join(f.directory, 'setup.json'), 'utf8'));
+  const widened = await fetch(f.origin+'/api/share-links/join-agent', { method: 'POST', headers: { Origin: f.origin, Authorization: 'Bearer '+identity.secret, 'Content-Type': 'application/json' }, body: JSON.stringify({linkToken,displayName:'Peer',permissions:['manage_members']}) });
+  assert.equal(widened.status,422);
+});
+
+test("competing agents cannot exceed the shared invitation capacity", async t => {
+  const f = await fixture(t), linkToken = randomBytes(32).toString('base64url');
+  f.store.shareLinks.create(f.keys.commons, 'commons', { requestId: 'one-place', linkToken, expiresAt: Date.now()+3600000, maxJoins: 1, expectedMemberRevision: 0 });
+  const target = f.origin+'/#join/'+linkToken;
+  const attempts = await Promise.allSettled(['a','b'].map(name => f.connect({target,directory:join(f.root,name)})));
+  assert.equal(attempts.filter(r => r.status==='fulfilled').length,1);
+  assert.equal(attempts.find(r => r.status==='rejected').reason.code,'link_unavailable');
+  assert.equal(f.store.shareLinks.list(f.keys.commons,'commons').links[0].joins,1);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM identity_links WHERE room_id=?').get('commons').n,1);
+});
+
+test("shared short codes and focused URLs select the same invitation without accepting account login links", () => {
+  const origin='https://room.trydemigod.com', token='a'.repeat(43);
+  assert.deepEqual(setupTarget(origin+'/#join/'+token+'/work/patch-1'),{origin,sharedToken:token});
+  assert.deepEqual(setupTarget(origin+'/#code/ABC-DEF-GHJ'),{origin,sharedToken:'ABC-DEF-GHJ'});
+  assert.deepEqual(setupTarget('ABC-DEF-GHJ',origin),{origin,sharedToken:'ABC-DEF-GHJ'});
+  for(const target of [origin+'/#invite/'+token, origin+'/#join/'+token+'/anything/patch',origin+'/#join/'+token+'/work/patch/extra'])
+    assert.throws(()=>setupTarget(target));
+});

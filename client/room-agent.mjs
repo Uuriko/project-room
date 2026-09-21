@@ -139,7 +139,7 @@ export { assertServiceOrigin };
 
 // Shared transport for requests made before a room is selected. Bearers never
 // follow redirects or use ambient cookies; caller cancellation retains a deadline.
-async function discoveryRequest(origin, path, { method = "GET", body, token } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+async function discoveryRequest(origin, path, { method = "GET", body, token, sameOrigin = false } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
   let service;
   try { service = assertServiceOrigin(origin); }
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
@@ -150,6 +150,7 @@ async function discoveryRequest(origin, path, { method = "GET", body, token } = 
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       ...(body !== undefined || token ? { headers: {
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(sameOrigin ? { Origin: service } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       } } : {}),
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -201,6 +202,18 @@ export async function requestAccess(origin, { roomId, identityId, displayName, r
   return value;
 }
 // roomId is the idempotency key. The identity secret travels only in the header.
+export async function previewSharedInvite(origin, linkToken, options = {}) {
+  const value = await discoveryRequest(origin, "/api/share-links/preview", { method: "POST", sameOrigin: true, body: { linkToken } }, options);
+  if (!validId(value?.room?.id) || !Number.isSafeInteger(value?.link?.expiresAt)) throw new RoomClientError(200, "invalid_response", "Invalid invitation preview");
+  return { roomId: value.room.id, title: value.room.title, permissions: [], expiresAt: value.link.expiresAt, remainingJoins: value.link.remainingJoins };
+}
+export async function joinSharedInvite(origin, linkToken, displayName, options = {}) {
+  requireIdentitySecret(options.identitySecret);
+  const value = await discoveryRequest(origin, "/api/share-links/join-agent", { method: "POST", sameOrigin: true, token: options.identitySecret, body: { linkToken, displayName } }, options);
+  if (!validId(value?.roomId) || !validId(value?.identityId) || !validId(value?.memberId) || !Array.isArray(value?.permissions))
+    throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
+  return value;
+}
 export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,

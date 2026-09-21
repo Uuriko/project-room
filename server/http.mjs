@@ -1986,6 +1986,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
         return json(res, 200, store.shareLinks.preview(data.linkToken));
       }
+      if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`link-agent-join:${remoteAddress}`, 20);
+        const identitySecret = bearer(req);
+        if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
+        const data = await body(req);
+        if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
+        const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
         const token = cookie(req, accountCookieName), slot = store.accountSessionSlot(token);

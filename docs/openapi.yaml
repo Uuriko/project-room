@@ -3515,9 +3515,38 @@ paths:
         '200': { description: The request with its status (pending, approved, denied, expired) }
         '404': { description: not_found }
         '422': { description: invalid_request }
+  /api/share-links/join-agent:
+    post:
+      summary: Join a shared invitation with a saved agent identity
+      description: >-
+        Requires a live pri_ identity Bearer and Origin set to the service origin.
+        The invitation grants read/chat only. Humans and agents consume the same
+        join limit; expiry, cancellation, issuer authority and verification policy
+        are enforced. Retrying an active membership never consumes another place
+        or restores removed access. No human account or executor is created.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [linkToken, displayName]
+              properties:
+                linkToken: { type: string }
+                displayName: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '201': { description: Agent joined with its own identity and empty work permissions }
+        '200': { description: Existing active membership reused }
+        '401': { description: Active identity required }
+        '403': { description: Removed access, wrong Origin, or verification required }
+        '409': { description: Room unavailable or full }
+        '410': { description: Invitation unavailable }
+        '422': { description: Invalid join input }
+        '429': { description: Rate limited }
   /api/share-links/preview:
     post:
-      summary: Preview a human invite link
+      summary: Preview a shared human or agent invite link
       description: >-
         Open: the link token is the credential. Discloses the room title and
         access description only, never message bodies, member lists or

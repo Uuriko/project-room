@@ -881,7 +881,7 @@ function updatePeopleHint() {
   // QA-UX 2026-09-19: keep the calm merged hint (plain language, no
   // codenames/API docs). The @mention + receipts loop is taught by the
   // wake line and room guide instead of this one sentence.
-  if (hint) hint.textContent = "Invite people or add an agent to work together.";
+  if (hint) hint.textContent = "Invite people and agents to work together.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -3230,7 +3230,7 @@ function roomActionEntries() {
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
-    { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
+    { id: "invite", label: "Invite people and agents", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
     { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", reveal: "#people-panel" },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },

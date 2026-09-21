@@ -206,3 +206,26 @@ for (const change of ['collapse', 'focus move']) test(`invitation copy failure a
   assert.equal(await page.locator('#share-note-copy').isEnabled(), true);
   assert.deepEqual(errors, []);
 });
+
+for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'desktop'}: human arrival and copyable agent connection`, { timeout: 45000 }, async t => {
+  const { page, fixture, origin, errors } = await setup(t, touch);
+  const url = await create(page);
+  await page.locator('#share-link-close').click();
+  await page.goto(url);
+  await page.locator('#join-link-form').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#shared-agent-details').evaluate(el => el.open), false);
+  assert.equal(await page.locator('#join-link-name').isVisible(), true);
+  await page.locator('#shared-agent-details > summary').click();
+  const instructions = await page.locator('#shared-agent-instructions').inputValue();
+  assert.ok(instructions.includes(url)); assert.ok(instructions.includes('releases/latest'));
+  assert.ok(instructions.includes('scripts/agent-inbox.mjs join'));
+  assert.ok(instructions.includes('--accept'));
+  await page.locator('#shared-agent-copy').click();
+  assert.equal(await page.evaluate(() => window.noteCopies.at(-1)), instructions);
+  assert.equal(await page.locator('#join-link-dialog').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+  mkdirSync('test-results', { recursive: true });
+  await page.screenshot({ path: `test-results/shared-invite-${touch ? 'mobile' : 'desktop'}.png` });
+  assert.deepEqual(errors, []);
+  assert.equal(fixture.store.shareLinks.list(fixture.keys.owner, 'commons').links[0].joins, 0);
+  assert.equal(new URL(url).origin, origin);
+});

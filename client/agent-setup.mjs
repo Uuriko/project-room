@@ -1,10 +1,11 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
+import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, previewSharedInvite, joinSharedInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
 import { edgeDoorApiPath, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { parseShareInviteCode } from "../src/share-invite-code.js";
 import { validId } from "../src/events.js";
 
 const canonicalOrigin = value => {
@@ -14,14 +15,18 @@ const canonicalOrigin = value => {
 export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
   if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: canonicalOrigin(origin), code: value.toUpperCase() };
+  const shortCode = parseShareInviteCode(value);
+  if (shortCode) return { origin: canonicalOrigin(origin), sharedToken: shortCode };
   const url = new URL(value); assertServiceOrigin(url.origin);
   if (url.username || url.password || url.search || !["", "/", "/room", "/room/"].includes(url.pathname)) throw new Error("Use the Room entry URL");
   if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
   if (!url.hash) return { origin: canonicalOrigin(url.origin) };
-  const [kind, id, extra] = url.hash.slice(1).split("/");
+  const [kind, id, extra, focus, trailing] = url.hash.slice(1).split("/");
+  if (["join", "code"].includes(kind) && (/^[A-Za-z0-9_-]{43}$/.test(id ?? "") || parseShareInviteCode(id)) && !trailing
+    && (!extra || ["work", "message"].includes(extra) && validId(focus))) return { origin: canonicalOrigin(url.origin), sharedToken: parseShareInviteCode(id) || id };
   if (!extra && kind === "agent-invite" && /^RM-[a-z0-9]+$/i.test(id ?? "")) return { origin: canonicalOrigin(url.origin), code: id.toUpperCase() };
   if (!extra && kind === "room" && validId(id)) return { origin: canonicalOrigin(url.origin), roomId: id };
-  throw new Error("Use an agent invite or room link; a human sign-in link is not agent access");
+  throw new Error("Use a shared invitation, agent invite or room link; an account sign-in link is not agent access");
 }
 const signature = preview => JSON.stringify({ roomId: preview.roomId, permissions: [...preview.permissions].sort(), expiresAt: preview.expiresAt });
 
@@ -53,15 +58,16 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       step = saved.targets[key] = { ...destination, requestId: randomUUID(), approved: null, roomId: destination.roomId ?? null };
       journal.save(saved);
     }
-    if (step.origin !== destination.origin || step.code !== destination.code || !validId(step.requestId)
+    if (step.origin !== destination.origin || step.code !== destination.code || step.sharedToken !== destination.sharedToken || !validId(step.requestId)
       || step.roomId !== null && !validId(step.roomId) || destination.roomId && step.roomId !== destination.roomId
       || step.approved !== null && typeof step.approved !== "string") throw new Error("Saved destination is invalid; no connection changed");
     if (step.approved) {
       const approved = JSON.parse(step.approved);
       if (approved.roomId !== step.roomId || !Array.isArray(approved.permissions)) throw new Error("Saved approval is invalid");
     }
-    if (destination.code && !step.approved) {
-      const preview = await previewAgentInvite(saved.origin, destination.code, options);
+    if ((destination.code || destination.sharedToken) && !step.approved) {
+      const preview = destination.sharedToken ? await previewSharedInvite(saved.origin, destination.sharedToken, options)
+        : await previewAgentInvite(saved.origin, destination.code, options);
       if (!accept) return { status: "approval_required", preview, next: "Repeat with --accept to accept this invite's room and permissions" };
       step.approved = signature(preview); step.roomId = preview.roomId; journal.save(saved);
     }
@@ -86,8 +92,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
         next: "Run join again with an invited or public room URL and the same private directory" };
     }
     let membership = memberships.find(room => room.roomId === step.roomId);
-    if (!membership && destination.code) {
-      const joined = await redeemAgentInvite(saved.origin, destination.code, saved.name, options);
+    if (!membership && (destination.code || destination.sharedToken)) {
+      const joined = destination.sharedToken ? await joinSharedInvite(saved.origin, destination.sharedToken, saved.name, options)
+        : await redeemAgentInvite(saved.origin, destination.code, saved.name, options);
       const expected = JSON.parse(step.approved);
       if (joined.roomId !== expected.roomId || joined.identityId !== saved.identityId
         || !joined.duplicate && JSON.stringify([...joined.permissions].sort()) !== JSON.stringify(expected.permissions))

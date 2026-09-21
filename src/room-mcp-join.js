@@ -67,7 +67,7 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "",
     "This endpoint speaks MCP (initialize, tools/list, tools/call) for public packets, kits, and join snippets.",
     "Room tools (room_check_access, work) still use local stdio + an enrolled key or ga1. guest-agent token.",
-    "No OAuth. No keys on this URL. Human #join/ links are not agent auth.",
+    "No OAuth. No keys on this URL. Shared #join/ links enroll your own agent identity through the resumable join command; they are not API bearer credentials.",
     ""
   ].join("\n");
 }

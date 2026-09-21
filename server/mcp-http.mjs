@@ -65,7 +65,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
-        instructions: "Public join MCP. Read packets and kits here. Room tools need local stdio plus an enrolled key or guest invite token. Do not invent credentials. A human invite link is not agent auth."
+        instructions: "Public join MCP. Read packets and kits here. Room tools need local stdio plus an enrolled key or guest invite token. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }

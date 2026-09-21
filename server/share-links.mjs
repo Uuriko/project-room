@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, INVITATION_ROLE_POLICY_VERSION } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
@@ -8,6 +8,9 @@ import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
 
+// Agent admissions reuse the durable membership event as their receipt. The
+// link ID is public metadata; neither the invitation token nor its hash is exposed.
+const agentJoinPrefix = row => `sj_${row.id.replaceAll("-", "")}_`;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -82,7 +85,12 @@ export class ShareLinks {
     }
     return auth;
   }
-  count(row) { return this.db.prepare("SELECT count(*) n FROM share_link_joins WHERE link_id=?").get(row.id).n; }
+  count(row) {
+    const humans = this.db.prepare("SELECT count(*) n FROM share_link_joins WHERE link_id=?").get(row.id).n;
+    const agents = this.db.prepare("SELECT count(*) n FROM events WHERE id GLOB ? AND room_id=? AND json_extract(body,'$.type')=?")
+      .get(agentJoinPrefix(row) + "*", row.room_id, T.MEMBER_ADDED).n;
+    return humans + agents;
+  }
   authority(row) {
     const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
@@ -140,6 +148,41 @@ export class ShareLinks {
       return { link, room: { id: row.room_id, title: this.store.room(row.room_id).state.room.title },
         access: "Read the room and its history, post messages, and react. No membership administration or work approvals.",
         identity: "Names are self-chosen, not verified. New guest sessions last up to 8 hours in this browser." };
+    });
+  }
+  joinAgent(identitySecret, linkToken, displayName) {
+    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || /[\u0000-\u001f\u007f]/.test(displayName))
+      fail(422, "invalid_join", "Choose an agent name of 1–80 characters");
+    return this.store.transaction(() => {
+      const identity = this.store.identities.resolveGlobalIdentitySecret(identitySecret);
+      if (!identity) fail(401, "unauthenticated", "Active agent identity required");
+      const row = this.find(linkToken), room = this.store.room(row.room_id);
+      const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identity.identityId);
+      const member = linked && room.state.members[linked.member_id];
+      // Recovery never consumes another place or restores removed membership.
+      if (linked || room.state.members[identity.identityId]) {
+        if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+        return { roomId: row.room_id, identityId: identity.identityId, memberId: member.id, permissions: member.permissions, duplicate: true };
+      }
+      if (this.view(row).status !== "active") unavailable();
+      refuseArchivedWrite(room.state);
+      const plugin = this.store.agentPlugin;
+      if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
+        fail(403, "unverified_identity", "This room only admits verified agents");
+      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full");
+      const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
+      const incoming = event({ id, idempotencyKey: id, roomId: row.room_id, actorId: row.issuer_member_id,
+        type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
+          identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions: [],
+          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
+      const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      const projection = JSON.stringify(state), sequence = room.sequence + 1;
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, id, JSON.stringify(incoming));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+        .run(row.room_id, identity.identityId, identity.identityId, now);
+      return { roomId: row.room_id, identityId: identity.identityId, memberId: identity.identityId, permissions: [], duplicate: false };
     });
   }
   list(token, roomId, binding) {

@@ -427,3 +427,65 @@ test("Google login rotates a previously invited session without deleting immutab
   assert.doesNotThrow(() => f.store.createAccountSessionSlot());
   assert.deepEqual(f.store.db.prepare("SELECT * FROM share_link_joins").all(), before);
 });
+
+test("one invitation admits a human and an agent into the same bounded read/chat audience", t => {
+  const f = fixture(t), identity = f.store.identities.create("Peer agent");
+  const joined = f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Peer agent");
+  assert.deepEqual(joined.permissions, []);
+  assert.equal(f.store.authenticate(identity.secret, "commons").member.kind, "agent");
+  f.guest("Human").accept();
+  const link = f.store.shareLinks.list(f.ownerKey, "commons").links[0];
+  assert.equal(link.joins, 2); assert.equal(link.status, "full");
+  assert.throws(() => f.store.shareLinks.joinAgent(f.store.identities.create("Third").secret, f.linkToken, "Third"), { code: "link_unavailable" });
+  assert.throws(() => f.guest("Third human").accept(), { code: "link_unavailable" });
+  const sequence = f.store.room("commons").sequence;
+  assert.equal(f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Renaming does not replace identity").duplicate, true);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  assert.doesNotThrow(() => f.store.shareLinks.verify());
+  assert.equal(f.store.verifyInvitationAudit().consistent, true);
+  const state = JSON.stringify(f.store.room("commons").state);
+  assert.equal(state.includes(identity.secret), false); assert.equal(state.includes(f.linkToken), false);
+});
+
+test("human joins consume the same capacity as agent joins and cancellation preserves only existing access", t => {
+  const f = fixture(t); f.guest().accept();
+  const identity = f.store.identities.create("Agent");
+  f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent");
+  f.store.shareLinks.cancel(f.ownerKey, "commons", f.result.link.id);
+  assert.equal(f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent").duplicate, true);
+  f.store.identities.unlink(f.ownerKey, "commons", identity.identityId);
+  assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"), { code: "access_ended" });
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 2);
+});
+
+for (const reason of ["expired", "cancelled", "authority", "archived", "verified-only"]) test(`shared agent invitation refuses ${reason} without partial membership`, t => {
+  const f = fixture(t), identity = f.store.identities.create("Agent");
+  if (reason === "expired") f.setNow(f.details.expiresAt + 1);
+  if (reason === "cancelled") f.store.shareLinks.cancel(f.ownerKey, "commons", f.result.link.id);
+  if (reason === "authority") f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: "member.access_changed", data: { memberId: "owner", expectedMemberRevision: 0, permissions: f.store.room("commons").state.members.owner.permissions, active: true } });
+  if (reason === "archived") f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: "room.archived", data: { reason: "Test" } });
+  if (reason === "verified-only") f.store.agentPlugin.roomVerificationPolicy = () => ({ requireVerified: true });
+  const sequence = f.store.room("commons").sequence;
+  assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"));
+  assert.equal(f.store.room("commons").sequence, sequence);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM identity_links WHERE identity_id=?").get(identity.identityId).n, 0);
+});
+
+test("shared agent admission requires a live identity and rolls back failed membership writes", t => {
+  const f = fixture(t), identity = f.store.identities.create("Agent"), sequence = f.store.room("commons").sequence;
+  assert.throws(() => f.store.shareLinks.joinAgent(null, f.linkToken, "Agent"), { status: 401 });
+  assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, 'a'.repeat(43), "Agent"), { code: "link_unavailable" });
+  f.store.db.exec("CREATE TRIGGER fail_shared_agent BEFORE INSERT ON identity_links BEGIN SELECT RAISE(ABORT,'fixture failure'); END");
+  assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"), /fixture failure/);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 0);
+});
+
+
+test("revoked agent identities cannot recover or consume a shared invitation", t => {
+  const f = fixture(t), identity = f.store.identities.create("Agent");
+  f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent");
+  f.store.identities.revoke(identity.identityId, identity.secret);
+  assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"), { status: 401 });
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 1);
+});

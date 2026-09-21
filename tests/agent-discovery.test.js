@@ -147,7 +147,7 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   assert.match(prompt, /After paste/);
   assert.match(prompt, /No Room key in this chat/);
   assert.match(prompt, /Waiting for Paste AI draft/);
-  assert.match(prompt, /human share link is not agent auth/);
+  assert.match(prompt, /account sign-in link is not agent auth/);
   assert.doesNotMatch(prompt, FORBIDDEN);
   assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
   assert.equal(discoveryDoc("/join.txt").body, prompt);
