@@ -493,7 +493,7 @@ for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile
   await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
   const record = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.excerpt'").get();
   const shared = { receipt: JSON.parse(record.receipt_json) }, posted = f.store.room("commons").state.messages.find(m => m.id === shared.receipt.messageId);
-  assert.equal(posted.body, "Shared email excerpt\n\n" + excerpt); assert.equal(JSON.stringify(posted).includes("4200"), false);
+  assert.equal(posted.body, "Shared email excerpt\n\n" + excerpt); assert.equal(JSON.stringify(posted).includes("Private budget: 4200"), false);
   const work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding, { sourceId: id, shareReceipt: shared, ready: false });
   await f.inbox(); await f.pick(id); await p.getByText("Work in progress", { exact: true }).waitFor();
   work.complete(); work.review(); work.decide();

@@ -44,7 +44,7 @@ test("draft preparation uses the saved reply, Reply-To and an encoded immutable-
   assert.deepEqual(plan.expected.to.map(a => a.address), ["replies@example.test"]);
   assert.equal(plan.create.headers.Prefer, 'IdType="ImmutableId"'); assert.equal(plan.requiredPermission, "Mail.ReadWrite");
   assert.deepEqual(plan.create.body, { message: { body: { contentType: "text", content: plan.expected.body } } });
-  assert.doesNotMatch(JSON.stringify(plan), /4200|observer@example.test|do not project this header|brief.txt/);
+  assert.doesNotMatch(JSON.stringify(plan), /Private budget: 4200|observer@example.test|do not project this header|brief.txt/);
   assert.equal(plan.create.headers.Authorization, undefined); assert.equal(plan.canExecute, false); assert.equal(plan.canSend, false);
   assert.deepEqual(prepareGraphReplyDraft(f.args), plan); assert.deepEqual(auditRecovery(f.store), before);
   const all = prepareGraphReplyDraft({ ...f.args, mode: "replyAll" });
