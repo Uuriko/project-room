@@ -51,12 +51,18 @@ test('agents and members without decide cannot record decisions', t => {
   assert.equal(decisions().length, 0);
 });
 
-test('decide permission cannot be delegated to an agent at all', t => {
+test('decide permission delegation follows #643 owner-grant rules', t => {
   const { store, keys, decisions } = fixture(t);
-  // Membership itself refuses: human administration is not delegable, so the
-  // reducer's human-only check is a second layer, not the only one.
-  assert.throws(() => store.command(keys.owner, 'commons', command(T.MEMBER_ADDED, {
-    memberId: 'agent-b', displayName: 'agent-b', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] })), /cannot be delegated/);
+  // #643: the owner may delegate decide to a non-owner agent (stamped delegatedAdmin);
+  // non-owners still cannot. The old "cannot be delegated at all" rule is superseded.
+  store.command(keys.owner, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'agent-b', displayName: 'agent-b', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] }));
+  const member = store.room('commons').state.members['agent-b'];
+  assert.equal(member.delegatedAdmin, true);
+  assert.ok(member.permissions.includes('decide'));
+  // A non-owner (viewer) cannot grant decide to an agent.
+  assert.throws(() => store.command(keys.viewer, 'commons', command(T.MEMBER_ADDED, {
+    memberId: 'agent-c', displayName: 'agent-c', kind: 'agent', accountableHumanId: 'owner', permissions: ['decide'] })), /cannot be delegated|access_denied|owner_required/);
   assert.equal(decisions().length, 0);
 });
 
