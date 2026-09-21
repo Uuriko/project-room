@@ -91,6 +91,9 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             Post [lane]DONE: + room-receipt block (24h receipt SLO).
 
 Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
+  Fail closed when the running scripts/room is not byte-identical to
+  origin/main's copy (stale-copy guard; escape hatch for dev/tests:
+  ROOM_ENFORCER_ALLOW_STALE=1).
   rebuild   [--out PATH] [--commit-push]
             Regenerate the machine board from board comments. Stamps a
             generated header with watermark (max comment id). --commit-push
@@ -1006,6 +1009,44 @@ cmd_query() {
 }
 
 # ---------------------------------------------------------------------------
+# Enforcer freshness guard — fail closed on stale script copies
+# ---------------------------------------------------------------------------
+# Enforcer verbs (rebuild/sweep/receipts-scan/rotation-check/metrics) act on
+# the board or the automation branch, so they must only run from the canonical
+# scripts/room on origin/main. A stale copy — e.g. the old one checked into the
+# room-state automation branch, or a dev copy on a feature branch — refuses
+# with exit 1 instead of proposing or acting on stale logic. (2026-09-20: the
+# stale room-state copy proposed a phantom strike-two on already-completed
+# RC-2026-09-19-067, and caused an erroneous strike-one at 07:28 UTC.)
+#
+# Escape hatch for development and tests: ROOM_ENFORCER_ALLOW_STALE=1. The
+# cron never sets it; every legit enforcer run happens in a fresh clone of
+# main, where the running copy IS the canonical one.
+
+room_self_path() {
+  case "$0" in
+    */*) printf '%s' "$0" ;;
+    *) command -v "$0" 2>/dev/null || printf '%s' "$0" ;;
+  esac
+}
+
+guard_enforcer_freshness() { # $1 = verb
+  local verb="$1"
+  [ "${ROOM_ENFORCER_ALLOW_STALE:-0}" = "1" ] && return 0
+  need sha256sum
+  local rr ref self_path self_sha main_sha
+  rr="$(repo_root)"
+  ref="$(git -C "$rr" rev-parse --verify --quiet 'refs/remotes/origin/main' 2>/dev/null || true)"
+  [ -n "$ref" ] || die "refusing $verb: cannot locate origin/main in $rr — run from a full clone of $DEFAULT_REPO with origin/main fetched"
+  self_path="$(room_self_path)"
+  [ -f "$self_path" ] || die "refusing $verb: cannot read the running script ($self_path)"
+  self_sha="$(sha256sum < "$self_path" | cut -d' ' -f1)"
+  main_sha="$(git -C "$rr" show "$ref:scripts/room" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+  [ -n "$main_sha" ] || die "refusing $verb: cannot read scripts/room at origin/main ($ref)"
+  [ "$self_sha" = "$main_sha" ] || die "refusing $verb: stale scripts/room copy — self=$self_sha, origin/main@$ref=$main_sha. Run main's copy (git checkout $ref -- scripts/room), then restore it before committing."
+}
+
+# ---------------------------------------------------------------------------
 # rebuild (enforcer, cron-only)
 # ---------------------------------------------------------------------------
 
@@ -1344,7 +1385,14 @@ main() {
   need gh; need jq
   case "$verb" in
     help|--help|-h) usage; exit 0 ;;
-    claim|heartbeat|release|query|handoff|receipt|rebuild|sweep|receipts-scan|rotation-check|metrics|_parse|_state)
+    rebuild|sweep|receipts-scan|rotation-check|metrics)
+      # Enforcer verbs fail closed on stale script copies (see
+      # guard_enforcer_freshness). Dev/test escape hatch:
+      # ROOM_ENFORCER_ALLOW_STALE=1.
+      case "${1:-}" in --help|-h) usage; exit 0 ;; esac
+      guard_enforcer_freshness "$verb"
+      "cmd_${verb//-/_}" "$@" ;;
+    claim|heartbeat|release|query|handoff|receipt|_parse|_state)
       # Per-verb --help must not fall through to a live run (2026-09-19:
       # `sweep --help` executed a live sweep because cmd_sweep ignores args).
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
