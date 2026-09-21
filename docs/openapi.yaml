@@ -1187,9 +1187,10 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/access-requests:
     get:
-      summary: List join requests (owner)
+      summary: List join requests (owner or delegate)
       description: >-
-        Owner-only (manage_members grant). Lists pending join requests by
+        Owner or membership-administration delegate (an agent identity the
+        owner granted via /membership-delegation/grant). Lists pending join requests by
         default; pass ?status=approved|denied|expired|pending|decided to
         filter. Approval links the identity via the standard identity-link
         path; denial records a reason.
@@ -1227,15 +1228,15 @@ paths:
                         method: { type: string }
                         path: { type: string }
                         description: { type: string }
-        '403': { description: access_denied (manage_members required) }
+        '403': { description: access_denied (membership administration required) }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
-      summary: Decide a join request (owner)
-      description: >-
-        Owner-only (manage_members grant). Approve links the identity as a
-        member with the granted permissions (narrowed or equal to what was
-        requested); deny records a reason. The decision is appended to the
-        room's audit trail.
+      summary: Decide a join request (owner or delegate)      description: >-
+        Owner or membership-administration delegate (an agent identity the
+        owner granted via /membership-delegation/grant). Approve links the
+        identity as a member with the granted permissions (narrowed or equal
+        to what was requested); deny records a reason. The decision is
+        appended to the room's audit trail.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -1252,9 +1253,74 @@ paths:
                 note: { type: string, maxLength: 500 }
       responses:
         '200': { description: The decided request (and the new member on approve) }
-        '403': { description: access_denied (manage_members required) }
+        '403': { description: access_denied (membership administration required) }
         '404': { description: not_found }
         '409': { description: request_conflict (already decided) or request_expired }
+        '422': { description: invalid_request }
+  /api/rooms/{roomId}/membership-delegation:
+    get:
+      summary: List membership-administration grants (owner)
+      description: >-
+        Owner-only. Lists the agent identities currently holding an
+        owner-granted membership-administration grant in this room. A grant
+        lets the holder's identity list and decide access requests; it does
+        not put manage_members in the agent's member permissions and it
+        cannot be re-granted by the holder.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: The room's active membership-administration grants }
+        '403': { description: access_denied (owner only) }
+  /api/rooms/{roomId}/membership-delegation/grant:
+    post:
+      summary: Grant membership administration to an agent identity (owner)
+      description: >-
+        Owner-only. Grants an agent identity linked into this room the right
+        to list and decide access requests. The grant is revocable, binds to
+        the identity (not the member record), and never lets the holder grant
+        to anyone else — there is no self-grant and no transitive grant. The
+        grant adds the agent-safe invite_member permission to the delegate's
+        member record (needed for the approval path; stripped on revoke);
+        manage_members itself never enters an agent's member permissions.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: Agent identity id (ai_...), linked into this room }
+      responses:
+        '200': { description: The granted membership-administration grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no such linked agent identity) }
+        '409': { description: grant_active (already granted) }
+        '422': { description: invalid_request }
+  /api/rooms/{roomId}/membership-delegation/revoke:
+    post:
+      summary: Revoke membership administration from an agent identity (owner)
+      description: >-
+        Owner-only. Revokes an active membership-administration grant. After
+        revocation the identity's decide/list calls return 403 exactly as
+        before the grant.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: Agent identity id (ai_...) }
+      responses:
+        '200': { description: The revoked grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no active grant) }
         '422': { description: invalid_request }
   /api/rooms/{roomId}/ownership/transfer:
     post:

@@ -48,6 +48,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
   paths.add('server/access-review.mjs');
+  paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');

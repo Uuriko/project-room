@@ -2,7 +2,9 @@
 //
 // An agent that minted an identity (server/agent-identities.mjs) but has no
 // room membership can request access to a room. The request sits in a
-// pending queue; a room owner approves or denies it. Approval links the
+// pending queue; the room owner — or an agent identity the owner has
+// explicitly granted membership administration
+// (server/membership-delegation.mjs) — approves or denies it. Approval links the
 // identity as a room member via AgentIdentities.link() — the same path as
 // the owner-driven identity-link flow, so the security properties are
 // identical. Nothing here auto-approves: every grant is an explicit owner
@@ -31,11 +33,6 @@ class ServiceError extends Error {
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// Local permission check mirroring memberCan() from src/events.js.
-const memberCan = (authority, memberId, permission) => {
-  const member = authority?.members?.[memberId];
-  return Array.isArray(member?.permissions) && member.permissions.includes(permission);
-};
 // Room permission vocabulary, mirrored from PERMISSIONS in src/events.js
 // (same Workers-bundle reason as above). access requests and approvals are
 // validated against this so an invalid name fails fast with a 422 that
@@ -224,13 +221,22 @@ export class AccessRequests {
     return rowToRequest(this.maybeExpire(row));
   }
 
-  // Owner-only: list requests for a room, optionally filtered by status.
-  list(token, roomId, { status = "pending" } = {}, expectedSessionBinding = null) {
+  // RC-2026-09-18-038: membership administration is the caller's own
+  // manage_members permission OR an owner grant on their agent identity
+  // (server/membership-delegation.mjs). Agents without either are denied
+  // exactly as before.
+  #requireMembershipAdministration(token, roomId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) {
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) {
       fail(403, "access_denied", "Membership administration grant required");
     }
+    return { auth, authority };
+  }
+
+  // Owner-only: list requests for a room, optionally filtered by status.
+  list(token, roomId, { status = "pending" } = {}, expectedSessionBinding = null) {
+    this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
     if (!STATUSES.includes(status)) fail(422, "invalid_request", `status must be one of ${STATUSES.join(", ")}`);
     this.expireOld(roomId);
     const rows = this.db.prepare(
@@ -238,15 +244,12 @@ export class AccessRequests {
     return Object.freeze(rows.map(rowToRequest));
   }
 
-  // Owner-only: approve or deny. Approval links the identity via the same
+  // Owner or membership-administration delegate (RC-2026-09-18-038):
+  // approve or deny. Approval links the identity via the same
   // AgentIdentities.link() path as the manual owner flow.
   decide(token, roomId, requestId, { decision, permissions, note } = {}, expectedSessionBinding = null) {
     if (!DECISIONS.includes(decision)) fail(422, "invalid_request", "decision must be 'approve' or 'deny'");
-    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-    const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) {
-      fail(403, "access_denied", "Membership administration grant required");
-    }
+    const { auth, authority } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
@@ -272,6 +275,13 @@ export class AccessRequests {
       if (!Array.isArray(grants) || !grants.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
         fail(422, "invalid_request",
           `permissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
+      }
+      // RC-2026-09-18-038: a delegate acting on an owner grant may admit
+      // members but may never confer manage_members — that would make the
+      // grant transitive. The owner (or a member already holding
+      // manage_members) remains sovereign.
+      if (grants.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
+        fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
       const identities = this.store.identities;
       const linked = identities.link(token, roomId, {

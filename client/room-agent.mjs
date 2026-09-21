@@ -796,6 +796,21 @@ export class RoomAgentClient {
     return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
       { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
   }
+  // Owner-granted membership administration (RC-2026-09-18-038): the owner
+  // grants/revokes/lists the delegation; a grant lets the holder's agent
+  // identity list and decide access requests. The holder cannot grant
+  // further — there is no self-grant path.
+  membershipAdministrationGrants({ signal } = {}) {
+    return this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/membership-delegation`, undefined, { signal });
+  }
+  grantMembershipAdministration(identityId, { signal } = {}) {
+    if (typeof identityId !== "string" || !identityId) throw new RoomClientError(0, "invalid_config", "Choose the agent identity to grant membership administration");
+    return this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/membership-delegation/grant`, { identityId }, { signal });
+  }
+  revokeMembershipAdministration(identityId, { signal } = {}) {
+    if (typeof identityId !== "string" || !identityId) throw new RoomClientError(0, "invalid_config", "Choose the agent identity whose membership-administration grant should be revoked");
+    return this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/membership-delegation/revoke`, { identityId }, { signal });
+  }
   // Ownership appointment: the current room owner transfers ownership to an
   // existing active member (human or agent). Owner-only; the transfer is
   // reversible and audited in the room's event log.
