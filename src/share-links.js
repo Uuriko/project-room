@@ -108,7 +108,7 @@ export async function reuseVisibleRoom(client, roomId, visibleSession) {
 }
 
 export function installShareLinks({ client, accountClient, getState, getSession, openRoom,
-  listPurposes = () => [], onJoinedRoom = null,
+  listPurposes = () => [], onJoinedRoom = null, onAccountSignin = () => {}, onOAuthStart = () => {},
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joinFocus = null;
@@ -415,6 +415,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const uncertain = readUncertainJoin();
     const resume = uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
     if (resume) redemptionId = resume.redemptionId;
+    onAccountSignin(null);
+    $("#join-account-choices").hidden = true; $("#join-account-auth").hidden = true;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
@@ -436,6 +438,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const sharedUrl = publicJoinInviteHref(joinSecret);
       $("#shared-agent-instructions").value = `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.`;
       updateSwitchWarning();
+      $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
+      $("#join-guest-note").hidden = Boolean(account.authenticated);
+      $("#join-link-submit").textContent = account.authenticated ? "Join room" : "Continue as guest";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (resume && version === joinVersion && !joining) {
         // The guest already consented to this exact request; its outcome is
@@ -452,6 +457,20 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (retryable && retryHadFocus && [document.body, $("#join-link-retry")].includes(document.activeElement)) $("#join-link-retry").focus();
     }
   }
+  for (const [id, mode] of [["#join-account-signin", "login"], ["#join-account-create", "signup"]]) {
+    $(id).addEventListener("click", () => {
+      if (joining) return;
+      $("#join-account-choices").hidden = true; $("#join-link-form").hidden = true;
+      $("#join-account-auth").hidden = false;
+      onAccountSignin(mode); $("#join-account-google").focus();
+    });
+  }
+  $("#join-account-google").addEventListener("click", onOAuthStart);
+  $("#join-account-back").addEventListener("click", () => {
+    onAccountSignin(null); $("#join-account-auth").hidden = true;
+    $("#join-account-choices").hidden = false; $("#join-link-form").hidden = false;
+    $("#join-link-name").focus();
+  });
   $("#shared-agent-copy").addEventListener("click", async () => {
     const field = $("#shared-agent-instructions"), value = field.value, version = joinVersion;
     if (!value || $("#shared-agent-details").hidden) return;
@@ -549,6 +568,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-link-close").addEventListener("click", () => { if (!joining) joinDialog.close(); });
   joinDialog.addEventListener("cancel", event => { if (joining) event.preventDefault(); });
   joinDialog.addEventListener("close", () => {
+    onAccountSignin(null);
     joinVersion++;
     const pendingToken = joinSecret, attempted = joinAttempted, landed = joinLanded, roomTitle = previewRoomTitle;
     joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; previewRoomTitle = null;
@@ -574,5 +594,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (suppressJoinHash) { suppressJoinHash = false; return; }
     const fragment = consumeJoinFragment(); if (fragment) open(fragment);
   });
-  return { sync, resetManagement, open };
+  return { sync, resetManagement, open,
+    pendingFragment: () => joinSecret ? `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}` : null,
+    async resumeSignedIn() {
+      if (!joinDialog.open || !joinSecret) return false;
+      await open({ token: joinSecret, focus: joinFocus }); return true;
+    }
+  };
 }

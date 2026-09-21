@@ -31,7 +31,8 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#clear-search').isVisible(), false);
   const message = page.locator('[data-message-record-id="test-welcome"]');
-  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), true, 'reaction pills stay visible without a disclosure');
+  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), false, 'unused reactions stay inside the picker');
+  await message.getByLabel('Add reaction', { exact: true }).click();
   await message.locator('[data-reaction="heart"]').click();
   await page.waitForFunction(() => document.querySelector('[data-message-record-id="test-welcome"] [data-reaction="heart"]').getAttribute('aria-pressed') === 'true');
   assert.equal(await page.locator('#thread-bar').isVisible(), false, 'reacting does not switch the conversation');

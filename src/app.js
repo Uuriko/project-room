@@ -115,7 +115,8 @@ function stashInviteForOAuth() {
   // back by the join dialog when a join was attempted but not landed) so the
   // dialog re-opens after sign-in. A stale stash from an abandoned OAuth is
   // cleared when no join link is live, so it can't resurrect a phantom invite.
-  if (typeof location.hash === "string" && location.hash.startsWith("#join/")) stashPendingJoin(window.sessionStorage, location.hash);
+  const pendingJoin = shareLinksUI?.pendingFragment() || location.hash;
+  if (typeof pendingJoin === "string" && pendingJoin.startsWith("#join/")) stashPendingJoin(window.sessionStorage, pendingJoin);
   else clearPendingJoin(window.sessionStorage);
 }
 // The Google entry point is a plain anchor: stash a live invitation before
@@ -410,6 +411,7 @@ const signinUI = createAuthSigninUI({
   },
   onSignedIn: async () => {
     await accountClient.restore();
+    if (await shareLinksUI?.resumeSignedIn()) return;
     const requestedRoom = selectedRoomFromLocation();
     if (!requestedRoom) { showAccountWorkspace(); return; }
     const identity = await client.restore(requestedRoom);
@@ -1600,6 +1602,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
+  const focusedReactionPicker = focused?.matches(".reaction-picker > summary");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
@@ -1658,7 +1661,9 @@ function renderMessages() {
                 continue;
               }
             }
+            const reactionPickerOpen = selector === ".message-links" && before.querySelector(".reaction-picker")?.open;
             before.innerHTML = after.innerHTML;
+            if (reactionPickerOpen && before.querySelector(".reaction-picker")) before.querySelector(".reaction-picker").open = true;
           }
         }
       }
@@ -1704,9 +1709,10 @@ function renderMessages() {
   }
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
-    const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
+    const replacement = focusedMessage ? row : focusedReactionPicker ? row?.querySelector(".reaction-picker > summary") : focusedFeedback ? row?.querySelector(".draft-state")
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
-    replacement?.focus({ preventScroll: true });
+    const target = replacement?.closest(".reaction-picker:not([open])")?.querySelector("summary") || replacement;
+    target?.focus({ preventScroll: true });
   }
   // Only when the update dropped focus to the body: a member who moved focus
   // themselves while the render was in flight keeps it.
@@ -1732,7 +1738,7 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 // Save as result, Pin, Make this work, Record decision and moderation move into
 // one keyboard- and hover-reachable "⋯" overflow menu. Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
-function messageLinksHTML(m, { linked, moderation, count, muted }) {
+function messageLinksHTML(m, { linked, moderation, count, muted, reactionPicker = "" }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
   const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
@@ -1745,7 +1751,7 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
   const overflow = [saveHtml, pinHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
-  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${reactionPicker}${replyHtml}${threadHtml}${menu}</div>`;
 }
 function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
@@ -1760,16 +1766,21 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
-  const reactionButtons = reactionPills(m.reactions).map(({ key, symbol, memberIds, count, used }) => {
+  const usedReactions = [], availableReactions = [];
+  reactionPills(m.reactions).forEach(({ key, symbol, memberIds, count, used }) => {
     const selected = memberIds.includes(session.member.id);
     const pending = pendingReactions.get(`${m.id}:${key}`);
     const label = `${pending && !pending.busy ? "Retry " : ""}${key}`;
-    return `<button type="button" class="reaction${used ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${count}" title="${esc(memberIds.map(name).join(", ") || `React with ${key}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${key}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
-  }).join("");
+    const button = `<button type="button" class="reaction${used ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${count}" title="${esc(memberIds.map(name).join(", ") || `React with ${key}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${key}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
+    (used || pending ? usedReactions : availableReactions).push(button);
+  });
+  const reactionButtons = usedReactions.join("");
+  const reactionPicker = !muted && !m.deletedAt && availableReactions.length
+    ? `<details class="reaction-picker"><summary aria-label="Add reaction" title="Add reaction">☺<span aria-hidden="true">+</span></summary><div class="reaction-options" role="group" aria-label="Choose a reaction">${availableReactions.join("")}</div></details>` : "";
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, reactionPicker })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -2971,7 +2982,7 @@ $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   // An action picked from the "⋯" overflow menu closes the menu behind it.
-  button.closest("details.message-more")?.removeAttribute("open");
+  button.closest("details.message-more, details.reaction-picker")?.removeAttribute("open");
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "decide") openDecision(id);
@@ -3205,6 +3216,18 @@ function chatEscapeState() {
     inThread: Boolean(currentThreadId)
   };
 }
+document.addEventListener("click", event => {
+  for (const picker of document.querySelectorAll(".reaction-picker[open]")) {
+    if (!picker.contains(event.target)) picker.open = false;
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const picker = event.target.closest(".reaction-picker[open]");
+  if (!picker) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  picker.open = false; picker.querySelector("summary").focus();
+}, true);
 function runEscapeChat(event) {
   if (event.key !== "Escape" || event.repeat || event.isComposing || event.keyCode === 229) return false;
   const action = escapeChatAction(chatEscapeState());
@@ -4858,7 +4881,15 @@ $("#rb-more-button").addEventListener("click", async () => {
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 $("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
 document.addEventListener("visibilitychange", renderReturnBrief);
-shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
+shareLinksUI = installShareLinks({ client, accountClient,
+  onOAuthStart: stashInviteForOAuth,
+  onAccountSignin: mode => {
+    // One sign-in controller and form, hosted in the invitation while needed.
+    $(mode ? "#join-account-methods" : "#signin-extra").append($("#auth-signin-ui"));
+    if (mode) signinUI.showPassword(mode);
+    else clearPendingJoin(window.sessionStorage);
+  },
+  getState: () => state, getSession: () => session, setConnectionStatus,
   listPurposes: () => Object.values(state?.workItems ?? {}).map(item => ({ id: item.id, title: item.title,
     done: ["complete", "superseded"].includes(nextWorkStep(item).action) })),
   onJoinedRoom: focus => {
