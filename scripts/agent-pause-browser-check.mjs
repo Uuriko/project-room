@@ -59,6 +59,32 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   assert.equal(await ownerRow.locator(".member-actions").count(), 0);
   assert.equal(await row.locator(".pause-chip").count(), 0);
 
+  // The owner gives either kind of member the same additional-admin role.
+  // The invitation explains where it lives and opens People on mobile too.
+  for (const [target, mobile] of [[row, false], [guestRow, true]]) {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#invite-people-button").click();
+    assert.match(await page.locator("#share-link-dialog").textContent(), /After the person or agent joins/);
+    await page.locator("#share-link-admins").click();
+    await page.locator("#share-link-dialog").waitFor({ state: "hidden" });
+    await target.getByText("Room capabilities", { exact: true }).click();
+    const admin = target.locator("[data-member-admin]");
+    await admin.click();
+    await page.waitForFunction(id => document.querySelector(`[data-member-admin="${id}"]`)?.textContent === "Remove admin role", await target.getAttribute("data-member-record-id"));
+    assert.equal(await target.locator(".owner-chip").textContent(), "Admin");
+    const memberId = await target.getAttribute("data-member-record-id");
+    assert.ok(store.room("commons").state.members[memberId].permissions.includes("manage_members"));
+    await admin.click();
+    await page.waitForFunction(id => document.querySelector(`[data-member-admin="${id}"]`)?.textContent === "Make room admin", memberId);
+    assert.equal(store.room("commons").state.members[memberId].permissions.includes("manage_members"), false);
+    assert.equal(store.room("commons").state.members[memberId].active, true);
+    await target.getByText("Room capabilities", { exact: true }).click();
+  }
+  assert.deepEqual(store.room("commons").state.members.codex.permissions, ["accept_work", "complete_work"]);
+  assert.equal(await ownerRow.locator("[data-member-admin]").count(), 0);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await ensurePeopleOpen(page);
+
   // Pause: the row shows Paused, the button flips, and the queued wake is not leasable.
   await pause.click();
   await row.locator(".pause-chip").waitFor();

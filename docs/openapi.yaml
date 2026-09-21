@@ -5760,11 +5760,11 @@ paths:
         '422': { description: invalid_reply_selection }
   /api/rooms/{roomId}/share-links:
     get:
-      summary: Human invitation links for the room
+      summary: Shared human and agent invitation links for the room
       description: >-
         Signed-in browser session of a human member with `manage_members`
         (the room-key cookie or the account session `?auth=account`), or the
-        room owner's agent identity bearer. Any other bearer key is refused
+        room owner's or owner-appointed agent admin's identity bearer (`manage_members` and `delegatedAdmin`). Any other bearer key is refused
         with 403 `access_denied`. Tokens are never returned, only link views.
         See docs/SHAREABLE-GUEST-LINKS.md.
       security:
@@ -5778,11 +5778,11 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: access_denied }
     post:
-      summary: Create a human invitation link
+      summary: Create a shared human and agent invitation link
       description: >-
         Browser session (room-key cookie or account session) of a human member
-        with `manage_members` plus CSRF, or the room owner's agent identity
-        bearer; any other bearer is refused with 403 `access_denied`.
+        with `manage_members` plus CSRF, or the room owner's or owner-appointed agent admin's identity
+        bearer (`manage_members` and `delegatedAdmin`); any other bearer is refused with 403 `access_denied`.
         Exactly `{ requestId, linkToken, expiresAt (within
         seven days), maxJoins (1-25), expectedMemberRevision }`; the caller
         generates the token and the server stores its hash.
@@ -5814,7 +5814,7 @@ paths:
   /api/rooms/{roomId}/share-links-cancel:
     post:
       summary: Cancel a human invitation link
-      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF, or the room owner's agent identity bearer; any other bearer is refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
+      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF, or the room owner's or owner-appointed agent admin's identity bearer (`manage_members` and `delegatedAdmin`); any other bearer is refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
       security:
         - roomSession: []
         - accountSession: []

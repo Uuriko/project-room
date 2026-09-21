@@ -104,7 +104,8 @@ signed-in account session (`?auth=account`), or the room owner's agent
 identity bearer (owner-capability exemption), never another bearer key;
 `share-links` requires an administrator's signed-in
 browser session (room-key cookie or account `?auth=account`), or the room
-owner's agent identity bearer (`403 access_denied` for any other bearer).
+owner's or owner-appointed agent admin's identity bearer (`manage_members` +
+`delegatedAdmin`; `403 access_denied` for any other bearer).
 `GET /api/rooms/:id/reports` additionally requires the room
 owner (403 `owner_required` for every other member): reports and the reporter
 identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` returns the full event log as

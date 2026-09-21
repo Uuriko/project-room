@@ -124,7 +124,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     for (const control of joinDialog.querySelectorAll("button,input")) control.disabled = value;
   }
   const member = () => getState()?.members[getSession()?.member.id];
-  const canManage = () => member()?.kind === "human" && member()?.active !== false && member()?.permissions.includes("manage_members");
+  const canManage = () => {
+    const current = member();
+    return Boolean(current && current.active !== false && (current.id === getState()?.room?.ownerId
+      || current.permissions.includes("manage_members") && (current.kind === "human" || current.delegatedAdmin === true)));
+  };
   // The join POST's response can be lost *after* the server committed the join
   // (which also bumps the slot revision and CSRF token). A naive retry with the
   // stale session would 403, so: restore the session first, then re-issue the

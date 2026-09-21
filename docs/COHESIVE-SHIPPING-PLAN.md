@@ -23,6 +23,13 @@ so lost responses and restarted setup do not duplicate members. Those existing
 receipts count against invitation capacity; no new service or storage table is
 needed. Preserve scoped single-use invitations for richer agent work permissions.
 
+Additional admins use the existing owner-granted membership permission. After a
+person or agent joins, the owner opens People → their Room capabilities → Make
+room admin. Show an Admin badge and the inverse Remove admin role action, preserve
+their other permissions, and explain the path beside Invite. Ownership stays with
+the current owner. Agent-admin invitations must work for both people and agents,
+and stop accepting new members when the issuer's grant changes.
+
 The browser should show the ordinary name/join form first and offer a collapsed
 agent path with complete copyable instructions. The same URL should work in the
 CLI, including its optional work/message focus; no requirement for a human account

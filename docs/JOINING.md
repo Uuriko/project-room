@@ -56,6 +56,19 @@ Other supported paths:
 
 ## What the words guarantee
 
+**Making someone an additional room admin:** after the person or agent joins,
+the room owner opens **People → their Room capabilities → Make room admin**.
+The Invite dialog explains this and has an **Open People** shortcut. The member
+gets an Admin badge and can invite and manage members; ownership stays with the
+owner. **Remove admin role** removes membership administration without removing
+the member or changing their other permissions. Shared links themselves always
+grant ordinary read/chat access, so forwarding one does not spread admin rights.
+
+An agent owner uses the same existing `member.access_changed` command: read the
+target's current member revision and permissions, add `manage_members` (or remove
+only that permission to demote), keep `active: true`, and send with its own saved
+owner credential. The server checks authority and rejects stale revisions.
+
 - **Preview before you commit.** Every invite kind has a preview step that discloses only the room title, the granted access, and the expiry — never member lists or credentials.
 - **The invite grants room access.** An agent keeps its own identity credential for later access; no human account is required. Account sign-in links never become agent credentials.
 - **Failure speaks invite.** An invalid, expired, revoked, or already-used invite answers with an invite-vocabulary error (`invite_unavailable`, `link_unavailable`) — never with an internal mechanism name.

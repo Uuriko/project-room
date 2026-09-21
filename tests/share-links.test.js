@@ -51,6 +51,28 @@ test("one share link creates distinct named guest identities without sharing the
   assert.equal(posted.event.actorId, first.session.member.id);
 });
 
+test("an additional agent admin issues usable human and agent invitations until its grant changes", t => {
+  const f = fixture(t), identity = f.store.identities.create("Additional admin");
+  f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Additional admin");
+  const change = permissions => f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: identity.identityId, expectedMemberRevision: f.store.room("commons").state.members[identity.identityId].revision, permissions, active: true } });
+  change(["manage_members"]);
+  const linkToken = randomBytes(32).toString("base64url");
+  const minted = f.store.shareLinks.create(identity.secret, "commons", { ...f.details, requestId: randomUUID(), linkToken, maxJoins: 3, expectedMemberRevision: 1 }, null);
+  assert.equal(minted.link.status, "active");
+  const slot = f.store.createAccountSessionSlot();
+  f.store.shareLinks.join(slot.token, linkToken, { displayName: "Human", redemptionId: randomUUID(), expectedSessionRevision: 0, expectedSessionBinding: slot.session.sessionBinding });
+  const peer = f.store.identities.create("Peer");
+  f.store.shareLinks.joinAgent(peer.secret, linkToken, "Peer");
+  assert.equal(f.store.shareLinks.preview(linkToken).link.remainingJoins, 1);
+  assert.equal(f.store.verifyInvitationAudit().consistent, true);
+  assert.doesNotThrow(() => f.store.shareLinks.verify());
+  change([]);
+  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_unavailable" });
+  assert.throws(() => f.store.shareLinks.list(identity.secret, "commons", null), { code: "access_denied" });
+  assert.equal(f.store.room("commons").state.members[identity.identityId].active, true);
+});
+
 test("retries keep the same guest, do not consume another use, and require unchanged browser ownership", t => {
   const f = fixture(t), guest = f.guest();
   const first = guest.accept(), again = guest.accept();
@@ -281,7 +303,7 @@ test("a human guest joins through an agent-issued link and the invitation audit 
   assert.equal(f.store.shareLinks.list(f.identity.secret, "commons", null).links.find(link => link.id === created.link.id).joins, 1);
 });
 
-test("HTTP: owner identity Bearer <redacted> administers share links; a non-owner agent Bearer <redacted> 403", async t => {
+test("HTTP: owner and appointed agent admin can manage shared invites; ordinary agents cannot", async t => {
   const f = agentOwnerFixture(t);
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -304,8 +326,7 @@ test("HTTP: owner identity Bearer <redacted> administers share links; a non-owne
   const cancelled = await request("/api/rooms/commons/share-links-cancel", { method: "POST", headers: ownerBearer, data: { linkId } });
   assert.equal(cancelled.status, 200);
   assert.equal((await cancelled.json()).link.status, "cancelled");
-  // A non-owner agent identity bearer is still refused on all three routes,
-  // even with a broad permission grant: the HTTP gate is owner-only.
+  // A work grant alone never permits membership administration.
   const other = f.store.identities.create("Other Agent");
   f.store.identities.link(f.ownerKey, "commons", {
     identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"]
@@ -320,6 +341,17 @@ test("HTTP: owner identity Bearer <redacted> administers share links; a non-owne
     assert.equal(response.status, 403);
     assert.equal((await response.json()).error.code, "access_denied");
   }
+  const change = permissions => f.store.command(f.identity.secret, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: other.identityId, expectedMemberRevision: f.store.room("commons").state.members[other.identityId].revision, permissions, active: true } });
+  change(["manage_members"]);
+  assert.equal((await request("/api/rooms/commons/share-links", { headers: otherBearer })).status, 200);
+  const adminLink = await request("/api/rooms/commons/share-links", { method: "POST", headers: otherBearer,
+    data: { ...create, requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"), expectedMemberRevision: 1 } });
+  assert.equal(adminLink.status, 201);
+  const adminId = (await adminLink.json()).link.id;
+  assert.equal((await request("/api/rooms/commons/share-links-cancel", { method: "POST", headers: otherBearer, data: { linkId: adminId } })).status, 200);
+  change([]);
+  assert.equal((await request("/api/rooms/commons/share-links", { headers: otherBearer })).status, 403);
 });
 
 test("an agent-issued link goes authority_changed when the issuer loses ownership or is deactivated", t => {

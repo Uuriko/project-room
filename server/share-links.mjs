@@ -95,10 +95,10 @@ export class ShareLinks {
   authority(row) {
     const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
-    // Agent-issued links carry no account: they were minted under the owner's
-    // identity bearer, so authority rests on continued ownership alone.
+    // Agent-issued links carry no account. An explicit owner-granted admin
+    // keeps issuance authority only while its grant and revision remain current.
     if (row.issuer_account_id === null) {
-      return ownerId === row.issuer_member_id && member?.active !== false
+      return (ownerId === row.issuer_member_id || member?.delegatedAdmin === true && member.permissions.includes("manage_members")) && member?.active !== false
         && member?.revision === row.issuer_member_revision;
     }
     // Human-issued links stay authoritative while the issuer owns the room or
