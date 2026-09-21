@@ -83,10 +83,25 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
     assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
     await input.fill("");
+    const topic = page.locator('[data-message-record-id="topic"]');
+    assert.equal(await topic.locator('.reactions button').count(), 0, "no unused reaction pills beneath messages");
+    assert.equal(await topic.locator('.reaction-options').isVisible(), false);
+    const addReaction = topic.getByLabel("Add reaction", { exact: true });
+    await addReaction.focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await topic.locator('.reaction-options').isVisible(), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await topic.locator('.reaction-options').isVisible(), false);
+    await addReaction.click();
+    const optionsBounds = await topic.locator('.reaction-options').boundingBox();
+    assert.ok(optionsBounds.x >= 0 && optionsBounds.x + optionsBounds.width <= viewport.width, "picker fits narrow and desktop screens");
     const like = page.locator('[data-message-record-id="topic"] button[data-reaction="like"]');
     assert.equal(await like.isVisible(), true);
     await like.click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="true"]'));
+
+    assert.equal(await topic.locator('.reactions button').count(), 1, "only the used reaction remains visible");
+    assert.equal(await topic.locator('.reaction-options').isVisible(), false, "choosing a reaction closes the picker");
 
     // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
     await page.route("**/api/rooms/commons/commands", route => route.fulfill({

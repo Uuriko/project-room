@@ -804,10 +804,20 @@
     <dialog id="join-link-dialog" aria-labelledby="join-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="join-link-title">Join this room</h2><button id="join-link-close" class="button ghost" type="button">Close</button></div>
       <p id="join-link-scope">Checking your invitation…</p>
+      <section id="join-account-choices" hidden aria-label="Join with an account or as a guest">
+        <p>Already have an account?</p>
+        <div class="join-account-actions"><button id="join-account-signin" class="button primary" type="button">Sign in</button><button id="join-account-create" class="button secondary" type="button">Create an account</button></div>
+        <p class="form-hint">Keep your rooms across visits and devices. Or join below as a guest for a quick conversation.</p>
+      </section>
+      <section id="join-account-auth" hidden aria-label="Account sign-in">
+        <a id="join-account-google" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+        <div id="join-account-methods"></div>
+        <button id="join-account-back" class="text-button" type="button">Back to guest joining</button>
+      </section>
       <form id="join-link-form" hidden>
         <label for="join-link-name">Your name</label><input id="join-link-name" type="text" autocomplete="nickname" required maxlength="80" aria-describedby="join-name-note">
         <p id="join-name-note" class="form-hint">Names aren’t verified.</p>
-        <p class="form-hint">Up to 8 hours in this browser. Sign-out or cleared cookies end access.</p>
+        <p id="join-guest-note" class="form-hint">Guest access lasts up to 8 hours in this browser. Sign-out or cleared cookies end access.</p>
         <details id="join-access-details"><summary>Guest access</summary><p id="join-link-permissions"></p><p id="join-link-expiry" class="form-hint"></p><p class="form-hint">If you’re already a member, your existing membership is reused.</p></details>
         <p id="join-switch-warning" class="form-hint" hidden>Joining may change your identity and clear unsent drafts. Save a copy first.</p>
         <button id="join-link-submit" class="button primary" type="submit">Join room</button>

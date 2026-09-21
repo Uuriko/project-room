@@ -301,6 +301,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
 
   return {
+    showPassword(mode) {
+      if (busy) return;
+      activeMethod = "password"; passwordMode = mode === "login" ? "login" : "signup";
+      render();
+    },
     mount(target) {
       container = target;
       render();

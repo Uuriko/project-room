@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
+import { hashPassword } from "../src/password-auth.mjs";
 import { randomBytes } from "node:crypto";
 import { fillAccessKey } from "./auth-signin.mjs";
 
@@ -188,4 +189,51 @@ test("invitation account replacement warns about an account-only draft and clear
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   await p.locator("#invitation-dismiss").click(); await p.locator("#inbox-panel").waitFor();
   await p.getByText("No messages yet.", { exact: true }).waitFor();
+});
+
+for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns to the same room without a guest or extra room`, { timeout: 35000 }, async t => {
+  const f = await setup(t, { mobile: mode === "signup" }), p = f.page;
+  const email = `${mode}-invitation@example.invalid`, password = "invitation-fixture-password";
+  if (mode === "login") {
+    f.store.createAccount("invitation-existing", "test");
+    f.store.accountLogins.linkPasswordMethod("invitation-existing", { email, verifier: hashPassword(password) });
+  }
+  const token = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(f.keys.owner, "commons", { requestId: `invitation-${mode}`, linkToken: token,
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
+  const before = f.store.room("commons").sequence;
+  await p.goto(f.origin + "/#join/" + token);
+  await p.locator("#join-link-form").waitFor();
+  assert.equal(await p.locator("#join-link-submit").textContent(), "Continue as guest");
+  await p.locator(mode === "signup" ? "#join-account-create" : "#join-account-signin").click();
+  const form = p.locator('#join-account-auth [data-signin-form="password"]');
+  assert.equal(await form.locator(`[data-password-mode="${mode}"]`).getAttribute("aria-pressed"), "true");
+  await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
+  await form.locator('button[type="submit"]').click();
+  await p.locator("#join-link-form").waitFor();
+  assert.equal(await p.locator("#join-link-submit").textContent(), "Join room");
+  assert.equal(await p.locator("#join-account-choices").isVisible(), false);
+  assert.equal(await p.locator("#join-guest-note").isVisible(), false);
+  assert.equal(f.store.room("commons").sequence, before, "sign-in alone does not redeem the invitation");
+  await p.locator("#join-link-name").fill("Account member"); await p.locator("#join-link-submit").click();
+  await p.locator("#main").waitFor(); await p.locator("#join-link-dialog").waitFor({ state: "hidden" });
+  assert.equal(new URL(p.url()).searchParams.get("room"), "commons");
+  await p.reload(); await p.locator("#main").waitFor();
+  assert.equal(await p.locator("#room-title").textContent(), f.store.snapshot(f.keys.owner, "commons").state.room.title);
+});
+
+test("shared invitation: Google handoff preserves invitation and purpose, guest back keeps the name", { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page, token = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(f.keys.owner, "commons", { requestId: "oauth-invite", linkToken: token,
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
+  await p.goto(f.origin + "/#join/" + token + "/message/test-welcome");
+  await p.locator("#join-link-name").fill("Keep my name");
+  await p.locator("#join-account-signin").click(); await p.locator("#join-account-back").click();
+  assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
+  await p.locator("#join-account-create").click();
+  // Capture navigation intent without calling a real identity provider.
+  await p.locator("#join-account-google").evaluate(el => el.addEventListener("click", e => e.preventDefault()));
+  await p.locator("#join-account-google").click();
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("pr-pending-join")), `#join/${token}/message/test-welcome`);
+  await f.capture("invitation-account-options");
 });

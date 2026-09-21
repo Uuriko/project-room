@@ -1102,3 +1102,24 @@ summary { overflow-wrap: anywhere; }
 
 .agent-invite-instructions { margin-top: 16px; }
 .agent-invite-instructions pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }
+
+/* Reactions are conversation content; unused choices belong in a disclosure. */
+.reactions:empty { display: none; }
+.reaction-picker { position: relative; }
+.reaction-picker > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; color: var(--muted); border-radius: .4rem; font-size: 1.1rem; }
+.reaction-picker > summary::-webkit-details-marker { display: none; }
+.reaction-picker > summary:hover { color: var(--text); background: var(--panel-raised); }
+.reaction-picker > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.reaction-picker[open] { z-index: 40; }
+.reaction-options { position: absolute; bottom: calc(100% + .25rem); left: 0; display: flex; gap: .25rem; padding: .35rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); box-shadow: var(--shadow); width: max-content; }
+@media (hover: hover) and (pointer: fine) {
+  .reaction-picker:not([open]) > summary { opacity: 0; }
+  .message:is(:hover, :focus-within) .reaction-picker > summary { opacity: 1; }
+  .reactions .reaction { min-height: 28px; min-width: 36px; padding: .1rem .45rem; }
+}
+@media (hover: none), (pointer: coarse) {
+  .reaction-picker > summary { min-width: 44px; min-height: 44px; }
+}
+
+.join-account-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+#join-account-choices { padding-bottom: .75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
