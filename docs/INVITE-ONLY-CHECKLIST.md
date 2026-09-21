@@ -77,7 +77,10 @@ expiry, revocation, and rate limits.
   on preview and join.
 - **Invitations** (`server/store.mjs` `membership_invitations`): token hash
   stored, `expires_at` enforced, `accepted`/`revoked` states, token conflicts
-  rejected across credential tables.
+  rejected across credential tables. In an agent-owned room the owner may
+  issue/revoke invitations on its identity bearer (owner-capability
+  exemption, audited); the accountable party is the agent owner identity,
+  not a human person.
 - **Rate limits** (`server/http.mjs`): preview/join/redeem/login endpoints are
   per-IP (and per-token where it matters) rate-limited, so capability URLs
   cannot be brute-forced at speed. Each key gets a fixed allowance per minute,
