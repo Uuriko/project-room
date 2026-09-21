@@ -531,3 +531,59 @@ test("a follow-up host receives the earlier result and runs independently withou
   assert.deepEqual(calls, [first.command.data.messageId, next.command.data.messageId]);
   assert.deepEqual((await f.client.replyContext(first.command.data.messageId)).request, parent);
 });
+
+test("a room stream wakes the automatic host before its polling interval", { timeout: 8000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController();
+  t.after(() => controller.abort());
+  let listening, calls = 0;
+  const ready = new Promise(resolve => { listening = resolve; });
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (new URL(url).pathname.endsWith("/stream")) {
+      assert.equal(options.redirect, "error"); assert.equal(options.credentials, "omit"); listening();
+    }
+    return response;
+  } };
+  const queue = runRequestQueue({ ...a, connection, signal: controller.signal, intervalMs: 10000,
+    execute: async () => { calls++; return { body: "Stream woke this host" }; },
+    emit: result => { if (result.status === "delivered") controller.abort(); } });
+  await ready; const started = Date.now();
+  const requestMessageId = f.open("stream-wake").command.data.messageId;
+  await queue;
+  assert.equal(calls, 1); assert.ok(Date.now() - started < 5000, "delivery did not wait for the 10-second poll");
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
+
+test("an unavailable stream falls back to bounded polling without losing a request", { timeout: 8000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController();
+  t.after(() => controller.abort()); let failed, streams = 0, calls = 0;
+  const ready = new Promise(resolve => { failed = resolve; });
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (new URL(url).pathname.endsWith("/stream")) { streams++; failed(); return new Response("unavailable", { status: 503 }); }
+    return fetch(url, options);
+  } };
+  const queue = runRequestQueue({ ...a, connection, signal: controller.signal, intervalMs: 1000,
+    execute: async () => { calls++; return { body: "Polling recovered" }; },
+    emit: result => { if (result.status === "delivered") controller.abort(); } });
+  await ready; const started = Date.now(); f.open("fallback-wake"); await queue;
+  assert.ok(Date.now() - started >= 800, "failed streams do not spin a tight polling loop");
+  assert.equal(streams, 1); assert.equal(calls, 1);
+});
+
+test("stream wakeups retain deadlines, reject malformed cursors and enforce revocation", { timeout: 8000 }, async t => {
+  const f = await fixture(t), after = f.store.room("commons").sequence;
+  assert.deepEqual(await f.client.waitForChange(after, { timeoutMs: 100 }), { changed: false });
+  const malformed = new RoomAgentClient({ ...f.config, fetchImpl: (url, options) => new URL(url).pathname.endsWith("/stream")
+    ? Promise.resolve(new Response("event: room-event\nid: nope\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } }))
+    : fetch(url, options) });
+  await assert.rejects(malformed.waitForChange(after), { code: "invalid_response" });
+  let listening; const ready = new Promise(resolve => { listening = resolve; });
+  const client = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options); if (new URL(url).pathname.endsWith("/stream")) listening(); return response;
+  } });
+  const ended = assert.rejects(client.waitForChange(after), { code: "access_ended" }); await ready;
+  const member = f.store.room("commons").state.members.producer;
+  f.store.command(f.keys.owner, "commons", { id: "end-stream-member", type: "member.access_changed", data: {
+    memberId: "producer", expectedMemberRevision: member.revision, permissions: [], active: false } });
+  await ended;
+});

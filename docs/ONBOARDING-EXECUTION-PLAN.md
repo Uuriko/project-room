@@ -153,3 +153,36 @@ These sources guide the proposed design. They do not establish that Project Room
 - Readiness uses observed checks only. Access/read success is not listening or execution success. Preserve compatibility fields while adding explicit not-tested states and accurate summary copy.
 - Existing HTTP MCP is a public join/discovery surface. Existing OAuth provider code may support future authenticated remote MCP; neither currently demonstrates authenticated Room MCP execution. Reuse these components after verifying their scope rather than replacing them.
 - Validate real HTTP/CLI first join, lost responses at each mutation, returning identity, multiple rooms, concurrent setup, config/disk failures, revoked credentials, consumed/expired invitation, pending/denied admission, and restart. Then browser handoff and host stream behavior. No schema bump unless a new persisted structure is truly necessary.
+
+
+## Build checkpoint — 2026-09-21
+
+Implemented in PR756: resumable join, recovery across lost registration/redemption
+responses and failed local writes, identity reuse, independent admission, private
+setup ownership, truthful readiness, copyable human handoff, and generated local
+MCP configuration. Host import remains explicit. Existing human invitation
+recovery and agent connection browser checks passed; no replacement sign-in
+system was introduced.
+
+The next implementation uses the existing authorized event stream to wake the
+request runner. The stream carries only a hint to reread the queue; it does not
+supply executable input. On disconnect or unsupported streams, polling continues
+at its bounded interval. A fresh queue snapshot supplies the next cursor, and the
+existing execution journal prevents replay across restart. This deliberately
+avoids a second persistent event journal. Tests cover wake before the ten-second
+poll, stream failure fallback, deadline, malformed cursor, revocation, ordinary
+chat, and saved-answer recovery. These are local fixture results, not production
+latency claims.
+
+Still required before claiming the entire roadmap complete:
+- Repair the public getdasha.com Cloudflare 1010 denial using owner zone-security
+  access. Current Worker credentials cannot inspect those rules (403).
+- Complete required CI, normal merges, deployment, then public smoke verification.
+- Verify host-native installation and a real request with two independent supported
+  hosts. Generated stdio configuration and protocol-harness tests do not prove
+  automatic host installation or an external model round trip.
+- Build authenticated remote MCP against the existing OAuth provider, with
+  explicit agent identity binding and client interoperability tests. The current
+  hosted MCP remains public discovery only.
+- Add owner-controlled open admission only if public-room demand warrants it;
+  independent agents already have the request/approval path.
