@@ -46,6 +46,11 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIde
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
+import { extractAgentMentions } from "./inbox-agent-routing.mjs"; // #658: mention lifecycle tracking (pure parser).
+import {
+  MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
+  assertTransitionMention, resolveMentionTarget, mentionStateSchema,
+} from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -738,6 +743,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
+      // #658: mention lifecycle tracking. Purely additive side tables (no
+      // events, no projection impact): IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence.
+      this.db.exec(mentionStateSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -2656,6 +2665,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ? bindingOrOptions : options;
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
     const { actor = null, since = null, until = null } = opts;
+    // #658: mention timeouts are evaluated lazily on read. The flip needs a
+    // write-capable transaction, so it runs before the query_only read
+    // below; usually a no-op (one indexed UPDATE, zero rows touched).
+    this.flipExpiredMentions(roomId);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
@@ -2698,6 +2711,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const visible = events.filter(({ event }) =>
         event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
         || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // #658: mention chips ride on message views. One batched query for
+      // the whole page (no N+1); only members who can read the room see it.
+      const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
+      const members = this.room(roomId).state.members ?? {};
+      const chips = this.mentionChipsForEvents(roomId, members, messageIds);
+      for (const { event } of visible) {
+        if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
+      }
       return { events: visible, next, hasMore: next < sequence };
     });
   }
@@ -2885,6 +2906,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+      // #658: mention lifecycle. Runs in the same transaction as the message
+      // event: mention rows are never recorded without their triggering
+      // message, and a post by a mentioned member marks their pending
+      // mentions responded in the same transaction. Never throws for
+      // unparseable input — an unresolvable mention is simply not tracked.
+      if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
       // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
       // event is offered to enabled webhook subscriptions whose event
       // filter matches. Journaled in the same transaction as the event
@@ -2937,5 +2964,192 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
     }
+  }
+
+  // #658: mention lifecycle tracking. Called inside command()'s transaction
+  // for every message.posted. Two jobs:
+  //   1. A post by a mentioned member marks their pending (delivered or
+  //      acknowledged) mentions in this room responded — a reply is
+  //      stronger than a read, so it skips acknowledged.
+  //   2. @names in the body resolve to room members (never the sender);
+  //      each resolved member gets one delivered row for this message event.
+  // Unresolved names get no row — never invent a recipient.
+  trackMentions(roomId, state, senderMemberId, data, eventId) {
+    const nowMs = this.now();
+    this.db.prepare(
+      `UPDATE mention_states SET state='responded', decided_at=?
+       WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
+    ).run(nowMs, roomId, senderMemberId);
+    let names = [];
+    try { names = extractAgentMentions(typeof data.body === "string" ? data.body : ""); }
+    catch { names = []; }
+    if (names.length === 0) return;
+    const members = state?.members ?? {};
+    let identityNames = {};
+    try {
+      const links = this.db.prepare(
+        `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
+         JOIN agent_identities i ON i.identity_id=l.identity_id
+         WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
+      for (const row of links) identityNames[row.memberId] = row.displayName;
+    } catch { identityNames = {}; }
+    const timeoutMs = this.mentionTimeoutMsFor(roomId);
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO mention_states
+       (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+       VALUES(?,?,?,?,?,?,NULL)`);
+    const seen = new Set();
+    for (const name of names) {
+      const memberId = resolveMentionTarget(members, identityNames, name, senderMemberId);
+      if (!memberId || seen.has(memberId)) continue;
+      seen.add(memberId);
+      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
+    }
+  }
+
+  // #658: per-room mention timeout, defaulting to 30 minutes. Owner-
+  // configurable via setMentionTimeout; absent rows read as the default.
+  mentionTimeoutMsFor(roomId) {
+    const row = this.db.prepare("SELECT timeout_ms AS timeoutMs FROM room_mention_settings WHERE room_id=?").get(roomId);
+    const timeoutMs = Number(row?.timeoutMs);
+    return Number.isSafeInteger(timeoutMs) && timeoutMs >= MENTION_TIMEOUT_MS_MIN && timeoutMs <= MENTION_TIMEOUT_MS_MAX
+      ? timeoutMs : MENTION_TIMEOUT_MS_DEFAULT;
+  }
+
+  // #658: owner-only timeout override for a room.
+  setMentionTimeout(token, roomId, timeoutMs, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    if (auth.member.id !== this.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MENTION_TIMEOUT_MS_MIN || timeoutMs > MENTION_TIMEOUT_MS_MAX) {
+      fail(422, "invalid_mention_timeout", `timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX}`);
+    }
+    return this.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at) VALUES(?,?,?)
+         ON CONFLICT(room_id) DO UPDATE SET timeout_ms=excluded.timeout_ms, updated_at=excluded.updated_at`
+      ).run(roomId, timeoutMs, this.now());
+      return { roomId, timeoutMs };
+    });
+  }
+
+  // #658: lazily flip expired delivered|acknowledged rows to timed_out.
+  // Runs inside the caller's transaction (write-capable paths) or as its
+  // own write transaction before a read path — never inside query_only.
+  flipExpiredMentions(roomId, nowMs = this.now()) {
+    // Cheap guard first: eventsAfter runs on every SSE pump (250ms per
+    // connection), so the common no-expired-rows case must stay a single
+    // indexed read, never a write transaction.
+    const expired = this.db.prepare(
+      `SELECT 1 FROM mention_states
+       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
+    ).get(roomId, nowMs);
+    if (!expired) return 0;
+    const run = () => this.db.prepare(
+      `UPDATE mention_states SET state='timed_out', decided_at=?
+       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
+    ).run(nowMs, roomId, nowMs);
+    return this.db.isTransaction ? run().changes : this.transaction(run).changes;
+  }
+
+  // #658: explicit acknowledgement. Member-only and idempotent: the caller
+  // acks their own mention row for the message event. Acking a message with
+  // no mention row at all is 404; a row that names someone else is 403.
+  // Terminal states return the current state unchanged (idempotent).
+  acknowledgeMention(token, roomId, messageEventId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    return this.transaction(() => {
+      this.flipExpiredMentions(roomId);
+      const mine = this.db.prepare(
+        "SELECT state FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
+      ).get(roomId, messageEventId, auth.member.id);
+      if (!mine) {
+        const any = this.db.prepare(
+          "SELECT 1 FROM mention_states WHERE room_id=? AND message_event_id=?").get(roomId, messageEventId);
+        fail(any ? 403 : 404, any ? "mention_not_yours" : "mention_not_found",
+          any ? "You can only acknowledge your own mentions" : "No mention found for this message");
+      }
+      if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
+      assertTransitionMention("delivered", "acknowledged");
+      this.db.prepare(
+        "UPDATE mention_states SET state='acknowledged' WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
+      ).run(roomId, messageEventId, auth.member.id);
+      return this.mentionView(roomId, messageEventId, auth.member.id);
+    });
+  }
+
+  // #658: member-readable mention list. memberId defaults to the caller; an
+  // owner may query another member's mentions (feeds the #662 attention
+  // card's "N mentions unacknowledged"). Supports state and after filters.
+  listMentions(token, roomId, { state = null, after = null, memberId = null } = {}, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const target = memberId ?? auth.member.id;
+    if (typeof target !== "string" || !target) fail(422, "invalid_mention_query", "memberId must be a non-empty string");
+    if (state !== null && !["delivered", "acknowledged", "responded", "timed_out"].includes(state)) {
+      fail(422, "invalid_mention_query", "state must be one of delivered, acknowledged, responded, timed_out");
+    }
+    if (after !== null && (typeof after !== "string" || Number.isNaN(Date.parse(after)))) {
+      fail(422, "invalid_mention_query", "after must be an ISO timestamp");
+    }
+    if (target !== auth.member.id && auth.member.id !== this.room(roomId).state.room.ownerId) {
+      fail(403, "mention_forbidden", "You can only list your own mentions");
+    }
+    return this.transaction(() => {
+      this.flipExpiredMentions(roomId);
+      const rows = this.db.prepare(
+        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state,
+                created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
+         FROM mention_states
+         WHERE room_id=? AND mentioned_member_id=?
+           AND (? IS NULL OR state=?) AND (? IS NULL OR created_at>=?)
+         ORDER BY created_at DESC LIMIT 200`
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after));
+      const members = this.room(roomId).state.members ?? {};
+      return {
+        roomId, memberId: target,
+        mentions: rows.map(r => ({
+          messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
+          displayName: members[r.memberId]?.displayName ?? r.memberId,
+          createdAt: new Date(r.createdAt).toISOString(),
+          timeoutAt: new Date(r.timeoutAt).toISOString(),
+          decidedAt: r.decidedAt === null ? null : new Date(r.decidedAt).toISOString(),
+        })),
+      };
+    });
+  }
+
+  // #658: single mention row view for the ack response.
+  mentionView(roomId, messageEventId, memberId) {
+    const row = this.db.prepare(
+      `SELECT state, created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
+       FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
+    ).get(roomId, messageEventId, memberId);
+    if (!row) return null;
+    const members = this.room(roomId).state.members ?? {};
+    return {
+      roomId, messageEventId, memberId, state: row.state,
+      displayName: members[memberId]?.displayName ?? memberId,
+      createdAt: new Date(row.createdAt).toISOString(),
+      timeoutAt: new Date(row.timeoutAt).toISOString(),
+      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
+    };
+  }
+
+  // #658: batch-load mention chip data for a page of message events. One
+  // query for the whole page (no N+1); display names come from the room
+  // projection already in hand.
+  mentionChipsForEvents(roomId, members, eventIds) {
+    if (!eventIds.length) return new Map();
+    const placeholders = eventIds.map(() => "?").join(",");
+    const rows = this.db.prepare(
+      `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
+       FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
+    ).all(roomId, ...eventIds);
+    const chips = new Map();
+    for (const row of rows) {
+      const list = chips.get(row.messageEventId) ?? [];
+      list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });
+      chips.set(row.messageEventId, list);
+    }
+    return chips;
   }
 }

@@ -87,6 +87,7 @@ optional.push("server/attachment-schema.mjs");
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/attention.mjs");
 optional.push("server/owner-attention.mjs"); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
+optional.push("server/mention-lifecycle.mjs"); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs", "server/sms-ingest.mjs", "server/messenger-ingest.mjs", "server/sms-outbound.mjs", "server/messenger-outbound.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
