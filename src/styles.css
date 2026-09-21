@@ -124,7 +124,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .work-checks { min-width: 0; margin: 0 0 .75rem; padding: .8rem; border: 1px solid var(--line); }
 .work-checks legend { padding: 0 .3rem; font-size: .8rem; }
 #new-work-form .check { display: flex; align-items: center; gap: .6rem; min-height: 44px; min-width: 0; overflow-wrap: anywhere; }
-.form-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.form-actions { display: flex; justify-content: flex-end; gap: .5rem; position: relative; z-index: 1; }
 
 .work-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; max-height: 72vh; padding: 1rem; overflow-y: auto; }
 .work-card { padding: 1rem; border: 1px solid var(--line); background: var(--panel-raised); scroll-margin-top: 6rem; }
@@ -589,14 +589,15 @@ button:disabled { cursor: wait; opacity: .6; }
 .catchup-signals { display: flex; flex-wrap: wrap; gap: .25rem 1rem; color: var(--muted); }
 .catchup-signals, .catchup-signals small { font-size: .875rem; font-weight: 400; }
 .catchup-signals :empty { display: none; }
-.return-brief-body { display: grid; gap: .9rem; padding: 0 .85rem .85rem; border-top: 1px solid var(--line-soft); }
+.return-brief-body { display: grid; gap: .9rem; padding: 0 .85rem .85rem; border-top: 1px solid var(--line-soft); min-width: 0; overflow-wrap: anywhere; }
 .return-brief-body h3 { margin: .75rem 0 .5rem; font-size: 1rem; }
 .return-brief-body details > summary { min-height: 44px; padding: .65rem 0; cursor: pointer; font-size: .875rem; }
 .rb-boundary { display: block; font-size: .75rem; font-weight: 400; color: var(--muted); }
-.rb-group-label { display: block; margin: .5rem 0 .15rem; font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.rb-group-label { display: block; margin: .5rem 0 .15rem; font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); overflow-wrap: anywhere; }
 .rb-group:first-child .rb-group-label { margin-top: 0; }
-.rb-group-list { padding-left: .35rem; }
-.rb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
+.rb-group { min-width: 0; overflow-wrap: anywhere; }
+.rb-group-list { padding-left: .35rem; min-width: 0; }
+.rb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; min-width: 0; }
 .rb-event { font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
 #rb-attention-list .rb-event { display: grid; gap: .15rem; padding-block: .35rem; }
 .rb-event .work-link { color: var(--blue); font-size: .875rem; text-decoration: underline; text-underline-offset: .18em; }
