@@ -51,14 +51,18 @@ export class AgentConnections {
   row(roomId, memberId) { return this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? AND member_id=?").get(roomId, memberId); }
   owner(token, roomId, binding) {
     const auth = this.store.authenticate(token, roomId, binding);
-    // #643: owner-by-id — the owner capability follows the owner identity,
-    // not the credential flavor (share-links-style owner-capability
-    // exemption): an agent owner manages connections on their identity
-    // bearer. The mutation path additionally requires a signed-in account
-    // session — connection sponsorship is account-bound by schema.
+    // #597/#643: owner-by-id — the owner capability follows the owner identity,
+    // not the credential flavor: an agent owner manages connections on their identity
+    // bearer. Human owners retain the original browser-session boundary (session +
+    // account required) — a raw access key must not mint agent credentials.
+    // The mutation path additionally requires a signed-in account session —
+    // connection sponsorship is account-bound by schema.
     if (auth.member?.id !== this.store.room(roomId).state.room.ownerId
       || !auth.member.permissions.includes("manage_members")) {
       fail(403, "owner_required", "Only the room owner can manage agent connections");
+    }
+    if (auth.member.kind === "human" && (!auth.account || auth.kind !== "session")) {
+      fail(403, "owner_required", "Only the signed-in room owner can manage agent connections");
     }
     return auth;
   }
