@@ -3039,10 +3039,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Cheap guard first: eventsAfter runs on every SSE pump (250ms per
     // connection), so the common no-expired-rows case must stay a single
     // indexed read, never a write transaction.
-    const expired = this.db.prepare(
-      `SELECT 1 FROM mention_states
-       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
-    ).get(roomId, nowMs);
+    // Defensive: if the mention_states table doesn't exist (e.g. a test
+    // fixture from before #658), treat as nothing to flip rather than
+    // throwing and breaking event listing.
+    let expired;
+    try {
+      expired = this.db.prepare(
+        `SELECT 1 FROM mention_states
+         WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
+      ).get(roomId, nowMs);
+    } catch {
+      return 0;
+    }
     if (!expired) return 0;
     const run = () => this.db.prepare(
       `UPDATE mention_states SET state='timed_out', decided_at=?
