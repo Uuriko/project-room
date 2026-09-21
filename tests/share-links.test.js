@@ -336,7 +336,7 @@ test("an agent-issued link goes authority_changed when the issuer loses ownershi
   assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_unavailable" });
 });
 
-test("v34 databases migrate share-link and invitation history to v35 with issuer columns nullable", async t => {
+test("v34 databases migrate share-link and invitation history to v36 with issuer columns nullable", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-share-migrate-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const filename = join(directory, "room.sqlite");
@@ -389,10 +389,10 @@ test("v34 databases migrate share-link and invitation history to v35 with issuer
   for (const { sql } of fenceDefinitions(34)) db.exec(sql);
   db.exec("PRAGMA user_version=34");
   db.close();
-  // Reopening migrates to v35 and preserves every row and the audit.
+  // Reopening migrates to v36 (via v35) and preserves every row and the audit.
   const store = new RoomStore(filename, { now: () => now });
   t.after(() => store.close());
-  assert.equal(store.storagePlatform.version(store.db), 35);
+  assert.equal(store.storagePlatform.version(store.db), 36);
   assert.equal(store.db.prepare("SELECT count(*) n FROM share_links").get().n, shareCount);
   assert.equal(store.db.prepare("SELECT count(*) n FROM membership_invitations").get().n, invitationCount);
   assert.equal(store.db.prepare("SELECT count(*) n FROM share_link_joins").get().n, joinCount);
