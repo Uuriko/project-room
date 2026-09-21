@@ -750,6 +750,17 @@ button:disabled { cursor: wait; opacity: .6; }
 .reviewer-unavailable p { margin: 0 0 .5rem; font-size: .875rem; line-height: 1.5; color: var(--muted); }
 .work-checks { border-radius: .6rem; }
 summary { overflow-wrap: anywhere; }
+/* Large text and very narrow windows need document scrolling rather than a
+   squeezed-to-zero timeline. Normal desktop/phone layouts stay viewport-fit. */
+@container room-shell (max-width: 20em) {
+  .app-shell > #main { flex: 0 0 auto; }
+  .room-main { overflow: visible; min-height: 32rem; }
+  .timeline { flex: 1 0 auto; min-height: 12rem; overflow: visible; }
+}
+@media (max-height: 500px) {
+  .app-shell > #main { flex: 0 0 auto; }
+  .room-main { min-height: 32rem; }
+}
 @container room-shell (max-width: 40em) {
   .topbar { flex-direction: row; align-items: center; gap: .5rem; }
   .brand div { display: none; }

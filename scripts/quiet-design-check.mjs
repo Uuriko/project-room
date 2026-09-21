@@ -122,6 +122,7 @@ for (const touch of [false, true]) {
     }
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
+    assert.ok((await page.locator('#message-list').boundingBox()).height >= 160, 'large text retains a readable conversation region');
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
