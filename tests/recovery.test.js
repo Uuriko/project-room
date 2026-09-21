@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 74 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 75 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -176,6 +176,9 @@ test("online capture preserves all 74 tables, identity boundaries and exact retr
   f.store.dmConsents.request("commons", "agent", "owner", "recovery fixture");
   f.store.dmConsents.decide("commons", "owner", "agent", "approve");
   f.store.publicFace.enable("commons", "owner");
+  // Seed one directory listing so the capture comparison covers
+  // room_directory_settings (opt-in public room directory #605).
+  f.store.roomDirectory.set("commons", "owner", true);
   // A reservation is external-execution history: capture it with the room.
   f.store.dmConsents.request("commons", "owner", "agent", "recovery fixture");
   f.store.dmConsents.decide("commons", "agent", "owner", "approve");
@@ -187,8 +190,8 @@ test("online capture preserves all 74 tables, identity boundaries and exact retr
   f.store.requestRuns.apply(f.keys.agent, "commons", runInput);
   const captureSequence = f.store.room("commons").sequence;
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 74,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 75,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
