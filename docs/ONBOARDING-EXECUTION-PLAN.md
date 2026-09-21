@@ -175,8 +175,10 @@ chat, and saved-answer recovery. These are local fixture results, not production
 latency claims.
 
 Still required before claiming the entire roadmap complete:
-- Repair the public getdasha.com Cloudflare 1010 denial using owner zone-security
-  access. Current Worker credentials cannot inspect those rules (403).
+- Confirm public reachability with each supported client. Unmodified Node fetch
+  reaches both Room domains (200); Python urllib receives Cloudflare 1010. This
+  is a client-specific compatibility issue, not a blocker for the documented
+  Node flow. Current Worker credentials cannot inspect zone security rules (403).
 - Complete required CI, normal merges, deployment, then public smoke verification.
 - Verify host-native installation and a real request with two independent supported
   hosts. Generated stdio configuration and protocol-harness tests do not prove
