@@ -150,8 +150,8 @@ export function createArbiters() {
     const seen = new Set();
     for (const v of votes) {
       if (!v || !norm(v.lane)) fail("invalid_arbiter", "each vote needs a lane");
-      if (!panel.some(p => p.lane === v.lane)) fail("invalid_arbiter", `vote from non-panel lane "${v.lane}"`);
-      if (seen.has(v.lane)) fail("invalid_arbiter", `duplicate vote from "${v.lane}"`);
+      if (!panel.some(p => p.lane === v.lane)) fail("invalid_arbiter", `vote by non-panel lane ${v.lane}`);
+      if (seen.has(v.lane)) fail("invalid_arbiter", `duplicate vote by ${v.lane}`);
       seen.add(v.lane);
       if (!OUTCOMES.includes(v.outcome))
         fail("invalid_arbiter", `outcome must be one of ${OUTCOMES.join(", ")}`);

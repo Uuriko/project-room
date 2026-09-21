@@ -79,6 +79,19 @@ export const unfencedAdditiveTables = Object.freeze([
   // uniqueness plus the pending->delivered|failed->dead_letter transitions
   // are the integrity gate.
   "agent_webhook_deliveries",
+  // Escrowed bounties (agent work exchange, slice 1): bounty_journal,
+  // bounty_records, bounty_disputes, bounty_events, bounty_idempotency,
+  // bounty_watchers, bounty_sequences.
+  // Purely additive and intentionally NOT fenced: older writers have no code
+  // path to them, and the append-only hash-chained journal plus the
+  // conservation verifier are the integrity gate.
+  "bounty_journal",
+  "bounty_records",
+  "bounty_disputes",
+  "bounty_events",
+  "bounty_idempotency",
+  "bounty_watchers",
+  "bounty_sequences",
   // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
   // room_verification_policy (per-room gate). Purely additive and
   // intentionally NOT fenced: older writers have no code path to them, and
