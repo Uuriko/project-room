@@ -569,7 +569,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
   const minted = await post("/room/api/agent-identities", { data: { displayName: "Owner Agent" } });
   assert.equal(minted.status, 201);
-  const ownerSecret = minted.body.secret, ownerId = minted.body.identityId;
+  const ownerSecret = minted.body.secret;
   const created = await post("/room/api/agent-rooms", { token: ownerSecret, data: createArgs("owner-den") });
   assert.equal(created.status, 201);
   const room = "/api/rooms/owner-den";
