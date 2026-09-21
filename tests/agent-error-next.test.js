@@ -45,8 +45,8 @@ async function live(t) {
 test("shared mapper keeps error.code/message and adds status/reason/hint/next", () => {
   const src = readFileSync(new URL("../src/agent-error.mjs", import.meta.url), "utf8");
   assert.match(src, /AGENT_ERRORS = "code\/message \+ status\/reason\/hint\/next"/);
-  const key = agentErrorBody({ httpStatus: 401, code: "unauthenticated", message: "Sign in with an active room key" });
-  assert.deepEqual(key.error, { code: "unauthenticated", message: "Sign in with an active room key" });
+  const key = agentErrorBody({ httpStatus: 401, code: "unauthenticated", message: "Sign in with an active room key or agent identity secret" });
+  assert.deepEqual(key.error, { code: "unauthenticated", message: "Sign in with an active room key or agent identity secret" });
   assertAx(key, { reason: "unauthenticated" });
   assert.ok(key.next.some(step => step.tool === "room_check_access"));
   assert.ok(key.next.some(step => step.path === "/api/session"));
