@@ -6,7 +6,8 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createRuntimePackage, verifyRuntimePackage, publicAssets } from "../scripts/runtime-package.mjs";
+import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed } from "../scripts/runtime-package.mjs";
+import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
 import { frozenRecoveryFixture } from "../scripts/frozen-runtime-fixture.mjs";
@@ -26,7 +27,11 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   }
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["LICENSE", "NOTICE", "THIRD_PARTY.md", "deploy/public-assets.mjs", "server/inbox-stitch.mjs", "server/inbox-stitch-store.mjs", "server/inbox-spam.mjs", "server/notify-prefs.mjs", "server/inbox-import-guards.mjs", "server/spam-shadow.mjs", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-send-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "server/agent-identities.mjs", "server/agent-invites.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "scripts/run-room-request.mjs", "scripts/agent-doctor.mjs", "scripts/bootstrap-agent-room.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/csv-export.mjs", "server/inbox-transport.mjs", "server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs", "server/graph-fixture-sync.mjs", "server/graph-reply-draft.mjs", "server/graph-reply-journal.mjs", "server/graph-reply-update-review.mjs", "server/version.mjs", "scripts/stamp-version.mjs", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "deploy/capabilities.mjs", "deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/board.js", "src/work-templates.js", "src/room-templates.js", "server/diagnostics.mjs", "scripts/release-evidence.mjs", "server/action-classes.mjs", "server/wake-queue.mjs", "server/request-runs.mjs", "server/attention.mjs", "server/owner-attention.mjs", "server/mention-lifecycle.mjs", "server/moderation.mjs", "server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs", "server/spam-quarantine-journal.mjs", "server/quarantine-thread-splits.mjs", "src/inbox-quarantine-ui.js", "server/channel-drain.mjs", "server/sla-clocks.mjs", "server/sla-urgent-notify.mjs", "server/sla-sweep.mjs", "server/sla-sweep-hooks.mjs", "server/sla-breach-journal.mjs", "server/sla-dashboard.mjs", "server/morning-digest.mjs", "server/digest-mode.mjs", "server/inbox-triage.mjs", "server/inbox-handoff.mjs", "server/handoff-case.mjs", "server/work-handoff.mjs", "server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "server/boot-options.mjs", "server/instance-lock.mjs", "server/room-export-html.mjs", "server/access-review.mjs", "server/usage-summary.mjs", "server/notifications.mjs", "server/spend-allowance.mjs", "server/pins.mjs", "server/room-lifecycle.mjs", "server/room-norms.mjs", "server/attachment-schema.mjs", "server/access-requests.mjs", "server/identity-ratelimit.mjs", "server/agent-rooms.mjs", "server/google-oauth.mjs", "server/github-oauth.mjs", "server/oauth-provider.mjs", "server/inbox-search.mjs", "server/inbox-threads.mjs", "src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js", "server/account-login-methods.mjs", "server/account-deletion.mjs", "src/account-deletion.mjs", "server/account-passkeys.mjs", "src/passkey-login.mjs", "src/password-auth.mjs", "server/magic-links.mjs", "server/resend-mailer.mjs", "server/channel-adapters/messenger.mjs", "server/channel-adapters/sms.mjs", "server/messenger-ingest.mjs", "server/messenger-outbound.mjs", "server/sms-ingest.mjs", "server/sms-outbound.mjs", "server/quarantine-review-coverage.mjs", "server/agent-api-keys.mjs", "server/agent-card-signing.mjs", "server/agent-directory.mjs", "server/agent-plugin-manifest.mjs", "server/outbound-webhooks.mjs", "server/agent-webhook-subscriptions.mjs", "server/webhook-dispatch.mjs", "server/identity-verification.mjs", "server/agent-heartbeats.mjs", "server/mentions.mjs", "server/agent-plugin-store.mjs", "server/agent-plugin-routes.mjs", "server/inbox-assign.mjs", "server/inbox-internal-notes.mjs", "server/inbox-collision.mjs", "server/inbox-approval.mjs", "server/inbox-agent-routing.mjs", "server/inbox-collab-store.mjs", "server/inbox-collab-routes.mjs", "server/room-activation-pack.mjs", "server/work-claims.mjs", "server/work-claim-routes.mjs", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/room-mcp-join.js", "server/mcp-http.mjs", "connectors/muse.md", "server/dm-consents.mjs", "server/public-face.mjs", "server/room-directory.mjs", "src/dm-consents.js", "src/needs-attention.js", "src/presence-state.js"].filter(path => existsSync(join(destination, path))).length);
+  // The package must contain exactly the allowlisted files that exist at this commit.
+  // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
+  // the import-closure test below guarantees it covers every imported module,
+  // so no hand-maintained file list or count lives here.
+  assert.equal(receipt.files, [...allowed].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -147,6 +152,18 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     }
     assert.throws(() => verifyRuntimePackage(damaged), fault);
   }
+});
+
+test("every module in the server import closure is in the runtime-package allowlist", () => {
+  // Regression guard for #590/#592/#606: a new server/*.mjs imported by
+  // server/http.mjs (transitively from server.mjs) must be registered in
+  // scripts/runtime-package.mjs, or the browser gate's createRuntimePackage
+  // silently ships a runtime with a missing module. This computes the import
+  // graph from source, so the allowlist can never drift from the code.
+  const closure = importClosure("server.mjs", repository);
+  const missing = [...closure].filter(path => !allowed.has(path)).sort();
+  assert.deepEqual(missing, [],
+    `Imported but not allowlisted for the runtime package. Add to scripts/runtime-package.mjs: ${missing.join(", ")}`);
 });
 
 test("uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies", t => {
