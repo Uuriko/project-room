@@ -169,20 +169,22 @@ async function checkVerificationLadder(client) {
     rungs.push({ name: "read", ok: false, detail: diagnostic.hint ?? diagnostic.message });
     return ladderResult(rungs, access);
   }
-  rungs.push({ name: "write", ok: true, wrote: false,
+  rungs.push({ name: "write", ok: null, state: "not_tested", wrote: false,
     detail: "draft-only probe: no sandbox room yet, so the verification message was composed but never sent. Nothing was written to any room." });
   return ladderResult(rungs, access);
 }
 
 function ladderResult(rungs, access) {
   const total = rungs.length, passed = rungs.filter(rung => rung.ok).length;
-  const failed = rungs.find(rung => !rung.ok);
+  const failed = rungs.find(rung => rung.ok === false);
   const summary = failed === undefined
-    ? `${total}/${total} — you're live in #${access.roomId}`
+    ? `${passed} checks verified in #${access.roomId}; write, listening and execution not tested`
     : `${passed}/${total} — ${failed.name} failed. Run: node scripts/agent-inbox.mjs doctor`;
   if (failed !== undefined) process.exitCode = 1;
   return { contractVersion: 1, type: "agent_connection_ladder", status: failed === undefined ? "verified" : "failed",
-    roomId: access?.roomId ?? null, memberId: access?.memberId ?? null, rungs, summary };
+    roomId: access?.roomId ?? null, memberId: access?.memberId ?? null,
+    readiness: { access: access ? "verified" : "failed", read: rungs.some(r => r.name === "read" && r.ok) ? "verified" : "not_tested",
+      write: "not_tested", listening: "not_tested", execution: "not_tested" }, rungs, summary };
 }
 
 async function redeemInviteWithConsent(origin, code, displayName, { autoYes, autoNo }) {
@@ -207,7 +209,11 @@ async function redeemInviteWithConsent(origin, code, displayName, { autoYes, aut
 }
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
-if (action === "reply") {
+if (action === "join") {
+  try { const { connectMain } = await import("./connect-room.mjs"); await connectMain(process.argv.slice(3)); }
+  catch (error) { console.error(JSON.stringify({ status: "setup_incomplete", code: error.code ?? "setup_failed",
+    message: error.message, next: "Keep the private directory and repeat the same join command to resume" })); process.exitCode = 1; }
+} else if (action === "reply") {
   const { replyMain } = await import("./agent-replies.mjs");
   await replyMain(process.argv.slice(3));
 } else if (action === "watch") {
@@ -247,6 +253,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs heartbeats
   node scripts/agent-inbox.mjs rooms [NEXT_CURSOR]
   node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
+  node scripts/agent-inbox.mjs join INVITE_OR_ROOM_URL PRIVATE_DIRECTORY [--name NAME] [--accept]
   node scripts/agent-inbox.mjs bootstrap-agent-room DISPLAY_NAME [ROOM_ID] [TITLE] [PURPOSE]
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs account-link ROOM_ID IDENTITY_ID DISPLAY_NAME [PERM1,PERM2] [NOTE]

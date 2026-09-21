@@ -87,20 +87,31 @@ export class AgentIdentities {
   // its hash is stored. An identity alone grants nothing: a room owner must
   // link it into each room. The response carries SIGNUP_NEXT so a cold
   // agent knows its first moves without asking a human.
-  create(displayName) {
+  create(displayName, { secret: suppliedSecret } = {}) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
     // (422 there) — storing them raw corrupts logs, exports, and renders.
     if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
+    if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
+      fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
+      const recoveredId = suppliedSecret === undefined ? null : `ai_${hash(suppliedSecret).slice(0, 40)}`;
+      if (recoveredId) {
+        const existing = this.db.prepare("SELECT * FROM agent_identities WHERE identity_id=?").get(recoveredId);
+        if (existing) {
+          if (existing.revoked_at !== null || existing.secret_hash !== hash(suppliedSecret))
+            fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
+          return { identityId: recoveredId, displayName: existing.display_name, duplicate: true, next: SIGNUP_NEXT };
+        }
+      }
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-      const identityId = `ai_${base64url(randomBytes(12))}`;
-      const secret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
+      const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
+      const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
         .run(identityId, hash(secret), name, this.store.now());
-      return { identityId, displayName: name, secret, next: SIGNUP_NEXT };
+      return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }), next: SIGNUP_NEXT };
     });
   }
 

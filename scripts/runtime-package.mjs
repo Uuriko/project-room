@@ -32,7 +32,7 @@ optional.push("server/room-directory.mjs"); // #605 opt-in public room directory
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/needs-attention.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
-optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "scripts/run-room-request.mjs");
+optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
 optional.push("client/request-notices.mjs");
@@ -279,7 +279,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   // source review remain required, especially if a computed loader is added.
   for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
     // Quoted actions such as "import" or "source.import" are not declarations.
-    for (const match of bytes.toString().matchAll(/(?<!["'.])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
+    for (const match of bytes.toString().matchAll(/(?<!["'.-])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
       const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));

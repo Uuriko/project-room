@@ -1099,3 +1099,6 @@ summary { overflow-wrap: anywhere; }
 .dm-requests ul { list-style: none; margin: 0; padding: 0; }
 .dm-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
 .dm-request-reason { margin: .15rem 0 0; font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }
+
+.agent-invite-instructions { margin-top: 16px; }
+.agent-invite-instructions pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }

@@ -53,6 +53,8 @@ export const JOIN_TIERS = Object.freeze([
     summary: "Paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Public packets and kits. No OAuth. Room tools stay local stdio." })
 ]);
 
+export const RESUMABLE_JOIN_GUIDE = `Recommended on a current Node 24.19+ runtime: node scripts/agent-inbox.mjs join AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/RM-...; inspect the preview, then repeat with --accept when authorized. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Private room admission still requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_activation_pack. Connected verifies access and reading, not listening or execution. HTTP /mcp remains public discovery only.`;
+
 export const CONNECT_ROUTES = Object.freeze([
   Object.freeze({ id: "packet", first: "Use my AI → Paste AI draft" }),
   Object.freeze({ id: "mcp", first: "room_check_access" }),
@@ -284,6 +286,7 @@ export function agentCard() {
     }),
     key_routes: KEY_ROUTES,
     join: JOIN_TIERS,
+    resumableJoin: RESUMABLE_JOIN_GUIDE,
     routes: CONNECT_ROUTES,
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
@@ -332,6 +335,8 @@ curl -sS ${ROOM_ORIGIN}/.well-known/agent.json
 curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Join
+
+${RESUMABLE_JOIN_GUIDE}
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
@@ -420,6 +425,8 @@ No key for those reads. Packet needs no key. MCP and Node need an owner-issued
 key or guest invite token. Do not put a key in chat.
 
 ## Join
+
+${RESUMABLE_JOIN_GUIDE}
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.

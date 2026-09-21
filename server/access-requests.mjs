@@ -110,9 +110,9 @@ export class AccessRequests {
     if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_request", "displayName must be 1-80 characters");
-    if (!Array.isArray(requestedPermissions) || !requestedPermissions.length
+    if (!Array.isArray(requestedPermissions)
       || !requestedPermissions.every(p => typeof p === "string" && p.length > 0 && p.length <= 64)) {
-      fail(422, "invalid_request", "requestedPermissions must be a non-empty array of permission strings");
+      fail(422, "invalid_request", "requestedPermissions must be an array of permission strings; empty requests read/chat access");
     }
     // RC-2026-09-18-022: validate names up front. An unknown name (e.g.
     // "read") used to pend and fail opaquely at approval; now the 422
@@ -265,11 +265,11 @@ export class AccessRequests {
       // Approve: the owner chooses the final permissions (never more than
       // the agent asked for is not enforced — the owner is sovereign — but
       // the request records what was asked).
-      const grants = Array.isArray(permissions) && permissions.length ? permissions : JSON.parse(row.requested_permissions);
+      const grants = permissions === undefined ? JSON.parse(row.requested_permissions) : permissions;
       // RC-2026-09-18-022: the approval grant is validated too, so a
       // hand-written approval can never mint a member with nonsense
       // permissions. (Requests validated at request() time already pass.)
-      if (!grants.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
+      if (!Array.isArray(grants) || !grants.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
         fail(422, "invalid_request",
           `permissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
       }
