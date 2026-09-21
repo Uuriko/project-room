@@ -1,3 +1,4 @@
+import { openMemberProfile } from "./room-chrome.mjs";
 // Quiet Focus A1/A2 evidence: a background snapshot must not collapse an open
 // disclosure, steal focus, or clear a draft. Real browser + local HTTP service;
 // all identities, messages, and keys are disposable fixtures.
@@ -57,6 +58,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
 
   // A2: open a disclosure in the presence list and keep focus on its summary
   await ensurePeopleOpen(page);
+  await openMemberProfile(page, "maya");
   const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary[data-focus-key="member-capabilities:maya"]');
   await summary.click();
   const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details:has(> summary[data-focus-key="member-capabilities:maya"])');

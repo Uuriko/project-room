@@ -205,7 +205,6 @@ const client = new RoomClient({
     syncNotifications();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
-    updatePeopleHint();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
@@ -289,7 +288,7 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "event-list", "presence-list", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
+    for (const id of ["message-list", "event-list", "presence-list", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
     $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
@@ -311,7 +310,6 @@ const client = new RoomClient({
     for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     $("#people-panel").open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
-    if ($("#people-hint")) $("#people-hint").textContent = "";
     agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
@@ -877,13 +875,6 @@ function setAuthKind(kind) {
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   configureAuthPanel();
   $("#access-key").focus({ preventScroll: true });
-}
-function updatePeopleHint() {
-  const hint = $("#people-hint");
-  // QA-UX 2026-09-19: keep the calm merged hint (plain language, no
-  // codenames/API docs). The @mention + receipts loop is taught by the
-  // wake line and room guide instead of this one sentence.
-  if (hint) hint.textContent = "Invite people and agents to work together.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1478,7 +1469,7 @@ function render() {
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${typeChip}${stateChip}${ownerChip}<span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${workingOnTitle}${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -1610,8 +1601,6 @@ function renderMessages() {
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
-  const channelMessages = state.messages.filter(m => messageChannelId(m) === activeChannelId);
-  setText("#message-count", `${channelMessages.length} ${channelMessages.length === 1 ? "message" : "messages"}`);
   $("#thread-bar").hidden = !currentThreadId;
   $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
   if (currentThreadId) {
@@ -1952,6 +1941,7 @@ $("#recipe-strip").addEventListener("click", event => {
   const control = event.target.closest("[data-recipe-action]");
   if (!control) return;
   const action = control.dataset.recipeAction;
+  $("#settings-dialog").close();
   if (action === "open-catch-up") openCatchUp();
   if (action === "open-chat") { $("#message-input").focus(); }
   if (action === "focus-work") {
@@ -3288,7 +3278,7 @@ function roomActionEntries() {
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people and agents", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
-    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", reveal: "#people-panel" },
+    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", always: true },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
@@ -3354,6 +3344,7 @@ function chooseRoomAction(id) {
   }
   if (id === "catch-up") { openCatchUp(); return; }
   if (id === "results") { selectWorkView("results"); return; }
+  if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
   if (id === "usage") { openSettings("usage-panel"); return; }
   if (id === "instructions") { openSettings("room-about"); $("#room-instructions-open").click(); return; }
   if (id === "search" || id === "mentions" || id === "pinned-search") {

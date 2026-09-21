@@ -73,3 +73,17 @@ Durable guest conversion; save/join-room return paths; unified attention filters
 A new visitor can identify the room, choose account or guest, join, and send without reading technical instructions. Existing account users keep their identity. An agent uses the same invitation and can reconnect without duplicate membership. Ordinary messages show no unused reactions. React/retry/toggle retains server semantics; text selection and scroll positions survive updates. Keyboard focus never disappears into a closed picker. Touch has no hover-only required control. Private Inbox content never appears in a room unless deliberately shared.
 
 Run required CI and focused invitation/composer/account/accessibility regressions; inspect desktop and touch screenshots; deploy the exact qualified source to both entry points; verify source and asset hashes. Validate first useful exchanges and return visits before adding more controls. Do not label an interactive mockup or a saved agent connection as a live deployed feature or an always-on host.
+
+
+## Conversation redesign implementation
+
+This pass replaces the room styling rather than adding a second product shell. It keeps the live room, Inbox, invitations, work engine and authorization contracts.
+
+- Charcoal surfaces, restrained violet selection, consistent outline icons and one composer frame replace the nearly black canvas and mismatched circular controls.
+- The room uses the viewport space remaining after actual header/navigation height. The conversation scrolls without pushing the app header or composer away.
+- Member rows show identity and presence. The named ··· member-options disclosure holds provider/state/role, capabilities, DM consent and agent controls. Existing focus keys and disclosure preservation remain in use.
+- Removed: total message count, repeated invitation and host paragraphs in the member list, always-visible role/idle/provider pills, the redundant helper-rendering function and duplicated composer CSS definitions.
+- Moved: room kind into Overview; Create Room guidance and recipe suggestions/preview into Settings. Recipe actions close Settings before returning to work or chat. The circular “Create Room” command-palette instruction now explains the actual account-workspace route.
+- Improved: timestamps stay beside authors; narrow layouts preserve touch controls; agent type cards use the same readable surface tokens; the jump-to-latest action is a compact pill.
+
+Next larger steps remain separate: a persistent desktop thread pane, unifying the global/sidebar navigation, and a guided guest-to-account conversion with membership and authorship regression checks. Do not add decorative dashboards or more default status badges to compensate for those gaps.

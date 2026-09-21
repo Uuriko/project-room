@@ -30,6 +30,18 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#clear-search').isVisible(), false);
+  const layout = await page.evaluate(() => {
+    const header = document.querySelector('.topbar').getBoundingClientRect();
+    const composer = document.querySelector('#message-form').getBoundingClientRect();
+    return { headerTop: header.top, composerBottom: composer.bottom, height: innerHeight,
+      width: document.documentElement.scrollWidth, viewport: innerWidth };
+  });
+  assert.ok(layout.headerTop >= 0 && layout.composerBottom <= layout.height + 1, 'header and composer fit together in the viewport');
+  assert.ok(layout.width <= layout.viewport + 1, 'the shell never needs horizontal scrolling');
+  assert.equal(await page.locator('#message-count, #people-hint, #people-wake-hint').count(), 0, 'redundant counters and instructions were removed');
+  assert.equal(await page.locator('#recipe-preview-toggle').isVisible(), false, 'diagnostic tools do not crowd the conversation');
+  mkdirSync('test-results', { recursive: true });
+  await page.screenshot({ path: `test-results/redesign-${touch ? 'touch' : 'desktop'}-conversation.png` });
   const message = page.locator('[data-message-record-id="test-welcome"]');
   assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), false, 'unused reactions stay inside the picker');
   await message.getByLabel('Add reaction', { exact: true }).click();

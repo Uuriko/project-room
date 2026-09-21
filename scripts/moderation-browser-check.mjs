@@ -1,3 +1,4 @@
+import { openMemberProfile } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 E4: a member reports a message to the room owner and mutes an author for
 // themselves; the owner alone sees the report list with the reporter's name.
@@ -97,6 +98,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(f.guestState().mutedMemberIds, undefined);
     // Mute from the people rail works the same way, through the disclosed capabilities block.
     await ensurePeopleOpen(page);
+    await openMemberProfile(page, "producer");
     await page.locator('#presence-list [data-focus-key="member-capabilities:producer"]').click();
     await railToggle.click();
     await target.locator(".message-muted").waitFor({ state: "visible" });

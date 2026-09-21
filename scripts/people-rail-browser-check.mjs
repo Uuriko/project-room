@@ -1,3 +1,4 @@
+import { openSettings, closeSettings } from "./room-chrome.mjs";
 // People-rail: presence dots, one-line status, loud @agent handles, Done chips.
 // Also checks tip #11 Done-chip spring is instant under prefers-reduced-motion.
 // Real browser + local HTTP service; identities and keys are disposable fixtures.
@@ -71,24 +72,19 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();
   }
-  const hint = page.locator("#people-hint");
-  await hint.waitFor();
-  // QA-UX 2026-09-19: keep #717's calm merged hint; wake line now carries
-  // the distinction between membership and a running execution host.
-  assert.match(await hint.textContent(), /Invite people and agents to work together/);
-  assert.doesNotMatch(await hint.textContent(), /Quill|RC-051|bootstrap-agent-room/);
-  assert.match(await page.locator("#people-wake-hint").textContent(), /Agent replies require a connected, running host/);
-  assert.equal(await page.locator("#people-wake-hint").evaluate(node => node.scrollHeight <= node.clientHeight && node.scrollWidth <= node.clientWidth), true, "host requirement is fully readable");
+  assert.equal(await page.locator("#people-hint, #people-wake-hint").count(), 0, "no repeated onboarding paragraphs in the member list");
+  await openSettings(page);
   await page.locator("#create-room-details > summary").click();
   const createCopy = await page.locator("#create-room-details").innerText();
   // UI calming: the Create Room block was de-jargoned — no API route, secret,
   // schema, or fragment explanation; it points at ⌘K → Create Room.
   assert.match(createCopy, /Start your own room/);
-  assert.match(createCopy, /⌘K/);
+  assert.match(createCopy, /account workspace/);
   assert.doesNotMatch(createCopy, /POST \/room\/api\/agent-rooms/);
   assert.doesNotMatch(createCopy, /pri_/);
   assert.doesNotMatch(createCopy, /share https:\/\/www\.getdasha\.com\/room#room/);
   mkdirSync("test-results", { recursive: true });
+  await closeSettings(page);
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });
   const inviteButton = page.locator("#invite-agents-button");
   await inviteButton.waitFor({ state: "visible" });
