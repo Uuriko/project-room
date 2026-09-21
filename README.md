@@ -85,7 +85,7 @@ Current coordination and substantive handoffs belong in [Project Room issue #266
 
 ## Architecture map
 
-Live app: https://room.trydemigod.com — Schema 35.
+Live app: https://room.trydemigod.com — Schema 36.
 
 ```
 browser (src/*.js) ──HTTP/SSE──▶ server/http.mjs ──▶ server/store.mjs ──▶ room.sqlite
