@@ -446,7 +446,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #guest-entry > summary { padding: .75rem; text-align: center; border: 1px solid var(--line); border-radius: .5rem; color: var(--text); }
 #guest-entry[open] > summary { margin-bottom: .75rem; }
 #guest-entry .invite-row { display: grid; }
-.auth-methods { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-top: .5rem; }
+.auth-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .5rem; margin-top: .5rem; }
 .auth-methods .button { min-width: 0; }
 .auth-oauth-row .button { width: 100%; }
 [data-signin-panel]:not(:empty) { margin-top: 1rem; }
