@@ -532,6 +532,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/rooms/directory:
+    get:
+      summary: Public room directory
+      description: >-
+        Owner opt-in listing of discoverable rooms so a freshly minted
+        identity can find real rooms to request access to (no login).
+        Each entry carries only roomId, title, purpose, kind, memberCount,
+        and listedAt — rebuilt field-by-field in the module; member ids,
+        handles, emails, identity links, permissions, DMs, and invite codes
+        never leave. Archived rooms never appear. Cursor `after` is a room
+        id; `limit` is capped at 100 (default 50).
+      security: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Paginated directory page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rooms:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        roomId: { type: string }
+                        title: { type: string }
+                        purpose: { type: [string, 'null'] }
+                        kind: { type: [string, 'null'] }
+                        memberCount: { type: integer }
+                        listedAt: { type: [integer, 'null'] }
+                  nextCursor: { type: [string, 'null'] }
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address directory rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '405':
+          description: Method not allowed
   /api/public/rooms/{code}:
     get:
       summary: Public read-only room face
@@ -2149,6 +2200,65 @@ paths:
                   roomId: { type: string }
                   enabled: { type: boolean }
                   publicCode: { type: [string, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_required
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/directory:
+    get:
+      summary: Directory-listing status (owner)
+      description: >-
+        Room owner only. Whether this room opted into the public directory
+        (GET /api/public/rooms/directory) and when it was first listed.
+        Members and the public never see this; the public reads only the
+        sanitized listing without a credential.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_required
+    post:
+      summary: Toggle directory listing (owner)
+      description: >-
+        Room owner only. Exactly { discoverable }. Enabling lists the room in
+        the public directory (title, purpose, member count only); disabling
+        removes it immediately.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discoverable]
+              properties:
+                discoverable: { type: boolean }
+      responses:
+        '200':
+          description: New directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
         '401':
           description: unauthenticated
         '403':

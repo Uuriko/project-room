@@ -127,7 +127,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // NOT fenced: older writers have no code path to them, and each module
   // verifies its own schema on open.
   "dm_consents",
-  "room_public_settings"
+  "room_public_settings",
+  // room_directory_settings (#605 opt-in public room directory) is purely
+  // additive and intentionally NOT fenced, same as room_public_settings.
+  "room_directory_settings"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

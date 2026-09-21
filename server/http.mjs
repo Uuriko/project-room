@@ -1307,6 +1307,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
+      // Public room directory (#605): owner opt-in listing so a freshly
+      // minted identity can discover real rooms to request access to.
+      // Sanitized field-by-field in the module: no member, identity, or
+      // DM data ever leaves. Registered BEFORE the /api/public/rooms/{code}
+      // matcher below, which would otherwise read "directory" as a code.
+      if (url.pathname === "/api/public/rooms/directory" && req.method === "GET") {
+        rate(`room-directory:${remoteAddress}`, 120);
+        return json(res, 200, store.roomDirectory.list({
+          after: url.searchParams.get("after"),
+          limit: url.searchParams.get("limit"),
+        }));
+      }
+      if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
       // Public read-only face: no login, owner opt-in only. The code is the
       // Bearer <redacted> (unguessable pub1.*); no member, identity, or DM data ever leaves.
       const publicFaceMatch = /^\/p\/([A-Za-z0-9._~-]{1,128})$/.exec(url.pathname);
@@ -2171,7 +2184,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|public-face))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2772,6 +2785,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["peerId"])) reject(422, "invalid_dm_unblock", "peerId is the accepted field");
         return json(res, 200, store.dmConsents.unblock(roomId, auth.member.id, data.peerId));
+      }
+      // Public directory listing controls (#605): owner only (enforced in
+      // the module). Status is visible to the owner alone; the public reads
+      // the sanitized listing at GET /api/public/rooms/directory.
+      if (route === "directory" && req.method === "GET") {
+        return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
+      }
+      if (route === "directory" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["discoverable"]) || typeof data.discoverable !== "boolean") {
+          reject(422, "invalid_directory", "discoverable (boolean) is the accepted field");
+        }
+        return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
       }
       // Public-face controls: owner only (enforced in the module). Status is
       // visible to the owner alone; the public reads the face at /p/{code}.
