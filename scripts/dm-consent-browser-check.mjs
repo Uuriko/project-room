@@ -62,6 +62,13 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   };
   const consentSection = (page, memberId) =>
     page.locator(`#presence-list .presence-member[data-member-record-id="${memberId}"] details.dm-consent`);
+  // #message-to-select lives in #composer-toolbar, which stays hidden until a
+  // recipient is chosen — set it the way disclosure-check.mjs does instead of
+  // selectOption, which requires the select to be visible.
+  const selectRecipient = (page, value) =>
+    page.locator("#message-to-select").evaluate((el, v) => {
+      el.value = v; el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
 
   // --- Alice requests to message Bob; the pending state is visible. ---
   const a = await signIn(aliceKey);
@@ -73,7 +80,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   assert.match(await a.page.locator("#status.visible").textContent(), /DM request sent to Bob/);
 
   // --- The consent gate refuses the DM in the composer, draft kept. ---
-  await a.page.locator("#message-to-select").selectOption("bob");
+  await selectRecipient(a.page, "bob");
   await a.page.locator("#message-input").fill("hello bob, consent-gated");
   await a.page.locator("#message-form button[type=submit]").click();
   const composerError = a.page.locator("#composer-status.visible.error");
@@ -104,7 +111,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   const aliceBob2 = consentSection(a.page, "bob");
   await aliceBob2.locator("summary").click();
   await aliceBob2.getByText("You can message Bob").waitFor();
-  await a.page.locator("#message-to-select").selectOption("bob");
+  await selectRecipient(a.page, "bob");
   await a.page.locator("#message-input").fill("hello bob, approved");
   await a.page.locator("#message-form button[type=submit]").click();
   await a.page.locator("#message-input").waitFor({ state: "visible" });

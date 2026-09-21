@@ -43,8 +43,8 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
   // move focus into the panel; closing must not strand focus.
   await ensurePeopleOpen(page);
-  const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary');
-  const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details');
+  const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary[data-focus-key="member-capabilities:maya"]');
+  const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details:has(> summary[data-focus-key="member-capabilities:maya"])');
   await summary.focus();
   await page.keyboard.press("Enter");
   assert.equal(await details.evaluate(d => d.open), true, "keyboard opens the disclosure");
