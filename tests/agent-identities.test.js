@@ -555,3 +555,38 @@ test("room discovery pages bounded links, hides inactive members and identifies 
   assert.deepEqual(last.rooms.map(room => [room.roomId, room.archivedAt]), [["page-100", "2026-09-20T00:00:00.000Z"]]);
   assert.equal(last.nextCursor, null);
 });
+
+// #593/#643: an agent owner passes the identity-connection ladder with
+// owner-class permissions (manage_members, decide); the exemption is
+// ownership, not the credential flavor.
+test("owner agent passes the identity-connection ladder with owner-class permissions", async t => {
+  const { agentRoomSchema } = await import("../server/agent-rooms.mjs");
+  const { AgentRooms } = await import("../server/agent-rooms.mjs");
+  const { createRateLimiter } = await import("../server/identity-ratelimit.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "project-room-owner-ladder-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("den"));
+  store.db.exec(agentRoomSchema);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const rooms = new AgentRooms(store, { rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const identity = store.identities.create("Keeper");
+  rooms.create(identity.secret, {
+    roomId: "keeper-den", title: "Den", purpose: "ladder check", kind: "personal", displayName: "Keeper"
+  });
+  const client = new RoomAgentClient({ origin, roomId: "keeper-den", token: identity.secret, memberId: identity.identityId });
+  const check = await client.checkConnection();
+  assert.equal(check.status, "credential_accepted");
+  assert.equal(check.memberId, identity.identityId);
+  assert.ok(check.permissions.includes("manage_members"), "owner keeps manage_members");
+  assert.ok(check.permissions.includes("decide"), "owner keeps decide");
+  // A non-owner agent member carrying owner-class bits still fails the ladder.
+  const other = store.identities.create("Helper");
+  store.identities.link(identity.secret, "keeper-den", {
+    identityId: other.identityId, displayName: "Helper", permissions: ["accept_work", "manage_members"]
+  });
+  const otherClient = new RoomAgentClient({ origin, roomId: "keeper-den", token: other.secret, memberId: other.identityId });
+  await assert.rejects(() => otherClient.checkConnection(), /not linked to this room/);
+});
