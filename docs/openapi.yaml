@@ -5432,7 +5432,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ roomId, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/guest-agent-links:
     post:
