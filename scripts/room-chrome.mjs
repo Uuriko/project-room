@@ -86,3 +86,11 @@ export async function openSearch(page) {
 export function dialogPrimarySubmit(page, formSelector) {
   return page.locator(`${formSelector} button[value="default"]`);
 }
+
+// Member permissions and agent controls live behind the explicit profile button.
+export async function openMemberProfile(page, memberId) {
+  await ensurePeopleOpen(page);
+  const profile = page.locator(`[data-member-record-id="${memberId}"] .member-profile`);
+  if (!(await profile.evaluate(node => node.open))) await profile.locator(":scope > summary").click();
+  return profile;
+}

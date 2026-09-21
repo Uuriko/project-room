@@ -13,7 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { ensurePeopleOpen, ensureSidebarClosed } from "./room-chrome.mjs";
+import { openMemberProfile, ensurePeopleOpen, ensureSidebarClosed } from "./room-chrome.mjs";
 
 test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + retry, explicit disconnect state", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-a34-"));
@@ -43,6 +43,7 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
   // move focus into the panel; closing must not strand focus.
   await ensurePeopleOpen(page);
+  await openMemberProfile(page, "maya");
   const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary[data-focus-key="member-capabilities:maya"]');
   const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details:has(> summary[data-focus-key="member-capabilities:maya"])');
   await summary.focus();

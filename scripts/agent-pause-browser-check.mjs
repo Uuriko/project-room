@@ -1,3 +1,4 @@
+import { openMemberProfile } from "./room-chrome.mjs";
 // C6: owner-facing Pause, Resume and Remove for agent members in the People
 // panel. Pause/Resume act on the agent's wake-queue pause row through
 // POST /api/rooms/:id/agent-pause; Remove sends MEMBER_ACCESS_CHANGED after a
@@ -52,6 +53,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   const guestRow = page.locator('#presence-list .presence-member[data-member-record-id="guest"]');
   const ownerRow = page.locator('#presence-list .presence-member[data-member-record-id="owner"]');
   const pause = row.locator("[data-member-pause]"), remove = row.locator("[data-member-remove]");
+  await openMemberProfile(page, "codex");
   await pause.waitFor();
   assert.equal(await pause.textContent(), "Pause");
   assert.equal(await remove.textContent(), "Remove");
@@ -67,6 +69,8 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
     assert.match(await page.locator("#share-link-dialog").textContent(), /After the person or agent joins/);
     await page.locator("#share-link-admins").click();
     await page.locator("#share-link-dialog").waitFor({ state: "hidden" });
+    await page.locator("#room-sidebar").waitFor({ state: "visible" });
+    await openMemberProfile(page, await target.getAttribute("data-member-record-id"));
     await target.getByText("Room capabilities", { exact: true }).click();
     const admin = target.locator("[data-member-admin]");
     await admin.click();
@@ -78,6 +82,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
     await page.waitForFunction(id => document.querySelector(`[data-member-admin="${id}"]`)?.textContent === "Make room admin", memberId);
     assert.equal(store.room("commons").state.members[memberId].permissions.includes("manage_members"), false);
     assert.equal(store.room("commons").state.members[memberId].active, true);
+    await openMemberProfile(page, await target.getAttribute("data-member-record-id"));
     await target.getByText("Room capabilities", { exact: true }).click();
   }
   assert.deepEqual(store.room("commons").state.members.codex.permissions, ["accept_work", "complete_work"]);

@@ -20,7 +20,7 @@
         <div class="topbar-actions">
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
-          <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><span aria-hidden="true">↻</span></button>
+          <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
           <div class="session-menu" id="session-menu">
             <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions"><span aria-hidden="true">⋮</span></button>
             <div id="session-menu-panel" class="session-menu-panel">
@@ -243,7 +243,6 @@
         <aside id="room-sidebar" aria-label="Channels and people">
           <div class="sidebar-head">
             <h1 id="room-title" tabindex="-1">Project Room</h1>
-            <span id="room-kind-badge" class="room-kind-badge" hidden></span>
           </div>
           <button id="room-overview-open" class="button ghost room-overview-open" type="button" aria-haspopup="dialog" aria-controls="room-overview-dialog">Overview</button>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
@@ -257,26 +256,19 @@
           </div>
           <details id="people-panel" class="sidebar-panel" open>
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
-            <details id="create-room-details" class="create-room-details">
-              <summary>Create Room</summary>
-              <p>Start your own room, then invite people to join it. Press ⌘K and choose “Create Room” for the one-click path.</p>
-            </details>
-            <p id="people-hint" class="form-hint"></p>
-            <p id="people-wake-hint" class="form-hint">Agent replies require a connected, running host.</p>
             <div id="presence-list" class="presence-list"></div>
           </details>
         </aside>
 
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
-            <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu">&#9776;</button>
+            <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
             <h2 id="conversation-title" tabindex="-1"># general</h2>
-            <span id="message-count" class="count-chip"></span>
             <div class="topbar-actions">
-              <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search">&#8981;</button>
+              <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
               <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Actions <kbd aria-hidden="true">&#8984;K</kbd></button>
-              <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings">&#9881;</button>
+              <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--bg)"/><circle cx="15" cy="17" r="2.5" fill="var(--bg)"/></svg></button>
             </div>
           </header>
           <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
@@ -327,7 +319,7 @@
             <div class="composer-row">
               <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work">+</button>
               <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
-              <button class="button primary icon-button" type="submit" aria-label="Send" title="Send">&uarr;</button>
+              <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <p id="composer-status" class="status form-status" role="status"></p>
@@ -339,14 +331,12 @@
             </details>
           </form>
           <span id="cursor-label" class="sr-only"></span>
-          <div id="recipe-strip" class="recipe-strip" hidden></div>
-          <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
-          <div id="recipe-preview" class="recipe-preview" hidden></div>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
         </section>
 
         <dialog id="room-overview-dialog" aria-labelledby="room-overview-title">
           <div class="dialog-head"><h2 id="room-overview-title">Room overview</h2><button id="room-overview-close" class="button ghost" type="button">Close</button></div>
+          <span id="room-kind-badge" class="room-kind-badge" hidden></span>
           <p id="room-overview-purpose"></p>
           <div id="room-overview-content" class="room-overview-content"></div>
         </dialog>
@@ -408,6 +398,15 @@
         </dialog>
         <dialog id="settings-dialog" aria-labelledby="settings-title">
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
+          <details id="create-room-details" class="create-room-details">
+            <summary>Create Room</summary>
+            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room. If you joined with a room key, sign in to your account first.</p>
+          </details>
+          <details id="room-tools" class="room-tools"><summary>Suggestions and automations</summary>
+            <div id="recipe-strip" class="recipe-strip" hidden></div>
+            <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
+            <div id="recipe-preview" class="recipe-preview" hidden></div>
+          </details>
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
             <p class="room-purpose"></p>
@@ -766,7 +765,7 @@
     <dialog id="share-link-dialog" aria-labelledby="share-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="share-link-title">Invite people and agents</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>
         <p id="share-link-intro">Share one link with people or AI agents. They can read the room and chat. They cannot invite others or approve work.</p>
-      <p class="form-hint">Want an additional room admin? After the person or agent joins, the owner can open People → their Room capabilities → Make room admin. Admins can invite and manage members; ownership stays with you. <button id="share-link-admins" type="button" class="text-button">Open People</button></p>
+      <p class="form-hint">Want another admin? After the person or agent joins: People → their ··· member options → Room capabilities → Make room admin. <button id="share-link-admins" type="button" class="text-button">Open People</button></p>
       <p id="share-local-note" class="form-hint" hidden>Local preview: links work only on this Mac.</p>
       <form id="share-link-form">
         <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>

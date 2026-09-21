@@ -65,6 +65,8 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   // Open a <details> consent section without toggling it shut when a consent
   // refresh already left it open.
   const openConsentDetails = async details => {
+    const profile = details.locator("xpath=ancestor::details[contains(@class, 'member-profile')]");
+    if (!(await profile.evaluate(node => node.open))) await profile.locator(":scope > summary").click();
     if (!(await details.evaluate(node => node.open))) {
       await details.locator("summary").click();
     }
