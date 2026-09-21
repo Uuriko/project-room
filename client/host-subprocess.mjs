@@ -12,7 +12,7 @@ export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes 
     if (signal?.aborted) { reject(new Error("Host cancelled")); return; }
     const grouped = process.platform !== "win32";
     let child;
-    try { child = spawn(config.command, config.args, { cwd, env, shell: false, detached: grouped, stdio: ["pipe", "pipe", "pipe"] }); }
+    try { child = spawn(config.command, config.args, { cwd, env, shell: false, detached: grouped, stdio: [input.length ? "pipe" : "ignore", "pipe", "pipe"] }); }
     catch { reject(new Error("Host could not start; inspect its configuration")); return; }
     let failure = null, size = 0; const chunks = [];
     const kill = () => {
@@ -24,7 +24,7 @@ export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes 
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     child.on("error", () => { failure ??= "Host could not start; inspect its configuration"; });
-    child.stdin.on("error", () => stop("Host input failed; reconcile the original attempt"));
+    child.stdin?.on("error", () => stop("Host input failed; reconcile the original attempt"));
     child.stderr.resume(); // Never disclose diagnostics; they may contain secrets.
     child.stdout.on("data", chunk => {
       size += chunk.length;
@@ -36,6 +36,6 @@ export function hostSubprocess(config, { cwd, env, signal, input = "", maxBytes 
       if (failure || code === null) reject(new Error(failure ?? "Host exited unsuccessfully; reconcile the original attempt"));
       else resolve({ stdout: Buffer.concat(chunks), exitCode: code });
     });
-    child.stdin.end(input);
+    child.stdin?.end(input);
   });
 }

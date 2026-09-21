@@ -22,7 +22,7 @@ function fixture(t) {
     { name: "Configured value test", command: process.execPath, args: ["-e", "if(require('fs').readFileSync('value.txt','utf8')!=='after\\n')process.exit(1)"], timeoutMs: 2000 }
   ] };
   const execute = (extra = {}, value = result) => configuredHost({ command: process.execPath,
-    args: ["-e", `console.log(${JSON.stringify(JSON.stringify(value))})`], cwd, timeoutMs: 2000, verification, ...extra });
+    args: ["-e", `process.stdin.resume();process.stdin.on("end",()=>console.log(${JSON.stringify(JSON.stringify(value))}));`], cwd, timeoutMs: 2000, verification, ...extra });
   return { cwd, git, result, verification, execute };
 }
 test("adapter runs configured checks and binds observations to exact local patch", async t => {
