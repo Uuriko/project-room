@@ -5468,6 +5468,74 @@ paths:
       responses:
         '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/mentions:
+    get:
+      summary: List mention lifecycle rows (#658)
+      description: >-
+        Member-readable list of @mention lifecycle rows
+        (delivered → acknowledged → responded, or timed_out). memberId
+        defaults to the caller; the room owner may query another member's
+        rows (feeds the #662 attention card's "N mentions unacknowledged").
+        Optional state and after (ISO timestamp) filters. Timeouts are
+        evaluated lazily on read — expired delivered/acknowledged rows flip
+        to timed_out in the read. 403 mention_forbidden when a non-owner
+        queries another member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [delivered, acknowledged, responded, timed_out] }
+        - name: after
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] }" }
+        '403': { description: mention_forbidden }
+  /api/rooms/{roomId}/mentions/{messageEventId}/ack:
+    post:
+      summary: Acknowledge a mention (#658)
+      description: >-
+        Explicit acknowledgement of the caller's own mention row for the
+        message event. Member-only and idempotent: re-acking returns the
+        current state. 404 when the message has no mention row at all;
+        403 mention_not_yours when the row names another member. A later
+        post by the mentioned member transitions the row to responded
+        without an explicit ack.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: messageEventId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ roomId, messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }" }
+        '403': { description: mention_not_yours }
+        '404': { description: mention_not_found }
+  /api/rooms/{roomId}/mentions/settings:
+    post:
+      summary: Configure the mention timeout (#658)
+      description: >-
+        Room owner only. Overrides the per-room mention timeout
+        (mentionTimeoutMs, default 30 minutes) after which unacknowledged
+        mentions read as timed_out. Body: `{ timeoutMs }`, an integer
+        between 60000 and 86400000. 403 owner_required for anyone else.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timeoutMs]
+              properties:
+                timeoutMs: { type: integer }
+      responses:
+        '200': { description: "{ roomId, timeoutMs }" }
+        '403': { description: owner_required }
   /api/rooms/{roomId}/guest-agent-links:
     post:
       summary: Mint a guest invite

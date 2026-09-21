@@ -130,7 +130,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_public_settings",
   // room_directory_settings (#605 opt-in public room directory) is purely
   // additive and intentionally NOT fenced, same as room_public_settings.
-  "room_directory_settings"
+  "room_directory_settings",
+  // mention_states + room_mention_settings (#658 mention lifecycle) are
+  // purely additive and intentionally NOT fenced: older writers have no code
+  // path to them, and the lifecycle module owns its schema.
+  "mention_states",
+  "room_mention_settings"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

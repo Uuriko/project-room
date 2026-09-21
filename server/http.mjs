@@ -2185,7 +2185,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2196,6 +2196,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const dmConsentBlockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/block$/.exec(url.pathname);
       const dmConsentRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/revoke$/.exec(url.pathname);
       const dmConsentUnblockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/unblock$/.exec(url.pathname);
+      // #658: mention lifecycle. The ack template names the message event;
+      // settings is a literal segment and is tested first so it is never
+      // mistaken for a message event id.
+      const mentionSettingsMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/settings$/.exec(url.pathname);
+      const mentionAckMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/([^/]{1,128})\/ack$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
@@ -2247,16 +2252,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch) reject(404, "not_found", "Not found");
+        && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
+        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch)[1]);
+        ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
+        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
+      const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
-        : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate" : "ownership-transfer";
+        : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -2656,6 +2665,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "needs-attention" && req.method === "GET") {
         // #662: owner-only rollup of everything awaiting an owner decision.
         return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence));
+      }
+      if (route === "mentions" && req.method === "GET") {
+        // #658: member-readable mention list. memberId defaults to the
+        // caller; an owner may query another member (feeds #662's card).
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_mention_query", "state, after and memberId are the accepted query parameters");
+        }
+        return json(res, 200, store.listMentions(selected.token, roomId, {
+          state: params.get("state"), after: params.get("after"), memberId: params.get("memberId"),
+        }, fence));
+      }
+      if (route === "mention-ack" && req.method === "POST") {
+        // #658: explicit mention acknowledgement. Member-only and
+        // idempotent; acking someone else's mention is 403.
+        return json(res, 200, store.acknowledgeMention(selected.token, roomId, mentionEventId, fence));
+      }
+      if (route === "mention-settings" && req.method === "POST") {
+        // #658: owner-only mention timeout override for the room.
+        const data = await body(req);
+        if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
+        return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named
