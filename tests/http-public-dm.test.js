@@ -300,3 +300,26 @@ test("join identity + first-room creation is atomic (no orphan identity)", async
   }), /simulated room failure/);
   assert.equal(count(), before, "a failed room creation must not leave an orphan identity");
 });
+
+test("DM consent proactive block over HTTP", async t => {
+  const { origin, aliceKey, bobKey } = await serve(t);
+  const dm = data => postMessage(origin, aliceKey, { messageId: randomUUID(), body: "ping", toMemberId: "bob", ...data });
+  // Bob proactively blocks Alice without any pending request.
+  const blocked = await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: "alice" }, bobKey);
+  assert.equal(blocked.status, 200, JSON.stringify(blocked.json));
+  assert.equal(blocked.json.status, "blocked");
+  // Alice's request is refused and her DM cannot post.
+  const asked = await post(origin, "/api/rooms/commons/dm-consents", { targetId: "bob" }, aliceKey);
+  assert.equal(asked.status, 403);
+  assert.equal(asked.json.error.code, "dm_blocked");
+  assert.equal((await dm()).status, 403);
+  // Self-block is a 422; unknown peer is a 404.
+  assert.equal((await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: "bob" }, bobKey)).status, 422);
+  assert.equal((await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: "ghost" }, bobKey)).status, 404);
+  // Unauthenticated is refused.
+  assert.equal((await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: "alice" })).status, 401);
+  // Bob unblocks: Alice may ask again.
+  const unblocked = await post(origin, "/api/rooms/commons/dm-consents/unblock", { peerId: "alice" }, bobKey);
+  assert.equal(unblocked.status, 200);
+  assert.equal((await post(origin, "/api/rooms/commons/dm-consents", { targetId: "bob" }, aliceKey)).status, 201);
+});

@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "connectors/muse.md"];
+export const publicAssets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -28,6 +28,7 @@ const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/re
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
+optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "scripts/run-room-request.mjs");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");

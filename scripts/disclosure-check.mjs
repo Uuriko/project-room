@@ -57,9 +57,9 @@ test("background updates preserve open disclosures, focus, draft and recipient",
 
   // A2: open a disclosure in the presence list and keep focus on its summary
   await ensurePeopleOpen(page);
-  const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary');
+  const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary[data-focus-key="member-capabilities:maya"]');
   await summary.click();
-  const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details');
+  const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details:has(> summary[data-focus-key="member-capabilities:maya"])');
   assert.equal(await details.evaluate(d => d.open), true, "disclosure opens");
   await summary.focus();
   assert.equal(await page.evaluate(() => document.activeElement.tagName), "SUMMARY");

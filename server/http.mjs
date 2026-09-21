@@ -2179,6 +2179,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
       // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
       const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      const dmConsentBlockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/block$/.exec(url.pathname);
       const dmConsentRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/revoke$/.exec(url.pathname);
       const dmConsentUnblockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/unblock$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
@@ -2232,15 +2233,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !dmConsentDecideMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch) reject(404, "not_found", "Not found");
+        && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? dmConsentDecideMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch)[1]);
+        ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide"
-        : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentRevokeMatch ? "dm-consent-revoke"
+        : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate" : "ownership-transfer";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
@@ -2740,7 +2741,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Consent-bound DMs: participants list/request their own directional
       // pairs; the owner sees pair metadata. The authenticated member is the
-      // implicit actor — ids in the response are handles, never member ids.
+      // implicit actor — rows carry display handles plus the authoritative
+      // member ids (display names are not unique per room).
       if (route === "dm-consents" && req.method === "GET") {
         return json(res, 200, store.dmConsents.list(roomId, auth.member.id));
       }
@@ -2755,6 +2757,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["decision"])) reject(422, "invalid_dm_decision", "decision is the accepted field");
         return json(res, 200, store.dmConsents.decide(roomId, auth.member.id, dmRequesterId, data.decision));
+      }
+      if (route === "dm-consent-block" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_block", "peerId is the accepted field");
+        return json(res, 200, store.dmConsents.block(roomId, auth.member.id, data.peerId));
       }
       if (route === "dm-consent-revoke" && req.method === "POST") {
         const data = await body(req);

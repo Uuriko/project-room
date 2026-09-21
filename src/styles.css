@@ -1059,3 +1059,15 @@ summary { overflow-wrap: anywhere; }
 .room-overview-content ul { list-style: none; margin: 0; padding: 0; }
 .room-overview-content li { margin: 0 0 1rem; overflow-wrap: anywhere; }
 .room-overview-content p { margin: .3rem 0; }
+
+/* DM consent (consent-bound DMs, PR #731): per-member Direct messages
+   disclosure and the incoming-request inbox in the People panel. */
+.dm-consent summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+.dm-consent-body p { margin: .3rem 0; font-size: .82rem; color: var(--muted); }
+.dm-consent-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: .35rem 0 .15rem; }
+.dm-consent-actions .text-button { min-height: 24px; font-size: .75rem; }
+.dm-consent-note { font-size: .75rem; color: var(--room-quiet); }
+.dm-requests { margin-bottom: .5rem; }
+.dm-requests ul { list-style: none; margin: 0; padding: 0; }
+.dm-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.dm-request-reason { margin: .15rem 0 0; font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }

@@ -191,7 +191,9 @@ State machine:
   targetHandle, status, createdAt, decidedAt }` — metadata only.
 - Nobody else: pairs invisible. No room events for consent changes (side
   table only) → no room-visible indicators, satisfying the product decision.
-- Handles, never member ids, in list outputs (ids stay server-side).
+- Handles plus the authoritative member ids in list outputs (display names
+  are not unique per room, so browser actions resolve by id; ids were already
+  visible to members via presence).
 
 ### Migration
 On first gate check for a pair, seed `approved` for any direction that
