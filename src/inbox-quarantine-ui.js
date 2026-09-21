@@ -64,7 +64,11 @@ export function installQuarantineReview({ api, ownerKey }) {
     for (const [value, label] of [["held", "Held"], ["released", "Released"], ["dismissed", "Dismissed"]]) {
       const option = document.createElement("option"); option.value = value; option.textContent = label; filter.append(option);
     }
-    filter.addEventListener("change", () => { if (owns()) refresh(); });
+    // A status change replaces the whole list, so the cards on screen are
+    // about to stop belonging to the selected view. Clear them first: they
+    // carry Confirm / Dismiss / Split, and a reviewer who acts on one during
+    // the fetch is acting on a message that is not in the list they chose.
+    filter.addEventListener("change", () => { if (owns()) refresh({ clear: true }); });
     const reload = document.createElement("button"); reload.type = "button"; reload.className = "button ghost";
     reload.textContent = "↻"; reload.setAttribute("aria-label", "Refresh quarantine review");
     reload.addEventListener("click", () => { if (owns() && !reload.disabled) refresh(); });
@@ -259,13 +263,16 @@ export function installQuarantineReview({ api, ownerKey }) {
         : "Couldn’t complete that action. Try again.");
     } finally { busy.delete(id); }
   }
-  async function refresh({ silent = false } = {}) {
+  async function refresh({ silent = false, clear = false } = {}) {
     const el = section();
     if (!owns()) return;
     const turn = ++epoch;
     const status = $("#inbox-quarantine-status").value;
     const reload = el.querySelector("header button");
     if (!silent) { reload.disabled = true; text("#inbox-quarantine-status-line", "Loading…"); }
+    // Only on a status change: a plain reload keeps the same view's cards so
+    // the list does not blink on every refresh.
+    if (clear) { armed.clear(); $("#inbox-quarantine-list").replaceChildren(); }
     // The coverage panel refreshes with the review list, so a Confirm /
     // Dismiss / Split lands in the numbers on the same pass. It reads its
     // own endpoint; a failure there must not break the review list.

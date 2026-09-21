@@ -101,6 +101,13 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
   assert.ok((await card(page, 0).textContent()).includes("Score 80/100"));
+  // The released view shows released rows and nothing else. Confirm / Dismiss
+  // / Split only exist on a held card, so their absence is the invariant: the
+  // list used to keep the previous filter's cards on screen while the new one
+  // loaded, which left a reviewer able to act on a message that was not in the
+  // view they had just chosen.
+  assert.equal(await card(page, 0).getByRole("button", { name: "Confirm", exact: true }).count(), 0,
+    "a released card carries no held-only actions");
 
   // Back to held: Dismiss arms on the first click (nothing changes), then
   // dismisses on the second click.
