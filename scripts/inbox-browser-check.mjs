@@ -901,6 +901,13 @@ test("real inbox: lost save response retries exact request without a second revi
 
 test("real inbox: unknown share survives reload as metadata and never posts twice", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page; await f.inbox(); await f.pick("note");
+  // Reproduce the CI UUID that happened to contain the budget's digits.
+  // Identifiers are allowed metadata; the private source text is not.
+  await p.evaluate(() => {
+    const generate = crypto.randomUUID.bind(crypto);
+    Object.defineProperty(crypto, "randomUUID", { configurable: true,
+      value: () => generate().replace(/-4[0-9a-f]{3}-/, "-4200-") });
+  });
   let lost = false; const ids = [], before = f.store.room("commons").sequence;
   await p.route("**/api/inbox/commands", async route => {
     ids.push(route.request().postDataJSON().requestId);
@@ -932,7 +939,8 @@ test("real inbox: unknown share survives reload as metadata and never posts twic
   assert.equal(stored.request.requestId, ids[0]);
   assert.deepEqual(stored.request.paragraphs, [0]);
   // And no private source text or sender address may appear anywhere in it.
-  assert.equal(storedRaw.includes("4200"), false, `private budget leaked into pending-share storage: ${storedRaw}`);
+  assert.match(stored.request.requestId, /-4200-/);
+  assert.equal(storedRaw.includes("Private budget: 4200."), false, `private budget leaked into pending-share storage: ${storedRaw}`);
   assert.equal(storedRaw.includes("maya@"), false, `sender address leaked into pending-share storage: ${storedRaw}`);
   await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox();
   await p.locator("#inbox-ask").click(); await p.getByRole("button", { name: "Confirm share", exact: true }).waitFor();
