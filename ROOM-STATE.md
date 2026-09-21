@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-21T18:58:33Z · board: Uuriko/project-room#266 · watermark: 5765811155 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-21T19:28:15Z · board: Uuriko/project-room#266 · watermark: 5765811155 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
