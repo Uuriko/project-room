@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 74 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 77 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -176,6 +176,17 @@ test("online capture preserves all 74 tables, identity boundaries and exact retr
   f.store.dmConsents.request("commons", "agent", "owner", "recovery fixture");
   f.store.dmConsents.decide("commons", "owner", "agent", "approve");
   f.store.publicFace.enable("commons", "owner");
+  // Seed one directory listing so the capture comparison covers
+  // room_directory_settings (opt-in public room directory #605).
+  f.store.roomDirectory.set("commons", "owner", true);
+  // Seed one mention row and one room mention setting so the capture
+  // comparison covers mention_states and room_mention_settings (#658).
+  f.store.db.prepare(`INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+    VALUES('commons','recovery-mention-msg','agent','delivered',?,?,NULL)`)
+    .run(f.now(), f.now() + 30 * 60 * 1000);
+  f.store.db.prepare(`INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at)
+    VALUES('commons',?,?)`)
+    .run(30 * 60 * 1000, f.now());
   // A reservation is external-execution history: capture it with the room.
   f.store.dmConsents.request("commons", "owner", "agent", "recovery fixture");
   f.store.dmConsents.decide("commons", "agent", "owner", "approve");
@@ -187,8 +198,8 @@ test("online capture preserves all 74 tables, identity boundaries and exact retr
   f.store.requestRuns.apply(f.keys.agent, "commons", runInput);
   const captureSequence = f.store.room("commons").sequence;
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 74,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 77,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -327,16 +338,16 @@ test("read-only open accepts a v34 backup written before the additive wake queue
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
   f.store.db.exec("PRAGMA user_version=27");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v36/);
   f.store.db.exec("PRAGMA user_version=34");
   // A true v34 file carries v34 writer triggers, not v35 ones; the doctored
   // marker alone would leave the file self-inconsistent and the fence
   // (correctly) refuses it. Swap the trigger generation for the tables still
   // present (absent additive tables are skipped, per the fence's own rule) so
   // the file is self-consistent; the writable migration below reinstalls the
-  // v35 set.
+  // v36 set.
   const v34Tables = new Set(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-  for (const row of f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v35_*'").all()) {
+  for (const row of f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v36_*'").all()) {
     f.store.db.exec(`DROP TRIGGER "${row.name}"`);
   }
   for (const { name, sql } of fenceDefinitions(34)) {

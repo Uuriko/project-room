@@ -284,6 +284,17 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .presence-online { background: var(--room-green); }
 .presence-away { background: var(--room-quiet); }
 .presence-offline { background: var(--room-rule); }
+/* #660: server-derived working states. */
+.presence-working { background: var(--room-green); box-shadow: 0 0 0 2px rgb(34 197 94 / 35%); }
+.presence-listening { background: var(--room-green); }
+.presence-idle { background: var(--room-quiet); }
+.presence-unreachable { background: var(--room-red, #ef4444); }
+.member-state-chip { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: 999px; font-size: .68rem; font-weight: 700; letter-spacing: .02em; background: rgb(255 255 255 / 6%); color: var(--muted); vertical-align: middle; }
+.member-state-chip[data-state="working"] { background: rgb(34 197 94 / 15%); color: var(--room-green); }
+.member-state-chip[data-state="unreachable"] { background: rgb(239 68 68 / 15%); color: var(--room-red, #ef4444); }
+.member-working-on { display: block; font-size: .78rem; color: var(--muted); font-style: italic; }
+.member-owned-by { display: block; font-size: .75rem; color: var(--room-quiet); }
+.owner-chip { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: 999px; font-size: .68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: rgb(250 204 21 / 15%); color: #facc15; vertical-align: middle; }
 /* Round-2 #117: done chip — marks terminally finished work at a glance.
    UI calming #10: consolidated here (was defined twice; the later rule won). */
 .done-chip { flex: 0 0 auto; display: inline-grid; place-items: center; gap: .25rem; min-height: 1.15rem; padding: .05rem .38rem; border: 1px solid var(--room-rule); border-radius: 99px; background: color-mix(in srgb, var(--room-green) 16%, var(--room-dark)); color: var(--room-green); font-size: .58rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
@@ -386,6 +397,23 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .room-guide p { margin: 0; flex: 1 1 16rem; color: var(--muted); font-size: .95rem; line-height: 1.5; }
 #room-guide-dismiss { width: auto; }
 #people-hint:empty { display: none; }
+/* #662: owner "needs your attention" card. */
+.needs-attention { margin: 0 1rem .75rem; padding: .85rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
+.needs-attention[hidden] { display: none; }
+.attention-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .5rem; flex-wrap: wrap; }
+.attention-header h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.attention-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--accent, #d97706); color: #fff; font-size: .8rem; font-weight: 700; }
+.attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.attention-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--line-soft); border-radius: .5rem; background: rgb(255 255 255 / 2%); }
+.attention-body { flex: 1 1 18rem; min-width: 0; }
+.attention-kind { display: inline-block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: .5rem; }
+.attention-severity-action .attention-kind { color: var(--accent, #d97706); font-weight: 700; }
+.attention-title { font-size: .95rem; overflow-wrap: anywhere; }
+.attention-detail { margin: .25rem 0 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
+.attention-actions { display: flex; align-items: center; gap: .5rem; }
+.attention-actions .button { width: auto; }
+.attention-hint { color: var(--muted); font-size: .85rem; }
+#attention-status:empty { display: none; }
 .auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
 #session-hint { margin: .75rem 0 0; color: var(--muted); font-size: .85rem; }
 #session-restore { display: grid; gap: .45rem; margin: 1.25rem 0 0; }
@@ -1059,3 +1087,15 @@ summary { overflow-wrap: anywhere; }
 .room-overview-content ul { list-style: none; margin: 0; padding: 0; }
 .room-overview-content li { margin: 0 0 1rem; overflow-wrap: anywhere; }
 .room-overview-content p { margin: .3rem 0; }
+
+/* DM consent (consent-bound DMs, PR #731): per-member Direct messages
+   disclosure and the incoming-request inbox in the People panel. */
+.dm-consent summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+.dm-consent-body p { margin: .3rem 0; font-size: .82rem; color: var(--muted); }
+.dm-consent-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: .35rem 0 .15rem; }
+.dm-consent-actions .text-button { min-height: 24px; font-size: .75rem; }
+.dm-consent-note { font-size: .75rem; color: var(--room-quiet); }
+.dm-requests { margin-bottom: .5rem; }
+.dm-requests ul { list-style: none; margin: 0; padding: 0; }
+.dm-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+.dm-request-reason { margin: .15rem 0 0; font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }

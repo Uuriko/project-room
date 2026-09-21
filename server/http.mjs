@@ -25,6 +25,7 @@ import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests } from "./access-requests.mjs";
+import { attentionReport } from "./owner-attention.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
@@ -1307,6 +1308,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
+      // Public room directory (#605): owner opt-in listing so a freshly
+      // minted identity can discover real rooms to request access to.
+      // Sanitized field-by-field in the module: no member, identity, or
+      // DM data ever leaves. Registered BEFORE the /api/public/rooms/{code}
+      // matcher below, which would otherwise read "directory" as a code.
+      if (url.pathname === "/api/public/rooms/directory" && req.method === "GET") {
+        rate(`room-directory:${remoteAddress}`, 120);
+        return json(res, 200, store.roomDirectory.list({
+          after: url.searchParams.get("after"),
+          limit: url.searchParams.get("limit"),
+        }));
+      }
+      if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
       // Public read-only face: no login, owner opt-in only. The code is the
       // Bearer <redacted> (unguessable pub1.*); no member, identity, or DM data ever leaves.
       const publicFaceMatch = /^\/p\/([A-Za-z0-9._~-]{1,128})$/.exec(url.pathname);
@@ -2171,7 +2185,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|public-face))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2179,8 +2193,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
       // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
       const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      const dmConsentBlockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/block$/.exec(url.pathname);
       const dmConsentRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/revoke$/.exec(url.pathname);
       const dmConsentUnblockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/unblock$/.exec(url.pathname);
+      // #658: mention lifecycle. The ack template names the message event;
+      // settings is a literal segment and is tested first so it is never
+      // mistaken for a message event id.
+      const mentionSettingsMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/settings$/.exec(url.pathname);
+      const mentionAckMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/([^/]{1,128})\/ack$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
@@ -2232,16 +2252,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !dmConsentDecideMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch) reject(404, "not_found", "Not found");
+        && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
+        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? dmConsentDecideMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch)[1]);
+        ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
+        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
+      const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide"
-        : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentRevokeMatch ? "dm-consent-revoke"
-        : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate" : "ownership-transfer";
+        : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
+        : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -2638,6 +2662,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
         return json(res, 200, bundle);
       }
+      if (route === "needs-attention" && req.method === "GET") {
+        // #662: owner-only rollup of everything awaiting an owner decision.
+        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence));
+      }
+      if (route === "mentions" && req.method === "GET") {
+        // #658: member-readable mention list. memberId defaults to the
+        // caller; an owner may query another member (feeds #662's card).
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_mention_query", "state, after and memberId are the accepted query parameters");
+        }
+        return json(res, 200, store.listMentions(selected.token, roomId, {
+          state: params.get("state"), after: params.get("after"), memberId: params.get("memberId"),
+        }, fence));
+      }
+      if (route === "mention-ack" && req.method === "POST") {
+        // #658: explicit mention acknowledgement. Member-only and
+        // idempotent; acking someone else's mention is 403.
+        return json(res, 200, store.acknowledgeMention(selected.token, roomId, mentionEventId, fence));
+      }
+      if (route === "mention-settings" && req.method === "POST") {
+        // #658: owner-only mention timeout override for the room.
+        const data = await body(req);
+        if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
+        return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
+      }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named
         // member plus the room's paused roster. Authorization is store-level.
@@ -2740,7 +2790,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Consent-bound DMs: participants list/request their own directional
       // pairs; the owner sees pair metadata. The authenticated member is the
-      // implicit actor — ids in the response are handles, never member ids.
+      // implicit actor — rows carry display handles plus the authoritative
+      // member ids (display names are not unique per room).
       if (route === "dm-consents" && req.method === "GET") {
         return json(res, 200, store.dmConsents.list(roomId, auth.member.id));
       }
@@ -2756,6 +2807,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["decision"])) reject(422, "invalid_dm_decision", "decision is the accepted field");
         return json(res, 200, store.dmConsents.decide(roomId, auth.member.id, dmRequesterId, data.decision));
       }
+      if (route === "dm-consent-block" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_block", "peerId is the accepted field");
+        return json(res, 200, store.dmConsents.block(roomId, auth.member.id, data.peerId));
+      }
       if (route === "dm-consent-revoke" && req.method === "POST") {
         const data = await body(req);
         if (!exact(data, ["peerId"])) reject(422, "invalid_dm_revoke", "peerId is the accepted field");
@@ -2765,6 +2821,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["peerId"])) reject(422, "invalid_dm_unblock", "peerId is the accepted field");
         return json(res, 200, store.dmConsents.unblock(roomId, auth.member.id, data.peerId));
+      }
+      // Public directory listing controls (#605): owner only (enforced in
+      // the module). Status is visible to the owner alone; the public reads
+      // the sanitized listing at GET /api/public/rooms/directory.
+      if (route === "directory" && req.method === "GET") {
+        return json(res, 200, store.roomDirectory.status(roomId, auth.member.id));
+      }
+      if (route === "directory" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["discoverable"]) || typeof data.discoverable !== "boolean") {
+          reject(422, "invalid_directory", "discoverable (boolean) is the accepted field");
+        }
+        return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
       }
       // Public-face controls: owner only (enforced in the module). Status is
       // visible to the owner alone; the public reads the face at /p/{code}.
@@ -2820,13 +2889,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
         return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
       }
+      // #643: invitation administration admits the room owner by ID on any
+      // credential (share-links-style owner-capability exemption, audited);
+      // anyone else needs an account browser session, as before.
+      const invitationOwnerActing = auth.member?.id === store.room(roomId).state.room.ownerId;
       if (route === "invitations" && req.method === "GET") {
         // Round-2 #108: invite-link analytics.
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         return json(res, 200, store.invitationStats(selected.token, roomId, auth.sessionBinding));
       }
       if (route === "invitations" && req.method === "POST") {
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         const fields = ["requestId", "invitationToken", "intendedAccountId", "intendedMemberId", "displayName", "role", "expiresAt", "expectedIssuerMemberRevision"];
         if (!exact(data, fields)) reject(422, "invalid_invitation", "Supply the exact invitation scope");
@@ -2834,7 +2907,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "invitation-revoke" && req.method === "POST") {
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
         return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));

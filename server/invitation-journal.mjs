@@ -58,11 +58,15 @@ export function validateInvitationSnapshot(record, audits) {
     expiresAt: record.expires_at, expectedIssuerMemberRevision: record.issuer_member_revision
   }));
   assert(Array.isArray(audits) && audits.length === (record.status === "pending" ? 1 : 2));
+  // v36: a revoked event revoked by an accountless owner carries a null
+  // revoker account; the member id stays the authority.
+  const agentRevoker = record.status === "revoked" && record.revoked_by_account_id === null;
   for (const [index, audit] of audits.entries()) {
     assert(exact(audit, auditKeys) && audit.invitation_id === record.id && audit.sequence === index + 1);
     // The issued event of an agent-issued invitation carries a null actor
-    // account/epoch; every other event has a real account actor.
-    const agentActor = agentIssued && index === 0;
+    // account/epoch, as does the revoked event of an agent-owner revocation
+    // (v36); every other event has a real account actor.
+    const agentActor = (agentIssued && index === 0) || (agentRevoker && index === 1);
     if (agentActor) assert(audit.actor_account_id === null && audit.actor_auth_epoch === null);
     else assert(validId(audit.actor_account_id) && integer(audit.actor_auth_epoch));
     assert(validId(audit.actor_member_id));
@@ -85,7 +89,11 @@ export function validateInvitationSnapshot(record, audits) {
       assert(last.at === record.accepted_at && last.room_event_id === record.joined_event_id && last.reason === null);
     } else {
       assert(record.status === "revoked" && integer(record.revoked_at));
-      assert(validId(record.revoked_by_account_id) && validId(record.revoked_by_member_id) && bounded(record.revoke_reason, 4096));
+      // v36: the revoker account is null when an accountless owner revoked;
+      // the member id stays the authority and must match the audit actor.
+      if (agentRevoker) assert(record.revoked_by_account_id === null);
+      else assert(validId(record.revoked_by_account_id));
+      assert(validId(record.revoked_by_member_id) && bounded(record.revoke_reason, 4096));
       assert(nullFields(record, acceptKeys) && last.at === record.revoked_at && last.room_event_id === null && last.reason === record.revoke_reason);
       assert(last.actor_account_id === record.revoked_by_account_id && last.actor_member_id === record.revoked_by_member_id);
     }

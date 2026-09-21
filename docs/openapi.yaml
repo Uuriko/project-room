@@ -163,6 +163,13 @@ paths:
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
+        #660: each member also carries a derived `state` — working (active
+        work session, or agent with live host heartbeat + recent command),
+        listening (SSE watching, host heartbeat within 5 min, or human
+        command within 5 min), idle (seen within 60 min), unreachable
+        (agent with a registered host, last seen over 60 min ago — humans
+        never show unreachable). `state: "unreachable"` is the
+        machine-readable "agent is down, not ignoring you" signal.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -205,6 +212,33 @@ paths:
                             properties:
                               workItemId: { type: string }
                               status: { type: string }
+                        state:
+                          type: string
+                          enum: [working, listening, idle, unreachable]
+                          description: >-
+                            #660 derived working state. working = active work
+                            session (accepted/started) or agent with live host
+                            heartbeat + command in the last 5 min; listening =
+                            SSE watching, host heartbeat within 5 min, or
+                            human command within 5 min; idle = seen within
+                            60 min; unreachable = agent with a registered
+                            host, last seen over 60 min ago (3x heartbeat
+                            interval if smaller). Humans never show
+                            unreachable.
+                        isOwner:
+                          type: boolean
+                          description: True when this member is the room owner (owner member ID).
+                        scopes:
+                          type: array
+                          items: { type: string }
+                          description: The member's permission list, projected from room state.
+                        ownerIdentityId:
+                          type: string
+                          nullable: true
+                          description: >-
+                            For agent members with an identity link, the
+                            linked agent identity ID (used to render
+                            "owned by"); null otherwise.
                   next:
                     type: array
                     description: Machine-readable follow-ups — dm-member when someone is watching or holding work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
@@ -532,6 +566,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/rooms/directory:
+    get:
+      summary: Public room directory
+      description: >-
+        Owner opt-in listing of discoverable rooms so a freshly minted
+        identity can find real rooms to request access to (no login).
+        Each entry carries only roomId, title, purpose, kind, memberCount,
+        and listedAt — rebuilt field-by-field in the module; member ids,
+        handles, emails, identity links, permissions, DMs, and invite codes
+        never leave. Archived rooms never appear. Cursor `after` is a room
+        id; `limit` is capped at 100 (default 50).
+      security: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Paginated directory page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rooms:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        roomId: { type: string }
+                        title: { type: string }
+                        purpose: { type: [string, 'null'] }
+                        kind: { type: [string, 'null'] }
+                        memberCount: { type: integer }
+                        listedAt: { type: [integer, 'null'] }
+                  nextCursor: { type: [string, 'null'] }
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address directory rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '405':
+          description: Method not allowed
   /api/public/rooms/{code}:
     get:
       summary: Public read-only room face
@@ -928,7 +1013,8 @@ paths:
     post:
       summary: Issue a targeted membership invitation
       description: >-
-        Signed-in account session only (403 account_session_required for
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
         bearer keys), member with invite rights. Exactly `{ requestId,
         invitationToken, intendedAccountId, intendedMemberId, displayName,
         role (moderator | member | guest), expiresAt,
@@ -968,8 +1054,8 @@ paths:
         guests with expiry and status, invitation links with remaining joins, pending
         one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
         agent identities and connections with state, and last activity per member.
-        Owner-only (the room owner's account session or room key; other members get
-        403 owner_required). Shares the per-credential read allowance of every room
+        Owner-only by ID (the room owner's account session, room key, or agent
+        identity bearer; other members get 403 owner_required). Shares the per-credential read allowance of every room
         read. The report never carries a token, secret or hash; removed members are
         absent. `node scripts/access-review.mjs` prints the same object from a store
         file or from this route.
@@ -1457,8 +1543,9 @@ paths:
         Owner-only read of every report in the room, newest first, with the
         reporter's member id, the reported message's author and the message as
         it stands now (body null once deleted; `message` null when the message
-        is no longer in the room). Any other member receives 403
-        `owner_required`; the reporter identity is never served to them.
+        is no longer in the room). The owner is recognized by ID on any
+        credential; any other member receives 403 `owner_required`; the
+        reporter identity is never served to them.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -1905,10 +1992,11 @@ paths:
       summary: List DM consent pairs
       description: >-
         The caller's own directional DM consent pairs (requester/target as
-        display handles, status, reason, timestamps). The room owner
-        additionally sees pair metadata for moderation — never DM contents.
-        A DM (message.posted with toMemberId) is rejected with 403
-        dm_consent_required until the target has approved the direction.
+        display handles plus the authoritative requesterId/targetId — display
+        names are not unique per room, so browser actions resolve by id).
+        The room owner additionally sees pair metadata for moderation — never
+        DM contents. A DM (message.posted with toMemberId) is rejected with
+        403 dm_consent_required until the target has approved the direction.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -1923,6 +2011,8 @@ paths:
                   properties:
                     requester: { type: string }
                     target: { type: string }
+                    requesterId: { type: string }
+                    targetId: { type: string }
                     status: { type: string, enum: [pending, approved, rejected, blocked, revoked] }
                     reason: { type: [string, 'null'] }
                     createdAt: { type: integer }
@@ -2064,6 +2154,33 @@ paths:
           description: unauthenticated
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/dm-consents/block:
+    post:
+      summary: Block DMs from a member
+      description: >-
+        Proactively refuse DMs from another active member without waiting for
+        a pending request: exactly { peerId }. Directional and sticky: the
+        blocked member's requests are refused with 403 dm_blocked, and a
+        pending request from them becomes blocked. The reverse direction (you
+        DMing them) is untouched. Lift with POST .../dm-consents/unblock.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [peerId]
+              properties:
+                peerId: { type: string }
+      responses:
+        '200':
+          description: Block recorded
+        '401':
+          description: unauthenticated
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/public-face:
     get:
       summary: Public-face status (owner)
@@ -2119,6 +2236,65 @@ paths:
                   roomId: { type: string }
                   enabled: { type: boolean }
                   publicCode: { type: [string, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_required
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/directory:
+    get:
+      summary: Directory-listing status (owner)
+      description: >-
+        Room owner only. Whether this room opted into the public directory
+        (GET /api/public/rooms/directory) and when it was first listed.
+        Members and the public never see this; the public reads only the
+        sanitized listing without a credential.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_required
+    post:
+      summary: Toggle directory listing (owner)
+      description: >-
+        Room owner only. Exactly { discoverable }. Enabling lists the room in
+        the public directory (title, purpose, member count only); disabling
+        removes it immediately.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [discoverable]
+              properties:
+                discoverable: { type: boolean }
+      responses:
+        '200':
+          description: New directory status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  discoverable: { type: boolean }
+                  listedAt: { type: [integer, 'null'] }
         '401':
           description: unauthenticated
         '403':
@@ -5125,8 +5301,8 @@ paths:
     get:
       summary: Owner's agent connections
       description: >-
-        Signed-in room owner's account session only (403 owner_required for
-        anyone else, bearer keys included). Lists issued, rotated and
+        Room owner by ID on any credential (403 owner_required for anyone
+        else). Lists issued, rotated and
         disconnected agent connections without key material. See
         docs/AGENT-CONNECTION.md.
       security:
@@ -5252,7 +5428,7 @@ paths:
     get:
       summary: Recent request failures for the room
       description: >-
-        Signed-in room owner's account session only (403 owner_required).
+        Room owner by ID on any credential (403 owner_required otherwise).
         Returns the in-memory list of failed requests for this room:
         operationId, time, status, code, category and route template only
         (docs/SAFE-DIAGNOSTICS.md); never bodies or credentials.
@@ -5275,12 +5451,98 @@ paths:
       responses:
         '200': { description: "{ format, exportedAt, service: { sourceRevision, buildId, mode }, room, diagnostics }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/needs-attention:
+    get:
+      summary: Owner "needs your attention" rollup (#662)
+      description: >-
+        Room owner with `manage_members`, by room Bearer <redacted> or signed-in
+        account session (the CLI uses the bearer). Aggregates every place an
+        owner decision is required: pending access requests (inline approve/deny
+        via the decide path), work awaiting verification or an owner decision,
+        spend-allowance headroom below 20% (or over), and claim leases expiring
+        within 24h. 403 owner_required for anyone else. Each item carries the
+        concrete next action so approvals live in the conversation surface
+        instead of a separate admin area.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '403': { description: owner_required }
+  /api/rooms/{roomId}/mentions:
+    get:
+      summary: List mention lifecycle rows (#658)
+      description: >-
+        Member-readable list of @mention lifecycle rows
+        (delivered → acknowledged → responded, or timed_out). memberId
+        defaults to the caller; the room owner may query another member's
+        rows (feeds the #662 attention card's "N mentions unacknowledged").
+        Optional state and after (ISO timestamp) filters. Timeouts are
+        evaluated lazily on read — expired delivered/acknowledged rows flip
+        to timed_out in the read. 403 mention_forbidden when a non-owner
+        queries another member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [delivered, acknowledged, responded, timed_out] }
+        - name: after
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] }" }
+        '403': { description: mention_forbidden }
+  /api/rooms/{roomId}/mentions/{messageEventId}/ack:
+    post:
+      summary: Acknowledge a mention (#658)
+      description: >-
+        Explicit acknowledgement of the caller's own mention row for the
+        message event. Member-only and idempotent: re-acking returns the
+        current state. 404 when the message has no mention row at all;
+        403 mention_not_yours when the row names another member. A later
+        post by the mentioned member transitions the row to responded
+        without an explicit ack.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: messageEventId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ roomId, messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }" }
+        '403': { description: mention_not_yours }
+        '404': { description: mention_not_found }
+  /api/rooms/{roomId}/mentions/settings:
+    post:
+      summary: Configure the mention timeout (#658)
+      description: >-
+        Room owner only. Overrides the per-room mention timeout
+        (mentionTimeoutMs, default 30 minutes) after which unacknowledged
+        mentions read as timed_out. Body: `{ timeoutMs }`, an integer
+        between 60000 and 86400000. 403 owner_required for anyone else.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timeoutMs]
+              properties:
+                timeoutMs: { type: integer }
+      responses:
+        '200': { description: "{ roomId, timeoutMs }" }
+        '403': { description: owner_required }
   /api/rooms/{roomId}/guest-agent-links:
     post:
       summary: Mint a guest invite
       description: >-
-        Owner with `manage_members`: room bearer key, or browser room or
-        account session with CSRF. Body: `{ requestId, linkToken (the guest invite token),
+        Owner by ID with `manage_members`: room bearer key, or browser room or
+        account session with CSRF. Minting stays account-bound (403
+        account_session_required for an accountless owner). Body: `{ requestId, linkToken (the guest invite token),
         expectedOwnerRevision, displayName?, roomId? }`; the link token the
         caller generated becomes the guest member's read_chat credential and
         only its hash is stored. 30 per address per minute. `GET` on the
@@ -5311,7 +5573,8 @@ paths:
     post:
       summary: Revoke a targeted membership invitation
       description: >-
-        Signed-in account session only (403 account_session_required for
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
         bearer keys); the issuer or a member with `manage_members`. Body is
         exactly `{ expectedRevision, reason }`; the revocation is journaled
         with its reason.

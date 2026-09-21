@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
@@ -556,4 +556,58 @@ test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async
       for (const kind of ROOM_KINDS) assert.ok(error.message.includes(kind), `names ${kind}`);
       return true;
     });
+});
+
+// #597/#643: the agent owner administers by ID on its identity bearer —
+// reports, access review, diagnostics, agent connections, share links —
+// while a non-owner agent member is denied on each. Guest-agent mint passes
+// the owner gate but stays account-bound (403 account_session_required).
+test("HTTP: agent owner administers by ID; non-owner agent is denied", async t => {
+  const { store, post, origin } = await httpFixture(t);
+  const get = (path, token) => fetch(`${origin}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
+  const minted = await post("/room/api/agent-identities", { data: { displayName: "Owner Agent" } });
+  assert.equal(minted.status, 201);
+  const ownerSecret = minted.body.secret;
+  const created = await post("/room/api/agent-rooms", { token: ownerSecret, data: createArgs("owner-den") });
+  assert.equal(created.status, 201);
+  const room = "/api/rooms/owner-den";
+  // Owner-by-ID reads: all 200.
+  for (const path of [`${room}/reports`, `${room}/access-review`, `${room}/agent-connections`, `${room}/diagnostics`]) {
+    const res = await get(path, ownerSecret);
+    assert.equal(res.status, 200, `${path}: ${JSON.stringify(res.body)?.slice(0, 160)}`);
+  }
+  // Owner-by-ID share-link administration: list, create, cancel — 200/201.
+  const listed = await get(`${room}/share-links`, ownerSecret);
+  assert.equal(listed.status, 200);
+  const linkToken = randomBytes(32).toString("base64url");
+  const made = await post(`${room}/share-links`, { token: ownerSecret, data: {
+    requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 5, expectedMemberRevision: 0
+  } });
+  assert.equal(made.status, 201, JSON.stringify(made.body)?.slice(0, 200));
+  const cancelled = await post(`${room}/share-links-cancel`, { token: ownerSecret, data: { linkId: made.body.link.id } });
+  assert.equal(cancelled.status, 200);
+  // Guest-agent mint: the owner gate passes, but minting stays account-bound.
+  const guestMint = await post(`${room}/guest-agent-links`, { token: ownerSecret, data: {
+    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
+    expectedOwnerRevision: 0, displayName: "Guest"
+  } });
+  assert.equal(guestMint.status, 403);
+  assert.equal(guestMint.body?.error?.code, "account_session_required");
+  // A non-owner agent member: denied on every admin surface.
+  const other = await post("/room/api/agent-identities", { data: { displayName: "Other Agent" } });
+  store.identities.link(ownerSecret, "owner-den", {
+    identityId: other.body.identityId, displayName: "Other Agent", permissions: ["accept_work"]
+  });
+  for (const path of [`${room}/reports`, `${room}/access-review`, `${room}/agent-connections`, `${room}/diagnostics`, `${room}/share-links`]) {
+    const res = await get(path, other.body.secret);
+    assert.equal(res.status, 403, `${path}: ${res.status}`);
+  }
+  const otherMint = await post(`${room}/guest-agent-links`, { token: other.body.secret, data: {
+    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
+    expectedOwnerRevision: 0, displayName: "Guest"
+  } });
+  assert.equal(otherMint.status, 403);
+  assert.notEqual(otherMint.body?.error?.code, "account_session_required");
 });

@@ -85,7 +85,11 @@ test("server identity, room boundaries, command schema and causal references are
   assert.throws(() => store.command(human, "commons", command(T.MESSAGE_POSTED, { body: 7 })), /Invalid field/);
   assert.throws(() => store.command(human, "commons", { ...command(T.MESSAGE_POSTED, { body: "hello" }), causationId: "missing" }), /Causation event/);
   assert.throws(() => store.command(human, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "human", permissions: [] })), /lacks manage_members/);
-  assert.throws(() => store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "agent", permissions: ["manage_members"] })), /Human administration/);
+  // #643: the owner may delegate admin bits to an agent; the grant is stamped
+  // delegatedAdmin on the member and the event instead of being rejected.
+  const grant = store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "agent", permissions: ["manage_members"] }));
+  assert.equal(store.room("commons").state.members.extra.delegatedAdmin, true);
+  assert.equal(grant.event.data.delegatedAdmin, true);
 });
 
 test("revocation denies reads, writes, and duplicate retries; re-enable does not resurrect keys", t => {
@@ -344,7 +348,7 @@ test("v2 migration preserves credentials and never merges matching Room member i
 
   let store = new RoomStore(filename);
   const alpha = store.authenticate(tokens[0]), beta = store.authenticate(tokens[1]);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 35);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
   assert.notEqual(alpha.account.id, beta.account.id, "matching legacy member ids are not identity proof across Rooms");
   assert.equal(alpha.account.authEpoch, 0); assert.equal(beta.account.authEpoch, 0);
   assert.equal(store.authenticate(sessions[0]).account.id, alpha.account.id);

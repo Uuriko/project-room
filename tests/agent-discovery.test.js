@@ -51,9 +51,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
   assert.equal(card.join.find(row => row.id === "hosted-mcp").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
-  assert.equal(card.capabilities.remoteMcp, false);
-  assert.equal(card.capabilities.hostedMcpJoin, true);
-  assert.equal(card.capabilities.guestAgentLinkMint, true);
+  assert.equal(card.capabilities["guest-agent-links"], true);
+  assert.equal(card.capabilities["agent-keys"], true);
+  assert.equal(card.capabilities["agent-rooms"], true);
   assert.match(card.description, /Work Items/);
   assert.match(card.description, /receipts/i);
   assert.match(card.description, /Members/);
@@ -102,8 +102,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
   assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
-  assert.equal(card.capabilities.streaming, true);
-  assert.equal(card.capabilities.pushNotifications, false);
+  assert.equal(card.capabilities["agent-identities"], true);
+  assert.equal(card.capabilities["webhooks"], true);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
@@ -426,8 +426,13 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
   }
   assert.equal(typeof card.provider.organization, "string");
   assert.equal(typeof card.provider.url, "string");
-  assert.equal(typeof card.capabilities.streaming, "boolean");
-  assert.equal(typeof card.capabilities.pushNotifications, "boolean");
+  // #601: capabilities are build-time route-family booleans plus a stale flag.
+  for (const family of ["agent-identities", "agent-invites", "agent-keys", "agent-rooms",
+      "guest-agent-links", "directory", "agent-inbox", "collab", "webhooks",
+      "public-face", "spend-allowance"]) {
+    assert.equal(typeof card.capabilities[family], "boolean", family);
+  }
+  assert.equal(typeof card.capabilities.stale, "boolean");
   // Modes are defined as media types in the spec.
   const mime = value => typeof value === "string" && /^[a-z-]+\/[a-z0-9.+-]+$/.test(value);
   assert.ok(card.defaultInputModes.length > 0 && card.defaultInputModes.every(mime));

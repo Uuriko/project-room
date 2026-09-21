@@ -36,6 +36,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
   paths.add('deploy/agent-discovery.mjs');
+  paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
@@ -75,6 +76,10 @@ paths.add('server/attachment-schema.mjs');
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)
+  paths.add('src/dm-consents.js'); // DM consent browser view-model + API helpers (imported by src/app.js)
+  paths.add('server/owner-attention.mjs'); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
+  paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
+  paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.

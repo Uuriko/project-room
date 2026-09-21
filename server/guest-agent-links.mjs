@@ -82,8 +82,12 @@ export class GuestAgentLinks {
 
   owner(token, roomId, binding) {
     const auth = this.store.authenticate(token, roomId, binding);
-    if (!auth.account || auth.member.kind !== "human"
-      || auth.member.id !== this.store.room(roomId).state.room.ownerId
+    // #643: owner-by-id — the owner capability follows the owner identity,
+    // not the credential flavor (share-links-style owner-capability
+    // exemption): an agent owner may mint guest links on their identity
+    // bearer. The mint itself stays account-bound: guest member ids derive
+    // from the sponsor account (see mint()).
+    if (auth.member?.id !== this.store.room(roomId).state.room.ownerId
       || !auth.member.permissions.includes("manage_members")) {
       fail(403, "owner_required", "Only the room owner can mint a guest invite. Use Add agent for a durable key.");
     }
@@ -162,6 +166,10 @@ export class GuestAgentLinks {
     const displayName = displayNameOf(details.displayName);
     return this.store.transaction(() => {
       const auth = this.owner(token, roomId, binding);
+      // Guest member ids derive from the sponsor account
+      // (guestAgentMemberId): an accountless owner — e.g. an agent identity
+      // bearer — passes the owner gate but cannot mint without an account.
+      if (!auth.account) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       this.sweepExpired(token, roomId, binding);
       const memberId = guestAgentMemberId(auth.account.id, requestId);

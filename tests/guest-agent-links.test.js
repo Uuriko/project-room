@@ -189,3 +189,33 @@ test("room cap of 10 live guest-agents and top-level owner mint", async t => {
   assert.equal(overflow.status, 429);
   assert.equal((await overflow.json()).error.code, "rate_limited");
 });
+
+test("agent owner passes the owner gate but mint stays account-bound; non-owner agent is denied", async t => {
+  const { store, request } = await serve(t);
+  const { AgentRooms, agentRoomSchema } = await import("../server/agent-rooms.mjs");
+  const { createRateLimiter } = await import("../server/identity-ratelimit.mjs");
+  store.db.exec(agentRoomSchema);
+  const rooms = new AgentRooms(store, { rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
+  const identity = store.identities.create("Owning Agent");
+  rooms.create(identity.secret, {
+    roomId: "agent-den", title: "Den", purpose: "guest link gate check", kind: "personal", displayName: "Keeper"
+  });
+  // The owner gate passes for the accountless owner, but minting a guest
+  // link needs a sponsor account, so it stays 403 account_session_required
+  // (v1 limitation, not an owner-gate denial).
+  const ownerMint = await request("/api/rooms/agent-den/guest-agent-links", {
+    method: "POST", token: identity.secret, data: mintBody()
+  });
+  assert.equal(ownerMint.status, 403);
+  assert.equal((await ownerMint.json()).error.code, "account_session_required");
+  // A non-owner agent member fails the owner gate instead.
+  const other = store.identities.create("Other Agent");
+  store.identities.link(identity.secret, "agent-den", {
+    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work"]
+  });
+  const otherMint = await request("/api/rooms/agent-den/guest-agent-links", {
+    method: "POST", token: other.secret, data: mintBody()
+  });
+  assert.equal(otherMint.status, 403);
+  assert.equal((await otherMint.json()).error.code, "owner_required");
+});

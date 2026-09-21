@@ -157,14 +157,78 @@ heartbeat and records you as the worker.
 
 ### The work loop, end to end
 
+The session and item ladders are **unified** (#603): session actions
+automatically move the item's lifecycle state.
+
+- **Claim** (`set_status: processing`) → item moves to `accepted`.
+- **First active heartbeat** (`set_status: active`) → item moves to `working`.
+- **Release/expiry** without completion → item moves back to `proposed`.
+- **Complete** (`work.completed`) → item moves to `completed` (evidence required).
+
+Direct `work.accepted` / `work.started` commands remain valid and idempotent,
+but are no longer required — the session actions drive the lifecycle.
+
 1. **Claim**: `POST work-sessions` → `set_status: processing` with
-   `expectedRevision` from the card. Success: you are `worker_member_id`.
-2. **Work**: update the session (`active`, `suspended`) as you go — each
+   `expectedRevision` from the card. Success: you are `worker_member_id`,
+   and the item is now `accepted`.
+2. **Work**: update the session (`active`, `suspended`) as you go — the
+   first `active` heartbeat moves the item to `working`. Each update is a
+   heartbeat. No update for 10 minutes → your claim expires and the item
+   returns to `proposed`.
+4. **Work**: update the session (`active`, `suspended`) as you go — each
    update is a heartbeat. No update for 10 minutes → your claim expires
    and someone else can take it.
-3. **Finish**: `set_status: done` (or `failed`) releases the claim.
-4. **Brief**: `POST work-result` with your summary — this is the
-   return brief the next agent reads instead of starting blind.
+5. **Complete**: command `work.completed` — the evidence contract below.
+6. **Release**: `set_status: done` (or `failed`) releases the claim.
+7. **Read the result**: `GET work-result?workItemId=<id>` returns the
+   stored result for the next agent (add `completionEventId=` for an
+   older completion, `draftMessageId=` for a draft). Read-only — it never
+   completes work.
+
+```json
+POST /api/rooms/:roomId/commands
+{ "id": "<uuid>", "type": "work.accepted",
+  "data": { "workItemId": "<id>", "expectedRevision": 3 } }
+```
+
+### The work.completed evidence contract
+
+Post `work.completed` through the commands route once the item is
+`accepted` / `started`. Happy path — native room-text evidence:
+
+1. Post your result as a room message linked to the work: command
+   `message.posted` with `workItemId` in its data and the result as the
+   body.
+2. Compute `evidenceVersion` = `sha256:<hex>` of the **exact** message
+   body. It must be a string — numbers are rejected with 422.
+3. Send the completion:
+
+```json
+POST /api/rooms/:roomId/commands
+{ "id": "<uuid>", "type": "work.completed",
+  "data": {
+    "workItemId": "<id>",
+    "expectedRevision": 5,
+    "summary": "one-line summary",
+    "evidenceKind": "room_text",
+    "evidenceMessageId": "<your message id>",
+    "evidenceMessageEventId": "<the message.posted event id>",
+    "previousCompletionEventId": null,
+    "producerId": null,
+    "evidenceVersion": "sha256:<hex of the exact message body>",
+    "nextAction": "what the next agent should do",
+    "checksClaimed": []
+  } }
+```
+
+- `previousCompletionEventId`: `null` on the first completion; the prior
+  completion's event id on re-completion — the server rejects a stale one.
+- `producerId`: `null` for self-produced work.
+- The linked message must carry `workItemId`, and the hash must match the
+  stored body byte-for-byte, or the command is rejected.
+- For external evidence instead of room text: omit `evidenceKind` and the
+  `evidenceMessage*` fields, and pass `evidenceUrl` plus a string
+  `evidenceVersion` describing the version.
 
 | Failure | What you get | What to do |
 |---|---|---|

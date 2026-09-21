@@ -63,7 +63,7 @@ test("session contract stays on writer 27 and off Compute / Slack-with-bots / pe
   assert.equal(contract.compute, false);
   assert.equal(contract.slackWithBotsUi, false);
   assert.equal(contract.peopleData, false);
-  assert.equal(contract.workStateSeparate, true);
+  assert.equal(contract.workStateSeparate, false);
 });
 
 test("legacy work items read as queued; started/status/stop/stopped are exact transitions", () => {
@@ -72,8 +72,12 @@ test("legacy work items read as queued; started/status/stop/stopped are exact tr
     started_at: null, attempt_count: 0, budget: null, spend_cents: null, round_count: 0, tool_calls: 0, suspended_by: null, attempts: [] });
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:00:00.000Z" });
   assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+  // #603: already accepted, stays accepted on claim
+  assert.equal(item.state, "accepted");
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, at: "2026-09-10T21:01:00.000Z", data: { status: "active" } });
   assert.equal(item.status, SESSION_STATUSES.ACTIVE);
+  // #603: first active heartbeat moves accepted -> working
+  assert.equal(item.state, "working");
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STOP_REQUESTED, at: "2026-09-10T21:02:00.000Z" });
   assert.equal(item.stop_requested_at, "2026-09-10T21:02:00.000Z");
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, at: "2026-09-10T21:03:00.000Z", data: { status: "done" } });
@@ -141,7 +145,8 @@ test("HTTP lists by status, sets status, and Stop writes stop_requested_at plus 
   assert.equal(startEvent.event.type, T.SESSION_STARTED);
   assert.equal(store.room("commons").state.workItems["session-one"].status, "processing");
   assert.equal(store.workContext(agentKey, "commons", "session-one").work.status, "processing");
-  assert.equal(store.workContext(agentKey, "commons", "session-one").work.state, "proposed");
+  // #603: claim automatically moves proposed -> accepted
+  assert.equal(store.workContext(agentKey, "commons", "session-one").work.state, "accepted");
 
   const activated = await request("/api/rooms/commons/work-sessions", {
     method: "POST", token: agentKey,
@@ -197,7 +202,7 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 35);
+  assert.equal(store.storagePlatform.version(store.db), 36);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 
@@ -477,4 +482,31 @@ test("a round-limit pause records its reason; resume without approval is refused
   assert.throws(() => applySessionFields({ ...item, status: "processing" },
     { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent", at: "2026-09-10T21:03:00.000Z",
       data: { status: "suspended", suspendReason: "lunch" } }), /suspendReason/);
+});
+
+test("#603: claim moves proposed->accepted, first active heartbeat moves accepted->working, release moves back to proposed", () => {
+  const item = { id: "ladder", title: "Test", state: "proposed", revision: 0, accountableMemberId: "agent" };
+  // Claim (set_status: processing) -> accepted
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-21T10:00:00.000Z" });
+  assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+  assert.equal(item.state, "accepted");
+  // First active heartbeat -> working
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent",
+    at: "2026-09-21T10:01:00.000Z", data: { status: "active" } });
+  assert.equal(item.status, SESSION_STATUSES.ACTIVE);
+  assert.equal(item.state, "working");
+  // Release without completion -> back to proposed
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent",
+    at: "2026-09-21T10:02:00.000Z", data: { status: "failed" } });
+  assert.equal(item.status, SESSION_STATUSES.FAILED);
+  assert.equal(item.state, "proposed");
+});
+
+test("#603: completed work stays completed on release", () => {
+  const item = { id: "ladder-done", title: "Test", state: "completed", revision: 5, accountableMemberId: "agent" };
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-21T10:00:00.000Z" });
+  assert.equal(item.state, "completed", "completed state is preserved on claim");
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent",
+    at: "2026-09-21T10:01:00.000Z", data: { status: "done" } });
+  assert.equal(item.state, "completed", "completed state is preserved on release");
 });

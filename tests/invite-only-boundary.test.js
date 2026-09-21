@@ -59,6 +59,9 @@ const PROBES = {
   // not_found), so the sweep above counts these as served-open.
   "GET /api/public/rooms/{}": [undefined, 404],
   "GET /api/public/rooms/{}/feed": [undefined, 404],
+  // Opt-in room directory (#605): public by design so a freshly minted
+  // identity can discover rooms; an empty directory answers 200 with no rooms.
+  "GET /api/public/rooms/directory": [undefined, 200],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it

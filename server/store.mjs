@@ -16,6 +16,7 @@ import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, crea
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
@@ -45,6 +46,11 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIde
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
+import { extractAgentMentions } from "./inbox-agent-routing.mjs"; // #658: mention lifecycle tracking (pure parser).
+import {
+  MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
+  assertTransitionMention, resolveMentionTarget, mentionStateSchema,
+} from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -55,6 +61,7 @@ import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
+import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
@@ -276,7 +283,11 @@ const invitationSchema = `
       OR
       (status='accepted' AND revision=1 AND accepted_at IS NOT NULL AND accepted_by_account_id=intended_account_id AND redemption_id IS NOT NULL AND joined_event_id IS NOT NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
       OR
-      (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_account_id IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+      (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+      -- v36: revoked_by_account_id is NULL when the revoking owner acted on
+      -- an accountless identity bearer (agent-owned room); the member id and
+      -- the journal audit event carry the authority, mirroring the v35
+      -- agent-issuer pattern for issuer_account_id.
     )
   );
   CREATE UNIQUE INDEX IF NOT EXISTS membership_invitation_issue_request ON membership_invitations(room_id,issuer_account_id,issue_request_id);
@@ -552,6 +563,7 @@ export class RoomStore {
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
     this.publicFace = new PublicFace(this);
+    this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
@@ -693,6 +705,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Fresh databases are created in the v35 shape already; skip the
       // rebuild for them.
       if (version > 0 && version < 35) this.migrateShareLinkAgentIssuerV35();
+      // v36: the revoked-state CHECK goes nullable for revoked_by_account_id
+      // so an agent room owner (no account) can revoke invitations, not just
+      // issue them (#597). SQLite cannot relax a CHECK in place, so the
+      // invitation tables are rebuilt. Fresh databases are created in the
+      // v36 shape already; skip the rebuild for them.
+      if (version > 0 && version < 36) this.migrateInvitationAgentRevokeV36();
       // Short human invite codes alias share_links. After the v35 rebuild so
       // the FK targets the live table. Purely additive, no version bump,
       // intentionally outside the writer fence.
@@ -722,6 +740,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // side tables (no events, no projection impact), same pattern.
       this.db.exec(dmConsentSchema);
       this.db.exec(roomPublicFaceSchema);
+      // #605: opt-in public room directory (owner toggles discoverability;
+      // purely additive side table, no events, no projection impact).
+      this.db.exec(roomDirectorySchema);
+      // #658: mention lifecycle tracking. Purely additive side tables (no
+      // events, no projection impact): IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence.
+      this.db.exec(mentionStateSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -985,6 +1010,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       db.exec(shareLinkSchema);
       db.exec(invitationSchema);
       this.storagePlatform.setVersion(this.db, 35);
+    });
+  }
+  migrateInvitationAgentRevokeV36() {
+    // v36: agent-owner invitation revocation. The revoked-state CHECK required
+    // revoked_by_account_id IS NOT NULL, so an accountless agent owner could
+    // issue invitations (v35) but never revoke them — half of the owner
+    // invitation-administration capability (#597). SQLite cannot relax a CHECK
+    // in place: rebuild membership_invitations with the relaxed constraint.
+    // The revoker is recorded honestly: revoked_by_account_id is NULL only
+    // when the revoking owner acted on an accountless identity bearer, with
+    // the member id and the journal audit event carrying the authority
+    // (mirrors the v35 agent-issuer pattern). Children are rebuilt so their
+    // FKs target the live parent table, following
+    // migrateShareLinkAgentIssuerV35: with PRAGMA foreign_keys=ON, ALTER TABLE
+    // RENAME rewrites child FK targets to the legacy name, so the final drops
+    // must come last and children drop before the parent.
+    this.transaction(() => {
+      const db = this.db;
+      db.exec("ALTER TABLE share_link_joins RENAME TO share_link_joins_legacy_v35");
+      db.exec("ALTER TABLE membership_invitation_events RENAME TO membership_invitation_events_legacy_v35");
+      db.exec("ALTER TABLE membership_invitation_journal RENAME TO membership_invitation_journal_legacy_v35");
+      db.exec("ALTER TABLE membership_invitations RENAME TO membership_invitations_legacy_v35");
+      db.exec(invitationSchema); // Standalone block: exact tables + triggers, with the v36 CHECK.
+      db.exec("INSERT INTO membership_invitations SELECT * FROM membership_invitations_legacy_v35");
+      db.exec("INSERT INTO membership_invitation_events SELECT * FROM membership_invitation_events_legacy_v35");
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_update");
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_delete");
+      db.exec(invitationJournalSchema); // Standalone block: exact table + triggers.
+      db.exec("INSERT INTO membership_invitation_journal SELECT * FROM membership_invitation_journal_legacy_v35");
+      db.exec(`CREATE TABLE share_link_joins (
+        link_id TEXT NOT NULL REFERENCES share_links(id), invitation_id TEXT NOT NULL UNIQUE REFERENCES membership_invitations(id),
+        slot_hash TEXT NOT NULL REFERENCES account_session_slots(hash), redemption_id TEXT NOT NULL,
+        session_revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+        PRIMARY KEY(link_id,slot_hash,redemption_id)
+      )`);
+      db.exec("INSERT INTO share_link_joins SELECT * FROM share_link_joins_legacy_v35");
+      // Children first, then the parent nothing references anymore.
+      db.exec("DROP TABLE share_link_joins_legacy_v35");
+      db.exec("DROP TABLE membership_invitation_events_legacy_v35");
+      db.exec("DROP TABLE membership_invitation_journal_legacy_v35");
+      db.exec("DROP TABLE membership_invitations_legacy_v35");
+      // Recreate every index/trigger the renames carried away (all IF NOT EXISTS).
+      db.exec(invitationSchema);
+      this.storagePlatform.setVersion(this.db, 36);
     });
   }
   appendInvitationJournal(record, kind) {
@@ -1649,6 +1718,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   bindHumanAccount(roomId, memberId, accountId) {
     return this.transaction(() => this.ensureHumanAccountBinding(roomId, memberId, accountId));
   }
+  // #643: invitation-administration authentication. The room owner acts on any
+  // credential (share-links-style owner-capability exemption); everyone else
+  // must present an account session, as before. An accountless owner — e.g.
+  // an agent identity bearer — is returned with account null, and issuance /
+  // stats / revocation record the owner identity honestly (schema v36).
+  authenticateInvitationAdmin(token, roomId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const ownerId = this.room(roomId).state.room.ownerId;
+    if (auth.member?.id === ownerId) return auth;
+    if (!auth.account || auth.kind !== "session") fail(403, "account_session_required", "Invitation administration requires an account browser session");
+    return auth;
+  }
   issueInvitation(accountSessionToken, roomId, details) {
     const {
       requestId, token, intendedAccountId, intendedMemberId, displayName, role, expiresAt,
@@ -1663,15 +1744,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(expectedIssuerMemberRevision) || expectedIssuerMemberRevision < 0) {
       fail(422, "invalid_invitation", "Invitation requires an expiry and current issuer member revision");
     }
-    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    // The session binding is required for account sessions; an accountless
+    // owner bearer carries no session to bind.
+    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
     const tokenHash = hash(token);
     const permissions = [...INVITATION_ROLES[role]];
     const fingerprint = hash(canonical({ roomId, requestId, tokenHash, intendedAccountId, intendedMemberId, displayName: displayName.trim(), role, permissions, expiresAt, expectedIssuerMemberRevision }));
     return this.transaction(() => {
-      const issuer = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      // #643: the room owner issues on any credential; anyone else needs an
+      // account session with manage_members, as before.
+      const issuer = this.authenticateInvitationAdmin(accountSessionToken, roomId, expectedSessionBinding ?? null);
+      if (issuer.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!issuer.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
-      const prior = this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?")
-        .get(roomId, issuer.account.id, requestId);
+      // Idempotency scope follows the issuer identity: account-scoped for
+      // account sessions, member-scoped for an accountless owner (partial
+      // unique index membership_invitation_agent_issue_request).
+      const prior = issuer.account
+        ? this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?").get(roomId, issuer.account.id, requestId)
+        : this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id IS NULL AND issuer_member_id=? AND issue_request_id=?").get(roomId, issuer.member.id, requestId);
       if (prior) {
         this.verifyInvitationRecord(prior.id);
         if (prior.issue_fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Invitation request ID already used for different scope");
@@ -1701,11 +1791,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ) VALUES(?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,0,'pending',?,?)`).run(
         invitationId, tokenHash, roomId, intendedAccountId, intendedMemberId, displayName.trim(), role, JSON.stringify(permissions),
         INVITATION_ROLE_POLICY_VERSION,
-        issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.member.revision, requestId, fingerprint, now, expiresAt
+        // v35/v36: an accountless owner is recorded honestly with null
+        // account/epoch, never a fabricated account id.
+        issuer.account?.id ?? null, issuer.member.id, issuer.account?.authEpoch ?? null, issuer.member.revision, requestId, fingerprint, now, expiresAt
       );
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
-      ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.sessionRevision, now);
+      ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account?.id ?? null, issuer.member.id, issuer.account?.authEpoch ?? null, issuer.sessionRevision ?? 0, now);
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.appendInvitationJournal(row, "issued");
       return { invitation: invitationView(row, now, { includeScope: true }), duplicate: false };
@@ -1759,9 +1851,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Round-2 #108: invite-link analytics. Aggregate conversion stats for the
   // room's invitations, restricted to members who can manage memberships.
-  invitationStats(accountSessionToken, roomId, expectedSessionBinding) {
+  invitationStats(token, roomId, expectedSessionBinding) {
     return this.readTransaction(() => {
-      const actor = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      // #643: the room owner reads stats on any credential; anyone else
+      // needs an account session with manage_members, as before.
+      const actor = this.authenticateInvitationAdmin(token, roomId, expectedSessionBinding ?? null);
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Membership administration grant required");
       const rows = this.db.prepare("SELECT status,expires_at,created_at,accepted_at FROM membership_invitations WHERE room_id=?").all(roomId);
       const now = this.now();
@@ -1782,23 +1876,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
     }
-    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    // The session binding is required for account sessions; an accountless
+    // owner bearer carries no session to bind.
+    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
     if (expectedRoomId !== null && !validId(expectedRoomId)) fail(422, "invalid_room", "Invalid Room id");
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       if (!row || (expectedRoomId !== null && row.room_id !== expectedRoomId)) fail(404, "invitation_not_found", "Invitation not found in this Room");
-      const actor = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+      // #643: the room owner revokes on any credential; anyone else needs an
+      // account session with manage_members, as before.
+      const actor = this.authenticateInvitationAdmin(accountSessionToken, row.room_id, expectedSessionBinding ?? null);
+      if (actor.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
       this.verifyInvitationRecord(row.id);
       if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
       if (row.status !== "pending") fail(409, "invitation_not_pending", "Only a pending invitation can be revoked");
       const revision = row.revision + 1, now = this.now();
+      // v36: an accountless owner revoker is recorded honestly with a null
+      // account, never a fabricated account id.
       const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
-        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, actor.account.id, actor.member.id, reason.trim(), invitationId, expectedRevision).changes;
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, actor.account?.id ?? null, actor.member.id, reason.trim(), invitationId, expectedRevision).changes;
       if (changed !== 1) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
-      ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account.id, actor.member.id, actor.account.authEpoch, actor.sessionRevision, revision, now, reason.trim());
+      ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account?.id ?? null, actor.member.id, actor.account?.authEpoch ?? null, actor.sessionRevision ?? 0, revision, now, reason.trim());
       const revoked = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.appendInvitationJournal(revoked, "revoked");
       return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };
@@ -1956,7 +2057,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         expiresAt: null, csrf: null, sessionBinding: null
       };
     }
-    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key");
+    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash
@@ -2242,7 +2343,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const { members } = this.roomAuthority(roomId);
+      const { members, ownerId } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
       const working = new Map();
@@ -2269,26 +2370,57 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
       const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      const agentPresence = memberId => {
+      // #660: raw host status per member. status is "online"|"offline"|null
+      // (null = no registered host); identityId is the linked agent identity.
+      const hostStatusOf = memberId => {
         const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return null;
+        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
         const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return null;
+        if (!link) return { identityId: null, status: null, lastSeenAt: null };
         const status = this.agentHeartbeats.statusOf(link.identityId);
         // Unregistered (no host) stays null so RC-051 clients keep the
         // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return null;
-        return { status: status.status, lastSeenAt: status.lastSeenAt };
+        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
+        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
       };
+      const agentPresence = memberId => {
+        const host = hostStatusOf(memberId);
+        if (host.status === null) return null;
+        return { status: host.status, lastSeenAt: host.lastSeenAt };
+      };
+      // #660: unreachable threshold is 60 min or 3x the host heartbeat
+      // interval, whichever is smaller.
+      const unreachableAfterMs = Math.min(
+        PRESENCE_UNREACHABLE_AFTER_MS,
+        3 * this.agentHeartbeats.staleAfterMs
+      );
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
           const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+          const host = hostStatusOf(m.id);
+          const workingOn = working.get(m.id) ?? [];
+          const isWatching = watching.has(m.id);
           return {
             memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: watching.has(m.id), workingOn: working.get(m.id) ?? [],
+            watching: isWatching, workingOn,
             lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id)
+            presence: agentPresence(m.id),
+            // #660: derived working state + owner/scope projection (additive).
+            state: presenceState({
+              kind: m.kind,
+              hasActiveSession: workingOn.length > 0,
+              watching: isWatching,
+              hostStatus: host.status,
+              hostLastSeenAt: host.lastSeenAt,
+              lastCommandAt: lastCommandAt.get(m.id) ?? null,
+              lastSeenAt,
+              unreachableAfterMs,
+              now,
+            }),
+            isOwner: m.id === ownerId,
+            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
+            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
@@ -2533,6 +2665,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ? bindingOrOptions : options;
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
     const { actor = null, since = null, until = null } = opts;
+    // #658: mention timeouts are evaluated lazily on read. The flip needs a
+    // write-capable transaction, so it runs before the query_only read
+    // below; usually a no-op (one indexed UPDATE, zero rows touched).
+    this.flipExpiredMentions(roomId);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
@@ -2575,6 +2711,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const visible = events.filter(({ event }) =>
         event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
         || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // #658: mention chips ride on message views. One batched query for
+      // the whole page (no N+1); only members who can read the room see it.
+      const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
+      const members = this.room(roomId).state.members ?? {};
+      const chips = this.mentionChipsForEvents(roomId, members, messageIds);
+      for (const { event } of visible) {
+        if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
+      }
       return { events: visible, next, hasMore: next < sequence };
     });
   }
@@ -2762,6 +2906,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+      // #658: mention lifecycle. Runs in the same transaction as the message
+      // event: mention rows are never recorded without their triggering
+      // message, and a post by a mentioned member marks their pending
+      // mentions responded in the same transaction. Never throws for
+      // unparseable input — an unresolvable mention is simply not tracked.
+      if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
       // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
       // event is offered to enabled webhook subscriptions whose event
       // filter matches. Journaled in the same transaction as the event
@@ -2814,5 +2964,201 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
     }
+  }
+
+  // #658: mention lifecycle tracking. Called inside command()'s transaction
+  // for every message.posted. Two jobs:
+  //   1. A post by a mentioned member marks their pending (delivered or
+  //      acknowledged) mentions in this room responded — a reply is
+  //      stronger than a read, so it skips acknowledged.
+  //   2. @names in the body resolve to room members (never the sender);
+  //      each resolved member gets one delivered row for this message event.
+  // Unresolved names get no row — never invent a recipient.
+  trackMentions(roomId, state, senderMemberId, data, eventId) {
+    const nowMs = this.now();
+    this.db.prepare(
+      `UPDATE mention_states SET state='responded', decided_at=?
+       WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
+    ).run(nowMs, roomId, senderMemberId);
+    let names = [];
+    try { names = extractAgentMentions(typeof data.body === "string" ? data.body : ""); }
+    catch { names = []; }
+    if (names.length === 0) return;
+    const members = state?.members ?? {};
+    let identityNames = {};
+    try {
+      const links = this.db.prepare(
+        `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
+         JOIN agent_identities i ON i.identity_id=l.identity_id
+         WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
+      for (const row of links) identityNames[row.memberId] = row.displayName;
+    } catch { identityNames = {}; }
+    const timeoutMs = this.mentionTimeoutMsFor(roomId);
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO mention_states
+       (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+       VALUES(?,?,?,?,?,?,NULL)`);
+    const seen = new Set();
+    for (const name of names) {
+      const memberId = resolveMentionTarget(members, identityNames, name, senderMemberId);
+      if (!memberId || seen.has(memberId)) continue;
+      seen.add(memberId);
+      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
+    }
+  }
+
+  // #658: per-room mention timeout, defaulting to 30 minutes. Owner-
+  // configurable via setMentionTimeout; absent rows read as the default.
+  mentionTimeoutMsFor(roomId) {
+    const row = this.db.prepare("SELECT timeout_ms AS timeoutMs FROM room_mention_settings WHERE room_id=?").get(roomId);
+    const timeoutMs = Number(row?.timeoutMs);
+    return Number.isSafeInteger(timeoutMs) && timeoutMs >= MENTION_TIMEOUT_MS_MIN && timeoutMs <= MENTION_TIMEOUT_MS_MAX
+      ? timeoutMs : MENTION_TIMEOUT_MS_DEFAULT;
+  }
+
+  // #658: owner-only timeout override for a room.
+  setMentionTimeout(token, roomId, timeoutMs, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    if (auth.member.id !== this.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MENTION_TIMEOUT_MS_MIN || timeoutMs > MENTION_TIMEOUT_MS_MAX) {
+      fail(422, "invalid_mention_timeout", `timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX}`);
+    }
+    return this.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at) VALUES(?,?,?)
+         ON CONFLICT(room_id) DO UPDATE SET timeout_ms=excluded.timeout_ms, updated_at=excluded.updated_at`
+      ).run(roomId, timeoutMs, this.now());
+      return { roomId, timeoutMs };
+    });
+  }
+
+  // #658: lazily flip expired delivered|acknowledged rows to timed_out.
+  // Runs inside the caller's transaction (write-capable paths) or as its
+  // own write transaction before a read path — never inside query_only.
+  flipExpiredMentions(roomId, nowMs = this.now()) {
+    // Cheap guard first: eventsAfter runs on every SSE pump (250ms per
+    // connection), so the common no-expired-rows case must stay a single
+    // indexed read, never a write transaction.
+    // Defensive: a database from before the #658 schema has no mention_states
+    // table; treat that (and only that) as nothing-to-flip rather than
+    // throwing and breaking event listing. Any other error still throws.
+    let expired;
+    try {
+      expired = this.db.prepare(
+        `SELECT 1 FROM mention_states
+         WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
+      ).get(roomId, nowMs);
+    } catch (error) {
+      if (!/no such table/i.test(error?.message ?? "")) throw error;
+      return 0;
+    }
+    if (!expired) return 0;
+    const run = () => this.db.prepare(
+      `UPDATE mention_states SET state='timed_out', decided_at=?
+       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
+    ).run(nowMs, roomId, nowMs);
+    return this.db.isTransaction ? run().changes : this.transaction(run).changes;
+  }
+
+  // #658: explicit acknowledgement. Member-only and idempotent: the caller
+  // acks their own mention row for the message event. Acking a message with
+  // no mention row at all is 404; a row that names someone else is 403.
+  // Terminal states return the current state unchanged (idempotent).
+  acknowledgeMention(token, roomId, messageEventId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    return this.transaction(() => {
+      this.flipExpiredMentions(roomId);
+      const mine = this.db.prepare(
+        "SELECT state FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
+      ).get(roomId, messageEventId, auth.member.id);
+      if (!mine) {
+        const any = this.db.prepare(
+          "SELECT 1 FROM mention_states WHERE room_id=? AND message_event_id=?").get(roomId, messageEventId);
+        fail(any ? 403 : 404, any ? "mention_not_yours" : "mention_not_found",
+          any ? "You can only acknowledge your own mentions" : "No mention found for this message");
+      }
+      if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
+      assertTransitionMention("delivered", "acknowledged");
+      this.db.prepare(
+        "UPDATE mention_states SET state='acknowledged' WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
+      ).run(roomId, messageEventId, auth.member.id);
+      return this.mentionView(roomId, messageEventId, auth.member.id);
+    });
+  }
+
+  // #658: member-readable mention list. memberId defaults to the caller; an
+  // owner may query another member's mentions (feeds the #662 attention
+  // card's "N mentions unacknowledged"). Supports state and after filters.
+  listMentions(token, roomId, { state = null, after = null, memberId = null } = {}, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const target = memberId ?? auth.member.id;
+    if (typeof target !== "string" || !target) fail(422, "invalid_mention_query", "memberId must be a non-empty string");
+    if (state !== null && !["delivered", "acknowledged", "responded", "timed_out"].includes(state)) {
+      fail(422, "invalid_mention_query", "state must be one of delivered, acknowledged, responded, timed_out");
+    }
+    if (after !== null && (typeof after !== "string" || Number.isNaN(Date.parse(after)))) {
+      fail(422, "invalid_mention_query", "after must be an ISO timestamp");
+    }
+    if (target !== auth.member.id && auth.member.id !== this.room(roomId).state.room.ownerId) {
+      fail(403, "mention_forbidden", "You can only list your own mentions");
+    }
+    return this.transaction(() => {
+      this.flipExpiredMentions(roomId);
+      const rows = this.db.prepare(
+        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state,
+                created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
+         FROM mention_states
+         WHERE room_id=? AND mentioned_member_id=?
+           AND (? IS NULL OR state=?) AND (? IS NULL OR created_at>=?)
+         ORDER BY created_at DESC LIMIT 200`
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after));
+      const members = this.room(roomId).state.members ?? {};
+      return {
+        roomId, memberId: target,
+        mentions: rows.map(r => ({
+          messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
+          displayName: members[r.memberId]?.displayName ?? r.memberId,
+          createdAt: new Date(r.createdAt).toISOString(),
+          timeoutAt: new Date(r.timeoutAt).toISOString(),
+          decidedAt: r.decidedAt === null ? null : new Date(r.decidedAt).toISOString(),
+        })),
+      };
+    });
+  }
+
+  // #658: single mention row view for the ack response.
+  mentionView(roomId, messageEventId, memberId) {
+    const row = this.db.prepare(
+      `SELECT state, created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
+       FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
+    ).get(roomId, messageEventId, memberId);
+    if (!row) return null;
+    const members = this.room(roomId).state.members ?? {};
+    return {
+      roomId, messageEventId, memberId, state: row.state,
+      displayName: members[memberId]?.displayName ?? memberId,
+      createdAt: new Date(row.createdAt).toISOString(),
+      timeoutAt: new Date(row.timeoutAt).toISOString(),
+      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
+    };
+  }
+
+  // #658: batch-load mention chip data for a page of message events. One
+  // query for the whole page (no N+1); display names come from the room
+  // projection already in hand.
+  mentionChipsForEvents(roomId, members, eventIds) {
+    if (!eventIds.length) return new Map();
+    const placeholders = eventIds.map(() => "?").join(",");
+    const rows = this.db.prepare(
+      `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
+       FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
+    ).all(roomId, ...eventIds);
+    const chips = new Map();
+    for (const row of rows) {
+      const list = chips.get(row.messageEventId) ?? [];
+      list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });
+      chips.set(row.messageEventId, list);
+    }
+    return chips;
   }
 }

@@ -106,8 +106,12 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   const instinct = page.locator('#presence-list .presence-member[data-member-record-id="instinct"]');
   const ownerRow = page.locator('#presence-list .presence-member[data-member-record-id="owner"]');
   await codex.waitFor();
-  assert.equal(await codex.getAttribute("data-presence"), "online");
-  assert.equal(await instinct.getAttribute("data-presence"), "away");
+  // #660/#746: the rail renders the server's presence vocabulary
+  // (working/listening/idle/unreachable). This fixture issues no heartbeats,
+  // so neither agent has a live working session: both are idle. Engagement
+  // is still covered by the one-line status and Done-chip asserts below.
+  assert.equal(await codex.getAttribute("data-presence"), "idle");
+  assert.equal(await instinct.getAttribute("data-presence"), "idle");
   assert.equal(await codex.locator(".member-handle-agent").textContent(), "@Codex");
   assert.equal(await instinct.locator(".member-handle-agent").textContent(), "@Instinct");
   assert.doesNotMatch(await ownerRow.locator(".member-handle").textContent(), /^@/);
