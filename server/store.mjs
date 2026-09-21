@@ -56,6 +56,7 @@ import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
+import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
@@ -2333,7 +2334,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const { members } = this.roomAuthority(roomId);
+      const { members, ownerId } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
       const working = new Map();
@@ -2360,26 +2361,57 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
       const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      const agentPresence = memberId => {
+      // #660: raw host status per member. status is "online"|"offline"|null
+      // (null = no registered host); identityId is the linked agent identity.
+      const hostStatusOf = memberId => {
         const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return null;
+        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
         const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return null;
+        if (!link) return { identityId: null, status: null, lastSeenAt: null };
         const status = this.agentHeartbeats.statusOf(link.identityId);
         // Unregistered (no host) stays null so RC-051 clients keep the
         // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return null;
-        return { status: status.status, lastSeenAt: status.lastSeenAt };
+        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
+        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
       };
+      const agentPresence = memberId => {
+        const host = hostStatusOf(memberId);
+        if (host.status === null) return null;
+        return { status: host.status, lastSeenAt: host.lastSeenAt };
+      };
+      // #660: unreachable threshold is 60 min or 3x the host heartbeat
+      // interval, whichever is smaller.
+      const unreachableAfterMs = Math.min(
+        PRESENCE_UNREACHABLE_AFTER_MS,
+        3 * this.agentHeartbeats.staleAfterMs
+      );
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
           const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+          const host = hostStatusOf(m.id);
+          const workingOn = working.get(m.id) ?? [];
+          const isWatching = watching.has(m.id);
           return {
             memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: watching.has(m.id), workingOn: working.get(m.id) ?? [],
+            watching: isWatching, workingOn,
             lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id)
+            presence: agentPresence(m.id),
+            // #660: derived working state + owner/scope projection (additive).
+            state: presenceState({
+              kind: m.kind,
+              hasActiveSession: workingOn.length > 0,
+              watching: isWatching,
+              hostStatus: host.status,
+              hostLastSeenAt: host.lastSeenAt,
+              lastCommandAt: lastCommandAt.get(m.id) ?? null,
+              lastSeenAt,
+              unreachableAfterMs,
+              now,
+            }),
+            isOwner: m.id === ownerId,
+            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
+            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
