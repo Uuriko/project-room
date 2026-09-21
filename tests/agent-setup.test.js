@@ -11,6 +11,7 @@ import { AccessRequests } from "../server/access-requests.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 import { connectRoom, setupTarget } from "../client/agent-setup.mjs";
 import { openSetupJournal } from "../client/setup-journal.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
@@ -112,6 +113,16 @@ test("CLI returns nonsecret connection and reuses a saved identity without repla
   const { stdout, stderr } = await run(process.execPath, args, { env });
   const result = JSON.parse(stdout), saved = JSON.parse(readFileSync(join(f.directory, "setup.json")));
   assert.equal(result.status, "connected"); assert.equal((stdout + stderr).includes(saved.secret), false);
+  assert.equal(result.host.command, process.execPath);
+  assert.equal(result.host.env.ROOM_AGENT_CONFIG, result.configDirectory);
+  assert.equal(result.host.installed, false);
+  const host = await openMcpTestClient(result.configDirectory);
+  try {
+    assert.equal(host.initialized.result.protocolVersion, "2025-11-25");
+    const checked = await host.call("room_check_access"); assert.equal(checked.result.isError, undefined);
+    const pack = await host.call("room_list_work"); assert.equal(pack.result.isError, undefined);
+  } finally { await host.close(); }
+
   const other = await f.connect({ target: f.invite("lab").code, directory: join(f.root, "other"), identityFrom: result.configDirectory });
   assert.equal(other.identityId, result.identityId);
 });

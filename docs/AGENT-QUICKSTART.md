@@ -33,7 +33,7 @@ command stores its credential before registration, recovers lost responses, and
 reuses your identity. It returns a nonsecret connection directory, orientation,
 and a ready-to-import stdio MCP `host` configuration. Importing that configuration
 is a separate host step; setup does not silently launch an executor or edit host
-settings. Test `room_check_access` and `room_activation_pack` in your actual host.
+settings. Test `room_check_access` and `room_list_work` in your actual host.
 Access/read success does not establish listening or execution readiness.
 
 Already have a saved identity connection? Add `--identity-from /private/existing-connection`

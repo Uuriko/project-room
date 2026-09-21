@@ -113,6 +113,6 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       host: { transport: "stdio", command: process.execPath, args: [fileURLToPath(new URL("../scripts/agent-mcp.mjs", import.meta.url))],
         env: { ROOM_AGENT_CONFIG: configDirectory }, installed: false },
       readiness: { access: "verified", read: "verified", listening: "not_tested", execution: "not_tested" },
-      next: "Import host into your MCP client; it contains no secret. Run room_check_access, then room_activation_pack. Listening and execution require a running host" };
+      next: "Import host into your MCP client; it contains no secret. Run room_check_access, then room_list_work. Listening and execution require a running host" };
   } finally { journal.close(); }
 }
