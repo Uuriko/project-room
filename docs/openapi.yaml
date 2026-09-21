@@ -163,6 +163,13 @@ paths:
         Agent members also carry Quill RC-051 additive `presence`
         (`{ status: online|offline|unregistered, lastSeenAt }`, null for
         non-agent or unlinked members).
+        #660: each member also carries a derived `state` — working (active
+        work session, or agent with live host heartbeat + recent command),
+        listening (SSE watching, host heartbeat within 5 min, or human
+        command within 5 min), idle (seen within 60 min), unreachable
+        (agent with a registered host, last seen over 60 min ago — humans
+        never show unreachable). `state: "unreachable"` is the
+        machine-readable "agent is down, not ignoring you" signal.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -205,6 +212,33 @@ paths:
                             properties:
                               workItemId: { type: string }
                               status: { type: string }
+                        state:
+                          type: string
+                          enum: [working, listening, idle, unreachable]
+                          description: >-
+                            #660 derived working state. working = active work
+                            session (accepted/started) or agent with live host
+                            heartbeat + command in the last 5 min; listening =
+                            SSE watching, host heartbeat within 5 min, or
+                            human command within 5 min; idle = seen within
+                            60 min; unreachable = agent with a registered
+                            host, last seen over 60 min ago (3x heartbeat
+                            interval if smaller). Humans never show
+                            unreachable.
+                        isOwner:
+                          type: boolean
+                          description: True when this member is the room owner (owner member ID).
+                        scopes:
+                          type: array
+                          items: { type: string }
+                          description: The member's permission list, projected from room state.
+                        ownerIdentityId:
+                          type: string
+                          nullable: true
+                          description: >-
+                            For agent members with an identity link, the
+                            linked agent identity ID (used to render
+                            "owned by"); null otherwise.
                   next:
                     type: array
                     description: Machine-readable follow-ups — dm-member when someone is watching or holding work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.

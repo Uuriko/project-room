@@ -110,12 +110,22 @@ export function memberHandle(member, label) {
 }
 
 export function presenceLabel(presence) {
+  // #660: server-derived states first, then the legacy local derivation.
+  if (presence === "working") return "Working";
+  if (presence === "listening") return "Listening";
+  if (presence === "idle") return "Idle";
+  if (presence === "unreachable") return "Unreachable";
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
 
 // Presence is derived from room work + recent chat. No extra people-data store.
+// #660: when the member carries a server-provided `state` (from the presence
+// API), it wins — the server is authoritative. Otherwise fall back to the
+// local online/offline/away derivation.
 export function memberPresence(member, { workItems, messages, now } = {}) {
   if (!member || member.active === false) return "offline";
+  if (member.state === "working" || member.state === "listening"
+    || member.state === "idle" || member.state === "unreachable") return member.state;
   const clock = Number.isFinite(now) ? now : Date.now();
   const items = workList(workItems);
   if (items.some(item => item.accountableMemberId === member.id
