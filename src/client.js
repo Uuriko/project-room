@@ -1,5 +1,6 @@
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
+import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -406,7 +407,10 @@ export class RoomClient {
     } catch (error) {
       if (generation === this.generation) {
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) this.endAccess();
-        else if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+        // DM consent gate refusals are 403s but the session is still valid —
+        // ending access here would sign the user out and swallow the refusal.
+        else if (!DM_CONSENT_REFUSAL_CODES.includes(error.code)
+          && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) this.handleFailure(error);
       }
       throw error;
     }

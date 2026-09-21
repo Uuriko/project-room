@@ -266,3 +266,26 @@ test("HTML export carries the account headers, hands back a Blob and treats anyt
   wrong.session = identity();
   await assert.rejects(wrong.exportHtml(), error => error.code === "invalid_response");
 });
+test("a DM consent gate refusal on send keeps the session and surfaces the code", async () => {
+  for (const code of ["dm_consent_required", "dm_blocked"]) {
+    const ended = [];
+    const client = new RoomClient({ onAccessEnded: () => ended.push(true),
+      fetcher: async () => response({ error: { code, message: "refused" } }, 403) });
+    client.session = identity();
+    const generation = client.generation;
+    await assert.rejects(
+      client.send({ id: "dm1", type: "message.posted", data: { body: "hi", toMemberId: "bob" } }),
+      error => error.status === 403 && error.code === code);
+    assert.equal(ended.length, 0, `${code} is an application refusal, not an auth failure`);
+    assert.equal(client.generation, generation, "the generation is untouched");
+    assert.ok(client.session, "the session survives a consent refusal");
+  }
+});
+test("other 403s on send still end access", async () => {
+  const ended = [];
+  const client = new RoomClient({ onAccessEnded: () => ended.push(true),
+    fetcher: async () => response({ error: { code: "access_denied", message: "no" } }, 403) });
+  client.session = identity();
+  await assert.rejects(client.send({ id: "x", type: "message.posted", data: {} }), /no/);
+  assert.equal(ended.length, 1, "a real access failure still ends the session");
+});

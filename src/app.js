@@ -8,7 +8,7 @@ import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
-import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage } from "./dm-consents.js";
+import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
@@ -2896,7 +2896,7 @@ function submitRequest(form) {
       saveComposer();
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
-      if (command?.data?.toMemberId && ["dm_consent_required", "dm_blocked"].includes(error.code)) {
+      if (command?.data?.toMemberId && DM_CONSENT_REFUSAL_CODES.includes(error.code)) {
         const peer = state.members[command.data.toMemberId];
         throw Object.assign(new Error(dmConsentFailureMessage(error, peer?.displayName)), { code: error.code, status: error.status });
       }

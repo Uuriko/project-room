@@ -13,6 +13,10 @@
 
 export const DM_CONSENT_STATUSES = Object.freeze(["pending", "approved", "rejected", "blocked", "revoked"]);
 export const DM_CONSENT_DECISIONS = Object.freeze(["approve", "reject", "block"]);
+// Server refusal codes for the DM consent gate (HTTP 403). These are
+// application-level refusals — the session is still valid — so the HTTP
+// client must NOT treat them like an auth failure (which ends access).
+export const DM_CONSENT_REFUSAL_CODES = Object.freeze(["dm_consent_required", "dm_blocked"]);
 
 // Mirrors server/dm-consents.mjs _handleOf exactly.
 export function dmConsentHandleOf(member) {
