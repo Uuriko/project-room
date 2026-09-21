@@ -2,8 +2,8 @@
   "name": "project-room-staging",
   "main": "room.mjs",
   "compatibility_date": "2026-07-30",
-  "compatibility_flags": ["nodejs_compat", "enable_request_signal", "request_signal_passthrough"],
-  "workers_dev": true,
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal", "request_signal_passthrough", "enable_nodejs_http_server_modules"],
+  "workers_dev": false,
   "routes": [
     { "pattern": "getdasha.com/room*", "zone_name": "getdasha.com" },
     { "pattern": "getdasha.com/room/*", "zone_name": "getdasha.com" },
@@ -13,10 +13,17 @@
   "preview_urls": false,
   "build": { "command": "node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node build-assets.mjs" },
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
-  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom", "script_name": "project-room" }] },
   "migrations": [{ "tag": "room-sqlite-v1", "new_sqlite_classes": ["ProjectRoom"] }],
-  "triggers": { "crons": ["* * * * *"] },
-  "vars": { "ROOM_ORIGIN": "https://project-room-staging.getdasha.workers.dev" },
+  "triggers": { "crons": [] },
+  "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com" },
   "limits": { "cpu_ms": 1000 },
-  "observability": { "enabled": true, "head_sampling_rate": 1 }
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "env": { "production": {
+    "name": "project-room",
+    "routes": [{ "pattern": "room.trydemigod.com", "custom_domain": true }],
+    "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
+    "triggers": { "crons": ["* * * * *"] },
+    "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com" }
+  } }
 }

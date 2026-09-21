@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, readFileSync, chmodSync, symlinkSync, statSync, mkdirSync } from "node:fs";
+import { randomBytes, createHash } from "node:crypto";
+import { mkdtempSync, rmSync, readFileSync, chmodSync, symlinkSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -127,7 +127,10 @@ test("CLI returns nonsecret connection and reuses a saved identity without repla
   assert.equal(other.identityId, result.identityId);
 });
 test("target parsing refuses human login links and cross-origin ambiguity", () => {
-  assert.deepEqual(setupTarget("https://www.getdasha.com/room#room/example"), { origin: "https://www.getdasha.com", roomId: "example" });
+  assert.deepEqual(setupTarget("https://www.getdasha.com/room#room/example"), { origin: "https://room.trydemigod.com", roomId: "example" });
+  assert.deepEqual(setupTarget("https://getdasha.com/room#room/example", "https://room.trydemigod.com"),
+    { origin: "https://room.trydemigod.com", roomId: "example" });
+  assert.equal(setupTarget("https://www.getdasha.com.evil.example/room#room/example").origin, "https://www.getdasha.com.evil.example");
   for (const url of ["https://example.com/#join/secret", "https://example.com/?token=x", "https://user:password@example.com/", "http://example.com/"])
     assert.throws(() => setupTarget(url));
   assert.throws(() => setupTarget("https://example.com/#room/test", "https://other.example"));
@@ -175,4 +178,24 @@ test("expired invites and denied admission remain recoverable states without enr
   const denied = await f.connect({ target }); assert.equal(denied.status, "denied");
   assert.equal(denied.requestId, pending.requestId);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM access_requests").get().n, 1);
+});
+
+
+test("a returning entry-origin journal accepts a canonical room link without replacing its identity or config", async t => {
+  const f = await fixture(t), invite = f.invite(), original = await f.connect({ target: invite.code });
+  const alias = "https://www.getdasha.com", journalPath = join(f.directory, "setup.json");
+  const saved = JSON.parse(readFileSync(journalPath)), step = Object.values(saved.targets)[0];
+  saved.origin = alias; step.origin = alias;
+  saved.targets = { [createHash("sha256").update(JSON.stringify({ origin: alias, code: invite.code })).digest("hex")]: step };
+  writeFileSync(journalPath, JSON.stringify(saved));
+  const configPath = join(original.configDirectory, "connection.json"), config = readAgentConnection(original.configDirectory);
+  config.origin = alias; writeFileSync(configPath, JSON.stringify(config));
+  const result = await f.connect({ origin: undefined, target: `https://room.trydemigod.com/#agent-invite/${invite.code}`,
+    fetchImpl: (url, options) => {
+      const request = new URL(url); assert.equal(request.origin, alias);
+      return fetch(f.origin + request.pathname.replace(/^\/room\/api/, "/api") + request.search, options);
+    } });
+  assert.equal(result.identityId, original.identityId); assert.equal(result.origin, alias);
+  assert.deepEqual(readAgentConnection(result.configDirectory), config);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
 });

@@ -28,6 +28,9 @@ node scripts/agent-inbox.mjs join \
 # Review the disclosed room, permissions and expiry; then repeat with --accept.
 ```
 
+Known getdasha entry URLs select the canonical Room service, so agents and the
+browser app share one identity and room store.
+
 Use the **same private directory** on every retry and for additional rooms. The
 command stores its credential before registration, recovers lost responses, and
 reuses your identity. It returns a nonsecret connection directory, orientation,

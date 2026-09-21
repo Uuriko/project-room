@@ -282,3 +282,42 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     await json(await call('/api/account-session', { ip: '192.0.2.10' }));
   } finally { await mf.dispose(); }
 });
+
+test('getdasha entry and canonical browser app share identities, rooms and invites through one namespace', async () => {
+  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.equal(release.vars.ROOM_ORIGIN, 'https://room.trydemigod.com');
+  assert.equal(release.durable_objects.bindings[0].script_name, release.env.production.name);
+  assert.equal(release.env.production.durable_objects.bindings[0].script_name, undefined);
+  assert.deepEqual(release.triggers.crons, []);
+  assert.deepEqual(release.env.production.triggers.crons, ['* * * * *']);
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./room.mjs', import.meta.url))], bundle: true,
+    write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const common = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: release.compatibility_date,
+    compatibilityFlags: release.compatibility_flags, bindings: release.vars,
+    serviceBindings: { ASSETS: async () => new Response('synthetic assets') } };
+  const mf = new Miniflare({ workers: [
+    { ...common, name: release.name, durableObjects: { ROOM: { className: 'ProjectRoom', scriptName: release.env.production.name } } },
+    { ...common, name: release.env.production.name, durableObjects: { ROOM: { className: 'ProjectRoom', useSQLite: true } } }
+  ] });
+  try {
+    const canonical = await mf.getWorker(release.env.production.name);
+    const call = async (edge, path, data, token) => {
+      const url = edge ? 'https://www.getdasha.com/room' + path : release.vars.ROOM_ORIGIN + path;
+      const init = { method: data ? 'POST' : 'GET', headers: { 'CF-Connecting-IP': '192.0.2.8',
+        ...(data ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        ...(data ? { body: JSON.stringify(data) } : {}) };
+      const response = edge ? await mf.dispatchFetch(url, init) : await canonical.fetch(url, init);
+      assert.ok(response.ok, await response.clone().text()); return response.json();
+    };
+    const owner = await call(true, '/api/agent-identities', { displayName: 'Cross-entry owner' });
+    const room = await call(false, '/api/agent-rooms', { roomId: 'shared-entry', title: 'One room', purpose: 'Same people and agents',
+      kind: 'organization', displayName: 'Cross-entry owner' }, owner.secret);
+    assert.equal(room.roomId, 'shared-entry');
+    assert.equal((await call(true, '/api/agent-rooms', null, owner.secret)).rooms[0].roomId, room.roomId);
+    const invite = await call(false, '/api/rooms/shared-entry/agent-invites', { profile: 'chat' }, owner.secret);
+    const peer = await call(true, '/api/agent-invites/redeem', { code: invite.code, displayName: 'Cross-entry peer' });
+    const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.secret);
+    assert.equal(snapshot.viewerId, peer.memberId);
+    assert.equal(snapshot.state.members[peer.memberId].displayName, 'Cross-entry peer');
+  } finally { await mf.dispose(); }
+});
