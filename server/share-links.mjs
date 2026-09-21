@@ -87,8 +87,9 @@ export class ShareLinks {
   }
   count(row) {
     const humans = this.db.prepare("SELECT count(*) n FROM share_link_joins WHERE link_id=?").get(row.id).n;
-    const agents = this.db.prepare("SELECT count(*) n FROM events WHERE id GLOB ? AND room_id=? AND json_extract(body,'$.type')=?")
-      .get(agentJoinPrefix(row) + "*", row.room_id, T.MEMBER_ADDED).n;
+    // Use the event-ID index for this link's receipts, not the whole room history.
+    const agents = this.db.prepare("SELECT room_id, json_extract(body,'$.type') AS type FROM events WHERE id GLOB ?")
+      .all(agentJoinPrefix(row) + "*").filter(receipt => receipt.room_id === row.room_id && receipt.type === T.MEMBER_ADDED).length;
     return humans + agents;
   }
   authority(row) {
