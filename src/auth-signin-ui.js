@@ -66,7 +66,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   const failureText = error => error?.message || "Couldn\u2019t sign in. Try again.";
 
   function shellHtml() {
-    return `<div class="auth-divider"><span>or sign in another way</span></div>
+    return `<p class="form-hint">Choose another sign-in method.</p>
       <div class="auth-oauth-row">
         <button type="button" class="button secondary" data-oauth="github">Continue with GitHub</button>
       </div>

@@ -280,3 +280,20 @@ test("Google link intent attaches the subject to the signed-in account", async t
   assert.ok(methods.some(m => m.type === "oauth" && m.provider === "google" && !m.disabled),
     "expected Google linked to the signed-in account");
 });
+
+for (const stale of ["missing", "expired", "malformed"]) test(`Google start replaces a ${stale} session cookie`, async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const slot = f.store.createAccountSessionSlot();
+  if (stale === "expired") f.store.db.prepare("UPDATE account_session_slots SET expires_at=0 WHERE hash=?").run(slot.session.credentialHash);
+  const old = stale === "missing" ? "x".repeat(43) : stale === "malformed" ? "bad" : slot.token;
+  const flow = await beginFlow(origin, `account_session=${old}`);
+  assert.ok(flow.slotCookie);
+  assert.notEqual(flow.slotCookie, old);
+  const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture", { redirect: "manual" });
+  assert.equal(callback.headers.get("X-Room-Auth-Failure"), null);
+  const token = accountCookie(callback);
+  assert.ok(token);
+  const session = await fetch(origin + "/api/account-session", { headers: { Cookie: `account_session=${token}` } });
+  assert.equal((await session.json()).authenticated, true);
+});

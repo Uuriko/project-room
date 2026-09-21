@@ -91,7 +91,7 @@ function mount(routes = {}) {
 
 test("mount renders the method chooser, GitHub button, and no form by default", () => {
   const { container } = mount();
-  assert.ok(container.innerHTML.includes("or sign in another way"));
+  assert.ok(container.innerHTML.includes("Choose another sign-in method."));
   assert.ok(container.innerHTML.includes("Continue with GitHub"));
   assert.ok(container.innerHTML.includes("Email + password"));
   assert.ok(container.innerHTML.includes("Magic link"));
