@@ -104,13 +104,13 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await bobAlice.locator("summary").click();
   assert.match(await bobAlice.textContent(), /Alice can message you/);
 
-  // --- Alice's pending becomes "You can message Bob"; the DM posts. ---
+  // --- Alice's pending becomes approved ("Bob approved your request"); the DM posts. ---
   await a.page.reload();
   await a.page.locator("#main").waitFor({ state: "visible" });
   await openPeople(a.page);
   const aliceBob2 = consentSection(a.page, "bob");
   await aliceBob2.locator("summary").click();
-  await aliceBob2.getByText("You can message Bob").waitFor();
+  await aliceBob2.getByText("Bob approved your request — you can message them directly.").waitFor();
   await selectRecipient(a.page, "bob");
   await a.page.locator("#message-input").fill("hello bob, approved");
   await a.page.locator("#message-form button[type=submit]").click();
@@ -134,7 +134,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await openPeople(a.page);
   const aliceBob3 = consentSection(a.page, "bob");
   await aliceBob3.locator("summary").click();
-  await aliceBob3.getByText("Bob isn't accepting DMs from you").waitFor();
+  await aliceBob3.getByText("Bob isn't accepting DM requests from you").waitFor();
   // --- Bob unblocks; Alice can ask again. ---
   await bobAlice2.getByRole("button", { name: "Unblock", exact: true }).click();
   await b.page.locator("#status.visible").getByText(/Alice unblocked/).waitFor();
