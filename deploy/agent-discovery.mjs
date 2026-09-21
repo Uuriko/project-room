@@ -1,7 +1,7 @@
 // Public, secret-free discovery for AI agents. No people-data. No tokens.
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 
-export const ROOM_ORIGIN = "https://project-room-staging.getdasha.workers.dev";
+export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
 export const ROOM_PUBLIC_WWW = "https://www.getdasha.com/room";
 export const ROOM_PUBLIC_LOBBY = "https://lobby.getdasha.com/room";

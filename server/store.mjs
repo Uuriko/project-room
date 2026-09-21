@@ -2047,7 +2047,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         expiresAt: null, csrf: null, sessionBinding: null
       };
     }
-    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key");
+    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash
