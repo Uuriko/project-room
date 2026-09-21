@@ -611,13 +611,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
         rate(`google-start:${remoteAddress}`, 10);
         let slotToken = cookie(req, accountCookieName), expectedRevision;
+        if (slotToken) {
+          try { expectedRevision = store.accountSessionSlot(slotToken).sessionRevision; }
+          catch (error) {
+            // A stale browser cookie must not turn a fresh sign-in into a raw
+            // 401. Replace only an unauthenticated slot; preserve other errors.
+            if (error.code !== "unauthenticated") throw error;
+            slotToken = null;
+          }
+        }
         if (!slotToken) {
           const created = store.createAccountSessionSlot();
           slotToken = created.token;
           expectedRevision = created.session.sessionRevision;
           setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-        } else {
-          expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
         }
         const started = signIn.begin({ slotToken, expectedRevision });
         res.statusCode = 302;

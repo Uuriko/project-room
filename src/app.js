@@ -343,7 +343,7 @@ const client = new RoomClient({
       renderInvitation();
     }
     if (!pendingSignout) queueMicrotask(() => {
-      if (!$("#invitation-dialog").open) $("#access-key").focus({ preventScroll: true });
+      if (!$("#invitation-dialog").open) focusSignin();
     });
   }
 });
@@ -874,7 +874,7 @@ function setAuthKind(kind) {
   else url.searchParams.delete("account");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   configureAuthPanel();
-  $("#access-key").focus({ preventScroll: true });
+  focusSignin();
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1229,7 +1229,7 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
         : "This invitation was already accepted, but the Room could not be loaded. Refresh to try again; no new acceptance is needed.", true);
     setConnectionStatus(acceptanceConfirmed ? "Membership accepted · conversation not loaded" : "Invitation already accepted · Room not loaded");
     $("#auth-panel").hidden = false;
-    queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+    queueMicrotask(() => focusSignin());
   }
 }
 function selectOptions(selector, members, blank) {
@@ -2385,7 +2385,7 @@ async function submit(form, fn, { failureHint } = {}) {
   const current = () => operationId === submitOperationId
     && (form.id === "auth-form" || generation === client.generation);
   form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
-  const local = form.querySelector(".form-status");
+  const local = form.id === "auth-form" ? $("#auth-error") : form.querySelector(".form-status");
   if (form.id === "message-form") setComposerError("");
   else if (local) setFormStatus(local, "");
   try { await fn(current); }
@@ -2576,6 +2576,10 @@ $("#invitation-accept").addEventListener("click", async () => {
   }
 });
 $("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
+function focusSignin() {
+  const keyVisible = !$("#signin-extra").hidden && $("#key-signin").open;
+  $(keyVisible ? "#access-key" : "#google-signin").focus({ preventScroll: true });
+}
 function setSigninExtra(open) {
   const extra = $("#signin-extra"), toggle = $("#signin-more");
   if (!extra || !toggle) return;
@@ -2764,7 +2768,7 @@ $("#signout-button").addEventListener("click", async () => {
         configureAuthPanel();
         const ended = "Session ended; private drafts were cleared.";
         if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
-        if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+        if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
       }
     }
   }
@@ -4876,7 +4880,7 @@ shareLinksUI = installShareLinks({ client, accountClient,
   onOAuthStart: stashInviteForOAuth,
   onAccountSignin: mode => {
     // One sign-in controller and form, hosted in the invitation while needed.
-    $(mode ? "#join-account-methods" : "#signin-extra").append($("#auth-signin-ui"));
+    $(mode ? "#join-account-methods" : "#signin-extra").prepend($("#auth-signin-ui"));
     if (mode) signinUI.showPassword(mode);
     else clearPendingJoin(window.sessionStorage);
   },
@@ -4946,7 +4950,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
       setConnectionStatus("Not connected · account sign-in required");
       configureAuthPanel();
       $("#auth-panel").hidden = false;
-      if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+      if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
       return;
     }
     if (!requestedRoom) showAccountWorkspace();
@@ -5003,5 +5007,5 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;
-  if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+  if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
 });

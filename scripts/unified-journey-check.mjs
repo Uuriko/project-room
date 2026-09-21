@@ -34,7 +34,12 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await owner.getByRole("button", { name: "Enter room", exact: true }).click();
   await owner.locator("#main").waitFor({ state: "visible" });
 
-  await guest.goto(`${origin}/#join/${fixture.links.valid}`);
+  await guest.goto(origin);
+  await guest.locator("#guest-entry > summary").click();
+  assert.equal(await guest.locator("#signin-extra").isVisible(), false);
+  await guest.locator("#invite-link").fill(`${origin}/#join/${fixture.links.valid}`);
+  await guest.locator("#invite-redeem").click();
+  await guest.getByRole("button", { name: "Continue as guest", exact: true }).waitFor();
   await guest.locator("#join-link-name").fill("Unified test guest");
   await guest.locator("#join-link-submit").click();
   await guest.locator("#join-link-dialog").waitFor({ state: "hidden" });

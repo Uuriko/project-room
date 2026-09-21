@@ -38,10 +38,49 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+        <details id="guest-entry" class="invite-help"><summary>Continue as guest</summary>
+          <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
+          <div class="invite-row">
+            <label for="invite-link">Invitation link or code</label>
+            <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link or join code">
+            <button type="button" id="invite-redeem" class="button secondary">Open this invite link</button>
+          </div>
+          <p id="invite-error" class="status form-status" role="alert"></p>
+        </details>
         <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
+        <div id="signin-extra" hidden>
+        <div id="auth-signin-ui"></div>
+        <details id="key-signin" class="signin-support"><summary>Use a room or account key</summary>
+        <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
+          <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
+          <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
+        </div>
+        <p id="auth-kind-hint" class="form-hint">Use the key provided by your room owner or saved with your account.</p>
+        <form id="auth-form">
+          <label id="access-key-label" for="access-key">Room key</label>
+          <div class="key-field">
+            <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
+            <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
+          </div>
+          <button class="button primary" type="submit">Enter room</button>
+        </form>
+        </details>
+        <details id="signin-help" class="signin-support"><summary>Sign-in help &amp; saved sessions</summary>
+        <div id="session-restore" hidden>
+          <button type="button" id="reopen-last-room" class="button secondary" hidden>Reopen last room</button>
+          <button type="button" id="continue-account" class="button ghost" hidden>Continue to your rooms</button>
+          <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
+        </div>
+        <div class="access-help">
+          <p>Ask the room owner for an invite or key. No invite? Continue with Google above, then create your own room — your first room is free. Keep your key private.</p>
+          <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie and any remembered room.</p>
+        </div>
+        </details>
+        </div>
         <section id="join-agent" class="join-agent" aria-labelledby="join-agent-title">
           <h2 id="join-agent-title">Connect your agent</h2>
           <p class="form-hint">Paste this into Claude, Codex, Cursor or Grok.</p>
@@ -58,39 +97,7 @@
             </ul>
           </details>
         </section>
-        <div id="signin-extra" hidden>
-        <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
-          <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
-          <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
-        </div>
-        <p id="auth-kind-hint" class="form-hint">Room key: one room. Account key: Google or email across rooms.</p>
-        <form id="auth-form">
-          <label id="access-key-label" for="access-key">Room key</label>
-          <div class="key-field">
-            <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
-            <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
-          </div>
-          <button class="button primary" type="submit">Enter room</button>
-          <p id="auth-error" class="status form-status" role="alert"></p>
-        </form>
-        <details class="invite-help"><summary>Have an invite</summary>
-          <div class="invite-row">
-            <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link or join code">
-            <button type="button" id="invite-redeem" class="button secondary">Open this invite link</button>
-          </div>
-          <p id="invite-error" class="status form-status" role="alert"></p>
-        </details>
-        <div id="auth-signin-ui"></div>
-        <div id="session-restore" hidden>
-          <button type="button" id="reopen-last-room" class="button secondary" hidden>Reopen last room</button>
-          <button type="button" id="continue-account" class="button ghost" hidden>Continue to your rooms</button>
-          <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
-        </div>
-        <details class="access-help"><summary>Help</summary>
-          <p>Ask the room owner for an invite or key. No invite? Continue with Google above, then create your own room — your first room is free. Keep your key private.</p>
-          <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie and any remembered room.</p>
-        </details>
-        </div>
+
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>

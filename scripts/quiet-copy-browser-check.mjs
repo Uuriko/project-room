@@ -39,12 +39,16 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#session-hint").isVisible(), false);
     assert.equal(await page.locator("#session-restore").isVisible(), false);
     assert.equal(await page.locator("[data-oauth='github']").isVisible(), false);
+    await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await page.locator("#signin-more").click();
     await page.locator("#signin-extra").waitFor({ state: "visible" });
+    await page.screenshot({ path: `test-results/signin-${label}-more.png`, fullPage: true });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
-    assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), true);
+    assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), false);
+    assert.equal(await page.locator("#guest-entry > summary").isVisible(), true);
+    await page.locator("#key-signin > summary").click();
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
     await page.locator("#refresh-button").click();
@@ -52,7 +56,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
-    const help = page.locator(".access-help > summary");
+    const help = page.locator("#signin-help > summary");
     await help.focus(); await page.keyboard.press("Enter");
     const helpBody = page.locator(".access-help > p").first();
     assert.equal(await helpBody.isVisible(), true);
@@ -103,6 +107,7 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.equal(await page.locator("#signin-extra").isVisible(), false);
   await page.locator("#signin-more").click();
   await page.locator("#signin-extra").waitFor({ state: "visible" });
+  await page.locator("#key-signin > summary").click();
   assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);
   assert.equal(await page.getByRole("button", { name: "Open room", exact: true }).isVisible(), true);
