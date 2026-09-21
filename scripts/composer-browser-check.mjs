@@ -90,6 +90,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await addReaction.focus();
     await page.keyboard.press("Enter");
     assert.equal(await topic.locator('.reaction-options').isVisible(), true);
+    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: true });
+    await topic.locator('.reactions [data-reaction="thinking"]').waitFor();
+    assert.equal(await topic.locator('.reaction-options').isVisible(), true, "live changes preserve the open picker");
+    assert.equal(await addReaction.evaluate(el => el === document.activeElement), true, "live changes preserve picker focus");
+    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: false });
+    await topic.locator('.reactions [data-reaction="thinking"]').waitFor({ state: "detached" });
     await page.keyboard.press("Escape");
     assert.equal(await topic.locator('.reaction-options').isVisible(), false);
     await addReaction.click();

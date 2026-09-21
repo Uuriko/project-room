@@ -1602,6 +1602,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
+  const focusedReactionPicker = focused?.matches(".reaction-picker > summary");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
@@ -1660,7 +1661,9 @@ function renderMessages() {
                 continue;
               }
             }
+            const reactionPickerOpen = selector === ".message-links" && before.querySelector(".reaction-picker")?.open;
             before.innerHTML = after.innerHTML;
+            if (reactionPickerOpen && before.querySelector(".reaction-picker")) before.querySelector(".reaction-picker").open = true;
           }
         }
       }
@@ -1706,7 +1709,7 @@ function renderMessages() {
   }
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
-    const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
+    const replacement = focusedMessage ? row : focusedReactionPicker ? row?.querySelector(".reaction-picker > summary") : focusedFeedback ? row?.querySelector(".draft-state")
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
     const target = replacement?.closest(".reaction-picker:not([open])")?.querySelector("summary") || replacement;
     target?.focus({ preventScroll: true });
