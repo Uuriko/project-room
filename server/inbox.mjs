@@ -694,47 +694,6 @@ export class Inbox {
         return { contractVersion: 1, viewer: viewer(auth), threads, stitchedThreads, total: scoped.length };
       });
     }
-    // Per-channel SLA assessment for one built thread. Direction comes from
-    // the stored envelope: owner-sent is outbound, messages addressing the
-    // owner are inbound, everything else is skipped (no one owes a reply).
-    // Pure view over stored facts; never a stored flag.
-    slaAssessment(infosById, thread, sentIds) {
-      const addressOf = value => (value?.address ?? "").toLowerCase();
-      const directionOf = info => {
-        try {
-          if (info.adapter === "email") {
-            const envelope = readEmailEnvelope(info.envelope);
-            const own = new Set([envelope.connection.identity, ...(envelope.connection.aliases ?? [])].map(addressOf));
-            const from = addressOf(envelope.message.from);
-            if (own.has(from)) return "outbound";
-            return envelope.message.to.some(a => own.has(addressOf(a))) ? "inbound" : "skip";
-          }
-          if (info.adapter !== "synthetic") {
-            const envelope = readChannelEnvelope(info.envelope);
-            const identity = envelope.connection?.identity, from = envelope.message?.from;
-            if (from && identity && String(from.id) === String(identity.id)) return "outbound";
-            return inboxNeedsYou({ adapter: info.adapter, envelope: info.envelope }, sentIds) ? "inbound" : "skip";
-          }
-        } catch { /* malformed envelope: skip, never break the thread view */ }
-        return "skip";
-      };
-      const channelCounts = new Map(), messages = [];
-      for (const entry of thread.entries) {
-        const info = infosById.get(entry.message.id);
-        if (!info) continue;
-        const channel = info.adapter === "email" ? "email" : info.channel;
-        if (channel) channelCounts.set(channel, (channelCounts.get(channel) ?? 0) + 1);
-        const direction = directionOf(info);
-        if (direction === "skip") continue;
-        messages.push({ id: entry.message.id, occurredAt: entry.message.occurredAt, direction });
-      }
-      if (!messages.length || !channelCounts.size) return null;
-      const channel = [...channelCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-      try {
-        return assessThreadSla({ threadId: thread.threadId ?? "thread:" + messages[0].id,
-          channel, messages, now: Date.now(), targets: slaTargets });
-      } catch { return null; } // clock skew (now < latest inbound): omit rather than lie
-    }
     slaClockInput(infosById, thread, sentIds) {
       const addressOf = value => (value?.address ?? "").toLowerCase();
       const directionOf = info => {
