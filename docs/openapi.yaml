@@ -424,10 +424,15 @@ paths:
       summary: Create a multi-room agent identity
       description: >-
         Creates a stable cross-room agent identity and returns its secret once
-        (pri_...). The secret is stored only as a salted hash; it grants access
+        (pri_...). The secret is stored only as a hash; it grants access
         only to rooms the identity is linked into via identity-links. On the
         prefix-preserving www door the same handler is POST
-        /room/api/agent-identities.
+        /room/api/agent-identities. Optional recoverable:true requires an
+        Authorization Bearer credential generated and durably saved by the client
+        (pri_ followed by 43 base64url characters from 32 random bytes). Repeating
+        registration with that credential returns the same identity and duplicate:true,
+        without returning a secret. Rotation or revocation rejects the original
+        registration credential with 409 identity_credential_changed.
       security: []
       requestBody:
         required: true
@@ -438,6 +443,7 @@ paths:
               required: [displayName]
               properties:
                 displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity)' }
+                recoverable: { type: boolean, const: true, description: "Use the saved Bearer credential for retryable registration" }
       responses:
         '201':
           description: Identity created
@@ -2875,7 +2881,10 @@ paths:
         codes answer alike where it matters (404 invite_unavailable); the
         code is burnt on success. 20 per address per minute. On the
         prefix-preserving www door the same handler is POST
-        /room/api/agent-invites/redeem.
+        /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
+        agent identity reuses that identity, returns no secret, and allows that same
+        identity to recover a consumed invite while its membership remains active.
+        Recovery does not emit another membership event or widen the current grant.
       security: []
       requestBody:
         required: true
@@ -2900,10 +2909,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [identityId, secret, roomId, memberId, displayName, permissions, next]
+                required: [identityId, roomId, memberId, displayName, permissions, next]
                 properties:
                   identityId: { type: string }
-                  secret: { type: string, description: Shown once; the Bearer token for all later calls }
+                  secret: { type: string, description: Returned only for anonymous enrollment; the Bearer token for later calls }
                   roomId: { type: string }
                   memberId: { type: string }
                   displayName: { type: string }

@@ -1,5 +1,5 @@
 import { canInviteMembers } from "./events.js";
-import { publicRoomDeepLink } from "./room-deep-link.js";
+import { humanJoinShareBase } from "./room-deep-link.js";
 
 const $ = selector => document.querySelector(selector);
 
@@ -15,6 +15,14 @@ export function inviteMintBody(profile, displayName) {
   if (profile === "collaborate") return { permissions: [...COLLABORATE_PERMISSIONS], ...extra };
   if (profile === "contribute" || profile === "review" || profile === "chat") return { profile, ...extra };
   throw new Error("Choose contribute, collaborate, or review.");
+}
+
+export function agentInviteHandoff(code, locationLike = globalThis.location) {
+  if (!/^RM-[A-Z0-9]+$/.test(code)) throw new Error("Invalid agent invite");
+  const base = humanJoinShareBase(locationLike), url = new URL(base);
+  if (url.username || url.password || url.search || url.hash || !["http:", "https:"].includes(url.protocol) || !["", "/", "/room"].includes(url.pathname)) throw new Error("Invalid Room address");
+  const link = `${base}#agent-invite/${code}`;
+  return { link, text: `Join me in Project Room: ${link}\nFrom a Project Room runtime checkout, run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(link)} ./room-connection --name "My agent"\nReview the room and permissions, then repeat with --accept. Keep and reuse room-connection to resume or join another room. No human account is required. This connects room access; a running host is needed to answer requests.` };
 }
 
 export function installAgentInvites({ client, getState, getSession }) {
@@ -43,6 +51,7 @@ export function installAgentInvites({ client, getState, getSession }) {
 
   function resetForm() {
     minted = null;
+    const instructions = dialog.querySelector(".agent-invite-instructions"); if (instructions) instructions.open = false;
     form.reset();
     if ($("#agent-invite-profile")) $("#agent-invite-profile").value = "contribute";
     if ($("#agent-invite-code")) $("#agent-invite-code").value = "";
@@ -66,12 +75,12 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (!owns() || !minted || copying) return;
     copying = true; render();
     try {
-      const write = navigator.clipboard?.writeText?.(minted.code);
+      const write = navigator.clipboard?.writeText?.(minted.handoff.text);
       if (!write) throw new Error("clipboard");
       await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 800))]);
-      if (owns()) status("Copied. Shown once — peer redeem-invite. No Room key in chat.");
+      if (owns()) status("Copied connection instructions. Share them with your agent.");
     } catch {
-      if (owns()) status("Select and copy the code. Shown once.");
+      if (owns()) status("Select and copy the invite link and instructions.");
     } finally { copying = false; render(); }
   }
 
@@ -88,15 +97,10 @@ export function installAgentInvites({ client, getState, getSession }) {
       if (typeof created?.code !== "string" || !created.code.startsWith("RM-") || created.roomId !== getSession().roomId) {
         throw new Error("Invite could not be confirmed.");
       }
-      minted = created;
-      if ($("#agent-invite-code")) $("#agent-invite-code").value = created.code;
-      if ($("#agent-invite-share")) {
-        const link = publicRoomDeepLink(created.roomId);
-        $("#agent-invite-share").textContent = link
-          ? `Peer redeem-invite with this code. Deep-link: ${link}`
-          : "Peer redeem-invite with this code.";
-      }
-      status("Invite minted. Copy it now — the code is shown once. Agent-safe only.");
+      minted = { ...created, handoff: agentInviteHandoff(created.code) };
+      if ($("#agent-invite-code")) $("#agent-invite-code").value = minted.handoff.link;
+      if ($("#agent-invite-share")) $("#agent-invite-share").textContent = minted.handoff.text;
+      status("Invite ready. Copy and give it to your agent.");
     } catch (error) {
       if (!owns()) return;
       status(typeof error.message === "string" && error.message.length <= 180
@@ -115,7 +119,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     $("#agent-invite-profile")?.focus();
   });
   $("#agent-invite-close")?.addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { if (!busy) { minted = null; if ($("#agent-invite-code")) $("#agent-invite-code").value = ""; } });
+  dialog.addEventListener("close", () => { if (!busy) { minted = null; if ($("#agent-invite-code")) $("#agent-invite-code").value = ""; if ($("#agent-invite-share")) $("#agent-invite-share").textContent = ""; } });
   form.addEventListener("submit", mint);
   $("#agent-invite-copy")?.addEventListener("click", () => { void copyCode(); });
   $("#agent-invite-another")?.addEventListener("click", () => { if (!busy) resetForm(); });

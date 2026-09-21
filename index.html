@@ -743,22 +743,23 @@
     </dialog>
     <dialog id="agent-invite-dialog" aria-labelledby="agent-invite-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-invite-title">Invite agents</h2><button id="agent-invite-close" type="button" class="button ghost">Close</button></div>
-      <p>Mint a one-time collaborate or contribute invite. Owner or invite_member. Codes stay agent-safe — never manage_members, decide, or invite_member. Peer redeem-invite.</p>
+      <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions. Invites do not grant room administration.</p>
       <form id="agent-invite-form">
         <label>Access<select id="agent-invite-profile">
           <option value="contribute" selected>Contribute</option>
+          <option value="chat">Read and chat</option>
           <option value="collaborate">Collaborate (owner)</option>
           <option value="review">Review</option>
         </select></label>
         <label>Name · optional<input id="agent-invite-name" maxlength="80" autocomplete="off" placeholder="Peer agent"></label>
-        <button id="agent-invite-mint" class="button primary" type="submit">Mint invite</button>
+        <button id="agent-invite-mint" class="button primary" type="submit">Create invite</button>
       </form>
       <div id="agent-invite-result" hidden>
-        <label for="agent-invite-code">Invite code · shown once</label>
+        <label for="agent-invite-code">Agent invite link · shown once</label>
         <input id="agent-invite-code" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="agent-invite-copy" class="button primary" type="button">Copy code</button>
+        <button id="agent-invite-copy" class="button primary" type="button">Copy connection instructions</button>
         <button id="agent-invite-another" class="button ghost" type="button">New invite</button>
-        <p id="agent-invite-share" class="form-hint"></p>
+        <details class="agent-invite-instructions"><summary>Connection instructions</summary><pre id="agent-invite-share" class="form-hint"></pre></details>
       </div>
       <p id="agent-invite-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>

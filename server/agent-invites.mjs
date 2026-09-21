@@ -203,7 +203,9 @@ export class AgentInvites {
 
   // Unauthenticated: the code is the bearer credential. Burns the code,
   // mints an identity, and links it as an agent member — all atomically.
-  redeem(code, { displayName } = {}) {
+  redeem(code, { displayName, identitySecret = null } = {}) {
+    const existingIdentity = identitySecret === null ? null : this.store.identities.resolveGlobalIdentitySecret(identitySecret);
+    if (identitySecret !== null && !existingIdentity) fail(401, "unauthenticated", "Active identity credential required");
     // Legacy codes never contain I/L/O, so folding the confusables is safe
     // for both formats.
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
@@ -215,6 +217,13 @@ export class AgentInvites {
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
       if (!row) fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+      if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
+        const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
+        const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
+        if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+        return { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
+          displayName: member.displayName, permissions: member.permissions, duplicate: true, next: redeemNext(row.room_id, member.displayName) };
+      }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
       if (now >= row.expires_at) fail(410, "invite_expired", "Invite code expired");
@@ -231,7 +240,9 @@ export class AgentInvites {
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
         : row.display_name || DEFAULT_INVITE_NAME;
       if (name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
-      const identity = this.store.identities.create(name);
+      const identity = existingIdentity ?? this.store.identities.create(name);
+      if (this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identity.identityId))
+        fail(409, "identity_already_linked", "Identity already joined; reuse its saved connection");
       const memberId = identity.identityId;
       if (!MEMBER_ID_PATTERN.test(memberId)) fail(500, "invite_failed", "Generated member id is invalid");
       const permissions = JSON.parse(row.permissions_json);
@@ -271,7 +282,7 @@ export class AgentInvites {
       // response carries the same machine-readable next[] shape as signup
       // (RC-2026-09-18-018), tailored to the invite path, so a redeemed agent
       // knows its first moves without asking a human.
-      return { identityId: identity.identityId, secret: identity.secret, roomId: row.room_id, memberId, displayName: name, permissions, next: redeemNext(row.room_id, name) };
+      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { secret: identity.secret }), roomId: row.room_id, memberId, displayName: name, permissions, next: redeemNext(row.room_id, name) };
     });
   }
 

@@ -359,9 +359,9 @@ test("CLI: owner mints a code, a new AI redeems it and connects", async t => {
   assert.equal(checked.json.status, "verified");
   assert.equal(checked.json.memberId, redeemed.json.memberId);
   assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
-  assert.ok(checked.json.rungs.every(rung => rung.ok));
+  assert.ok(checked.json.rungs.filter(rung => rung.name !== "write").every(rung => rung.ok));
   assert.match(checked.json.rungs[0].detail, /accept_work,complete_work/);
-  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
+  assert.equal(checked.json.summary, "2 checks verified in #commons; write, listening and execution not tested");
   // The burned code cannot be revoked (already used) and cannot be reused.
   const revokeUsed = await cli(origin, ["invite-code-revoke", minted.json.inviteId], ownerEnv);
   assert.notEqual(revokeUsed.status, 0);
@@ -552,7 +552,7 @@ async function ladderAgent(t, origin, ownerKey) {
   return { ROOM_AGENT_CONFIG: join(agentDir, "agent") };
 }
 
-test("check runs the verification ladder: 3/3 for a fully plugged-in agent", async t => {
+test("check verifies access and reads without claiming write or execution readiness", async t => {
   const { origin, ownerKey } = await serve(t);
   const agentEnv = await ladderAgent(t, origin, ownerKey);
   const checked = await cliJson(origin, ["check"], agentEnv);
@@ -560,9 +560,9 @@ test("check runs the verification ladder: 3/3 for a fully plugged-in agent", asy
   assert.equal(checked.json.type, "agent_connection_ladder");
   assert.equal(checked.json.status, "verified");
   assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
-  assert.ok(checked.json.rungs.every(rung => rung.ok), JSON.stringify(checked.json.rungs));
+  assert.ok(checked.json.rungs.filter(rung => rung.name !== "write").every(rung => rung.ok), JSON.stringify(checked.json.rungs));
   assert.match(checked.json.rungs[1].detail, /roster readable/);
-  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
+  assert.equal(checked.json.summary, "2 checks verified in #commons; write, listening and execution not tested");
 });
 
 test("check ladder stops at the first failing rung and names the doctor repair", async t => {
@@ -594,7 +594,9 @@ test("check ladder write probe is draft-only: wrote=false, nothing sent", async 
   assert.equal(checked.status, 0, checked.stderr);
   const write = checked.json.rungs.find(rung => rung.name === "write");
   assert.ok(write, "expected a write rung");
-  assert.equal(write.ok, true);
+  assert.equal(write.ok, null);
+  assert.equal(write.state, "not_tested");
+  assert.equal(checked.json.readiness.execution, "not_tested");
   assert.equal(write.wrote, false, "the write probe must never write to a real room");
   assert.match(write.detail, /draft-only/);
   assert.match(write.detail, /never sent/);

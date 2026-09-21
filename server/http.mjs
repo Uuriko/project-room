@@ -2124,8 +2124,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
         rate(`identity-create:${remoteAddress}`, 30);
         const data = await body(req);
-        if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
-        return json(res, 201, store.identities.create(data.displayName));
+        if (!(exact(data, ["displayName"]) || exact(data, ["displayName", "recoverable"]) && data.recoverable === true)
+          || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
+        const registrationCredential = data.recoverable ? bearer(req) : undefined;
+        if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
+        return json(res, 201, store.identities.create(data.displayName, { secret: registrationCredential }));
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
@@ -2133,7 +2136,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
-        return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
+        return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) }));
       }
       // Agent invite preview: read-only consent data for the pre-redemption
       // review screen. Unauthenticated (the code is the bearer credential);

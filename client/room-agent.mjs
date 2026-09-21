@@ -170,12 +170,14 @@ function requireIdentitySecret(secret) {
 
 // Mint an identity without a room credential; store the returned secret securely.
 export async function createAgentIdentity(origin, displayName, options = {}) {
-  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName } }, options);
+  const value = await discoveryRequest(origin, "/api/agent-identities", { method: "POST", body: { displayName, ...(options.identitySecret ? { recoverable: true } : {}) }, token: options.identitySecret }, options);
+  if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
   return value;
 }
 export async function redeemAgentInvite(origin, code, displayName, options = {}) {
-  const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST", body: { code, displayName } }, options);
+  const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST", body: { code, displayName }, token: options.identitySecret }, options);
+  if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string" || typeof value?.memberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
   return value;

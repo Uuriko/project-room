@@ -1004,10 +1004,9 @@ function advertiseCapabilities(state, incoming) {
 function recordAccessRequest(state, incoming) {
   requireFields(incoming.data, ["requestId", "identityId", "displayName"]);
   // The ask, not the grant: the owner chooses the final permissions at
-  // decision time. The envelope already bounds the array shape; here it
-  // must simply be non-empty.
+  // decision time. An empty list requests basic read/chat membership.
   const permissions = incoming.data.permissions;
-  if (!Array.isArray(permissions) || permissions.length === 0) {
+  if (!Array.isArray(permissions)) {
     throw new Error("Event data missing permissions");
   }
 }

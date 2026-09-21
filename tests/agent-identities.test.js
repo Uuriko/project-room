@@ -208,9 +208,9 @@ test("CLI plug-in loop: a new AI goes from no credential to connected member", a
   assert.equal(checked.json.status, "verified");
   assert.equal(checked.json.memberId, identityId);
   assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
-  assert.ok(checked.json.rungs.every(rung => rung.ok));
+  assert.ok(checked.json.rungs.filter(rung => rung.name !== "write").every(rung => rung.ok));
   assert.match(checked.json.rungs[0].detail, /accept_work,complete_work/);
-  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
+  assert.equal(checked.json.summary, "2 checks verified in #commons; write, listening and execution not tested");
   const said = await cli(origin, ["status", "plugged in"], agentEnv);
   assert.equal(said.status, 0, said.stderr);
   const oriented = await cli(origin, ["orient"], agentEnv);
