@@ -302,7 +302,7 @@ export function workItemSessionContract() {
       "started_at", "attempt_count", "budget", "spend_cents", "round_count", "tool_calls", "suspended_by", "attempts"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
-    workStateSeparate: true,
+    workStateSeparate: false,
     compute: false,
     slackWithBotsUi: false,
     peopleData: false,
@@ -380,6 +380,9 @@ export function applySessionFields(item, incoming) {
     (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
       attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
       environment, limits: budget, endedAt: null, outcome: null, outputs: null });
+    // #603: claiming (set_status: processing) automatically moves the work
+    // item to accepted. The lifecycle and session ladders are unified.
+    if (item.state === "proposed") item.state = "accepted";
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
@@ -416,6 +419,9 @@ export function applySessionFields(item, incoming) {
       item.suspended_by = null;
       item.round_count = 0;
     }
+    // #603: first active heartbeat automatically moves the work item to
+    // working (started). The lifecycle and session ladders are unified.
+    if (next === SESSION_STATUSES.ACTIVE && item.state === "accepted") item.state = "working";
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STOP_REQUESTED) {
@@ -443,6 +449,9 @@ export function applySessionFields(item, incoming) {
     // G6: capture measured usage at close; a later attempt resets item spend.
     if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs;
       openAttempt.usageCents = Number.isSafeInteger(item.spend_cents) ? item.spend_cents : null; }
+    // #603: release/expiry without completion moves the work item back to
+    // proposed. Completed work stays completed.
+    if ((item.state === "accepted" || item.state === "working") && next !== "done") item.state = "proposed";
     return;
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);
