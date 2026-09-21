@@ -140,3 +140,28 @@ test("claim lease expiring within 24h surfaces; distant leases stay quiet", t =>
   assert.equal(items[0].severity, "info");
   assert.match(items[0].detail, /2h/);
 });
+
+test("report carries the viewer echo the browser client requires (no session kill)", async t => {
+  // Regression for the #744 Cloudflare browser failure: the rollup response
+  // lacked viewerId/viewerAccountId/viewerAuthEpoch/viewerSessionBinding, so
+  // RoomClient.needsAttention()'s ownsResponse check failed and endAccess()
+  // destroyed the owner's session right after login, re-hiding the invite button.
+  const f = setup(t);
+  const { RoomClient } = await import("../src/client.js");
+  const created = f.store.createSession(f.keys.owner);
+  const report = attentionReport({ store: f.store, accessRequests: f.accessRequests }, created.token, "commons");
+  const auth = created.session;
+  assert.equal(report.viewerId, "owner");
+  assert.equal(typeof report.viewerSessionBinding, "string");
+  const session = {
+    authMode: "room",
+    account: { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch },
+    member: auth.member,
+    roomId: "commons",
+    csrf: auth.csrf,
+    sessionBinding: auth.sessionBinding,
+    sessionRevision: auth.sessionRevision ?? null,
+  };
+  const client = new RoomClient({});
+  assert.equal(client.ownsResponse(report, session), true, "the rollup must survive the client identity check");
+});

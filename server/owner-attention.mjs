@@ -127,6 +127,14 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
 
   return Object.freeze({
     roomId,
+    // Viewer echo for the client's ownsResponse identity check: without these
+    // the browser client treats the rollup as a session change and ends access
+    // (which hides owner UI like the invite button). Mirrors store.mjs sessionView.
+    viewerId: auth.member.id,
+    viewerAccountId: auth.account?.id ?? null,
+    viewerAuthEpoch: auth.account?.authEpoch ?? null,
+    viewerSessionBinding: auth.sessionBinding,
+    viewerSessionRevision: auth.sessionRevision ?? null,
     evaluatedThrough: room.sequence,
     itemCount: items.length,
     items: Object.freeze(items.slice(0, MAX_ITEMS)),
