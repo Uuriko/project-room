@@ -3039,16 +3039,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Cheap guard first: eventsAfter runs on every SSE pump (250ms per
     // connection), so the common no-expired-rows case must stay a single
     // indexed read, never a write transaction.
-    // Defensive: if the mention_states table doesn't exist (e.g. a test
-    // fixture from before #658), treat as nothing to flip rather than
-    // throwing and breaking event listing.
+    // Defensive: a database from before the #658 schema has no mention_states
+    // table; treat that (and only that) as nothing-to-flip rather than
+    // throwing and breaking event listing. Any other error still throws.
     let expired;
     try {
       expired = this.db.prepare(
         `SELECT 1 FROM mention_states
          WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
       ).get(roomId, nowMs);
-    } catch {
+    } catch (error) {
+      if (!/no such table/i.test(error?.message ?? "")) throw error;
       return 0;
     }
     if (!expired) return 0;
