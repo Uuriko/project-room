@@ -78,6 +78,25 @@ write, never reconstruct from prose.
   blindly. Surface the failure to John in the digest with the verb, the
   error, and the last good watermark — then wait for his call.
 
+## 5b. Stale-script guard (fail-closed)
+
+Enforcer verbs (`rebuild`, `sweep`, `receipts-scan`, `rotation-check`,
+`metrics`) refuse to run — exit 1, no board writes, no commits — when the
+running `scripts/room` is not byte-identical to `origin/main`'s copy.
+This is the 2026-09-20 fix for two incidents: the stale `scripts/room`
+checked into the `room-state` automation branch proposed a phantom
+strike-two on already-completed RC-2026-09-19-067, and caused an
+erroneous strike-one at 07:28 UTC.
+
+- The tick's fresh clone of main passes the guard by construction.
+- **Borrow pattern** (when you must run from another branch, e.g. the
+  `room-state` branch during a manual rebuild): `git checkout main --
+  scripts/room`, run the verb, then `git restore --staged scripts/room
+  && git checkout -- scripts/room` before committing — the branch
+  convention is `ROOM-STATE.md` only.
+- Escape hatch for development and tests only:
+  `ROOM_ENFORCER_ALLOW_STALE=1`. The cron never sets it.
+
 ## 6. Config/state split
 
 - **Config** = the cron job's instructions (the `swarm-room-watch` body).
