@@ -31,7 +31,7 @@ const access = (actorId, memberId, permissions, active = false) => event({ type:
   data: { memberId, expectedMemberRevision: 0, permissions, active } });
 
 test("reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 35);
+  assert.equal(STORE_SCHEMA_VERSION, 36);
   assert.deepEqual([...ROOM_KINDS], ["personal", "organization"]);
   assert.ok(COMMAND_TYPES.includes(T.ROOM_ARCHIVED)); assert.equal(classifyCommand(T.ROOM_ARCHIVED), "act");
   const state = seed("r").reduce(applyEvent, emptyRoomState());

@@ -16,7 +16,7 @@ test("rebuilt service opens deployed schema v33 and converges it without data lo
   const projection = seed.store.room("commons").state;
   seed.store.close();
   const db = new DatabaseSync(filename);
-  for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v35_*'").all()) db.exec(`DROP TRIGGER ${row.name}`);
+  for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v3[56]_*'").all()) db.exec(`DROP TRIGGER ${row.name}`);
   for (const { sql } of fenceDefinitions(33)) db.exec(sql);
   db.exec("PRAGMA user_version=33");
   db.close();
@@ -24,7 +24,7 @@ test("rebuilt service opens deployed schema v33 and converges it without data lo
   const current = new RoomStore(filename);
   t.after(() => { current.close(); rmSync(seed.directory, { recursive: true, force: true }); });
   assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, STORE_SCHEMA_VERSION);
-  assert.equal(STORE_SCHEMA_VERSION, 35);
+  assert.equal(STORE_SCHEMA_VERSION, 36);
   assert.deepEqual(current.room("commons").state, projection);
   assert.ok(current.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get());
   assert.ok(current.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_attachments'").get());

@@ -98,7 +98,9 @@ export class Moderation {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
       const room = this.store.room(roomId);
-      if (auth.member.id !== room.state.room.ownerId || auth.member.kind !== "human") fail(403, "owner_required", "Only the room owner can read reports");
+      // #643: owner-by-id — the owner capability follows the owner identity,
+      // not the member kind; an agent owner may review reports. Owner-only.
+      if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
       const messages = new Map(room.state.messages.map(m => [m.id, m]));
       const reports = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? ORDER BY created_at DESC, report_id").all(roomId).map(row => {
         const message = messages.get(row.message_id);

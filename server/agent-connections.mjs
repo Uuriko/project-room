@@ -51,8 +51,17 @@ export class AgentConnections {
   row(roomId, memberId) { return this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? AND member_id=?").get(roomId, memberId); }
   owner(token, roomId, binding) {
     const auth = this.store.authenticate(token, roomId, binding);
-    if (!auth.account || auth.kind !== "session" || auth.member.kind !== "human"
-      || auth.member.id !== this.store.room(roomId).state.room.ownerId || !auth.member.permissions.includes("manage_members")) {
+    // #597/#643: owner-by-id — the owner capability follows the owner identity,
+    // not the credential flavor: an agent owner manages connections on their identity
+    // bearer. Human owners retain the original browser-session boundary (session +
+    // account required) — a raw access key must not mint agent credentials.
+    // The mutation path additionally requires a signed-in account session —
+    // connection sponsorship is account-bound by schema.
+    if (auth.member?.id !== this.store.room(roomId).state.room.ownerId
+      || !auth.member.permissions.includes("manage_members")) {
+      fail(403, "owner_required", "Only the room owner can manage agent connections");
+    }
+    if (auth.member.kind === "human" && (!auth.account || auth.kind !== "session")) {
       fail(403, "owner_required", "Only the signed-in room owner can manage agent connections");
     }
     return auth;
@@ -125,6 +134,11 @@ export class AgentConnections {
     const request = this.validate(details), requestJSON = JSON.stringify(request), fingerprint = hash(requestJSON);
     return this.store.transaction(() => {
       const auth = this.owner(token, roomId, binding);
+      // Connection sponsorship is account-bound by schema (sponsor_account_id
+      // and actor_account_id are NOT NULL REFERENCES accounts(id)): an
+      // accountless owner — e.g. an agent identity bearer — may list
+      // connections and export diagnostics, but cannot sponsor new ones.
+      if (!auth.account) fail(403, "account_session_required", "Creating agent connections requires a signed-in account session");
       const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, keyHash, expiresAt } = request;
       const prior = this.db.prepare("SELECT * FROM agent_connection_operations WHERE room_id=? AND actor_account_id=? AND request_id=?").get(roomId, auth.account.id, requestId);
       if (prior) {

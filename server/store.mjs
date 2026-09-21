@@ -277,7 +277,11 @@ const invitationSchema = `
       OR
       (status='accepted' AND revision=1 AND accepted_at IS NOT NULL AND accepted_by_account_id=intended_account_id AND redemption_id IS NOT NULL AND joined_event_id IS NOT NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
       OR
-      (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_account_id IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+      (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+      -- v36: revoked_by_account_id is NULL when the revoking owner acted on
+      -- an accountless identity bearer (agent-owned room); the member id and
+      -- the journal audit event carry the authority, mirroring the v35
+      -- agent-issuer pattern for issuer_account_id.
     )
   );
   CREATE UNIQUE INDEX IF NOT EXISTS membership_invitation_issue_request ON membership_invitations(room_id,issuer_account_id,issue_request_id);
@@ -695,6 +699,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Fresh databases are created in the v35 shape already; skip the
       // rebuild for them.
       if (version > 0 && version < 35) this.migrateShareLinkAgentIssuerV35();
+      // v36: the revoked-state CHECK goes nullable for revoked_by_account_id
+      // so an agent room owner (no account) can revoke invitations, not just
+      // issue them (#597). SQLite cannot relax a CHECK in place, so the
+      // invitation tables are rebuilt. Fresh databases are created in the
+      // v36 shape already; skip the rebuild for them.
+      if (version > 0 && version < 36) this.migrateInvitationAgentRevokeV36();
       // Short human invite codes alias share_links. After the v35 rebuild so
       // the FK targets the live table. Purely additive, no version bump,
       // intentionally outside the writer fence.
@@ -990,6 +1000,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       db.exec(shareLinkSchema);
       db.exec(invitationSchema);
       this.storagePlatform.setVersion(this.db, 35);
+    });
+  }
+  migrateInvitationAgentRevokeV36() {
+    // v36: agent-owner invitation revocation. The revoked-state CHECK required
+    // revoked_by_account_id IS NOT NULL, so an accountless agent owner could
+    // issue invitations (v35) but never revoke them — half of the owner
+    // invitation-administration capability (#597). SQLite cannot relax a CHECK
+    // in place: rebuild membership_invitations with the relaxed constraint.
+    // The revoker is recorded honestly: revoked_by_account_id is NULL only
+    // when the revoking owner acted on an accountless identity bearer, with
+    // the member id and the journal audit event carrying the authority
+    // (mirrors the v35 agent-issuer pattern). Children are rebuilt so their
+    // FKs target the live parent table, following
+    // migrateShareLinkAgentIssuerV35: with PRAGMA foreign_keys=ON, ALTER TABLE
+    // RENAME rewrites child FK targets to the legacy name, so the final drops
+    // must come last and children drop before the parent.
+    this.transaction(() => {
+      const db = this.db;
+      db.exec("ALTER TABLE share_link_joins RENAME TO share_link_joins_legacy_v35");
+      db.exec("ALTER TABLE membership_invitation_events RENAME TO membership_invitation_events_legacy_v35");
+      db.exec("ALTER TABLE membership_invitation_journal RENAME TO membership_invitation_journal_legacy_v35");
+      db.exec("ALTER TABLE membership_invitations RENAME TO membership_invitations_legacy_v35");
+      db.exec(invitationSchema); // Standalone block: exact tables + triggers, with the v36 CHECK.
+      db.exec("INSERT INTO membership_invitations SELECT * FROM membership_invitations_legacy_v35");
+      db.exec("INSERT INTO membership_invitation_events SELECT * FROM membership_invitation_events_legacy_v35");
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_update");
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_delete");
+      db.exec(invitationJournalSchema); // Standalone block: exact table + triggers.
+      db.exec("INSERT INTO membership_invitation_journal SELECT * FROM membership_invitation_journal_legacy_v35");
+      db.exec(`CREATE TABLE share_link_joins (
+        link_id TEXT NOT NULL REFERENCES share_links(id), invitation_id TEXT NOT NULL UNIQUE REFERENCES membership_invitations(id),
+        slot_hash TEXT NOT NULL REFERENCES account_session_slots(hash), redemption_id TEXT NOT NULL,
+        session_revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+        PRIMARY KEY(link_id,slot_hash,redemption_id)
+      )`);
+      db.exec("INSERT INTO share_link_joins SELECT * FROM share_link_joins_legacy_v35");
+      // Children first, then the parent nothing references anymore.
+      db.exec("DROP TABLE share_link_joins_legacy_v35");
+      db.exec("DROP TABLE membership_invitation_events_legacy_v35");
+      db.exec("DROP TABLE membership_invitation_journal_legacy_v35");
+      db.exec("DROP TABLE membership_invitations_legacy_v35");
+      // Recreate every index/trigger the renames carried away (all IF NOT EXISTS).
+      db.exec(invitationSchema);
+      this.storagePlatform.setVersion(this.db, 36);
     });
   }
   appendInvitationJournal(record, kind) {
@@ -1654,6 +1708,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   bindHumanAccount(roomId, memberId, accountId) {
     return this.transaction(() => this.ensureHumanAccountBinding(roomId, memberId, accountId));
   }
+  // #643: invitation-administration authentication. The room owner acts on any
+  // credential (share-links-style owner-capability exemption); everyone else
+  // must present an account session, as before. An accountless owner — e.g.
+  // an agent identity bearer — is returned with account null, and issuance /
+  // stats / revocation record the owner identity honestly (schema v36).
+  authenticateInvitationAdmin(token, roomId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const ownerId = this.room(roomId).state.room.ownerId;
+    if (auth.member?.id === ownerId) return auth;
+    if (!auth.account || auth.kind !== "session") fail(403, "account_session_required", "Invitation administration requires an account browser session");
+    return auth;
+  }
   issueInvitation(accountSessionToken, roomId, details) {
     const {
       requestId, token, intendedAccountId, intendedMemberId, displayName, role, expiresAt,
@@ -1668,15 +1734,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(expectedIssuerMemberRevision) || expectedIssuerMemberRevision < 0) {
       fail(422, "invalid_invitation", "Invitation requires an expiry and current issuer member revision");
     }
-    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    // The session binding is required for account sessions; an accountless
+    // owner bearer carries no session to bind.
+    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
     const tokenHash = hash(token);
     const permissions = [...INVITATION_ROLES[role]];
     const fingerprint = hash(canonical({ roomId, requestId, tokenHash, intendedAccountId, intendedMemberId, displayName: displayName.trim(), role, permissions, expiresAt, expectedIssuerMemberRevision }));
     return this.transaction(() => {
-      const issuer = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      // #643: the room owner issues on any credential; anyone else needs an
+      // account session with manage_members, as before.
+      const issuer = this.authenticateInvitationAdmin(accountSessionToken, roomId, expectedSessionBinding ?? null);
+      if (issuer.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!issuer.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
-      const prior = this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?")
-        .get(roomId, issuer.account.id, requestId);
+      // Idempotency scope follows the issuer identity: account-scoped for
+      // account sessions, member-scoped for an accountless owner (partial
+      // unique index membership_invitation_agent_issue_request).
+      const prior = issuer.account
+        ? this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?").get(roomId, issuer.account.id, requestId)
+        : this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id IS NULL AND issuer_member_id=? AND issue_request_id=?").get(roomId, issuer.member.id, requestId);
       if (prior) {
         this.verifyInvitationRecord(prior.id);
         if (prior.issue_fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Invitation request ID already used for different scope");
@@ -1706,11 +1781,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ) VALUES(?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,0,'pending',?,?)`).run(
         invitationId, tokenHash, roomId, intendedAccountId, intendedMemberId, displayName.trim(), role, JSON.stringify(permissions),
         INVITATION_ROLE_POLICY_VERSION,
-        issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.member.revision, requestId, fingerprint, now, expiresAt
+        // v35/v36: an accountless owner is recorded honestly with null
+        // account/epoch, never a fabricated account id.
+        issuer.account?.id ?? null, issuer.member.id, issuer.account?.authEpoch ?? null, issuer.member.revision, requestId, fingerprint, now, expiresAt
       );
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
-      ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.sessionRevision, now);
+      ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account?.id ?? null, issuer.member.id, issuer.account?.authEpoch ?? null, issuer.sessionRevision ?? 0, now);
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.appendInvitationJournal(row, "issued");
       return { invitation: invitationView(row, now, { includeScope: true }), duplicate: false };
@@ -1764,9 +1841,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Round-2 #108: invite-link analytics. Aggregate conversion stats for the
   // room's invitations, restricted to members who can manage memberships.
-  invitationStats(accountSessionToken, roomId, expectedSessionBinding) {
+  invitationStats(token, roomId, expectedSessionBinding) {
     return this.readTransaction(() => {
-      const actor = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      // #643: the room owner reads stats on any credential; anyone else
+      // needs an account session with manage_members, as before.
+      const actor = this.authenticateInvitationAdmin(token, roomId, expectedSessionBinding ?? null);
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Membership administration grant required");
       const rows = this.db.prepare("SELECT status,expires_at,created_at,accepted_at FROM membership_invitations WHERE room_id=?").all(roomId);
       const now = this.now();
@@ -1787,23 +1866,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
     }
-    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    // The session binding is required for account sessions; an accountless
+    // owner bearer carries no session to bind.
+    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
     if (expectedRoomId !== null && !validId(expectedRoomId)) fail(422, "invalid_room", "Invalid Room id");
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       if (!row || (expectedRoomId !== null && row.room_id !== expectedRoomId)) fail(404, "invitation_not_found", "Invitation not found in this Room");
-      const actor = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+      // #643: the room owner revokes on any credential; anyone else needs an
+      // account session with manage_members, as before.
+      const actor = this.authenticateInvitationAdmin(accountSessionToken, row.room_id, expectedSessionBinding ?? null);
+      if (actor.account && typeof expectedSessionBinding !== "string") fail(422, "invalid_session_binding", "Current account session binding required");
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
       this.verifyInvitationRecord(row.id);
       if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
       if (row.status !== "pending") fail(409, "invitation_not_pending", "Only a pending invitation can be revoked");
       const revision = row.revision + 1, now = this.now();
+      // v36: an accountless owner revoker is recorded honestly with a null
+      // account, never a fabricated account id.
       const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
-        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, actor.account.id, actor.member.id, reason.trim(), invitationId, expectedRevision).changes;
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, actor.account?.id ?? null, actor.member.id, reason.trim(), invitationId, expectedRevision).changes;
       if (changed !== 1) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
-      ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account.id, actor.member.id, actor.account.authEpoch, actor.sessionRevision, revision, now, reason.trim());
+      ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account?.id ?? null, actor.member.id, actor.account?.authEpoch ?? null, actor.sessionRevision ?? 0, revision, now, reason.trim());
       const revoked = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.appendInvitationJournal(revoked, "revoked");
       return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };

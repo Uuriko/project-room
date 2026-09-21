@@ -50,13 +50,13 @@ the body is read.
 | `POST /api/rooms/:id/public-face/rotate` | room Bearer / session | room owner only; replaces the public code (old code 404s immediately) |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
 | `POST /api/rooms/:id/reports` | room Bearer / session | member (not the message author); one report per member per message; 20/hour/member |
-| `POST /api/rooms/:id/agent-connections` | signed-in account session (`?auth=account`) + CSRF | room owner only (`403 owner_required`, bearer keys included) |
+| `POST /api/rooms/:id/agent-connections` | signed-in account session (`?auth=account`) + CSRF | room owner only; mutations stay account-bound (`403 account_session_required` for an accountless owner bearer — the schema needs a sponsor account). `GET` admits the owner by ID on any credential |
 | `POST /api/rooms/:id/agent-pause` | room Bearer / session | the member itself (own wake-pause row), or the signed-in room owner + `manage_members` for another member; a removed member's row is inspect-only (`409 member_inactive`) |
-| `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
+| `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner by ID + `manage_members`; minting stays account-bound (`403 account_session_required` for an accountless owner — guest member ids derive from the sponsor account) |
 | `POST /api/rooms/:id/share-links` | signed-in browser session (room-key cookie or account `?auth=account`) + CSRF, or room-owner agent identity bearer | human member + `manage_members`, or the room owner on its identity bearer (`403 access_denied` for any other bearer) |
 | `POST /api/rooms/:id/share-links-cancel` | signed-in browser session (room-key cookie or account `?auth=account`) + CSRF, or room-owner agent identity bearer | link issuer / `manage_members`, or the room owner on its identity bearer (`403 access_denied` for any other bearer) |
-| `POST /api/rooms/:id/invitations` | signed-in account session (`?auth=account`) + CSRF | member with invite rights (`403 account_session_required` for bearer keys) |
-| `POST /api/rooms/:id/invitations/:invitationId/revoke` | signed-in account session (`?auth=account`) + CSRF | inviter / `manage_members` (`403 account_session_required` for bearer keys) |
+| `POST /api/rooms/:id/invitations` | signed-in account session (`?auth=account`) + CSRF, or room-owner agent identity bearer | member with invite rights, or the room owner on its identity bearer (owner-capability exemption; `403 account_session_required` for other bearer keys) |
+| `POST /api/rooms/:id/invitations/:invitationId/revoke` | signed-in account session (`?auth=account`) + CSRF, or room-owner agent identity bearer | inviter / `manage_members`, or the room owner on its identity bearer (owner-capability exemption; `403 account_session_required` for other bearer keys) |
 | `POST /api/rooms/:id/ownership/transfer` | room bearer key session | room owner only (`403 owner_required`); appoints an existing active member (human or agent) as owner; unknown/inactive targets are a bare `404` |
 
 `POST /api/invitations/preview` is unauthenticated by design (the invitation
@@ -97,9 +97,12 @@ All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, pins, presence, capabilities, provider-heartbeats,
 usage, reminders, notifications, agent-invites, agent-pause, spend-allowance, work-*, reply-*, charter, return-brief, thread)
 require a room credential with member visibility; `dm-consents` (own pairs; the owner additionally sees pair metadata, never DM contents) and `public-face` (status only; toggle/rotate are owner-only) included; `agent-connections`,
-`diagnostics` and `invitations` additionally require the room
-owner's or an administrator's signed-in account session (`?auth=account`),
-never a bearer key; `share-links` requires an administrator's signed-in
+`diagnostics` and `agent-connections` admit the room owner by ID on any
+credential (mutations on `agent-connections` stay account-bound);
+`invitations` additionally require the room owner's or an administrator's
+signed-in account session (`?auth=account`), or the room owner's agent
+identity bearer (owner-capability exemption), never another bearer key;
+`share-links` requires an administrator's signed-in
 browser session (room-key cookie or account `?auth=account`), or the room
 owner's agent identity bearer (`403 access_denied` for any other bearer).
 `GET /api/rooms/:id/reports` additionally requires the room

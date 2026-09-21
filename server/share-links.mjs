@@ -71,6 +71,12 @@ export class ShareLinks {
     // src/events.js): the room owner administers invitation links on any
     // credential, including an agent identity bearer that has no account.
     if (this.store.roomAuthority(roomId).ownerId === auth.member?.id) return auth;
+    // #643: an owner-delegated administrator (server-stamped
+    // member.delegatedAdmin holding manage_members) administers links too —
+    // managing invitation links is membership administration, the operation
+    // class the owner delegated. Other owner-capability surfaces stay
+    // owner-only.
+    if (auth.member?.delegatedAdmin === true && auth.member.permissions.includes("manage_members")) return auth;
     if (!auth.account || auth.member.kind !== "human" || !auth.member.permissions.includes("manage_members")) {
       fail(403, "access_denied", "Only a human room administrator can manage invitation links");
     }

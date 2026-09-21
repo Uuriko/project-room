@@ -330,16 +330,16 @@ test("read-only open accepts a v34 backup written before the additive wake queue
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
   f.store.db.exec("PRAGMA user_version=27");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v36/);
   f.store.db.exec("PRAGMA user_version=34");
   // A true v34 file carries v34 writer triggers, not v35 ones; the doctored
   // marker alone would leave the file self-inconsistent and the fence
   // (correctly) refuses it. Swap the trigger generation for the tables still
   // present (absent additive tables are skipped, per the fence's own rule) so
   // the file is self-consistent; the writable migration below reinstalls the
-  // v35 set.
+  // v36 set.
   const v34Tables = new Set(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-  for (const row of f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v35_*'").all()) {
+  for (const row of f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v36_*'").all()) {
     f.store.db.exec(`DROP TRIGGER "${row.name}"`);
   }
   for (const { name, sql } of fenceDefinitions(34)) {

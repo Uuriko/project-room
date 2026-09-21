@@ -17,10 +17,12 @@ const isGuest = member => member.role === "guest" || isGuestAgentMemberId(member
 
 // Owner-only, like the sibling administrative reads. Accepts the owner's
 // signed-in account session or their room key, so the CLI (bearer-only) can
-// pull the same report a browser would.
+// pull the same report a browser would. #643: the owner capability follows
+// the owner identity, not the member kind — an agent owner holds full
+// authority, including manage_members.
 export function accessReviewOwner(store, token, roomId, binding) {
   const auth = store.authenticate(token, roomId, binding);
-  if (auth.member.kind !== "human" || auth.member.id !== store.room(roomId).state.room.ownerId
+  if (auth.member.id !== store.room(roomId).state.room.ownerId
     || !auth.member.permissions.includes("manage_members")) {
     fail(403, "owner_required", "Only the room owner can read the access review");
   }
@@ -53,6 +55,10 @@ export function assembleAccessReview(store, roomId) {
   const members = active.filter(member => !isGuest(member)).map(member => ({
     memberId: member.id, displayName: member.displayName, kind: member.kind, role: member.role ?? null,
     permissions: [...member.permissions], revision: member.revision, accountableHumanId: member.accountableHumanId ?? null,
+    // #643: surfaces owner-delegated administration — an agent member holding
+    // admin bits via an explicit owner grant. The grant is server-stamped;
+    // this flag makes the exception inspectable in review output.
+    delegatedAdmin: member.delegatedAdmin === true,
     identityId: member.identityId ?? null, accountBound: accounts.has(member.id),
     membershipOrigin: member.membershipOrigin?.kind ?? (member.id === state.room.ownerId ? "bootstrap" : "added"), joinedAt: joined.get(member.id) ?? null,
     liveAccessKeys: liveKeys.get(member.id)?.n ?? 0, latestAccessKeyExpiresAt: iso(liveKeys.get(member.id)?.latest),

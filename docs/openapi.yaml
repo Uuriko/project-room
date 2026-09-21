@@ -979,7 +979,8 @@ paths:
     post:
       summary: Issue a targeted membership invitation
       description: >-
-        Signed-in account session only (403 account_session_required for
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
         bearer keys), member with invite rights. Exactly `{ requestId,
         invitationToken, intendedAccountId, intendedMemberId, displayName,
         role (moderator | member | guest), expiresAt,
@@ -1019,8 +1020,8 @@ paths:
         guests with expiry and status, invitation links with remaining joins, pending
         one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
         agent identities and connections with state, and last activity per member.
-        Owner-only (the room owner's account session or room key; other members get
-        403 owner_required). Shares the per-credential read allowance of every room
+        Owner-only by ID (the room owner's account session, room key, or agent
+        identity bearer; other members get 403 owner_required). Shares the per-credential read allowance of every room
         read. The report never carries a token, secret or hash; removed members are
         absent. `node scripts/access-review.mjs` prints the same object from a store
         file or from this route.
@@ -1508,8 +1509,9 @@ paths:
         Owner-only read of every report in the room, newest first, with the
         reporter's member id, the reported message's author and the message as
         it stands now (body null once deleted; `message` null when the message
-        is no longer in the room). Any other member receives 403
-        `owner_required`; the reporter identity is never served to them.
+        is no longer in the room). The owner is recognized by ID on any
+        credential; any other member receives 403 `owner_required`; the
+        reporter identity is never served to them.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -5265,8 +5267,8 @@ paths:
     get:
       summary: Owner's agent connections
       description: >-
-        Signed-in room owner's account session only (403 owner_required for
-        anyone else, bearer keys included). Lists issued, rotated and
+        Room owner by ID on any credential (403 owner_required for anyone
+        else). Lists issued, rotated and
         disconnected agent connections without key material. See
         docs/AGENT-CONNECTION.md.
       security:
@@ -5392,7 +5394,7 @@ paths:
     get:
       summary: Recent request failures for the room
       description: >-
-        Signed-in room owner's account session only (403 owner_required).
+        Room owner by ID on any credential (403 owner_required otherwise).
         Returns the in-memory list of failed requests for this room:
         operationId, time, status, code, category and route template only
         (docs/SAFE-DIAGNOSTICS.md); never bodies or credentials.
@@ -5419,8 +5421,9 @@ paths:
     post:
       summary: Mint a guest invite
       description: >-
-        Owner with `manage_members`: room bearer key, or browser room or
-        account session with CSRF. Body: `{ requestId, linkToken (the guest invite token),
+        Owner by ID with `manage_members`: room bearer key, or browser room or
+        account session with CSRF. Minting stays account-bound (403
+        account_session_required for an accountless owner). Body: `{ requestId, linkToken (the guest invite token),
         expectedOwnerRevision, displayName?, roomId? }`; the link token the
         caller generated becomes the guest member's read_chat credential and
         only its hash is stored. 30 per address per minute. `GET` on the
@@ -5451,7 +5454,8 @@ paths:
     post:
       summary: Revoke a targeted membership invitation
       description: >-
-        Signed-in account session only (403 account_session_required for
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
         bearer keys); the issuer or a member with `manage_members`. Body is
         exactly `{ expectedRevision, reason }`; the revocation is journaled
         with its reason.

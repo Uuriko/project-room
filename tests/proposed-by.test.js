@@ -283,7 +283,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 35);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 36);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");
@@ -347,7 +347,7 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
 
 // Every version here is derived from STORE_SCHEMA_VERSION. Written down, the
 // "newer than this service" probe has to be bumped on the same commit as the
-// schema or it stops probing: at v35 it still set user_version=35, which is not
+// schema or it stops probing: at v36 it still set user_version=36, which is not
 // newer, so the throw it asserted never came. The first half had been updated
 // and the second half had not.
 test("fresh databases use the current schema and every unsupported schema fails closed without mutation", () => {
