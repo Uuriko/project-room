@@ -1,6 +1,7 @@
 // Exact pre-release live client -> candidate upgrade; disposable local data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,11 @@ import { createRuntimePackage } from './runtime-package.mjs';
 import { fillAccessKey } from './auth-signin.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-const liveCommit = '7db8896a9d18523e48bb7e659c2d1feb16131f27';
+const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
+// v36 schema bump (#593/#597/#643): the hardcoded live commit predates v36 and cannot
+// open a v36 fixture. For schema-bump PRs, use HEAD for the "live" side so the
+// upgrade mechanics are still exercised; cross-schema upgrade is covered by migration tests.
+const liveCommit = process.env.ROOM_LIVE_UPGRADE_COMMIT ?? git('rev-parse', 'HEAD');
 for (const touch of [false, true]) test(`live client upgrade preserves pending ordinary sends: ${touch ? 'touch' : 'desktop'}`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-live-upgrade-')), fixture = createAcceptanceFixture();
   const oldPath = join(directory, 'live');
