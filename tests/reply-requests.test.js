@@ -343,3 +343,56 @@ test("prepared instructions stay current while selected conversation pagination 
   assert.equal(f.store.replyRequests.history(f.keys.agent, "commons").preparation, undefined);
   assert.equal(f.store.replyRequests.list(f.keys.agent, "commons").preparation, undefined);
 });
+
+test("follow-up preparation carries bounded completed exchanges for the same pair only", t => {
+  const f = fixture(t), q = f.open();
+  const id = q.command.data.messageId;
+  const clarification = f.post("guest", { messageId: "clarification", body: "Keep it small", replyToId: id });
+  f.post("guest", { messageId: "side", body: "Private side conversation", replyToId: id, toMemberId: "reviewer" });
+  f.send("agent", f.answer(q, clarification, { contextEventId: f.state().replyRequests[id].contextEventId,
+    contextSequence: f.store.room("commons").sequence, messageId: "answer" }));
+  f.post("guest", { messageId: "later", body: "Post-answer chatter", replyToId: id });
+  const follow = f.open("guest", { replyToId: "answer", body: "Add a keyboard shortcut" });
+  const read = (who, request = follow) => f.store.replyRequests.selected(f.keys[who], "commons", request.command.data.messageId);
+  const earlier = read("agent").preparation.previousExchanges;
+  assert.deepEqual(earlier[0].messages.map(message => message.id), [id, "clarification", "answer"]);
+  assert.deepEqual(read("guest").preparation.previousExchanges, earlier);
+  assert.throws(() => read("reviewer"), { code: "reply_request_not_found" });
+  const changedPair = f.open("guest", { replyToId: "answer", toMemberId: "reviewer" });
+  assert.deepEqual(read("reviewer", changedPair).preparation.previousExchanges, []);
+  f.send("agent", f.answer(follow, follow.receipt, { messageId: "second-answer" }));
+  const next = f.open("guest", { replyToId: "second-answer" });
+  assert.deepEqual(read("agent", next).preparation.previousExchanges.map(exchange => exchange.requestMessageId), [id, follow.command.data.messageId]);
+  assert.equal(f.state().replyRequests[id].status, "answered");
+  auditRecovery(f.store);
+});
+
+test("follow-up refuses withdrawn context and oversized history instead of silently omitting it", t => {
+  const f = fixture(t), q = f.open();
+  f.send("agent", f.answer(q, q.receipt, { messageId: "answer" }));
+  const follow = f.open("guest", { replyToId: "answer" });
+  f.send("guest", { id: "delete-question", type: "message.deleted", data: { messageId: q.command.data.messageId, expectedMessageRevision: 0 } });
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, "commons", follow.command.data.messageId), { code: "reply_follow_up_unavailable" });
+  const large = f.open(); let basis = large.receipt;
+  for (let i = 0; i < 17; i++) basis = f.post("guest", { messageId: `long-${i}`, body: "x".repeat(4096), replyToId: large.command.data.messageId });
+  f.send("agent", f.answer(large, basis, { messageId: "large-answer" }));
+  const last = f.open("guest", { replyToId: "large-answer" });
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, "commons", last.command.data.messageId), { code: "reply_follow_up_too_large" });
+});
+
+test("follow-up chains stop at eight prior exchanges and never carry another work branch", t => {
+  const f = fixture(t); let parent = null, q;
+  for (let i = 0; i < 10; i++) {
+    q = f.open("guest", { replyToId: parent });
+    if (i === 8) assert.equal(f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId).preparation.previousExchanges.length, 8);
+    if (i === 9) {
+      assert.throws(() => f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId), { code: "reply_follow_up_too_large" });
+      break;
+    }
+    parent = `chain-answer-${i}`;
+    f.send("agent", f.answer(q, q.receipt, { messageId: parent }));
+  }
+  f.send("owner", { id: "propose-branch", type: "work.proposed", data: { workItemId: "another-work", title: "Other work", definitionOfDone: "Done", accountableMemberId: "agent", mode: "read" } });
+  const other = f.open("guest", { replyToId: parent, workItemId: "another-work" });
+  assert.deepEqual(f.store.replyRequests.selected(f.keys.agent, "commons", other.command.data.messageId).preparation.previousExchanges, []);
+});

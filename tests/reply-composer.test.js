@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand } from "../src/reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, confirmsReplyCommand } from "../src/reply-requests.js";
 import { ConversationDrafts, DraftRecovery } from "../src/conversation.js";
 import { draftCommand, RoomClient } from "../src/client.js";
 
@@ -97,4 +97,22 @@ test("replyDraftData forwards an explicit channelId on plain, request and respon
   assert.equal(request.channelId, "c-design");
   const response = replyDraftData(mode("answered"), { body: "done", toMemberId: "owner", replyToId: "question", messageId: "m3", channelId: "c-design" });
   assert.equal(response.channelId, "c-design");
+});
+
+
+test("follow-up drafts bind the delivered answer and recipient without mixing normal drafts", () => {
+  const s = state(); s.members.guest.active = true;
+  Object.assign(s.replyRequests.question, { status: "answered", responseMessageId: "answer" });
+  s.messages.push({ id: "answer", replyToId: "question", body: "Delivered answer" });
+  const next = replyFollowUp(s, "question", "owner");
+  assert.ok(next); assert.equal(replyFollowUp(s, "question", "guest"), null);
+  assert.notEqual(replyDraftKey(next.mode), replyDraftKey({ kind: "request" }, "question"));
+  const data = replyDraftData(next.mode, { body: "Refine it", toMemberId: "other", replyToId: "other", messageId: "next" });
+  assert.equal(data.toMemberId, "guest"); assert.equal(data.replyToId, "answer");
+  for (const patch of [{ recipientId: "other" }, { responseMessageId: "question" }, { workItemId: "other" }, { extra: true }])
+    assert.equal(Boolean(validReplyDraft({ ...next.mode, ...patch }, s)), false);
+  s.members.guest.active = false; assert.equal(replyFollowUp(s, "question", "owner"), null);
+  assert.ok(validReplyDraft(next.mode, s)); // Unavailability must not discard an unsent draft.
+  s.messages.at(-1).body = null; assert.ok(validReplyDraft(next.mode, s)); // Keep exact pending retries even if the parent is withdrawn.
+  s.replyRequests.question.status = "open"; assert.equal(replyFollowUp(s, "question", "owner"), null);
 });

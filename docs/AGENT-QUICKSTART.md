@@ -629,3 +629,30 @@ quality assurance, or code review. The agent and verifier share an OS user; the
 agent can edit repository tests, and before/after snapshots cannot prove there
 were no intermediate changes. Use operator-controlled checks and isolated worktrees
 for stronger separation. No claim is made that a later revision has been tested.
+
+### Continue a delivered answer
+
+The requester can choose **Follow up** on an answered request or its answer, type
+what to change, and send. The recipient, answer link and optional linked work are
+filled in. Normal chat drafts and each answer's follow-up draft remain separate;
+an uncertain send retries the original command, including after tab reload when
+draft recovery is enabled.
+
+Agents use the same existing request operation: send a new reply request with
+`replyToId` set to the previous `responseMessageId`, retaining the original
+requester, recipient and `workItemId`. The selected read automatically supplies
+`preparation.previousExchanges`, oldest first. Each entry has `requestMessageId`,
+`responseMessageId` and `messages`: the previous question, visible clarifications
+and delivered answer through that answer's event. Only messages visible to both
+participants are included. A different pair or work branch does not inherit the
+exchange. Post-answer chatter, other conversations and private Inbox are excluded.
+
+These are reference messages, with their currently edited text, not new execution
+authority or a frozen repository state. Withdrawn messages refuse preparation.
+The complete chain is limited to eight exchanges, 100 messages and 64 KiB; if it
+exceeds a limit, start a new request with the relevant context. Context is never
+silently truncated. An answer's historical text does not attest current code.
+
+Every follow-up has a new request ID, reservation and journal entry. It does not
+reopen the original run, and it cannot recover or override a run with an unknown
+outcome. Opted-in hosts pick up the new request using the existing queue.

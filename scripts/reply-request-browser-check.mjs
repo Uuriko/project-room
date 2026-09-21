@@ -189,3 +189,48 @@ for (const width of [1280, 390]) test(`coding result stays readable and escaped 
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
 });
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`follow-up preserves drafts and retries one new request at ${viewport.width}px`, { timeout: 60000 }, async t => {
+    const f = await setup(t, viewport), first = f.request("follow-original");
+    f.send("guest", "message.posted", { messageId: "follow-answer", body: "The working first version", responseToRequestId: "follow-original",
+      expectedRequestRevision: 0, responseOutcome: "answered", contextEventId: first.event.id, contextSequence: first.sequence,
+      replyToId: "follow-original", toMemberId: "owner", workItemId: null });
+    const page = await f.login("owner");
+    await input(page).fill("Keep my normal draft");
+    await options(page); await page.locator("#remember-drafts").check();
+    await mode(page, "follow-original", "follow-up");
+    assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
+    assert.equal(await page.locator("#message-to-select").isDisabled(), true);
+    assert.match(await page.locator("#request-mode-label").textContent(), /Earlier exchange included/);
+    assert.match(await page.locator("#thread-context").textContent(), /includes private messages/);
+    assert.doesNotMatch(await page.locator("#composer-options").textContent(), /Visible to everyone here/);
+    assert.equal(await record(page, "follow-answer").locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");
+    await input(page).fill("Add keyboard support");
+    await page.screenshot({ path: `test-results/request-follow-up-${viewport.width}.png`, fullPage: true });
+    await page.locator("#request-exit").click();
+    await mode(page, "follow-answer", "follow-up");
+    assert.equal(await input(page).inputValue(), "Add keyboard support");
+    const commands = []; let lose = true;
+    await page.route("**/api/rooms/commons/commands", async route => {
+      commands.push(route.request().postDataJSON());
+      if (lose) { lose = false; await route.fetch(); await route.abort("failed"); }
+      else await route.continue();
+    });
+    await page.locator('#message-form button[type="submit"]').click(); await failed(page);
+    assert.equal(await input(page).evaluate(el => el.readOnly), true);
+    page.once("dialog", dialog => dialog.accept()); await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" }); await idle(page);
+    assert.equal(await input(page).inputValue(), "Add keyboard support");
+    await page.locator('#message-form button[type="submit"]').click(); await saved(page);
+    assert.deepEqual(commands[0], commands[1]);
+    assert.equal(Object.keys(f.state().replyRequests).length, 2);
+    const posted = f.state().messages.find(message => message.body === "Add keyboard support");
+    assert.equal(posted.replyToId, "follow-answer"); assert.equal(posted.toMemberId, "guest");
+    assert.equal(f.state().replyRequests["follow-original"].status, "answered");
+    await page.locator("#thread-back").click();
+    assert.equal(await input(page).inputValue(), "Keep my normal draft");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.deepEqual(f.errors, []);
+  });
+}
