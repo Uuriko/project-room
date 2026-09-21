@@ -141,6 +141,13 @@ export class AgentIdentities {
     const resolvedMemberId = memberId ?? identityId;
     if (!MEMBER_ID_PATTERN.test(resolvedMemberId)) fail(422, "invalid_identity", "memberId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
     if (!Array.isArray(permissions)) fail(422, "invalid_identity", "permissions must be an array; an empty array links the identity with read/chat access only");
+    // RC-2026-09-18-038: a delegate acting on an owner grant may link members
+    // but may never confer manage_members — that would make the grant
+    // transitive. The owner (or a member already holding manage_members)
+    // remains sovereign.
+    if (permissions.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
+      fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
+    }
     if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);

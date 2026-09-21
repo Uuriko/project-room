@@ -33,14 +33,6 @@ class ServiceError extends Error {
 }
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-// Minimal permission check (avoids importing src/events.js, which is not
-// Workers-bundle-safe). Mirrors memberCan() from src/events.js. Kept for
-// the vocabulary sync test even though the gates now go through
-// server/membership-delegation.mjs.
-const memberCan = (authority, memberId, permission) => {
-  const member = authority?.members?.[memberId];
-  return Array.isArray(member?.permissions) && member.permissions.includes(permission);
-};
 // Room permission vocabulary, mirrored from PERMISSIONS in src/events.js
 // (same Workers-bundle reason as above). access requests and approvals are
 // validated against this so an invalid name fails fast with a 422 that
@@ -257,7 +249,7 @@ export class AccessRequests {
   // AgentIdentities.link() path as the manual owner flow.
   decide(token, roomId, requestId, { decision, permissions, note } = {}, expectedSessionBinding = null) {
     if (!DECISIONS.includes(decision)) fail(422, "invalid_request", "decision must be 'approve' or 'deny'");
-    const { auth } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
+    const { auth, authority } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
@@ -283,6 +275,13 @@ export class AccessRequests {
       if (!Array.isArray(grants) || !grants.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
         fail(422, "invalid_request",
           `permissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
+      }
+      // RC-2026-09-18-038: a delegate acting on an owner grant may admit
+      // members but may never confer manage_members — that would make the
+      // grant transitive. The owner (or a member already holding
+      // manage_members) remains sovereign.
+      if (grants.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
+        fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
       const identities = this.store.identities;
       const linked = identities.link(token, roomId, {

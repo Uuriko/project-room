@@ -187,7 +187,7 @@ test("grant adds agent-safe invite_member; revoke strips it again", t => {
 });
 
 test("grant keeps a pre-existing invite_member untouched on revoke", t => {
-  const { delegation, ownerToken, agent } = setup(t);
+  const { delegation, ownerToken } = setup(t);
   // Owner links a second identity that already carries invite_member.
   const second = delegation.store.identities.create("Invite Agent");
   delegation.store.identities.link(ownerToken, "commons", {
@@ -198,4 +198,50 @@ test("grant keeps a pre-existing invite_member untouched on revoke", t => {
   delegation.revoke(ownerToken, "commons", { identityId: second.identityId });
   const member = delegation.store.roomAuthority("commons").members[second.identityId];
   assert.ok(member.permissions.includes("invite_member"), "pre-existing invite_member survives revoke");
+});
+
+test("a delegate cannot approve conferring manage_members — no transitive grant via decide", t => {
+  const { delegation, ownerToken, agent, requests, requester } = setup(t);
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  const req = requestAccess(requests, requester, "ar_escalate_decide");
+  assert.throws(() => requests.decide(agent.secret, "commons", req.requestId,
+    { decision: "approve", permissions: ["accept_work", "manage_members"] }),
+    err => err.status === 403 && /cannot grant manage_members/.test(err.message));
+  // The denied decision changed nothing: the request is still pending.
+  const pending = requests.list(agent.secret, "commons", { status: "pending" });
+  assert.ok(pending.some(r => r.requestId === req.requestId), "request still pending after denied escalation");
+  // Ordinary approval still works for the delegate.
+  const decided = requests.decide(agent.secret, "commons", req.requestId, { decision: "approve" });
+  assert.equal(decided.status, "approved");
+  assert.deepEqual([...decided.grantedPermissions], ["accept_work"]);
+});
+
+test("a delegate cannot link an identity with manage_members — no transitive grant via link", t => {
+  const { delegation, ownerToken, agent, store } = setup(t);
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  const fresh = store.identities.create("Sneaky Agent");
+  assert.throws(() => store.identities.link(agent.secret, "commons", {
+    identityId: fresh.identityId, displayName: "Sneaky Agent",
+    permissions: ["accept_work", "manage_members"]
+  }), err => err.status === 403 && /cannot grant manage_members/.test(err.message));
+  // Linking without manage_members still works for the delegate.
+  const linked = store.identities.link(agent.secret, "commons", {
+    identityId: fresh.identityId, displayName: "Sneaky Agent",
+    permissions: ["accept_work"]
+  });
+  assert.equal(linked.roomId, "commons");
+});
+
+test("the owner remains sovereign: may approve and link with manage_members", t => {
+  const { ownerToken, requests, requester, store } = setup(t);
+  const req = requestAccess(requests, requester, "ar_owner_sovereign");
+  const decided = requests.decide(ownerToken, "commons", req.requestId,
+    { decision: "approve", permissions: ["accept_work", "manage_members"] });
+  assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "manage_members"]);
+  const fresh = store.identities.create("Owner Linked Agent");
+  const linked = store.identities.link(ownerToken, "commons", {
+    identityId: fresh.identityId, displayName: "Owner Linked Agent",
+    permissions: ["manage_members"]
+  });
+  assert.equal(linked.roomId, "commons");
 });

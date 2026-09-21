@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 77 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 78 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -90,6 +90,12 @@ test("online capture preserves all 77 tables, identity boundaries and exact retr
   // Seed one agent-room ownership record so the capture covers agent_room_ownership.
   f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
     .run(identityId, "commons", f.now());
+  // Seed one membership delegation grant so the capture covers membership_delegation_grants
+  // (owner-granted membership administration #761). Written directly: the grant path
+  // requires a live owner session the fixture has no reason to own.
+  f.store.db.prepare(`INSERT INTO membership_delegation_grants(room_id,identity_id,granted_by,granted_at,revoked_at,added_invite_member)
+    VALUES('commons',?,'owner',?,NULL,1)`)
+    .run(identityId, f.now());
   // Seed wakeable-presence rows so the capture covers agent_hosts and agent_wake_signals (RC-2026-09-18-051).
   f.store.db.prepare(`INSERT INTO agent_hosts(agent_id,host_id,mode,wake_url,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
     .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
@@ -198,8 +204,8 @@ test("online capture preserves all 77 tables, identity boundaries and exact retr
   f.store.requestRuns.apply(f.keys.agent, "commons", runInput);
   const captureSequence = f.store.room("commons").sequence;
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 77,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 78,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

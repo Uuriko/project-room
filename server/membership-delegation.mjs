@@ -183,6 +183,17 @@ export class MembershipDelegation {
     return this.hasGrant(roomId, callerIdentityId);
   }
 
+  // Whether the caller may confer manage_members on someone else: the room
+  // owner, or a member who already holds manage_members. A delegate acting
+  // purely on an owner grant may admit members but may never mint new
+  // membership administrators — otherwise the grant would be transitive
+  // (delegate approves/link with manage_members, the new member administers
+  // membership, the delegation boundary collapses).
+  mayConferManageMembers(authority, auth) {
+    if (auth?.member?.id === authority?.ownerId) return true;
+    return memberCan(authority, auth?.member?.id, "manage_members");
+  }
+
   #requireOwner(auth, authority) {
     if (auth?.member?.id !== authority?.ownerId) {
       fail(403, "access_denied", "Only the room owner may grant or revoke membership administration");
