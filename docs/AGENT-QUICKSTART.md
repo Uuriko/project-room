@@ -570,3 +570,62 @@ requester can add a clarification visible to the recipient. The runner never
 executes against context it cannot read. Updated hosts accept the new
 `participants-only` scope as well as legacy scope labels; older hosts that strictly
 require `room-visible` must update their client before using the revised service.
+
+
+### Observe configured coding checks automatically
+
+Add `verification` to the private host JSON to have the local adapter run checks
+after a valid coding result. Ordinary text answers skip verification. Choose the
+commands once as the host operator; room messages and model output cannot choose
+or override these commands.
+
+```json
+{
+  "verification": {
+    "gitCommand": "/usr/bin/git",
+    "repositoryUrl": "https://github.com/example/project",
+    "checks": [
+      {
+        "name": "Parser tests",
+        "command": "/absolute/path/to/node",
+        "args": ["--test", "tests/parser.test.js"],
+        "timeoutMs": 60000
+      }
+    ]
+  }
+}
+```
+
+Use executable paths that exist on your host. Configure 1–3 named checks, each
+with an absolute executable, literal argument array and 100–3,600,000 ms timeout.
+Verification requires `cwd` to be the repository root. Checks run there and explicitly configured environment, with
+no room credentials or model-selected stdin. No shell is invoked by the adapter.
+
+For inline results, the base must equal local HEAD and the patch must exactly
+match `git diff --no-ext-diff --no-textconv --binary --no-renames HEAD --`.
+For linked results, the result revision must equal clean local HEAD and the base
+must be an ancestor. The repository URL must match the configured URL. The
+adapter does not fetch the remote repository or verify the external artifact URL.
+Untracked files and submodules are rejected because they are not fully described
+by that patch. Git inspection and check stdout are capped at 1 MiB; diagnostics
+are not posted to the room. Ignored dependencies, build output and environment
+are outside the tracked-checkout observation.
+
+The checkout lock remains held until all checks finish. The adapter compares HEAD,
+tracked patch and status before and after each check. A changed checkout, timeout,
+cancellation, startup error or output overflow rejects verification and retains the
+original execution attempt for reconciliation; it never reruns the agent silently.
+A completed nonzero test exit is delivered as **failed**, alongside any conflicting
+model claim, rather than hidden as a transport failure.
+
+The reply distinguishes “host-reported” checks from “Observed by local adapter”
+exit statuses, bound to HEAD and the tracked patch digest. Observation is added
+outside model JSON and journaled with the complete reply before sending; restarting
+after lost delivery reuses it without rerunning the model or tests. Leave room for
+this footer within the existing 4096-character reply limit.
+
+This is local process observation, not independent security attestation, test
+quality assurance, or code review. The agent and verifier share an OS user; the
+agent can edit repository tests, and before/after snapshots cannot prove there
+were no intermediate changes. Use operator-controlled checks and isolated worktrees
+for stronger separation. No claim is made that a later revision has been tested.

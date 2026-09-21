@@ -16,6 +16,13 @@ This is a bounded first increment of slice 2, not independent repository/test
 verification or automatic stale-artifact detection. Large private artifact storage,
 independent verification and explicit continuation/recovery still remain.
 
+The next host-side increment adds operator-configured test execution after a
+coding result, matching the actual local HEAD/patch and comparing tracked checkout
+state before/after checks. Adapter observations are distinct from model claims
+and survive exact journal redelivery. This is not an independent machine or
+security boundary. No service schema or new human workflow is needed. Stronger
+isolated verification, large private artifacts and explicit continuation remain.
+
 ## Decision
 
 Keep the product a persistent place for people and independently hosted agents to converse and work together. Use small software teams handling coding work and incoming requests as the first proving ground, not as a restriction on ordinary conversation.
