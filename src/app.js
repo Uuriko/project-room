@@ -4387,6 +4387,10 @@ async function runDmConsentAction(action, peerId, button) {
     if (seq === dmConsentSeq && generation === client.generation && state === room) notice(dmConsentFailureMessage(error, peer.displayName), true);
   } finally {
     dmConsentBusy = false;
+    // Re-enable the clicked button: a failed action leaves the consent list
+    // unchanged, so the post-action render skips the DOM (identical HTML) and
+    // would otherwise leave the button dead until an unrelated re-render.
+    if (button) button.disabled = false;
     if (seq === dmConsentSeq && generation === client.generation && state === room) await refreshDmConsents();
   }
 }

@@ -62,6 +62,13 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   };
   const consentSection = (page, memberId) =>
     page.locator(`#presence-list .presence-member[data-member-record-id="${memberId}"] details.dm-consent`);
+  // Open a <details> consent section without toggling it shut when a consent
+  // refresh already left it open.
+  const openConsentDetails = async details => {
+    if (!(await details.evaluate(node => node.open))) {
+      await details.locator("summary").click();
+    }
+  };
   // #message-to-select lives in #composer-toolbar, which stays hidden until a
   // recipient is chosen — set it the way disclosure-check.mjs does instead of
   // selectOption, which requires the select to be visible.
@@ -74,7 +81,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   const a = await signIn(aliceKey);
   await openPeople(a.page);
   const aliceBob = consentSection(a.page, "bob");
-  await aliceBob.locator("summary").click();
+  await openConsentDetails(aliceBob);
   await aliceBob.getByRole("button", { name: "Request to message", exact: true }).click();
   await aliceBob.getByText("Request pending").waitFor();
   assert.match(await a.page.locator("#status.visible").textContent(), /DM request sent to Bob/);
@@ -97,11 +104,13 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   assert.match(await inbox.textContent(), /Alice/);
   await inbox.getByRole("button", { name: "Approve", exact: true }).click();
   await b.page.locator("#status.visible").getByText(/Alice can now message you directly/).waitFor();
-  assert.equal(await b.page.locator(".dm-requests").count(), 0, "the inbox clears after a decision");
+  // The notice fires before the post-decision refresh; wait for the inbox to
+  // actually clear instead of asserting mid-refresh.
+  await b.page.locator(".dm-requests").waitFor({ state: "detached", timeout: 30000 });
 
   // --- Bob's member row for Alice reflects the approval; Alice can now DM. ---
   const bobAlice = consentSection(b.page, "alice");
-  await bobAlice.locator("summary").click();
+  await openConsentDetails(bobAlice);
   assert.match(await bobAlice.textContent(), /Alice can message you/);
 
   // --- Alice's pending becomes approved ("Bob approved your request"); the DM posts. ---
@@ -109,17 +118,18 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await a.page.locator("#main").waitFor({ state: "visible" });
   await openPeople(a.page);
   const aliceBob2 = consentSection(a.page, "bob");
-  await aliceBob2.locator("summary").click();
+  await openConsentDetails(aliceBob2);
   await aliceBob2.getByText("Bob approved your request — you can message them directly.").waitFor();
   await selectRecipient(a.page, "bob");
   assert.equal(await a.page.locator("#message-to-select").inputValue(), "bob",
     "the recipient select took the evaluate-set value before sending");
   await a.page.locator("#message-input").fill("hello bob, approved");
   await a.page.locator("#message-form button[type=submit]").click();
-  await a.page.locator("#message-input").waitFor({ state: "visible" });
-  assert.equal(await a.page.locator("#message-input").inputValue(), "",
-    "an approved DM sends and clears the composer");
-  assert.equal(await a.page.locator("#composer-status.visible.error").count(), 0);
+  // The send is async (network round-trip): wait for the cleared composer,
+  // which is the visible proof the DM posted, instead of asserting mid-flight.
+  await a.page.waitForFunction(() => document.querySelector("#message-input")?.value === "", null, { timeout: 30000 });
+  assert.equal(await a.page.locator("#composer-status.visible.error").count(), 0,
+    "an approved DM posts without a composer error");
 
   // --- Alice revokes; she is back to requesting. ---
   await aliceBob2.getByRole("button", { name: "Revoke my consent", exact: true }).click();
@@ -127,7 +137,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
 
   // --- Bob proactively blocks Alice; her row says so and the gate refuses. ---
   const bobAlice2 = consentSection(b.page, "alice");
-  await bobAlice2.locator("summary").click();
+  await openConsentDetails(bobAlice2);
   await bobAlice2.getByRole("button", { name: "Block", exact: true }).click();
   await b.page.locator("#status.visible").getByText(/Alice blocked/).waitFor();
   assert.equal(await consentSection(b.page, "alice").getByRole("button", { name: "Unblock", exact: true }).count(), 1);
@@ -135,7 +145,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await a.page.locator("#main").waitFor({ state: "visible" });
   await openPeople(a.page);
   const aliceBob3 = consentSection(a.page, "bob");
-  await aliceBob3.locator("summary").click();
+  await openConsentDetails(aliceBob3);
   await aliceBob3.getByText("Bob isn't accepting DM requests from you").waitFor();
   // --- Bob unblocks; Alice can ask again. ---
   await bobAlice2.getByRole("button", { name: "Unblock", exact: true }).click();
@@ -144,7 +154,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await a.page.locator("#main").waitFor({ state: "visible" });
   await openPeople(a.page);
   const aliceBob4 = consentSection(a.page, "bob");
-  await aliceBob4.locator("summary").click();
+  await openConsentDetails(aliceBob4);
   await aliceBob4.getByRole("button", { name: "Request again", exact: true }).waitFor();
 
   // --- A 500 on the consent API surfaces as a visible error, not a spinner. ---
@@ -168,7 +178,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await inbox2.getByText("Direct message requests (1)").waitFor();
   await inbox2.getByRole("button", { name: "Reject", exact: true }).click();
   await b.page.locator("#status.visible").getByText(/Declined Alice's DM request/).waitFor();
-  assert.equal(await b.page.locator(".dm-requests").count(), 0);
+  await b.page.locator(".dm-requests").waitFor({ state: "detached", timeout: 30000 });
 
   // --- Logged-out public face: no consent controls, still read-only. ---
   const enabled = await (await fetch(`${origin}/api/rooms/commons/public-face`, {
