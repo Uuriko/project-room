@@ -512,3 +512,22 @@ test("request reads reject nonparticipants and exclude another private reply bef
     if (memberId === "reviewer") assert.deepEqual((await other.replyRequests()).requests, []);
   }
 });
+
+test("a follow-up host receives the earlier result and runs independently without repeating its parent", async t => {
+  const f = await fixture(t), args = runner(t, f), first = f.open("first-pass");
+  const calls = [];
+  const execute = async input => {
+    calls.push(input.request.id);
+    if (calls.length === 1) return { body: "First implementation and test result" };
+    assert.equal(input.preparation.previousExchanges[0].messages.at(-1).body, "First implementation and test result");
+    assert.equal(input.messages[0].message.body, "Make this work with the keyboard too");
+    return { body: "Keyboard support added" };
+  };
+  await runRequestOnce({ ...args, requestMessageId: first.command.data.messageId, execute });
+  const parent = (await f.client.replyContext(first.command.data.messageId)).request;
+  const next = f.open("refinement", { replyToId: parent.responseMessageId, body: "Make this work with the keyboard too" });
+  await runRequestOnce({ ...args, requestMessageId: next.command.data.messageId, execute });
+  await runRequestOnce({ ...args, requestMessageId: next.command.data.messageId, execute });
+  assert.deepEqual(calls, [first.command.data.messageId, next.command.data.messageId]);
+  assert.deepEqual((await f.client.replyContext(first.command.data.messageId)).request, parent);
+});

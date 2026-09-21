@@ -130,3 +130,16 @@ Improve crawlable public explanations and existing discovery endpoints; do not t
 Build slice 1 as a bounded vertical increment: explicit automatic pickup of addressed requests, reliable ownership across runner instances, and one compact in-thread status/recovery surface. Then attach an inspectable result (slice 2). Begin real-user observation before expanding steering or provider coverage.
 
 Defer a full Slack/Discord clone, elaborate scoring or evidence graphs, compulsory agent teams, a universal autonomous planner, a new integration marketplace and a major framework/database rewrite. The product test is whether people and their agents get useful work done together with less coordination.
+
+### 2026-09-21 implementation checkpoint: follow-up from a delivered answer
+
+Built the next small interaction: **Follow up** opens a separate draft addressed
+to the same participant. Sending creates a new request linked to the answer. The
+server prepares the bounded earlier exchanges automatically for the host, with
+same-pair privacy and work scope preserved. No new tables, event types, task
+hierarchy or mandatory work item. The original execution remains immutable.
+
+Acceptance covers real HTTP host execution, exact lost-delivery retry, prior
+clarifications, private side conversations, changed recipients/work, withdrawn
+messages, chain/byte bounds, separate drafts and desktop/mobile reload. This is
+synthetic qualification; usage and retention still need real participant evidence.

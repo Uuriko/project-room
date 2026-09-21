@@ -13,6 +13,7 @@ const requireValid = (valid, message) => { if (!valid) throw new Error(message);
 // Browser drafts have a separate identity for each explicit mode, even inside
 // one conversation. Keys cannot collide with a canonical message ID.
 export function replyDraftKey(mode, threadId = null) {
+  if (mode?.kind === "request" && mode.followUpRequestId) return JSON.stringify(["follow-up", mode.followUpRequestId]);
   if (mode?.kind === "request" && mode.resultEventId) return JSON.stringify(["result-question", mode.workItemId, mode.resultEventId]);
   return mode ? JSON.stringify(["request", mode.kind, mode.requestMessageId ?? threadId]) : threadId;
 }
@@ -33,10 +34,28 @@ export function creditQuestion(state, workItemId, memberId, resultEventId) {
     body: `Who contributed to this result, and what did each person or AI do?\n\nReported credit: ${credit}`
       + (receipt.nativeText ? "" : `\nResult record: ${receipt.eventId}`) };
 }
+// Continue a delivered exchange as a new request, with its own draft and execution.
+export function replyFollowUp(state, requestId, memberId) {
+  const request = state.replyRequests?.[requestId];
+  if (request?.status !== "answered" || request.requesterId !== memberId
+    || state.members[request.recipientId]?.active !== true
+    || !state.messages?.some(message => message.id === request.responseMessageId && message.body !== null)) return null;
+  const mode = { kind: "request", followUpRequestId: requestId, recipientId: request.recipientId,
+    responseMessageId: request.responseMessageId, workItemId: request.workItemId };
+  return validReplyDraft(mode, state) ? { mode, toMemberId: mode.recipientId, replyToId: mode.responseMessageId } : null;
+}
 export function validReplyDraft(mode, state) {
   if (!mode || typeof mode !== "object" || Array.isArray(mode)) return false;
   if (mode.kind === "request") {
     if (Object.keys(mode).length === 1) return true;
+    if (own(mode, "followUpRequestId")) {
+      const request = state.replyRequests?.[mode.followUpRequestId];
+      const keys = ["kind", "followUpRequestId", "recipientId", "responseMessageId", "workItemId"];
+      return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
+        && request?.status === "answered" && mode.recipientId === request.recipientId
+        && mode.responseMessageId === request.responseMessageId && mode.workItemId === request.workItemId
+        && state.messages?.some(message => message.id === mode.responseMessageId);
+    }
     const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"], receipt = resultReceipt(state, mode);
     return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
       && id(mode.workItemId) && id(mode.resultEventId) && Boolean(receipt)
@@ -58,6 +77,7 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId, c
     expectedRequestRevision: mode.expectedRequestRevision, reason: body };
   const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
       ...(channelId === undefined ? {} : { channelId }),
+      ...(mode.followUpRequestId ? { toMemberId: mode.recipientId, replyToId: mode.responseMessageId, workItemId: mode.workItemId } : {}),
       ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,

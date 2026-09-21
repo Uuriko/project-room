@@ -376,6 +376,7 @@ export class DraftRecovery {
             || typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string"
             || d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== d.threadId)) continue;
           if (d.mode.kind === "request" && d.toMemberId && !state.members[d.toMemberId]) continue;
+          if (d.mode.followUpRequestId && (d.replyToId !== d.mode.responseMessageId || d.toMemberId !== d.mode.recipientId)) continue;
           if (d.mode.kind === "request" && d.mode.resultEventId && d.replyToId !== d.mode.resultMessageId) continue;
           if (d.mode.kind !== "request" && (d.replyToId !== d.mode.requestMessageId || d.toMemberId !== d.mode.requesterId)) continue;
           let pending = null;

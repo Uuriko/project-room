@@ -16,7 +16,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 import { createNeedsAttentionCard } from "./needs-attention.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
-import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
@@ -1613,7 +1613,7 @@ function renderMessages() {
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · visible to everyone in this room`);
+    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -1836,11 +1836,16 @@ async function refreshRequestRuns() {
 setInterval(() => { void refreshRequestRuns(); }, 10000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
-  if (!request) return "";
+  if (!request) {
+    const previous = Object.values(state.replyRequests ?? {}).find(entry => entry.responseMessageId === message.id);
+    return previous && replyFollowUp(state, previous.id, session.member.id)
+      ? `<button type="button" class="message-to-work" data-message-id="${esc(previous.id)}" data-message-action="request-follow-up">Follow up</button>` : "";
+  }
   const own = session.member.id, open = request.status === "open";
   const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
     : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
   const actions = [];
+  if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
   if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
   return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
@@ -1852,7 +1857,7 @@ function syncRequestComposer() {
   $("#request-reply").hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
@@ -1863,7 +1868,7 @@ function syncRequestComposer() {
   const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
   input.readOnly = Boolean(mode && pendingMessage);
   input.disabled = busy || requestReading || archived;
-  select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || pendingMessage));
+  select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
   send.disabled = busy || requestReading || archived || Boolean(request && request.status !== "open" && !pendingMessage);
@@ -1884,6 +1889,15 @@ function setRequestMode(mode, initial = {}) {
 }
 async function openRequestMode(kind, id) {
   if (!state || busy || requestReading || requestMode?.requestMessageId === id && pendingMessage) return;
+  if (kind === "follow-up") {
+    const followUp = replyFollowUp(state, id, session.member.id);
+    if (!followUp) { notice("This answer is no longer available for follow-up."); return; }
+    const root = conversation.rootById.get(followUp.replyToId);
+    if (currentThreadId !== root) switchThread(root);
+    setRequestMode(followUp.mode, followUp);
+    $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
+    return;
+  }
   const generation = client.generation, identity = session, epoch = ++requestEpoch;
   const current = () => generation === client.generation && session === identity && epoch === requestEpoch && state;
   requestReading = true; syncRequestComposer();

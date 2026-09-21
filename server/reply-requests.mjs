@@ -155,6 +155,7 @@ export class ReplyRequests {
           room: { id: state.room.id, title: state.room.title,
             purpose: instructions.charter?.purpose ?? state.room.purpose ?? "" },
           instructions,
+          previousExchanges: previousExchanges(request, state, rows, byMessage, owners),
           work: request.workItemId && Object.hasOwn(state.workItems, request.workItemId)
             ? currentWorkRecord(state.workItems[request.workItemId]) : null,
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
@@ -170,6 +171,38 @@ export class ReplyRequests {
       return result;
     });
   }
+}
+
+// Only an explicit request replying to the last answer of the same pair carries
+// prior context. Bound the chain; never silently drop earlier constraints.
+function previousExchanges(request, state, rows, byMessage, owners) {
+  const answered = new Map(Object.values(state.replyRequests ?? {})
+    .filter(entry => entry.status === "answered").map(entry => [entry.responseMessageId, entry]));
+  const exchanges = [], seen = new Set([request.id]);
+  let current = request, count = 0;
+  while (true) {
+    const prior = answered.get(byMessage.get(current.id)?.replyToId);
+    if (!prior || prior.requesterId !== request.requesterId || prior.recipientId !== request.recipientId
+      || prior.workItemId !== request.workItemId) break;
+    if (seen.has(prior.id)) changed();
+    seen.add(prior.id);
+    if (exchanges.length === 8) fail("reply_follow_up_too_large", "Earlier exchange is too long; start a new request with the relevant context", 413);
+    const terminal = rows.find(row => row.id === prior.terminalEventId);
+    if (!terminal) changed();
+    const messages = rows.filter(row => row.type === "message.posted" && row.sequence <= terminal.sequence)
+      .map(row => byMessage.get(row.message_id || row.id)).filter(message => message && owners.get(message.id) === prior.id
+        && (!message.toMemberId || [request.requesterId, request.recipientId].every(memberId =>
+          memberId === message.authorId || memberId === message.toMemberId))).map(readMessage);
+    if (!messages.some(message => message.id === prior.id) || !messages.some(message => message.id === prior.responseMessageId)
+      || messages.some(message => message.body === null))
+      fail("reply_follow_up_unavailable", "Earlier exchange contains withdrawn context; start a new request with the relevant context", 409);
+    exchanges.unshift({ requestMessageId: prior.id, responseMessageId: prior.responseMessageId, messages });
+    count += messages.length;
+    if (count > 100 || Buffer.byteLength(JSON.stringify(exchanges)) > REPLY_PAGE_BYTES)
+      fail("reply_follow_up_too_large", "Earlier exchange is too long; start a new request with the relevant context", 413);
+    current = prior;
+  }
+  return exchanges;
 }
 
 const check = condition => { if (!condition) throw new Error("Reply request history requires operator reconciliation"); };
