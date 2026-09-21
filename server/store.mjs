@@ -16,6 +16,7 @@ import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, crea
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
@@ -552,6 +553,7 @@ export class RoomStore {
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
     this.publicFace = new PublicFace(this);
+    this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
@@ -722,6 +724,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // side tables (no events, no projection impact), same pattern.
       this.db.exec(dmConsentSchema);
       this.db.exec(roomPublicFaceSchema);
+      // #605: opt-in public room directory (owner toggles discoverability;
+      // purely additive side table, no events, no projection impact).
+      this.db.exec(roomDirectorySchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
