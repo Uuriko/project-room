@@ -112,6 +112,8 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await aliceBob2.locator("summary").click();
   await aliceBob2.getByText("Bob approved your request — you can message them directly.").waitFor();
   await selectRecipient(a.page, "bob");
+  assert.equal(await a.page.locator("#message-to-select").inputValue(), "bob",
+    "the recipient select took the evaluate-set value before sending");
   await a.page.locator("#message-input").fill("hello bob, approved");
   await a.page.locator("#message-form button[type=submit]").click();
   await a.page.locator("#message-input").waitFor({ state: "visible" });
