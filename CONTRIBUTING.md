@@ -21,7 +21,10 @@ Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and
 4. Run `npm run check` (including `npm run lint`). For UI changes, install Chromium with
    `npx playwright install --with-deps chromium` and run the affected browser
    checks; the full suite is `npm run test:browser`. Workers changes also need
-   the checks in [cloudflare/README.md](cloudflare/README.md).
+   the checks in [cloudflare/README.md](cloudflare/README.md). Run all tests
+   via `scripts/test-env.sh` (e.g. `scripts/test-env.sh npm test`) so TMPDIR
+   points at the worktree-local `.tmp/` instead of the shared 512MB `/tmp`
+   tmpfs, which is actively reaped and causes SQLITE_FULL failures.
 5. Open a PR explaining the problem, resulting behavior, tests and limitations.
    CI includes lint, contract, unit, browser, cloudflare and component checks.
    Required CI must pass on the final revision. Maintainers handle merging and
