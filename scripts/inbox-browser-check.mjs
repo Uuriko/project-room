@@ -493,7 +493,7 @@ for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile
   await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
   const record = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.excerpt'").get();
   const shared = { receipt: JSON.parse(record.receipt_json) }, posted = f.store.room("commons").state.messages.find(m => m.id === shared.receipt.messageId);
-  assert.equal(posted.body, "Shared email excerpt\n\n" + excerpt); assert.equal(JSON.stringify(posted).includes("4200"), false);
+  assert.equal(posted.body, "Shared email excerpt\n\n" + excerpt); assert.equal(JSON.stringify(posted).includes("Private budget: 4200"), false);
   const work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding, { sourceId: id, shareReceipt: shared, ready: false });
   await f.inbox(); await f.pick(id); await p.getByText("Work in progress", { exact: true }).waitFor();
   work.complete(); work.review(); work.decide();
@@ -901,6 +901,13 @@ test("real inbox: lost save response retries exact request without a second revi
 
 test("real inbox: unknown share survives reload as metadata and never posts twice", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page; await f.inbox(); await f.pick("note");
+  // Reproduce the CI UUID that happened to contain the budget's digits.
+  // Identifiers are allowed metadata; the private source text is not.
+  await p.evaluate(() => {
+    const generate = crypto.randomUUID.bind(crypto);
+    Object.defineProperty(crypto, "randomUUID", { configurable: true,
+      value: () => generate().replace(/-4[0-9a-f]{3}-/, "-4200-") });
+  });
   let lost = false; const ids = [], before = f.store.room("commons").sequence;
   await p.route("**/api/inbox/commands", async route => {
     ids.push(route.request().postDataJSON().requestId);
@@ -932,7 +939,8 @@ test("real inbox: unknown share survives reload as metadata and never posts twic
   assert.equal(stored.request.requestId, ids[0]);
   assert.deepEqual(stored.request.paragraphs, [0]);
   // And no private source text or sender address may appear anywhere in it.
-  assert.equal(storedRaw.includes("4200"), false, `private budget leaked into pending-share storage: ${storedRaw}`);
+  assert.match(stored.request.requestId, /-4200-/);
+  assert.equal(storedRaw.includes("Private budget: 4200."), false, `private budget leaked into pending-share storage: ${storedRaw}`);
   assert.equal(storedRaw.includes("maya@"), false, `sender address leaked into pending-share storage: ${storedRaw}`);
   await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox();
   await p.locator("#inbox-ask").click(); await p.getByRole("button", { name: "Confirm share", exact: true }).waitFor();

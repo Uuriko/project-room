@@ -54,7 +54,8 @@ test("exact email excerpt shares only selected normalized text and returns a rev
   const selected = "Keep 🪷\nthis line", request = f.excerpt({ start: 0, end: selected.length }), shared = f.share(request);
   const message = f.store.room("commons").state.messages.find(m => m.id === shared.receipt.messageId);
   assert.equal(message.body, "Shared email excerpt\n\n" + selected);
-  for (const secret of ["4200", "observer@example.test", f.raw.message.subject, f.raw.message.id, "brief.txt"])
+  // IDs can contain the budget digits by chance; the exact body assertion above guards partial disclosure.
+  for (const secret of ["Private budget: 4200", "observer@example.test", f.raw.message.subject, f.raw.message.id, "brief.txt"])
     assert.equal(JSON.stringify(message).includes(secret), false);
   assert.equal(f.share(request).duplicate, true);
   assert.throws(() => f.share({ ...request, selection: { start: 0, end: 4 } }), { code: "idempotency_conflict" });

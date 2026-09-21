@@ -1,3 +1,5 @@
+> Current deployment topology and commands: [One Room service](../docs/ROOM-DEPLOYMENT.md). The records below describe earlier staging checkpoints.
+
 # Cloudflare staging candidate
 
 **Local candidate update:** private reminders now require schema v8. They and the

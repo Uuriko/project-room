@@ -340,6 +340,45 @@ export class RoomAgentClient {
       roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
       checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
+  // A wake-up hint only. Consumers re-read their authorized queue before acting;
+  // no streamed message body is used as executable input or saved as history.
+  async waitForChange(after, { signal, timeoutMs = 10000 } = {}) {
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
+      throw new Error("Choose a valid stream cursor and timeout");
+    const deadline = AbortSignal.timeout(timeoutMs), controller = new AbortController();
+    const stop = AbortSignal.any([controller.signal, deadline, ...(signal ? [signal] : [])]);
+    let reader;
+    try {
+      await this.checkConnection({ signal: stop });
+      const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/stream?after=${after}`,
+        { signal: stop, headers: { Accept: "text/event-stream" } });
+      if (!response.ok) throw this.#requestError(response, null, "Room stream unavailable");
+      if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body)
+        throw new RoomClientError(200, "invalid_response", "Room returned an invalid event stream");
+      reader = response.body.getReader();
+      const decoder = new TextDecoder(); let buffer = "";
+      while (true) {
+        const chunk = await reader.read(); if (chunk.done) return { changed: false };
+        buffer += decoder.decode(chunk.value, { stream: true });
+        if (buffer.length > 262144) throw new RoomClientError(200, "invalid_response", "Room stream frame exceeds its limit");
+        let boundary;
+        while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+          const frame = buffer.slice(0, boundary.index); buffer = buffer.slice(boundary.index + boundary[0].length);
+          const kind = /^event: ?([^\r\n]+)/m.exec(frame)?.[1];
+          if (kind === "access-ended") throw new RoomClientError(401, "access_ended", "Room access ended");
+          if (kind === "stream_lagging") return { changed: true };
+          if (kind !== "room-event") continue;
+          const id = /^id: ?([0-9]+)\r?$/m.exec(frame)?.[1], sequence = Number(id);
+          if (!id || !Number.isSafeInteger(sequence) || sequence <= after)
+            throw new RoomClientError(200, "invalid_response", "Room returned an invalid stream cursor");
+          return { changed: true, sequence };
+        }
+      }
+    } catch (error) {
+      if (deadline.aborted && !signal?.aborted) return { changed: false };
+      throw error;
+    } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
+  }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);

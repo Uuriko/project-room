@@ -4,19 +4,23 @@ import { fileURLToPath } from "node:url";
 import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
-import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { validId } from "../src/events.js";
 
+const canonicalOrigin = value => {
+  const origin = assertServiceOrigin(value);
+  return ["https://getdasha.com", "https://www.getdasha.com"].includes(origin) ? ROOM_ORIGIN : origin;
+};
 export function setupTarget(value, origin) {
   if (typeof value !== "string") throw new Error("Choose an invite or Room URL");
-  if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: assertServiceOrigin(origin), code: value.toUpperCase() };
+  if (/^RM-[a-z0-9]+$/i.test(value)) return { origin: canonicalOrigin(origin), code: value.toUpperCase() };
   const url = new URL(value); assertServiceOrigin(url.origin);
   if (url.username || url.password || url.search || !["", "/", "/room", "/room/"].includes(url.pathname)) throw new Error("Use the Room entry URL");
-  if (origin && origin !== url.origin) throw new Error("URL and configured origin disagree");
-  if (!url.hash) return { origin: url.origin };
+  if (origin && canonicalOrigin(origin) !== canonicalOrigin(url.origin)) throw new Error("URL and configured origin disagree");
+  if (!url.hash) return { origin: canonicalOrigin(url.origin) };
   const [kind, id, extra] = url.hash.slice(1).split("/");
-  if (!extra && kind === "agent-invite" && /^RM-[a-z0-9]+$/i.test(id ?? "")) return { origin: url.origin, code: id.toUpperCase() };
-  if (!extra && kind === "room" && validId(id)) return { origin: url.origin, roomId: id };
+  if (!extra && kind === "agent-invite" && /^RM-[a-z0-9]+$/i.test(id ?? "")) return { origin: canonicalOrigin(url.origin), code: id.toUpperCase() };
+  if (!extra && kind === "room" && validId(id)) return { origin: canonicalOrigin(url.origin), roomId: id };
   throw new Error("Use an agent invite or room link; a human sign-in link is not agent access");
 }
 const signature = preview => JSON.stringify({ roomId: preview.roomId, permissions: [...preview.permissions].sort(), expiresAt: preview.expiresAt });
@@ -30,16 +34,17 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     let saved = journal.read();
     if (!saved) {
       const imported = identityFrom ? readAgentConnection(identityFrom) : null;
-      if (imported && (imported.origin !== destination.origin || !/^pri_[A-Za-z0-9_-]{43}$/.test(imported.token))) throw new Error("Choose an identity connection on the same service");
+      if (imported && (canonicalOrigin(imported.origin) !== destination.origin || !/^pri_[A-Za-z0-9_-]{43}$/.test(imported.token))) throw new Error("Choose an identity connection on the same service");
       const importedIdentity = imported ? await listAgentRooms(imported.origin, imported.token, { fetchImpl }) : null;
       saved = { version: 1, origin: destination.origin, name, secret: imported?.token ?? "pri_" + randomBytes(32).toString("base64url"),
         identityId: importedIdentity?.identityId ?? null, targets: {} };
       journal.save(saved); // A crash before registration cannot lose the only credential.
     }
-    if (saved.version !== 1 || saved.origin !== destination.origin || !/^pri_[A-Za-z0-9_-]{43}$/.test(saved.secret)
+    if (saved.version !== 1 || canonicalOrigin(saved.origin) !== destination.origin || !/^pri_[A-Za-z0-9_-]{43}$/.test(saved.secret)
       || typeof saved.name !== "string" || !saved.name.trim() || saved.name.length > 80 || /[\u0000-\u001f\u007f]/.test(saved.name) || !saved.targets || typeof saved.targets !== "object" || Array.isArray(saved.targets)
       || saved.identityId !== null && !validId(saved.identityId)) throw new Error("Saved setup does not match this service or identity");
-    if (identityFrom && (readAgentConnection(identityFrom).token !== saved.secret || readAgentConnection(identityFrom).origin !== saved.origin)) throw new Error("Setup already belongs to another identity");
+    if (identityFrom && (readAgentConnection(identityFrom).token !== saved.secret || canonicalOrigin(readAgentConnection(identityFrom).origin) !== canonicalOrigin(saved.origin))) throw new Error("Setup already belongs to another identity");
+    destination.origin = saved.origin; // Existing verified alias connections keep their journal/config paths.
     const options = { identitySecret: saved.secret, fetchImpl };
     const key = createHash("sha256").update(JSON.stringify(destination)).digest("hex");
     let step = saved.targets[key];
@@ -108,7 +113,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       atomicPrivateJson(join(configDirectory, "connection.json"), config);
     }
     step.joined = true; journal.save(saved);
-    return { status: "connected", identityId: saved.identityId, roomId: step.roomId, memberId: access.memberId,
+    return { status: "connected", origin: saved.origin, identityId: saved.identityId, roomId: step.roomId, memberId: access.memberId,
       configDirectory, permissions: access.permissions, orientation,
       host: { transport: "stdio", command: process.execPath, args: [fileURLToPath(new URL("../scripts/agent-mcp.mjs", import.meta.url))],
         env: { ROOM_AGENT_CONFIG: configDirectory }, installed: false },

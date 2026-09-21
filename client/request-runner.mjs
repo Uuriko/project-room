@@ -121,13 +121,15 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
 
 // Explicit execution mode, separate from the notify-only watcher. Each scan is
 // bounded; work is serialized and every invocation re-reads its eligibility.
-export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000 }) {
+export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs;
   while (!signal?.aborted) {
+    let cursor = null;
     try {
-      const { requests } = await client.replyRequests({ status: "all", signal });
+      const { requests, evaluatedThrough } = await client.replyRequests({ status: "all", signal });
+      cursor = evaluatedThrough;
       const { runs } = await client.requestRuns(undefined, { signal });
       const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
       const owned = request => Object.hasOwn(runs, request.id);
@@ -147,9 +149,15 @@ export async function runRequestQueue({ connection, db, execute, signal, emit = 
       }
       delay = intervalMs;
     } catch { if (!signal?.aborted) emit({ status: "connection_unavailable" }); delay = Math.min(delay * 2, 60000); }
-    if (!signal?.aborted) await new Promise(resolve => {
+    const waitingAt = Date.now(); let changed = false;
+    if (stream && Number.isSafeInteger(cursor) && !signal?.aborted) {
+      try { ({ changed } = await client.waitForChange(cursor, { signal, timeoutMs: delay })); }
+      catch { /* Polling remains the bounded fallback for unavailable streams. */ }
+    }
+    const remaining = Math.max(0, delay - (Date.now() - waitingAt));
+    if (!changed && !signal?.aborted && remaining > 0) await new Promise(resolve => {
       const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
-      const timer = setTimeout(done, delay); signal?.addEventListener("abort", done, { once: true });
+      const timer = setTimeout(done, remaining); signal?.addEventListener("abort", done, { once: true });
     });
   }
 }
