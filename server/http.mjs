@@ -2853,13 +2853,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
         return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
       }
+      // #643: invitation administration admits the room owner by ID on any
+      // credential (share-links-style owner-capability exemption, audited);
+      // anyone else needs an account browser session, as before.
+      const invitationOwnerActing = auth.member?.id === store.room(roomId).state.room.ownerId;
       if (route === "invitations" && req.method === "GET") {
         // Round-2 #108: invite-link analytics.
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         return json(res, 200, store.invitationStats(selected.token, roomId, auth.sessionBinding));
       }
       if (route === "invitations" && req.method === "POST") {
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         const fields = ["requestId", "invitationToken", "intendedAccountId", "intendedMemberId", "displayName", "role", "expiresAt", "expectedIssuerMemberRevision"];
         if (!exact(data, fields)) reject(422, "invalid_invitation", "Supply the exact invitation scope");
@@ -2867,7 +2871,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "invitation-revoke" && req.method === "POST") {
-        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
         return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
