@@ -13,7 +13,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   dialog.querySelector('[data-send]').className = 'button primary';
   root.querySelector('[data-compose]').className = 'button primary';
   const $ = s => root.querySelector(s), d = s => dialog.querySelector(s), form = dialog.querySelector('form');
-  let allMailboxes = [], files = [], richMode = false, status = null, generation = 0, listTurn = 0, readTurn = 0, next = null, selected = null, editing = null, pending = null, busy = false, dirty = false;
+  let allMailboxes = [], files = [], richMode = false, status = null, generation = 0, listTurn = 0, readTurn = 0, listContext = null, next = null, selected = null, editing = null, pending = null, busy = false, dirty = false;
   const notice = value => { $('[data-notice]').textContent = value; };
   const call = data => api.request('/gmail/mailbox', { method: 'POST', data: { mailboxId: status?.id, ...data } });
   const fence = () => { const owner = ownerKey(), turn = generation; return () => owner && owner === ownerKey() && turn === generation; };
@@ -22,6 +22,9 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   function errorText(error) { return ['gmail_reconnect_required', 'gmail_write_permission_required'].includes(error.code) ? 'Reconnect Gmail from All messages to allow sending and organizing email.' : error.code === 'gmail_draft_changed' ? 'This draft changed in Gmail. Close and reopen it before editing.' : error.message || 'Gmail could not complete this request.'; }
   async function list(older = false) {
     const current = fence(), turn = ++listTurn, search = $('[data-search]');
+    const context = search.elements.folder.value + '\n' + search.elements.query.value;
+    if (!older && context !== listContext) $('[data-list]').replaceChildren();
+    listContext = context;
     notice('Loading email…'); $('[data-more]').disabled = true;
     try {
       const result = await call({ action: 'list', folder: search.elements.folder.value, query: search.elements.query.value, pageToken: older ? next : null });
@@ -40,7 +43,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   async function read(row) {
     const current = fence(), turn = ++readTurn; notice('Opening email…');
     try {
-      const result = await call({ action: 'read', id: row.id, draftId: row.draftId });
+      const result = await call({ action: 'read', id: row.id, draftId: row.draftId, sourceId: row.sourceId });
       if (!current() || turn !== readTurn) return;
       selected = result.message; const m = selected, reader = $('[data-reader]'); reader.replaceChildren();
       const title = document.createElement('h2'), meta = document.createElement('p'), body = document.createElement('pre'), actions = document.createElement('div'); actions.className = 'gmail-toolbar';
@@ -202,8 +205,15 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
       if (status) $('[data-mailbox]').value = status.id;
       $('[data-address]').textContent = status?.address ?? ''; $('[data-compose]').disabled = !status?.canWrite;
     },
-    open() { if (!ownerKey() || status?.state !== 'connected') return; root.hidden = false; panel.classList.add('gmail-active'); $('[data-compose]').focus(); list(); },
-    reset() { generation++; listTurn++; readTurn++; status = selected = editing = pending = null; busy = dirty = false; dialog.close(); form.reset(); files = []; richMode = false; d('[data-rich]').replaceChildren(); d('[data-files-list]').replaceChildren(); d('[data-from]').textContent = ''; d('[data-result]').textContent = ''; root.hidden = true; panel.classList.remove('gmail-active'); $('[data-list]').replaceChildren(); $('[data-reader]').replaceChildren(); $('[data-address]').textContent = ''; notice(''); }
+    open(mailboxId = null, sourceId = null) {
+      const target = mailboxId ? allMailboxes.find(m => m.id === mailboxId) : status;
+      if (!ownerKey() || target?.state !== 'connected') return false;
+      if (target.id !== status?.id) { this.reset(); status = target; this.setStatus({ mailboxes: allMailboxes }); }
+      root.hidden = false; panel.classList.add('gmail-active'); $('[data-compose]').focus();
+      if (sourceId) { $('[data-search]').elements.folder.value = 'inbox'; $('[data-search]').elements.query.value = ''; read({ sourceId }); }
+      list(); return true;
+    },
+    reset() { generation++; listTurn++; readTurn++; listContext = null; status = selected = editing = pending = null; busy = dirty = false; dialog.close(); form.reset(); files = []; richMode = false; d('[data-rich]').replaceChildren(); d('[data-files-list]').replaceChildren(); d('[data-from]').textContent = ''; d('[data-result]').textContent = ''; root.hidden = true; panel.classList.remove('gmail-active'); $('[data-list]').replaceChildren(); $('[data-reader]').replaceChildren(); $('[data-address]').textContent = ''; notice(''); }
   };
   return controller;
 }

@@ -46,6 +46,12 @@ test('multiple mailboxes retain separate encrypted grants, sender identities and
   const send = await f.actions.run(f.slot.token, f.session.sessionBinding, { action: 'send', mailboxId: added.mailboxId, requestId: 'second-send', to: 'recipient@example.com', subject: 'Second sender', body: 'Account two' }); assert.equal(send.state, 'accepted');
   const request = second.calls.find(c => c.url.endsWith('/messages/send')); assert.ok(request); assert.match(Buffer.from(JSON.parse(request.body).raw, 'base64url').toString(), /From: second@gmail.test/);
   assert.equal(f.calls.filter(c => c.url.endsWith('/messages/send')).length, 0);
+  await f.sync.mailboxTick(f.account.id, f.id);
+  const source = f.store.inbox.list(f.slot.token, f.session.sessionBinding, { includeChannels: true }).sources.find(s => s.connection?.id === f.id);
+  assert.equal((await f.actions.run(f.slot.token, f.session.sessionBinding, { action: 'read', mailboxId: f.id, sourceId: source.id })).message.id, 'mail-1');
+  const secondReads = second.calls.filter(c => c.url.includes('/messages/')).length;
+  await assert.rejects(f.actions.run(f.slot.token, f.session.sessionBinding, { action: 'read', mailboxId: added.mailboxId, sourceId: source.id }), { code: 'gmail_invalid_message' });
+  assert.equal(second.calls.filter(c => c.url.includes('/messages/')).length, secondReads);
   f.m.disconnect(f.slot.token, f.session.sessionBinding, f.id); assert.equal(f.m.status(f.m.auth(f.slot.token, f.session.sessionBinding)).mailboxes.length, 1);
   assert.equal((await f.sync.mailboxTick(f.account.id, added.mailboxId)).imported, 1);
 });
