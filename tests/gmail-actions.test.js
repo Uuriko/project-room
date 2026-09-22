@@ -35,11 +35,11 @@ test('reply uses provider thread, Message-ID and Reply-To; save/reopen/update/se
   const sent = f.calls.find(c => c.url.endsWith('/drafts/send')), payload = JSON.parse(sent.body); assert.equal(payload.message.threadId, 'thread-1');
   assert.match(Buffer.from(payload.message.raw, 'base64url').toString(), /In-Reply-To: <original@example.com>/);
 });
-test('ambiguous send stays unknown across service restart and concurrent duplicates send once', async t => {
+test('ambiguous send reconciles against Sent across service restart without resending', async t => {
   const f = await setup(t), original = f.config.fetchImpl;
   f.config.fetchImpl = async (url, init) => { if (url.endsWith('/messages/send')) { await original(url, init); throw new Error('lost receipt'); } return original(url, init); };
-  const results = await Promise.all([f.run(compose), f.run(compose)]); assert.ok(results.every(r => r.state === 'unknown'));
-  const restarted = new GmailActions(new GmailMailbox(f.store, f.config)); assert.equal((await restarted.run(f.slot.token, f.session.sessionBinding, compose)).state, 'unknown');
+  const results = await Promise.all([f.run(compose), f.run(compose)]); assert.ok(results.every(r => ['unknown', 'accepted'].includes(r.state)));
+  const restarted = new GmailActions(new GmailMailbox(f.store, f.config)); assert.equal((await restarted.run(f.slot.token, f.session.sessionBinding, compose)).state, 'accepted');
   assert.equal(f.calls.filter(c => c.url.endsWith('/messages/send')).length, 1);
 });
 test('old read-only consent rejects writes; header injection and unsupported draft attachments never mutate', async t => {
@@ -70,17 +70,16 @@ test('mailbox HTTP rejects missing CSRF before provider access and projects owne
   headers['X-CSRF-Token'] = f.session.csrf; const response = await request(); assert.equal(response.status, 200); const data = await response.json(); assert.equal(data.viewer.accountId, f.account.id); assert.equal(data.state, 'accepted');
 });
 
-test('formatted drafts and attachments cannot be silently stripped; Reply-To and body text are projected', async t => {
+test('formatted drafts preserve explicit attachment review and sanitize executable HTML', async t => {
   const f = await setup(t), read = await f.run({ action: 'read', id: 'mail-1' });
   assert.equal(read.message.replyTo, 'reply@example.com');
-  const saved = await f.run({ ...compose, action: 'save' }), draft = f.drafts.get(saved.id);
-  draft.message.payload.parts = [{ filename: 'plan.pdf', body: { attachmentId: 'attachment-1', size: 100 } }];
-  assert.equal((await f.run({ action: 'read', id: saved.messageId, draftId: saved.id })).message.editable, false);
-  await assert.rejects(f.run({ ...compose, requestId: 'attachment-send', draftId: saved.id, expectedMessageId: saved.messageId }), { code: 'gmail_draft_unsupported' });
-  draft.message.payload.parts = []; draft.message.payload.mimeType = 'text/html'; draft.message.payload.body.data = Buffer.from('<p>Hello</p><script>evil()</script>').toString('base64url');
-  const html = await f.run({ action: 'read', id: saved.messageId, draftId: saved.id }); assert.equal(html.message.editable, false); assert.ok(!html.message.body.includes('<script>'));
-  await assert.rejects(f.run({ ...compose, attachments: [{ name: 'silently-drop.txt' }] }), { code: 'gmail_invalid_message' });
-  assert.equal(f.calls.filter(c => c.url.endsWith('/drafts/send')).length, 0);
+  const saved = await f.run({ ...compose, action: 'save', html: '<p><b>Hello</b><script>evil()</script><img src="https://tracker.test/pixel"></p>', attachments: [{ name: 'plan.txt', type: 'text/plain', data: Buffer.from('Plan').toString('base64') }] });
+  const draft = await f.run({ action: 'read', id: saved.messageId, draftId: saved.id });
+  assert.equal(draft.message.editable, true); assert.equal(draft.message.attachments[0].name, 'plan.txt'); assert.match(draft.message.html, /<b>Hello<\/b>/); assert.ok(!/script|img|tracker/.test(draft.message.html));
+  await assert.rejects(f.run({ ...compose, requestId: 'omit-files', draftId: saved.id, expectedMessageId: saved.messageId }), { code: 'gmail_attachment_review_required' });
+  const sent = await f.run({ ...compose, requestId: 'with-files', draftId: saved.id, expectedMessageId: saved.messageId, html: draft.message.html, attachments: draft.message.attachments.map(a => ({ messageId: saved.messageId, partId: a.partId })) });
+  assert.equal(sent.state, 'accepted'); const opened = await f.run({ action: 'read', id: sent.id }); assert.equal(opened.message.attachments.length, 1);
+  const downloaded = await f.run({ action: 'attachment', id: sent.id, partId: opened.message.attachments[0].partId }); assert.equal(Buffer.from(downloaded.attachment.data, 'base64url').toString(), 'Plan');
 });
 
 test('search pagination forwards Gmail cursor and remains scoped to each account', async t => {

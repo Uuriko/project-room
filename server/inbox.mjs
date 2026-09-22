@@ -1,3 +1,4 @@
+import { gmailImportAuth } from './gmail-import-authority.mjs';
 import { createHash } from "node:crypto";
 import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
 import { currentApproval } from "../src/workflow.js";
@@ -540,8 +541,11 @@ export class Inbox {
       connections.set(profile.id, { id: profile.id, channel: profileChannel(profile), provider: profile.provider,
         state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected" });
     }
+    const gmail = profile?.provider === 'gmail-api' && connections.get(profile.id)?.state === 'active';
+    const folder = gmail ? this.store.connections.folder(auth.account.id, profile.id, 'INBOX') : null;
+    if (folder && !folder.members.includes(d.envelope.message.id)) return null;
     return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
-      readAt: readAt.get(row.id) ?? null, connection: profile ? connections.get(profile.id) : null,
+      readAt: gmail ? (d.envelope.message.isRead ? row.updated_at : null) : readAt.get(row.id) ?? null, connection: profile ? connections.get(profile.id) : null,
       needsYou: inboxNeedsYou(d, sentIds) };
   }
   list(token, binding, { includeChannels = false, includeEmail = false, cursor = null, limit = null } = {}) {
@@ -1206,7 +1210,7 @@ export class Inbox {
   }
   apply(token, request, binding, authority = null) {
     return this.store.transaction(() => {
-      const auth = this.auth(token, binding); validate(request);
+      const auth = (authority === importAuthority ? gmailImportAuth(this.store, token, request) : null) ?? this.auth(token, binding); validate(request);
       if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
       if (request.action === "source.import" && authority !== importAuthority) fail(403, "channel_importer_required", "Only the configured importer can record this source.");
