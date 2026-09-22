@@ -141,18 +141,20 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     try {
       return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
     } catch (error) {
+      if (error.code === "join_session_lost") throw uncertain(error);
       if (!canRetryInvitation(error)) throw error;
       try { await accountClient.restore(); }
       catch { throw uncertain(error); } // restore failed: the join outcome is still unknown
       try {
         return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
       } catch (retryError) {
-        throw canRetryInvitation(retryError) ? uncertain(error) : retryError;
+        throw canRetryInvitation(retryError) || retryError.code === "join_session_lost" ? uncertain(retryError) : retryError;
       }
     }
   }
   function joinFailureStatus(error) {
     const room = previewRoomTitle ? `“${previewRoomTitle}”` : "the room";
+    if (error?.code === "join_session_lost") return invitationFailureMessage(error);
     if (error?.uncertainJoin) {
       return `The connection was interrupted and we couldn't confirm whether you joined ${room}. ` +
         `Your invitation is kept — reopen it (or reload this page) and we'll check whether your join went through. You can't be joined twice.`;
@@ -450,6 +452,16 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } catch (error) {
       if (version !== joinVersion) return;
+      if (resume && error.code === "link_unavailable") {
+        // The earlier join may have consumed the final place. Preview refuses
+        // new joins, but the authenticated idempotent replay can still recover it.
+        previewRoomId = resume.roomId; previewRoomTitle = resume.roomTitle;
+        $("#join-link-name").value = resume.displayName;
+        $("#join-link-form").hidden = false;
+        $("#join-link-scope").textContent = "Checking your earlier join…";
+        await performJoin({ resume: true });
+        return;
+      }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
       const retryable = canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
@@ -535,7 +547,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion) return;
       failed = true;
       joinStatus(joinFailureStatus(error));
-      $("#join-link-signout").hidden = error.code !== "guest_session_ended";
+      if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
+      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
+      $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
+      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Sign out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);
@@ -556,6 +571,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const signedOut = await accountClient.logout();
       if (version !== joinVersion || !joinDialog.open) return;
       if (signedOut?.authenticated !== false || signedOut.account !== null) throw new Error("Sign-out was not confirmed. Try again.");
+      clearUncertainJoin();
       redemptionId = crypto.randomUUID(); $("#join-link-signout").hidden = true;
       joinStatus("Signed out. You can now join with a new guest identity.");
     } catch (error) {

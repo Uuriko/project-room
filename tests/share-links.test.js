@@ -521,3 +521,35 @@ test("revoked agent identities cannot recover or consume a shared invitation", t
   assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"), { status: 401 });
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 1);
 });
+
+
+test("same join retried with a lost cookie cannot mint a second guest or use the request ID as a credential", t => {
+  const f = fixture(t), original = f.guest("Jill"), joined = original.accept();
+  const before = f.store.room("commons").sequence;
+  const retry = f.guest("Jill");
+  for (let n = 0; n < 4; n++) {
+    const session = f.store.accountSessionSlot(retry.slot.token);
+    assert.throws(() => f.store.shareLinks.join(retry.slot.token, f.linkToken, {
+      displayName: "Jill", redemptionId: original.redemptionId,
+      expectedSessionRevision: session.sessionRevision, expectedSessionBinding: session.sessionBinding
+    }), { code: "join_session_lost" });
+  }
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 1);
+  assert.throws(() => f.store.authenticateAccountSession(retry.slot.token), { code: "unauthenticated" });
+  assert.equal(original.accept().session.member.id, joined.session.member.id);
+  // Names are not identity: a different person choosing the same name may join.
+  const different = retry.accept();
+  assert.notEqual(different.session.member.id, joined.session.member.id);
+});
+
+test("existing guest reopens a full invitation using a new request ID without another join", t => {
+  const f = fixture(t), first = f.guest("Jill");
+  const joined = first.accept(); f.guest("Other").accept();
+  const session = f.store.accountSessionSlot(first.slot.token);
+  const resumed = f.store.shareLinks.join(first.slot.token, f.linkToken, { displayName: "Jill", redemptionId: randomUUID(),
+    expectedSessionRevision: session.sessionRevision, expectedSessionBinding: session.sessionBinding });
+  assert.equal(resumed.duplicate, true);
+  assert.equal(resumed.session.member.id, joined.session.member.id);
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 2);
+});

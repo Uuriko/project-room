@@ -511,3 +511,61 @@ test("open-room failure after a join recovers the credential and navigates", asy
     assert.equal(readUncertainJoin(), null);
   } finally { dom.uninstall(); }
 });
+
+
+test("lost guest cookie keeps the original join request and shows recovery instead of blind retry", async () => {
+  const dom = guestJoinDom(), calls = [];
+  const accountClient = {
+    session: { authenticated: false, account: null }, async restore() { return this.session; },
+    async logout() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink(request) {
+      calls.push(structuredClone(request));
+      throw Object.assign(new Error("Return to your original browser session. No additional guest was created."), { code: "join_session_lost", status: 409 });
+    }
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open another identity"); } });
+    await ui.open({ token: "s".repeat(43) });
+    dom.node("#join-link-name").value = "Jill";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(calls.length, 1);
+    assert.equal(dom.node("#join-link-signout").hidden, false);
+    assert.match(dom.node("#join-link-signout").textContent, /uses another place/);
+    assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
+    assert.match(dom.node("#join-link-status").textContent, /original browser session/);
+    assert.equal(dom.node("#join-account-choices").hidden, false, "the recovery message offers a visible sign-in action");
+    assert.doesNotMatch(dom.node("#join-link-status").textContent, /couldn't confirm/);
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.deepEqual(calls[1], calls[0]);
+    assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
+    await dom.node("#join-link-signout").handlers.click();
+    assert.equal(readUncertainJoin(), null, "only the explicit start-over clears recovery");
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.notEqual(calls[2].redemptionId, calls[0].redemptionId);
+  } finally { dom.uninstall(); }
+});
+
+
+test("reload recovers a pending join even when its success filled the invitation", async () => {
+  const dom = guestJoinDom(); let recovered = null, opened = false;
+  const token = "s".repeat(43), redemptionId = crypto.randomUUID();
+  const accountClient = {
+    session: {}, async restore() { return this.session; },
+    async prepareShareLink() { throw Object.assign(new Error("Full invitation"), { code: "link_unavailable", status: 410 }); },
+    async joinShareLink(request) { recovered = request; return { roomId: "commons", session: { member: { id: "same-guest" } } }; }
+  };
+  dom.install();
+  try {
+    writeUncertainJoin({ linkToken: token, redemptionId, displayName: "Jill", roomId: "commons", roomTitle: "Room" });
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { opened = true; } });
+    await ui.open({ token });
+    assert.equal(recovered.redemptionId, redemptionId);
+    assert.equal(recovered.linkToken, token);
+    assert.equal(opened, true);
+    assert.equal(readUncertainJoin(), null);
+  } finally { dom.uninstall(); }
+});
