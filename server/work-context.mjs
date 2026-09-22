@@ -19,7 +19,7 @@ export function currentWorkRecord(item) {
   work.stop_requested_at = session.stop_requested_at;
   work.heartbeat_at = session.heartbeat_at;
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
-  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion checksClaimed nextAction eventId nativeText");
+  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
   work.blocker = pick(item.blocker, "reason nextAction eventId");

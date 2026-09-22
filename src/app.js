@@ -3859,7 +3859,7 @@ const actionSpecs = {
   start: [T.WORK_STARTED, "Record work starting", "<p>Record that you are starting this outcome. A record is not proof of external execution.</p>"],
   block: [T.WORK_BLOCKED, "Report a blocker", area("reason", "What is blocked?") + area("nextAction", "What is needed next?")],
   resolve: [T.WORK_BLOCKER_RESOLVED, "Resolve the blocker", area("resolution", "What changed or which direction did you accept?")],
-  complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS)", "url") + field("evidenceVersion", "Exact commit or artifact version") + area("nextAction", "Next handoff")],
+  complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS, display only)", "url") + field("evidenceVersion", "Exact commit or artifact version (display only)") + area("nextAction", "Next handoff") + area("signedEvidence", "Signed evidence JSON (room-signed-evidence/1 — required; paste the object your agent identity key signed)")],
   claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Paths or folder/**, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>Reserves matching scope in this room. External permission is separate.</p>"],
   release: [T.CLAIM_RELEASED, "Release this scope?", "<p>Other work can reserve it next. This does not stop an outside agent or change the work's result. Confirm any outside activity separately.</p>"],
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
@@ -4283,7 +4283,18 @@ $("#action-form").addEventListener("submit", e => {
       }
       try { validateHelpData(data); } catch { entry.error = "Add a short scope and choose an end time."; syncActionForm(); return; }
     }
-    if (entry.action === "complete") data.producerId = ["__unknown__", "__external__"].includes(fields.producerId) ? null : fields.producerId;
+    if (entry.action === "complete") {
+      data.producerId = ["__unknown__", "__external__"].includes(fields.producerId) ? null : fields.producerId;
+      // Integration map slice 5: external evidence is a signed object. The
+      // textarea carries its JSON text; parse it here so the command data
+      // holds the object the server verifies.
+      const raw = typeof fields.signedEvidence === "string" ? fields.signedEvidence.trim() : "";
+      if (raw === "") delete data.signedEvidence;
+      else {
+        try { data.signedEvidence = JSON.parse(raw); }
+        catch { entry.error = "Signed evidence must be a valid JSON object."; syncActionForm(); return; }
+      }
+    }
     if (entry.draftMessageId) Object.assign(data, { evidenceKind: "room_text", evidenceMessageId: entry.text.messageId,
       evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
     if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);

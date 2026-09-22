@@ -303,7 +303,7 @@ const exactKeys = (obj, keys, label) => {
     fail("invalid_receipt", `${label} must have exactly keys [${want.join(", ")}]`);
 };
 
-const validIssuedAt = s => {
+export const validIssuedAt = s => {
   // RFC 3339 UTC, seconds precision or exactly-3-digit millis, real
   // calendar time (no rollover like month 13). The spellings must be
   // canonical: "…:56Z" or "…:56.789Z", never "…:56.78Z".

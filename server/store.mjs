@@ -57,6 +57,7 @@ import {
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
+import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
@@ -385,7 +386,7 @@ const shapes = {
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
-  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments`,
+  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
@@ -415,7 +416,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -2906,6 +2907,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
       }
       catch (error) { fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      // Integration map slice 5: the external path is only as strong as
+      // its signature. Room_text is unchanged above; every other completion
+      // must carry a signed evidence object that verifies against the agent
+      // key registry. This runs outside the catch above so evidence
+      // failures keep their typed status (422 for a bad object, 409 for a
+      // replay) instead of collapsing into command_rejected.
+      if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind !== "room_text") {
+        try {
+          verifyCompletionEvidence(this.db, this.keyRegistry, roomId, incoming.data);
+        } catch (error) {
+          if (error instanceof EvidenceError) throw new ServiceError(error.code === "duplicate_evidence" ? 409 : 422, error.code, error.message);
+          throw error;
+        }
+      }
       if (incoming.type === T.CLAIM_ACQUIRED) {
         // Same transaction as actor/revision validation and persistence. Keeping
         // this live-only preserves replay of previously accepted reservations.
