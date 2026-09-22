@@ -20,7 +20,6 @@ const GROK = "id:agent/grokbot";    // worker lane
 const CODEX = "id:agent/codex";     // second worker lane
 
 let nowMs = 1_786_000_000_000;
-const tick = ms => { nowMs += ms; };
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 
 function makeEscrow(db = new DatabaseSync(":memory:")) {

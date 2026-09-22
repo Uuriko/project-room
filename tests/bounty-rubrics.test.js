@@ -17,7 +17,6 @@ const INSTINCT = "id:agent/instinct"; // designated verifier / decider
 const CODEX = "id:agent/codex";       // challenger lane
 
 let nowMs = 1_786_000_000_000;
-const tick = ms => { nowMs += ms; };
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 
 function makeEscrow(db = new DatabaseSync(":memory:")) {
