@@ -120,9 +120,11 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   ]);
   await producerSelect.selectOption("owner");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter submitted the result");
-  // evidenceUrl omitted: UI form cannot provide signedEvidence for external completions
+  await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/reporter-result");
   await page.locator('#action-form input[name="evidenceVersion"]').fill("producer-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Maya verifies independently");
+  // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.
+  await page.locator('#action-form textarea[name="signedEvidence"]').fill(JSON.stringify(signEvidence()));
   await page.locator('#action-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('[data-work-record-id="producer-choice"] .receipt')?.textContent.includes("Room owner"));
   const knownReceipt = await page.locator('[data-work-record-id="producer-choice"] .receipt').textContent();
@@ -133,9 +135,10 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="complete"]').click();
   await page.locator('#action-form select[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter cannot establish who produced the result");
-  // evidenceUrl omitted: UI form cannot provide signedEvidence for external completions
+  await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/unknown-result");
   await page.locator('#action-form input[name="evidenceVersion"]').fill("unknown-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Establish provenance before verification");
+  await page.locator('#action-form textarea[name="signedEvidence"]').fill(JSON.stringify(signEvidence()));
   await page.locator('#action-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('[data-work-record-id="producer-unknown-choice"] .receipt')?.textContent.includes("Unknown"));
   assert.equal(completionCommands.at(-1).data.producerId, null, "unknown is an explicit submitted choice");
