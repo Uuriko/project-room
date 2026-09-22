@@ -69,7 +69,9 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
   await dialog.getByText('Connected: morgan@gmail.test', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByRole('button', { name: 'Open my inbox', exact: true }).click();
-  await page.locator('#inbox-subject').getByText('A small collaboration', { exact: true }).waitFor();
+  await page.locator('[data-reader]').getByRole('heading', { name: 'A small collaboration', exact: true }).waitFor();
+  await page.locator('[data-reader]').getByRole('button', { name: 'Reply', exact: true }).waitFor();
+  await page.getByRole('button', { name: '← All messages', exact: true }).click();
   await page.getByRole('button', { name: 'Sync Gmail', exact: true }).click();
   await page.getByText('Manage inbox', { exact: true }).click();
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();

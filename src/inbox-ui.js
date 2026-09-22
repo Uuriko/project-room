@@ -537,6 +537,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
+      // Refreshing imported copies must preserve the user's All messages view.
+      if (selected && rows.some(row => row.id === selected && row.connection?.provider === 'gmail-api')) return;
       const pending = pendingShare(), saved = savedPosition();
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
