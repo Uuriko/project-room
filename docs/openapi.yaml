@@ -2296,6 +2296,7 @@ paths:
                   bounty: { $ref: '#/components/schemas/Bounty' }
                   receipt: { $ref: '#/components/schemas/BountyReceipt' }
         '401': { description: unauthenticated }
+        '403': { description: reputation_probation — probation-band lanes may only claim bounties up to 5 credits }
         '404': { description: unknown_bounty }
         '409': { description: already_claimed }
         '422': { description: invalid_bounty_input }

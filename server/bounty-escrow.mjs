@@ -50,6 +50,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
+import { claimEligibility, PROBATION_MAX_CLAIM_CREDITS } from "./bounty-reputation.mjs";
 
 export const GENESIS_LANES = Object.freeze([
   "id:agent/jill", "id:agent/instinct", "id:agent/grokbot", "id:agent/codex",
@@ -632,6 +633,12 @@ export class BountyEscrow {
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");
       check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the claim window closed at the deadline");
+      // Reputation gates claim eligibility only: probation-band lanes may
+      // claim small bounties but not large ones. Scores never touch payout
+      // amounts and never ban — decay always offers a way back.
+      const eligibility = claimEligibility(this, roomId, lane, bounty.amountMillis);
+      if (!eligibility.allowed)
+        fail("reputation_probation", `probation reputation band: may only claim bounties up to ${PROBATION_MAX_CLAIM_CREDITS} credits`);
       this._requirePayable(roomId, lane, CLAIM_BOND_MILLIS, "claim bond");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
@@ -845,7 +852,10 @@ export class BountyEscrow {
       const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
       const event = this._event(roomId, "bounty.decided",
         { bountyId, actor: act, before: "disputed", after: settled.state,
-          data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution } });
+          data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution,
+            // Reputation projection reads these (server/bounty-reputation.mjs).
+            claimant: bounty.claimant,
+            challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null } });
       return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
         receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event } };
     });
@@ -980,7 +990,8 @@ export class BountyEscrow {
     bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at });
     this._saveBounty(bounty);
     this._event(roomId, "bounty.refunded",
-      { bountyId, actor, before: "claimed", after: "refunded", data: { reason: "timeout", resolution: bounty.resolution } });
+      { bountyId, actor, before: "claimed", after: "refunded",
+        data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant } });
   }
 
   _expireUnfunded(bounty, at, actor) {
@@ -1154,6 +1165,25 @@ export class BountyEscrow {
 
   // Work-graph metrics. Proposed bounties are outside the work graph and
   // outside metrics: they are excluded from every count and total here.
+  // Raw bounty event stream for a room, in seq order. The reputation
+  // projector (server/bounty-reputation.mjs) folds this; any future
+  // consumer that needs the uninterpreted history reads here.
+  // Deliberately transaction-free: a single SELECT is atomic on its own,
+  // and the claim path calls this from inside a write transaction where
+  // nesting another transaction is not guaranteed.
+  listEvents(roomId, { sinceSeq = 0 } = {}) {
+    this._ensure();
+    check(Number.isInteger(sinceSeq) && sinceSeq >= 0, "invalid_input", "sinceSeq must be a non-negative integer");
+    const rows = this.db.prepare(`SELECT seq, at, type, bounty_id AS bountyId,
+        actor_kind AS actorKind, actor_id AS actorId,
+        before_state AS beforeState, after_state AS afterState, data
+      FROM bounty_events WHERE room_id=? AND seq > ? ORDER BY seq ASC`).all(roomId, sinceSeq);
+    return rows.map(r => Object.freeze({ seq: r.seq, at: r.at, type: r.type, bountyId: r.bountyId,
+      actor: r.actorKind === null && r.actorId === null ? null
+        : Object.freeze({ kind: r.actorKind, id: r.actorId }),
+      before: r.beforeState, after: r.afterState, data: JSON.parse(r.data) }));
+  }
+
   metrics(roomId) {
     return this.store.readTransaction(() => {
       this._ensure();
