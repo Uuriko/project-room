@@ -4,7 +4,6 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
   const dialog = document.createElement('dialog'); dialog.id = 'account-setup-dialog'; dialog.className = 'account-setup-dialog';
   dialog.setAttribute('aria-labelledby', 'account-setup-title'); document.body.append(dialog);
   let current = null, busy = false, generation = 0, checked = false;
-  const platforms = ['Gmail', 'Outlook', 'Slack', 'Discord', 'Telegram', 'WhatsApp'];
   const el = (tag, text, className) => { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; return node; };
   const button = (label, action, primary = false) => { const b = el('button', label, 'button ' + (primary ? 'primary' : 'ghost')); b.type = 'button'; b.onclick = action; return b; };
   async function save(patch) {
@@ -25,7 +24,7 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
     const step = current.step;
     let answers = () => ({});
     const progress = el('p', `Step ${step + 1} of 3`, 'form-hint');
-    const title = el('h2', ['Make Project Room yours', 'Bring your messages together', 'You’re ready'][step]); title.id = 'account-setup-title'; title.tabIndex = -1;
+    const title = el('h2', ['Make Project Room yours', 'Connect your email', 'You’re ready'][step]); title.id = 'account-setup-title'; title.tabIndex = -1;
     const status = el('p', '', 'form-hint'); status.setAttribute('role', 'status');
     const content = el('div', '', 'account-setup-content'), actions = el('div', '', 'account-setup-actions');
     if (step === 0) {
@@ -36,39 +35,33 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
       answers = () => ({ name: name.value.trim(), purpose: purpose.value });
       actions.append(button('Continue', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, step: 1 }); render(); }), true));
     } else if (step === 1) {
-      content.append(el('p', 'Which accounts would you like in your inbox? You can connect Gmail now and change this later.'));
-      const choices = el('div', '', 'setup-platforms');
-      for (const name of platforms) {
-        const label = el('label'), input = el('input'); input.type = 'checkbox'; input.value = name; input.checked = current.platforms.includes(name);
-        label.append(input, document.createTextNode(name + (name === 'Gmail' ? '' : ' · coming later'))); choices.append(label);
-      }
-      content.append(choices);
-      const selected = () => [...choices.querySelectorAll('input:checked')].map(i => i.value);
-      answers = () => ({ platforms: selected() });
+      content.append(el('p', 'Read, send, and organize Gmail here.'));
       if (gmailNotice) content.append(el('p', gmailNotice, 'form-hint'));
       const connection = el('p', 'Checking Gmail…', 'form-hint'); content.append(connection);
       const connect = button('Connect Gmail', () => run(async () => {
-        await save({ platforms: [...new Set([...selected(), 'Gmail'])] });
+        await save({ platforms: ['Gmail'] });
         const result = await api.request('/gmail/connect', { method: 'POST', data: {} });
         const url = new URL(result.authorizationUrl);
         if (url.origin !== 'https://accounts.google.com' || url.pathname !== '/o/oauth2/v2/auth') throw new Error('Invalid provider');
         location.assign(url.href);
       }), true);
-      connect.disabled = true; content.append(connect, el('p', 'Read, send, and organize Gmail in your private inbox. Nothing is sent or shared with a room automatically.', 'form-hint'));
+      connect.disabled = true; content.append(connect);
+      const next = button('Skip', () => run(async () => { await save({ step: 2 }); render(); }));
       const turn = generation;
       api.request('/gmail').then(value => {
         if (turn !== generation || !owns() || !connection.isConnected) return;
-        connection.textContent = value.state === 'unavailable' ? 'Gmail connection is not enabled here yet. Save your choices and continue.' : value.state === 'connected' ? `Connected: ${value.address}` : 'Choose a Google account and approve access to read, send, and organize email.';
+        connection.textContent = value.state === 'unavailable' ? 'Gmail isn’t available for this account yet.' : value.state === 'connected' ? `Connected: ${value.address}` : '';
         connect.disabled = value.state === 'unavailable' || value.state === 'connected';
-        if (value.state === 'connected') connect.textContent = 'Gmail connected';
-      }).catch(() => { if (connection.isConnected) connection.textContent = 'Couldn’t check Gmail. You can continue and connect later.'; });
-      actions.append(button('Back', () => run(async () => { await save({ platforms: selected(), step: 0 }); render(); })), button('Continue', () => run(async () => { await save({ platforms: selected(), step: 2 }); render(); }), true));
+        connect.hidden = value.state === 'unavailable' || value.state === 'connected';
+        connection.hidden = !connection.textContent;
+        if (value.state === 'connected') { next.textContent = 'Continue'; next.className = 'button primary'; }
+      }).catch(() => { if (connection.isConnected) connection.textContent = 'Couldn’t check Gmail. Try again later.'; });
+      actions.append(button('Back', () => run(async () => { await save({ step: 0 }); render(); })), next);
     } else {
       content.append(el('p', 'Your inbox is private. Choose what to share when you bring a message into a room.'));
-      if (current.platforms.some(p => p !== 'Gmail')) content.append(el('p', 'Your other platform choices are saved. They are not connected yet.', 'form-hint'));
       actions.append(button('Back', () => run(async () => { await save({ step: 1 }); render(); })), button('Open my inbox', () => run(async () => { await save({ completed: true }); dialog.close(); onInbox(); }), true));
     }
-    actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
+    if (step !== 1) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
     dialog.replaceChildren(progress, title, content, status, actions);
     if (!dialog.open) dialog.showModal(); title.focus();
   }
