@@ -126,6 +126,7 @@ function stashInviteForOAuth() {
 { const googleButton = $("#google-signin");
   if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
+let briefReconcileNote = ""; // Catch-up reconciliation failure, shown in the brief while the dialog is open.
 let portableWorkUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
@@ -317,7 +318,7 @@ const client = new RoomClient({
     if ($("#room-guide")) $("#room-guide").hidden = true;
     agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
-    setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
+    setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
     for (const id of ["review-criteria", "review-summary", "review-next", "decision-review-label", "decision-review-by", "decision-review-text", "decision-review-version"]) setText(`#${id}`, "");
     $("#review-brief").hidden = true; $("#review-notes").open = false;
@@ -358,7 +359,11 @@ const briefView = new ReturnBrief(client, {
   // establish that the room's separate live connection has disconnected.
   onError: error => { if ([401, 403].includes(error.status)) client.handleFailure(error); },
   onReconciliationFailure: () => {
-    if (state) notice("Your caught-up position was saved, but the latest room view could not be refreshed. Refresh before relying on this brief.", true);
+    if (!state) return;
+    // Shown in the brief's own status line while catch-up is open, for the
+    // same reason as the feed: a page notice sits under the dialog backdrop.
+    briefReconcileNote = "Your caught-up position was saved, but the latest room view could not be refreshed. Refresh before relying on this brief.";
+    if ($("#catchup-dialog")?.open) renderReturnBrief(); else notice(briefReconcileNote, true);
   }
 });
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
@@ -586,7 +591,7 @@ $("#room-archive-button").addEventListener("click", async () => {
   if (!state || !session || busy) return;
   if (!window.confirm("Archive this room? Everyone keeps reading and export; nothing new can be recorded, and this cannot be undone here.")) return;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id, button = $("#room-archive-button");
-  button.disabled = true;
+  button.disabled = true; setFormStatus($("#room-about-status"), "");
   try {
     await client.send({ id: crypto.randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
     if (sameSession(generation, roomId, memberId)) {
@@ -598,7 +603,7 @@ $("#room-archive-button").addEventListener("click", async () => {
     }
   } catch (error) {
     if (!sameSession(generation, roomId, memberId)) return;
-    notice(error.code === "room_archived" ? "This room is already archived." : "Couldn’t archive the room. Refresh and try again.", true);
+    dialogNotice("#room-about-status", error.code === "room_archived" ? "This room is already archived." : "Couldn’t archive the room. Refresh and try again.", true);
   } finally { button.disabled = false; }
 });
 $("#room-leave-button").addEventListener("click", async () => {
@@ -607,7 +612,7 @@ $("#room-leave-button").addEventListener("click", async () => {
   if (!member || member.active === false) return;
   if (!window.confirm("Leave this room? You lose access to it and need a new invitation to return. Your messages stay in the room.")) return;
   const generation = client.generation, roomId = session.roomId, button = $("#room-leave-button");
-  button.disabled = true;
+  button.disabled = true; setFormStatus($("#room-about-status"), "");
   try {
     await client.send({ id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
       data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } });
@@ -616,7 +621,7 @@ $("#room-leave-button").addEventListener("click", async () => {
     if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   } catch (error) {
     if (!sameSession(generation, roomId, member.id)) return;
-    notice(error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
+    dialogNotice("#room-about-status", error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
   } finally { button.disabled = false; }
 });
 $("#account-room-form").addEventListener("submit", async event => {
@@ -718,6 +723,17 @@ function clearNotice() {
   clearTimeout(noticeTimer);
   noticeTimer = null;
   resetNotice($("#status"));
+}
+// A notice raised from inside an open modal dialog is painted under that
+// dialog's backdrop: #status is fixed-position in the page, and a showModal()
+// dialog sits in the top layer above everything in the page. So a failure
+// from a button in a dialog looked like the click did nothing. Report it in
+// the dialog's own status region while the dialog is open, and fall back to
+// the page notice when it is not.
+function dialogNotice(statusSelector, text, error = false) {
+  const status = $(statusSelector);
+  if (status?.closest("dialog")?.open) setFormStatus(status, text, error);
+  else notice(text, error);
 }
 function notice(text, error = false) {
   const status = $("#status"), version = ++noticeVersion;
@@ -4572,7 +4588,9 @@ $("#notification-read-button").addEventListener("click", async () => {
   } catch (error) {
     if (!ownsNotifications(ticket)) return;
     // Truthful feedback: a stored marker is never reported as a failed save.
-    if (saved) notice("Marked read. The latest room view could not be refreshed; refresh before relying on this list.", true);
+    // The feed's own status line, not the page notice: this button lives in
+    // the catch-up dialog, and a page notice is painted under its backdrop.
+    if (saved) notificationError = "Marked read. The latest room view could not be refreshed; refresh before relying on this list.";
     else notificationError = "Could not mark read. Try again.";
     if ([401, 403].includes(error.status)) client.handleFailure(error);
   } finally {
@@ -4707,7 +4725,7 @@ function renderReturnBrief() {
     if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));
   }
   const newer = returnBrief && client.sequence > returnBrief.history.evaluatedThrough;
-  setText("#rb-status", owned ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
+  setText("#rb-status", owned ? briefView.message || briefReconcileNote || (newer ? "New changes available. Refresh catch-up." : "") : "");
   $("#rb-refresh-button").disabled = !owned || briefView.busy;
   $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
   $("#rb-more-button").disabled = briefView.busy;
@@ -4889,7 +4907,7 @@ $("#topbar-search-toggle").addEventListener("click", () => {
   if (show) $("#message-search").focus();
   else { $("#message-search").value = ""; renderSearch(Date.now()); }
 });
-$("#rb-refresh-button").addEventListener("click", loadReturnBrief);
+$("#rb-refresh-button").addEventListener("click", () => { briefReconcileNote = ""; return loadReturnBrief(); });
 $("#rb-more-button").addEventListener("click", async () => {
   const chain = briefView.chain, firstNewHistoryIndex = briefView.brief?.history.items.length ?? 0;
   const pagingButtonFocused = document.activeElement === $("#rb-more-button");
@@ -4899,7 +4917,7 @@ $("#rb-more-button").addEventListener("click", async () => {
     focusRecord($("#rb-history-list").querySelectorAll("[data-brief-key]")[firstNewHistoryIndex] || $("#rb-ack-button"));
   }
 });
-$("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
+$("#rb-ack-button").addEventListener("click", () => { briefReconcileNote = ""; return briefView.acknowledge(); });
 $("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
 document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient,

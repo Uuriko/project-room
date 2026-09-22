@@ -76,6 +76,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await openSettings(page, "room-about");
     await page.locator("#room-archive-button").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-leave-button").isHidden(), true, "the owner cannot leave");
+    // A failed archive is reported inside the dialog the button lives in. A
+    // page notice is painted under a modal's backdrop, so it used to look as
+    // though the click had done nothing at all.
+    await page.route("**/commands", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "synthetic" } }) })
+      : route.continue());
+    await page.locator("#room-archive-button").click();
+    await page.locator("#room-about-status").waitFor({ state: "visible" });
+    assert.match(await page.locator("#room-about-status").textContent(), /Couldn’t archive the room/);
+    assert.equal(await page.locator("#settings-dialog").evaluate(node => node.open), true, "the dialog stays where the reader is");
+    assert.equal(await page.locator("#room-archive-button").isDisabled(), false, "and the control is ready to try again");
+    assert.equal(f.store.room(created).state.room.archivedAt ?? null, null, "nothing was archived");
+    await page.unroute("**/commands");
     await page.locator("#room-archive-button").click();
     // The note lives in the sidebar, which is behind the Menu button on a
     // phone, so on mobile the archived state is one tap away rather than on
