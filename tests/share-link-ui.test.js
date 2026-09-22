@@ -517,6 +517,7 @@ test("lost guest cookie keeps the original join request and shows recovery inste
   const dom = guestJoinDom(), calls = [];
   const accountClient = {
     session: { authenticated: false, account: null }, async restore() { return this.session; },
+    async logout() { return this.session; },
     async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
     async joinShareLink(request) {
       calls.push(structuredClone(request));
@@ -540,6 +541,10 @@ test("lost guest cookie keeps the original join request and shows recovery inste
     await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
     assert.deepEqual(calls[1], calls[0]);
     assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
+    await dom.node("#join-link-signout").handlers.click();
+    assert.equal(readUncertainJoin(), null, "only the explicit start-over clears recovery");
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.notEqual(calls[2].redemptionId, calls[0].redemptionId);
   } finally { dom.uninstall(); }
 });
 
