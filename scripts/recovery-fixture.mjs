@@ -195,7 +195,8 @@ export function createRecoveryFixture(filename) {
     escrow.submitWork("commons", first.bountyId, { claimant,
       evidence: { evidenceUrl: "https://example.com/pr/1", summary: "Drafted the release note in the fixture." } });
     escrow.acceptWork("commons", first.bountyId, { acceptor: poster,
-      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation." } });
+      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation.",
+        citations: [{ criterionId: "c1", verdict: "pass" }] } });
     escrow.watchBounty("commons", first.bountyId, { watcher });
     const second = escrow.postBounty("commons", { poster, title: "Recovery: disputed bounty",
       criteria: "Fixture row for the dispute path.", amount: 8, deadline }).bounty;
