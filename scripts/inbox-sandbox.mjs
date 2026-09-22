@@ -18,7 +18,7 @@ export async function createInboxSandbox({ includeEmailReview = false } = {}) {
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const accountId = "sample-owner";
-  store.createAccount(accountId); store.bindHumanAccount("commons", "owner", accountId);
+  store.createAccount(accountId); store.completeOnboarding(accountId); store.bindHumanAccount("commons", "owner", accountId);
   const accountKey = store.issueAccountAccessKey(accountId), slot = store.createAccountSessionSlot();
   const session = store.loginAccountSession(slot.token, accountKey, 0);
   if (includeEmailReview) {

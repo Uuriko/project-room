@@ -139,6 +139,16 @@
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
           <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
+          <section class="inbox-gmail" aria-label="Gmail">
+            <p id="inbox-gmail-notice" class="form-hint" role="status"></p>
+            <p id="inbox-gmail-status" class="form-hint" role="status">Bring your email into your private inbox.</p>
+            <button id="inbox-gmail-connect" class="button primary" type="button" disabled>Connect Gmail</button>
+            <details><summary>Manage inbox</summary>
+              <p class="form-hint">Gmail imports up to 25 recent inbox messages when you connect or sync. Your email stays private until you choose to share it.</p>
+              <button id="inbox-gmail-disconnect" class="button ghost" type="button" hidden>Disconnect</button>
+              <button id="inbox-setup" class="button ghost" type="button">Personalize setup</button>
+            </details>
+          </section>
           <p id="inbox-status" role="status"></p>
           <div id="inbox-filters" class="inbox-filters" role="group" aria-label="Filter messages" hidden>
             <label>Channel <select id="inbox-filter-channel"></select></label>
@@ -146,10 +156,10 @@
             <label class="inbox-filter-toggle"><input id="inbox-group-toggle" type="checkbox" checked> Group by connection</label>
           </div>
           <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Nothing here yet. This inbox collects your mentions, assigned work, and messages from your connected accounts. Open a room to pick up your first task.</p>
+          <p id="inbox-empty" class="form-hint">Your inbox is empty. Connect Gmail to bring in your email.</p>
           <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
           <details id="inbox-add-connection" class="inbox-add-connection" hidden>
-            <summary>Add connection</summary>
+            <summary>Advanced connections</summary>
             <form id="inbox-connection-form" class="inbox-connection-form">
               <label for="inbox-connection-channel">Channel</label>
               <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option><option value="whatsapp">WhatsApp (pairing required)</option></select>

@@ -36,6 +36,7 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 // Keyed like routeKey(): parameters reduced to {}.
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
+  "GET /api/auth/gmail/callback": [undefined, 200],
   "GET /api/health": [undefined, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],

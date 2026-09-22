@@ -1,3 +1,4 @@
+import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
@@ -824,6 +825,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Existing v35 databases predate persistent OAuth state. Converge this
       // unfenced additive table on every open, not only invitation migration.
       this.db.exec(oauthPendingSchema);
+      this.db.exec(gmailSchema);
       this.db.exec(requestRunSchema);
       this.requestRuns.verifySchema();
       // Direct channel-send journal: purely additive, intentionally outside

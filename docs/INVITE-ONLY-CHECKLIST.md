@@ -57,6 +57,8 @@ formats are buffered and `Content-Length`-framed so a failed export is a JSON
 error, never a shorter file. Semantics and the leave/close procedure:
 `docs/EXPORT-RETENTION-DELETION.md`.
 
+Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
+
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 
 Each mechanism was checked for: unguessable token, hash-only storage,
@@ -173,3 +175,5 @@ expiry, revocation, and rate limits.
   route is in the mutating-route inventory (`tests/route-auth-table.test.js`)
   and `tests/wake-pause.test.js` pins owner-only access, the inert row of a
   removed member and secret-free responses.
+
+Gmail mailbox OAuth return: `GET /api/auth/gmail/callback` is public but requires expiring, single-use, encrypted PKCE state bound to the initiating authenticated account session. It grants no Room or account login.

@@ -23,6 +23,113 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/inbox/setup:
+    get:
+      summary: Read or save resumable setup preferences.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+    post:
+      summary: Read or save resumable setup preferences.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, purpose, platforms, step, completed]
+              properties:
+                name: { type: string, maxLength: 80 }
+                purpose: { type: string, enum: ["", personal, team, agents] }
+                platforms: { type: array, maxItems: 6, items: { type: string, enum: [Gmail, Outlook, Slack, Discord, Telegram, WhatsApp] } }
+                step: { type: integer, enum: [0, 1, 2] }
+                completed: { type: boolean }
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail:
+    get:
+      summary: Gmail availability and connection status. No tokens are returned.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail/connect:
+    post:
+      summary: Start read-only Gmail OAuth; returns authorizationUrl.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail/sync:
+    post:
+      summary: Import up to 25 recent inbox messages. No sends or remote mailbox edits.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail/disconnect:
+    post:
+      summary: Delete locally stored Gmail credentials and disconnect. Saved copies remain.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
+  /api/auth/gmail/callback:
+    get:
+      summary: Consume single-use PKCE state, check initiating account session, save encrypted grant, return to inbox.
+      security: []
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
   /api/rooms/{roomId}/commands:
     post:
       summary: Append an event command

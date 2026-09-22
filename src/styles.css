@@ -1163,3 +1163,19 @@ summary { overflow-wrap: anywhere; }
 #join-account-choices { padding-bottom: .75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
 
 #join-account-google { display: inline-flex; margin: .75rem 0; }
+
+/* Gmail-first inbox and resumable account setup. */
+.inbox-gmail { display: grid; gap: .65rem; padding: 1rem 0; border-bottom: 1px solid var(--border, #ddd); }
+.inbox-gmail > .button { justify-self: start; }
+.inbox-gmail details { font-size: .85rem; }
+.account-setup-dialog { width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1.5rem; border: 1px solid var(--border, #ddd); border-radius: 16px; }
+.account-setup-dialog::backdrop { background: #0006; }
+.account-setup-content { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.account-setup-content label { display: grid; gap: .4rem; }
+.account-setup-content input:not([type=checkbox]), .account-setup-content select { width: 100%; min-height: 44px; }
+.account-setup-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.setup-platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+.setup-platforms label { display: flex; align-items: center; padding: .5rem; gap: .5rem; }
+@media (max-width: 420px) { .setup-platforms { grid-template-columns: 1fr; } }
+
+.setup-platforms input[type=checkbox] { width: 20px; height: 20px; min-height: 20px; margin: 0; flex: 0 0 20px; }

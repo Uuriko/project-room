@@ -1,3 +1,5 @@
+import { googleConfig } from './google-oauth.mjs';
+import { gmailConfig } from './gmail-mailbox.mjs';
 // The default boot path wires its HTTP server arguments here so both the
 // local/staging entry point (server.mjs) and any test can build the exact
 // same server the boot would. The ChannelWebhookInbox is constructed next to
@@ -13,5 +15,7 @@ export function defaultServerArgs({ store, env = process.env, ...rest }) {
   const magicLinkMailer = send
     ? createMagicLinkMailer({ send, baseUrl: rest.origin ?? null })
     : createMagicLinkMailer();
-  return { ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
+  const googleAuth = rest.origin ? googleConfig(env, rest.origin) : null;
+  const gmailAuth = rest.origin ? gmailConfig(env, rest.origin, googleAuth) : null;
+  return { googleAuth, gmailAuth, ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
 }

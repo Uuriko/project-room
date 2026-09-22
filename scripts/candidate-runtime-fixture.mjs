@@ -25,6 +25,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-draft.mjs');
   paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
+  paths.add('server/gmail-mailbox.mjs'); paths.add('src/account-setup-ui.js');
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
   paths.add('src/room-roster.js');

@@ -1,3 +1,4 @@
+import { gmailConfig } from '../server/gmail-mailbox.mjs';
 import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -43,8 +44,12 @@ export class ProjectRoom {
     let googleAuth = null;
     try { googleAuth = googleConfig(env, env.ROOM_ORIGIN); }
     catch (error) { console.warn(`room google auth disabled: ${error.message}`); }
+    let gmailAuth = null;
+    try { gmailAuth = gmailConfig(env, env.ROOM_ORIGIN, googleAuth); }
+    catch (error) { console.warn(`room Gmail disabled: ${error.message}`); }
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
       googleAuth,
+      gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
       // the mailer seam reports mail_not_configured instead of breaking boot.
       magicLinkMailer: (() => {
