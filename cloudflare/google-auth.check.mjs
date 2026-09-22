@@ -7,13 +7,16 @@ import { Miniflare } from 'miniflare';
 for (const legacy of [false, true]) test(`configured Google sign-in starts on Workers (legacy schema: ${legacy})`, async () => {
  const bundled = await build({ entryPoints: ['google-auth.test-fixture.mjs'], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
  const origin = 'https://room.example.test';
- let jwk, token, redirectProvider = false;
+ let jwk, token, redirectProvider = false, untrustedRequests = 0;
  const mf = new Miniflare({ outboundService: async request => {
+  if (request.url.startsWith('https://untrusted.example/')) untrustedRequests++;
   if (redirectProvider) return new Response(null, {status: 302, headers: {Location: 'https://untrusted.example/'}});
   if (request.url === 'https://www.googleapis.com/oauth2/v3/certs') return Response.json({keys: [jwk]});
-  if (request.url === 'https://oauth2.googleapis.com/token') return Response.json({id_token: token, scope: 'openid email profile'});
+  if (request.url === 'https://oauth2.googleapis.com/token') return Response.json({id_token: token, access_token: 'fixture-access', refresh_token: 'fixture-refresh', scope: 'openid email profile https://www.googleapis.com/auth/gmail.modify'});
+  if (request.url.endsWith('/profile')) return Response.json({emailAddress: 'synthetic@example.test', historyId: '1'});
+  if (request.url.includes('gmail.googleapis.com') && request.url.includes('/messages?')) return Response.json({messages: []});
   throw new Error('Unexpected provider destination');
- }, modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'], durableObjects: { ROOM: { className: 'GoogleTestRoom', useSQLite: true } }, bindings: { LEGACY_OAUTH_SCHEMA: legacy, ROOM_ORIGIN: origin, ROOM_GOOGLE_CLIENT_ID: '123-example.apps.googleusercontent.com', ROOM_GOOGLE_CLIENT_SECRET: 'synthetic-google-client-secret' } });
+ }, modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'], durableObjects: { ROOM: { className: 'GoogleTestRoom', useSQLite: true } }, bindings: { ROOM_GMAIL_ENABLED: '1', ROOM_GMAIL_TOKEN_KEY: '42'.repeat(32), LEGACY_OAUTH_SCHEMA: legacy, ROOM_ORIGIN: origin, ROOM_GOOGLE_CLIENT_ID: '123-example.apps.googleusercontent.com', ROOM_GOOGLE_CLIENT_SECRET: 'synthetic-google-client-secret' } });
  try {
   const res = await mf.dispatchFetch(origin + '/api/auth/google/start', { redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
   assert.equal(res.status, 302, await res.clone().text());
@@ -36,8 +39,25 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const cookie = completed.headers.get('Set-Cookie').split(';')[0];
   const session = await mf.dispatchFetch(origin + '/api/account-session', {headers: {'CF-Connecting-IP': '192.0.2.1', Cookie: cookie}});
   assert.equal(session.status, 200);
-  assert.equal((await session.json()).authenticated, true);
+  const accountSession = await session.json();
+  assert.equal(accountSession.authenticated, true);
+  const connect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
+  assert.equal(connect.status, 200, await connect.clone().text());
+  const consent = new URL((await connect.json()).authorizationUrl);
+  assert.equal(consent.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
+  const gmailReturn = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + consent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + connect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
+  assert.equal(gmailReturn.status, 200);
+  assert.match(await gmailReturn.text(), /gmail=connected/);
+  const mailbox = await mf.dispatchFetch(origin + '/api/inbox/gmail', {headers: {Cookie: cookie, 'X-Session-Binding': accountSession.sessionBinding}});
+  assert.equal(mailbox.status, 200, await mailbox.clone().text());
+  assert.equal((await mailbox.json()).state, 'connected');
   redirectProvider = true;
+  const reconnect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
+  assert.equal(reconnect.status, 200);
+  const reconnectConsent = new URL((await reconnect.json()).authorizationUrl);
+  const deniedMail = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + reconnectConsent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + reconnect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
+  assert.match(await deniedMail.text(), /gmail=error/);
+  assert.equal(untrustedRequests, 0);
   const retry = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
   const rejected = await callback(new URL(retry.headers.get('Location')).searchParams.get('state'));
   assert.equal(rejected.headers.get('X-Room-Auth-Failure'), 'google_provider_rejected');
