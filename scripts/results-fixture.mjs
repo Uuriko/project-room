@@ -2,12 +2,21 @@
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
-import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { issueSignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
 import { rmSync } from "node:fs";
 
 export function createResultsFixture() {
   const f = createAcceptanceFixture();
-  const signEvidence = makeTestSigner(f.store, "Results fixture evidence agent");
+  // Sign using production API directly (not test helper) for packaging safety.
+  const evidenceIdentity = f.store.identities.create("Results fixture evidence agent");
+  const evidenceSeedHex = Buffer.from(evidenceIdentity.privateKey, "base64").toString("hex");
+  const signEvidence = (overrides = {}) => issueSignedEvidence({
+    signerIdentityId: evidenceIdentity.identityId,
+    issuedAt: new Date(f.store.now()).toISOString(),
+    contentHash: contentHashOf("results-fixture-bytes"),
+    seedHex: evidenceSeedHex,
+    ...overrides,
+  });
   const state = () => f.store.room("commons").state;
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   const change = (id, type, data = {}, actor = "producer") => send(actor, type, {

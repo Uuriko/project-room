@@ -6,7 +6,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { createEmailEnvelope } from "../server/email-envelope.mjs";
 import { prepareGraphReplyDraft } from "../server/graph-reply-draft.mjs";
-import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { issueSignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
@@ -69,7 +69,17 @@ export function createRecoveryFixture(filename) {
   schedule("commons", keys.owner, "resolved", "schedule-resolved");
   send("commons", keys.owner, T.WORK_SUPERSEDED, { workItemId: "resolved", expectedRevision: 0, supersededByWorkItemId: "active", reason: "Synthetic replacement" });
   send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "evidence", expectedRevision: 0 });
-  const signEvidence = makeTestSigner(store);
+  // Sign external evidence using the production signed-evidence API directly
+  // (not the test helper) so the fixture works in packaged runtime contexts.
+  const evidenceIdentity = store.identities.create("Recovery Fixture Agent");
+  const evidenceSeedHex = Buffer.from(evidenceIdentity.privateKey, "base64").toString("hex");
+  const signEvidence = (overrides = {}) => issueSignedEvidence({
+    signerIdentityId: evidenceIdentity.identityId,
+    issuedAt: new Date(store.now()).toISOString(),
+    contentHash: contentHashOf("recovery-fixture-bytes"),
+    seedHex: evidenceSeedHex,
+    ...overrides,
+  });
   send("commons", keys.owner, T.WORK_COMPLETED, { workItemId: "evidence", expectedRevision: 1, producerId: "owner", summary: "Synthetic exact result",
     evidenceUrl: "https://example.invalid/recovery", evidenceVersion: "fixture-v1", nextAction: "Owner review",
     signedEvidence: signEvidence() });
