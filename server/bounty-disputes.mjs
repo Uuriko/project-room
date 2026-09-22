@@ -2,6 +2,12 @@
 // dispute state machine: disputes are denominated in the bounty itself and
 // the dispute cost is capped at 25% of the bounty (settlement v2 design).
 //
+// The machine hooks the acceptance track only (integration-map candidate
+// #2): it re-decides the verdict on work, never moves credit lots itself.
+// Its single onDisputeFinalized packet carries track: "acceptance"; the
+// escrow freezes finality while a dispute runs and records the verdict
+// before any finality move.
+//
 // Escalation ladder:
 //   opened -> challenged -> evidence -> adjudicating -> decided -> resolved
 //                                      decided -> appealed -> adjudicating (tier+1)
@@ -71,7 +77,11 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
     if (!allowed.includes(dispute.state)) illegal(dispute.disputeId, dispute.state, allowed.join("|"));
   };
 
-  // Build the final packet and fire the escrow callback exactly once.
+  // Build the final packet and fire the escrow callback exactly once. The
+  // packet is always an acceptance-track verdict (integration-map candidate
+  // #2): the dispute machine hooks the acceptance track only, and the escrow
+  // asserts packet.track before settling — the packet can never drive a
+  // finality move on its own.
   const notifyFinalized = (dispute, terminal) => {
     if (dispute.notified) return dispute;
     const notified = Object.freeze({ ...dispute, notified: true });
@@ -79,6 +89,7 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
     if (onDisputeFinalized) {
       const packet = Object.freeze({ disputeId: notified.disputeId,
         bountyId: notified.bountyId, kind: notified.kind, terminal,
+        track: "acceptance",
         outcome: notified.resolution ? notified.resolution.outcome : null,
         reasonCodes: notified.resolution
           ? notified.resolution.reasonCodes : Object.freeze([]),
