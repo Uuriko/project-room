@@ -2606,7 +2606,7 @@ $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSes
 // always names the host the reader is actually on. A hardcoded one goes stale
 // the first time this is served elsewhere, and a staging address in
 // agent-facing copy is already something live-audit fails the build for.
-const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and follow it to join my Project Room.`;
+const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
 function fillJoinAgent() {
   const field = $("#join-agent-prompt");
   if (!field) return;

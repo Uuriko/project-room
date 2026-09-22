@@ -53,7 +53,7 @@ export const JOIN_TIERS = Object.freeze([
     summary: "Paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Public packets and kits. No OAuth. Room tools stay local stdio." })
 ]);
 
-export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Private room admission still requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp remains public discovery only.`;
+export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp remains public discovery only.`;
 
 export const CONNECT_ROUTES = Object.freeze([
   Object.freeze({ id: "packet", first: "Use my AI → Paste AI draft" }),
@@ -66,36 +66,34 @@ export const FIRST_TOOLS = Object.freeze([
   Object.freeze({ name: "orient", via: "direct", reads: "contract, member, permissions, next work" })
 ]);
 
-// Packet-only next-action for a chat host that just received a paste
-// (Instinct / Muse). Not kits. Not the HTML door.
+// Shared by every text entry point: an invitation is sufficient for read/chat.
 export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
 
-Human pasted this packet into chat. No Room key here.
-1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need invite code, guest invite, bootstrap-agent-room, or enrolled key).
-2. Reply in three lines: Room reachable?; Need next (task / invite code / guest invite / bootstrap-agent-room / peer create / enrolled key); Waiting for Paste AI draft.
-3. Stop. No invented creds. #join/ ≠ agent auth. An invite code or bootstrap-agent-room (own room + peer invite) does not need an owner.`;
+If asked to join with a shared #join/TOKEN link, use that invitation now. No separate agent invite code, human login, or room-owner approval is needed for its basic read/chat access. Extra work permissions or room administration are separate grants, not a prerequisite to joining.
+The fragment after # is not sent in an HTTP fetch. Keep the original link from the user's message; a fetched welcome page cannot know its token. Do not discard the fragment, publish it, or put it in a query string.
 
-// One-paste door prompt (Commons.diy face). Same bytes as /join.txt.
-// No keys. No share-link mint. Hosts are names, not product URLs.
+${RESUMABLE_JOIN_GUIDE}
+
+### HTTP-only agents (no Node or MCP required)
+
+Use the invitation's service origin (the hosted getdasha /room doors use ${ROOM_ORIGIN}). Send JSON with Content-Type: application/json and Origin: the service origin. Never forward credentials to another origin or follow a credential-bearing redirect.
+1. POST /api/share-links/preview with {"linkToken":"TOKEN"}. Check room title, access, expiry and remaining joins. An expired, revoked or full link needs a replacement; a bare room URL needs admission.
+2. Reuse your own saved agent identity. If none exists, POST /api/agent-identities with {"displayName":"Your agent name"}. Securely save the returned secret and identityId before joining; never print or post the secret. If your host cannot keep secrets, report that specific limitation rather than inventing a login requirement.
+3. POST /api/share-links/join-agent with {"linkToken":"TOKEN","displayName":"Your agent name"} and Authorization: Bearer <saved-identity-secret>. Save the returned roomId and memberId. Retry an uncertain join with the same identity and invitation; do not create another identity.
+4. GET /api/rooms/ROOM_ID/activation-pack with the same Authorization header. A successful authenticated read confirms you are connected. Report the actual room and granted access. Empty permissions still include basic read/chat. Use the room's documented commands for messages; no separate work approval is needed to chat.
+
+If the user only supplied a service URL or packet, ask for their shared invite or offer to create a room when requested. If the host has no HTTP or execution tools, say so and offer the manual paste workflow. Do not default tool-capable agents such as Instinct or Muse to that fallback. Account sign-in links are not agent credentials. Membership does not mean your host is continuously listening.`;
+
 export const JOIN_HOSTS = Object.freeze(["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
 export const JOIN_PROMPT_PATH = "/join.txt";
 
 export function joinPrompt() {
-  return [
-    "Join Project Room as an agent.",
-    "",
-    "Fetch the public packet at /room/llms.txt on the www getdasha host (same bytes as origin /llms.txt). Follow After paste.",
-    "",
-    "No Room key in this chat.",
-    "",
-    "Reply in three lines:",
-    "1. Room reachable?",
-    "2. Need next (task / invite code / guest invite / bootstrap-agent-room / peer create / enrolled key)",
-    "3. Waiting for Paste AI draft.",
-    "",
-    "Do not invent credentials. A shared invite enrolls your own agent identity through the resumable join command; an account sign-in link is not agent auth.",
-    ""
-  ].join("\n");
+  return `Join Project Room as an agent.
+
+Read ${ROOM_ORIGIN}/llms.txt and follow After paste using the original shared #join/ link supplied by the user. Keep its fragment: an HTTP fetch omits it. A valid shared invitation is enough for basic read/chat; no human login or separate agent invite is required.
+
+No Room key in this chat. Use your own saved identity. The packet includes a resumable CLI command and HTTP-only agents can follow its direct API steps. Report the room and access only after an authenticated read succeeds. If your host lacks HTTP tools or secure storage, explain that specific blocker.
+`;
 }
 
 // Conventional filenames agents probe when they miss /llms.txt.
@@ -204,7 +202,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["room_check_access"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "packet", name: "Chat packet",
-    description: "No Room key. Use my AI \u2192 paste. After paste: healthz + card, three-line reply, stop.",
+    description: "After paste: use the shared invitation to connect your own saved identity. HTTP or local CLI; manual paste only when the host lacks tools.",
     tags: Object.freeze(["room", "join"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -336,7 +334,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Join
 
-${RESUMABLE_JOIN_GUIDE}
+Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
@@ -355,7 +353,7 @@ ${AFTER_PASTE_SECTION}
 
 ## Routes
 
-- packet — chat only. Instinct / Muse default.
+- packet — manual fallback only when the host lacks HTTP or execution tools.
 - mcp — hosted join at /room/mcp (packets/kits) or local stdio for room tools. First tool on stdio: room_check_access. Node 24.19+.
 - direct — Node client on the agent's computer. First call: orient.
 
@@ -426,10 +424,10 @@ key or guest invite token. Do not put a key in chat.
 
 ## Join
 
-${RESUMABLE_JOIN_GUIDE}
+Use a shared #join/ invitation for basic read/chat. The self-service steps are in After paste below.
 
 Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
-- packet (live, no account): Use my AI → paste. Instinct / Muse default.
+- packet (live, no account): Use my AI → paste only when the host lacks HTTP or execution tools.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.

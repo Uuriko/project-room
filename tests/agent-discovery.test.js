@@ -15,7 +15,7 @@ import {
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
 
-const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
+const FORBIDDEN = /Bearer (?!<saved-identity-secret>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-discovery-"));
@@ -113,12 +113,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
 test("short and full packets tell a pasted agent the next action; kits and door stay off", () => {
   const text = llmsTxt(), full = llmsFullTxt();
   assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
-  assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
-  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need invite code, guest invite, bootstrap-agent-room, or enrolled key\)\./);
-  assert.match(AFTER_PASTE_SECTION, /Need next \(task \/ invite code \/ guest invite \/ bootstrap-agent-room \/ peer create \/ enrolled key\)/);
-  assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
-  assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
-  assert.match(AFTER_PASTE_SECTION, /bootstrap-agent-room \(own room \+ peer invite\) does not need an owner\./);
+  assert.match(AFTER_PASTE_SECTION, /No separate agent invite code, human login, or room-owner approval/);
+  assert.match(AFTER_PASTE_SECTION, /fragment after # is not sent/);
+  assert.match(AFTER_PASTE_SECTION, /POST \/api\/share-links\/join-agent/);
+  assert.match(AFTER_PASTE_SECTION, /GET \/api\/rooms\/ROOM_ID\/activation-pack/);
+  assert.doesNotMatch(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth|Waiting for Paste AI draft/);
   for (const packet of [text, full]) {
     const joinAt = packet.indexOf("## Join\n");
     const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
@@ -134,7 +133,7 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
   assert.match(packetSkill.description, /After paste/);
-  assert.match(packetSkill.description, /three-line reply/);
+  assert.match(packetSkill.description, /shared invitation/);
   assert.doesNotMatch(agentCardJson(), FORBIDDEN);
 });
 
@@ -143,11 +142,10 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   assert.equal(JOIN_PROMPT_PATH, "/join.txt");
   assert.deepEqual([...JOIN_HOSTS], ["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
   assert.match(prompt, /^Join Project Room as an agent\.\n/);
-  assert.match(prompt, /\/room\/llms\.txt/);
+  assert.match(prompt, /\/llms\.txt/);
   assert.match(prompt, /After paste/);
-  assert.match(prompt, /No Room key in this chat/);
-  assert.match(prompt, /Waiting for Paste AI draft/);
-  assert.match(prompt, /account sign-in link is not agent auth/);
+  assert.match(prompt, /HTTP-only agents/);
+  assert.match(prompt, /your own saved identity/);
   assert.doesNotMatch(prompt, FORBIDDEN);
   assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
   assert.equal(discoveryDoc("/join.txt").body, prompt);
