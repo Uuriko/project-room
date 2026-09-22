@@ -188,7 +188,8 @@ function receiptSet(escrow, roomId) {
 // is idempotent on entry_id; a redelivered row carrying CONFLICTING bytes is
 // rejected loudly (tamper-evident), never merged.
 const JOURNAL_COLUMNS = ["seq", "room_id", "entry_id", "account_id", "at", "kind",
-  "bounty_id", "lot_id", "amount", "lot_state", "prev_hash", "hash", "memo", "actor_kind", "actor_id"];
+  "bounty_id", "lot_id", "amount", "lot_state", "prev_hash", "hash", "memo", "actor_kind", "actor_id",
+  "track"]; // track joins the journal hash core when present: the replay must carry it.
 const canonicalRow = r => JOURNAL_COLUMNS.map(c => r[c] ?? null);
 
 function importJournal(db, roomId, rows) {

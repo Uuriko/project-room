@@ -11,13 +11,22 @@
 // (There is no `settled` state in slice 1 — the payable -> settled exit is
 // deliberately unimplemented.)
 //
-// Lifecycle (Plane-steal triage model):
-//   PROPOSED --fund--> FUNDED --claim--> CLAIMED --submit--> SUBMITTED
-//     --accept (gated approval)--> ACCEPTED --challenge window--> APPROVED
-//     --epoch sweep--> PAID
-//   PROPOSED --decline/duplicate--> CANCELLED ; PROPOSED --snooze--> PROPOSED (deferred)
-//   FUNDED/CLAIMED --timeout--> REFUNDED ; SUBMITTED/ACCEPTED --dispute--> DISPUTED
-//     --RELEASE--> APPROVED | --CANCEL--> REFUNDED
+// Lifecycle: two guarded tracks (integration-map candidate #2). Display
+// states are unchanged — the split is in transition legality, and every
+// journaled transition records its track.
+//
+//   Acceptance track (verdict on work, evidence-cited):
+//     claimed --submit--> submitted --accept--> accepted --challenge--> approved
+//     submitted|accepted --dispute--> disputed --release--> approved | --cancel--> refunded
+//   Finality track (credit-lot movements; requires a terminal acceptance verdict):
+//     locked --attribute--> attributed --approve--> approved --payout--> paid
+//     locked|attributed --refund--> refunded
+//
+// Disputes hook the acceptance track only and freeze finality while the
+// acceptance is re-decided: while a bounty is disputed, no award lot moves
+// except the dispute's own settlement, which records the verdict first.
+// Intake and triage (proposed/funded/claimed) are pre-lifecycle and governed
+// by neither track.
 //
 // Semantic state groups drive computation (progress, metrics, archival);
 // display labels stay inside their group. Query param is ?group=.
@@ -104,6 +113,63 @@ const TERMINAL_STATES = new Set(["paid", "refunded", "cancelled"]);
 // Journal kinds that move the AWARD itself (vs. bonds, fees, transfers).
 const AWARD_KINDS = new Set(["escrow-lock", "attribute", "approve", "payout", "refund", "fee"]);
 
+// --- two-track vocabulary ---------------------------------------------------
+// Acceptance = the verdict on work (evidence-cited). Finality = credit-lot
+// movements. States stay as display labels; the split is enforced in
+// transition legality, and every journaled transition records its track.
+export const TRACK_ACCEPTANCE = "acceptance";
+export const TRACK_FINALITY = "finality";
+
+// Acceptance track: verdict transitions on the bounty record (from-state ->
+// legal to-states). Terminal verdicts: accepted (work approved) or rejected
+// (work judged bad — the dispute-upheld refund; the display label stays
+// "refunded"). Every acceptance transition is evidence-cited.
+const ACCEPTANCE_TRACK = new Map([
+  ["claimed", new Set(["submitted"])],              // work enters review
+  ["submitted", new Set(["accepted", "disputed"])], // verdict | challenge
+  ["accepted", new Set(["disputed"])],              // challenge within the window
+  ["disputed", new Set(["approved", "refunded"])], // release: verdict affirmed; cancel: verdict rejected
+]);
+
+// Bounty-record state transitions -> the track that governs them. null =
+// intake/triage/commitment: pre-lifecycle, governed by neither track.
+const STATE_TRANSITION_TRACK = new Map([
+  ["proposed", new Map([["funded", null], ["cancelled", null]])],
+  ["funded", new Map([["claimed", null], ["refunded", TRACK_FINALITY]])],
+  ["claimed", new Map([["submitted", TRACK_ACCEPTANCE], ["refunded", TRACK_FINALITY]])],
+  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["disputed", TRACK_ACCEPTANCE]])],
+  ["accepted", new Map([["approved", TRACK_FINALITY], ["disputed", TRACK_ACCEPTANCE]])],
+  ["disputed", new Map([["approved", TRACK_ACCEPTANCE], ["refunded", TRACK_ACCEPTANCE]])],
+  ["approved", new Map([["paid", TRACK_FINALITY]])],
+]);
+
+// Journal kind -> track. Award lots ride the finality track
+// (locked -> attributed -> paid | refunded); bonds are escrow locks on the
+// same track. genesis and payable<->payable transfers are not bounty
+// lifecycle transitions (null).
+const JOURNAL_KIND_TRACK = new Map([
+  ["escrow-lock", TRACK_FINALITY], ["attribute", TRACK_FINALITY],
+  ["approve", TRACK_FINALITY], ["payout", TRACK_FINALITY],
+  ["refund", TRACK_FINALITY], ["fee", TRACK_FINALITY],
+  ["bond-lock", TRACK_FINALITY], ["bond-return", TRACK_FINALITY],
+  ["bond-forfeit", TRACK_FINALITY], ["bond-compensate", TRACK_FINALITY],
+  ["genesis", null], ["transfer", null],
+]);
+
+// Track attribution helpers (exported for tests and future consumers).
+export function trackOfJournalKind(kind) {
+  return JOURNAL_KIND_TRACK.has(kind) ? JOURNAL_KIND_TRACK.get(kind) : null;
+}
+export function trackOfStateTransition(from, to) {
+  return STATE_TRANSITION_TRACK.get(from)?.get(to) ?? null;
+}
+export function stateTransitionLegal(from, to) {
+  return STATE_TRANSITION_TRACK.get(from)?.has(to) ?? false;
+}
+export function acceptanceTransitionLegal(from, to) {
+  return ACCEPTANCE_TRACK.get(from)?.has(to) ?? false;
+}
+
 export const bountyEscrowSchema = `
   CREATE TABLE IF NOT EXISTS bounty_journal (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +187,8 @@ export const bountyEscrowSchema = `
     memo TEXT,
     actor_kind TEXT,
     actor_id TEXT,
-    receipt_id TEXT
+    receipt_id TEXT,
+    track TEXT
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
@@ -167,6 +234,7 @@ export const bountyEscrowSchema = `
     actor_id TEXT,
     before_state TEXT,
     after_state TEXT,
+    track TEXT,
     data TEXT NOT NULL CHECK(json_valid(data))
   );
   CREATE INDEX IF NOT EXISTS bounty_events_room ON bounty_events(room_id, seq);
@@ -191,6 +259,39 @@ export const bountyEscrowSchema = `
     next_n INTEGER NOT NULL
   );
 `;
+
+// Slice 1 (#762) shipped these tables to production before receipt_id /
+// track existed (#778, integration-map candidate #2). ALTER TABLE adds the
+// columns but cannot rewrite the stored CREATE TABLE text, so the strict
+// DDL-text verifySchema would refuse a deployed database ("Bounty escrow
+// schema requires operator reconciliation") and take the room down. Rebuild
+// the tables whose DDL changed, copying every row verbatim (the new columns
+// stay NULL for pre-existing rows; nothing reads them yet). Idempotent:
+// converged databases already match the expected DDL and are left alone.
+// Runs inside the store's boot transaction, before the writer fence is
+// installed (the bounty tables are unfenced).
+export function convergeBountyDeployedSchema(db) {
+  const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+  const expected = new Map();
+  for (const sql of bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
+    const m = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
+    if (m) expected.set(m[1], { ddl: sql, norm: normalize(sql) });
+  }
+  for (const table of ["bounty_journal", "bounty_events"]) {
+    const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
+    if (!actual) continue; // Fresh database: the schema exec below creates it.
+    if (normalize(actual) === expected.get(table).norm) continue; // Already converged.
+    const legacy = `${table}_legacy_v762`;
+    const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map(r => r.name);
+    if (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(legacy))
+      throw new Error(`Bounty schema convergence blocked: ${legacy} already exists`);
+    db.exec(`ALTER TABLE ${table} RENAME TO ${legacy}`);
+    db.exec(expected.get(table).ddl);
+    const colList = cols.join(", ");
+    db.exec(`INSERT INTO ${table} (${colList}) SELECT ${colList} FROM ${legacy}`);
+    db.exec(`DROP TABLE ${legacy}`);
+  }
+}
 
 class EscrowError extends Error {
   constructor(code, message) { super(message); this.name = "EscrowError"; this.code = code; }
@@ -255,6 +356,7 @@ export class BountyEscrow {
     this._arbiters = createArbiters();
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
+    this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
     // server/bounty-receipts.mjs. When null (the default — production key
     // provisioning is a later slice), transitions return `signed: []` and
@@ -286,9 +388,11 @@ export class BountyEscrow {
     }
   }
 
-  // Additive column migration for databases created by the pre-triage schema
-  // (unreleased; in practice only dev databases). Fresh databases get the
-  // full schema from bountyEscrowSchema above.
+  // Additive column migration for databases created by the slice-1 schema
+  // (#762 shipped to production, so deployed databases predate receipt_id /
+  // track). Fresh databases get the full schema from bountyEscrowSchema
+  // above; the RoomStore boot convergence rebuilds deployed tables first so
+  // the stored DDL text matches for verifySchema.
   _migrateColumns() {
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
     const addCol = (table, ddl) => {
@@ -298,9 +402,16 @@ export class BountyEscrow {
     addCol("bounty_journal", "actor_kind TEXT");
     addCol("bounty_journal", "actor_id TEXT");
     addCol("bounty_journal", "receipt_id TEXT");
+    addCol("bounty_journal", "track TEXT");
     addCol("bounty_events", "actor_kind TEXT");
     addCol("bounty_events", "before_state TEXT");
     addCol("bounty_events", "after_state TEXT");
+    addCol("bounty_events", "track TEXT");
+    // No track backfill for pre-track rows: the journal hash core is the
+    // 12-element form when track is NULL, so backfilling would change the
+    // verification core and invalidate their stored hashes. NULL track =
+    // "written before tracks existed" (or a null-track kind like
+    // genesis/transfer); nothing reads the column yet.
     addCol("bounty_records", "state_changed_ms INTEGER");
     addCol("bounty_records", "snoozed_until_ms INTEGER");
     addCol("bounty_records", "decline_reason TEXT");
@@ -331,16 +442,24 @@ export class BountyEscrow {
   _append({ roomId, accountId, at, kind, bountyId = null, lotId = null, amount, lotState, memo = null, actor = null }) {
     check(LOT_STATES.includes(lotState), "invalid_input", `unknown lot state "${lotState}"`);
     check(Number.isSafeInteger(amount) && amount !== 0, "invalid_amount", "journal amount must be a non-zero integer");
+    check(JOURNAL_KIND_TRACK.has(kind), "invalid_input", `unknown journal kind "${kind}"`);
     const entryId = newId("ent_");
     const prevHash = this._lastHash(roomId, accountId);
     const actorKind = actor?.kind ?? null, actorId = actor?.id ?? null;
-    const core = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
-      lotState, memo ?? "", actorKind ?? "", actorId ?? ""].join("|");
+    // Track attribution is tamper-evident: it joins the hash core, but only
+    // when non-null. Pre-track rows (and null-track kinds like
+    // genesis/transfer) keep the original 12-element core so their stored
+    // hashes keep verifying.
+    const track = trackOfJournalKind(kind);
+    const coreParts = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
+      lotState, memo ?? "", actorKind ?? "", actorId ?? ""];
+    if (track != null) coreParts.push(track);
+    const core = coreParts.join("|");
     const hash = sha256(core);
     this.db.prepare(`INSERT INTO bounty_journal
-      (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId);
+      (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(roomId, entryId, accountId, at, kind, bountyId, lotId, amount, lotState, prevHash, hash, memo, actorKind, actorId, track);
     return { entryId, hash, prevHash };
   }
 
@@ -404,14 +523,17 @@ export class BountyEscrow {
 
   // --- events ---------------------------------------------------------------
   // Every state transition records actor {kind, id} with before/after values.
-  _event(roomId, type, { bountyId = null, actor = null, before = null, after = null, data = {} } = {}) {
+  // Track is derived from the transition when both states are present
+  // (acceptance verdicts vs finality moves); an explicit track overrides.
+  _event(roomId, type, { bountyId = null, actor = null, before = null, after = null, data = {}, track = null } = {}) {
     const at = isoNow(this.nowMs());
+    const resolvedTrack = track ?? (before !== null && after !== null ? trackOfStateTransition(before, after) : null);
     const row = this.db.prepare(
-      `INSERT INTO bounty_events (room_id, at, type, bounty_id, actor_kind, actor_id, before_state, after_state, data)
-       VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, JSON.stringify(data));
+      `INSERT INTO bounty_events (room_id, at, type, bounty_id, actor_kind, actor_id, before_state, after_state, track, data)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, resolvedTrack, JSON.stringify(data));
     return { seq: Number(row.lastInsertRowid), at, type, bountyId,
-      actor: actor ? { kind: actor.kind, id: actor.id } : null, before, after, data };
+      actor: actor ? { kind: actor.kind, id: actor.id } : null, before, after, track: resolvedTrack, data };
   }
 
   // --- genesis ----------------------------------------------------------------
@@ -545,6 +667,42 @@ export class BountyEscrow {
     bounty.stateChangedMs = this.nowMs();
   }
 
+  // --- two-track guards ---------------------------------------------------------
+  // Acceptance track guard: the verdict transition must be legal on the
+  // acceptance track and evidence-cited. Method-level authorization checks
+  // stay where they are; this is the legality layer underneath them.
+  _acceptanceTransition(bounty, to, { evidence } = {}) {
+    if (!acceptanceTransitionLegal(bounty.state, to))
+      fail("illegal_transition", `acceptance track: ${bounty.state} -> ${to} is not a legal verdict transition`);
+    check(evidence !== undefined && evidence !== null, "missing_evidence",
+      `acceptance track: ${bounty.state} -> ${to} requires cited evidence`);
+  }
+
+  // Finality track guard: award lot movements require a terminal acceptance
+  // verdict. Exceptions: the intake lock (fund: proposed -> funded, which
+  // starts the finality track) and the timeout refund (work never entered
+  // the acceptance track). While a bounty is disputed, finality is frozen —
+  // only the dispute's own settlement may move the award, and only after it
+  // records the acceptance verdict (this._disputeSettling).
+  _requireFinalityMove(bounty, kind) {
+    check(AWARD_KINDS.has(kind), "internal", `finality guard called for non-award kind "${kind}"`);
+    if (bounty.state === "disputed" && this._disputeSettling !== bounty.bountyId)
+      fail("finality_frozen", `bounty ${bounty.bountyId} is disputed: finality is frozen while acceptance is re-decided`);
+    const verdictOk = (() => {
+      switch (kind) {
+        case "escrow-lock": return bounty.state === "proposed"; // intake lock
+        case "attribute": return bounty.state === "submitted" || this._disputeSettling === bounty.bountyId;
+        case "approve": return bounty.state === "accepted" || this._disputeSettling === bounty.bountyId;
+        case "payout": case "fee": return bounty.state === "approved";
+        case "refund": return bounty.state === "funded" || bounty.state === "claimed"
+          || this._disputeSettling === bounty.bountyId;
+        default: return false;
+      }
+    })();
+    if (!verdictOk)
+      fail("missing_verdict", `finality track: ${kind} requires a terminal acceptance verdict (bounty is ${bounty.state})`);
+  }
+
   // --- triage ---------------------------------------------------------------------
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
@@ -607,6 +765,8 @@ export class BountyEscrow {
       this._requirePayable(roomId, lane, bounty.amountMillis, "fund");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
+      // Finality track starts here: the intake lock (proposed -> funded).
+      this._requireFinalityMove(bounty, "escrow-lock");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
         amountMillis: bounty.amountMillis, kind: "escrow-lock", bountyId, lotId,
         memo: `escrow for bounty ${bountyId}`, actor: act,
@@ -730,6 +890,8 @@ export class BountyEscrow {
       check(bounty.claimant === lane, "not_authorized", "only the claimant may submit");
       check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the submission deadline passed");
       const receipt = this._evidenceOf(evidence, lane);
+      // Acceptance track: the work enters review, evidence-cited.
+      this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
       bounty.evidence = receipt;
       this._transition(bounty, "submitted");
       this._saveBounty(bounty);
@@ -783,6 +945,9 @@ export class BountyEscrow {
         check(typeof verifierAttestation.at === "string" && Number.isFinite(Date.parse(verifierAttestation.at)),
           "invalid_input", "verifierAttestation.at must be an ISO timestamp");
       const at = isoNow(this.nowMs());
+      // Acceptance track: the verdict (evidence = the verifier attestation).
+      // The finality move below (attribute) is gated on this verdict.
+      this._acceptanceTransition(bounty, "accepted", { evidence: verifierAttestation });
       // 1. Record the approval event first — it is the gate.
       const approval = Object.freeze({ decision: "approved", by: act, at });
       const event = this._event(roomId, "bounty.accepted",
@@ -790,8 +955,10 @@ export class BountyEscrow {
           data: { approval: { decision: approval.decision, by: approval.by, at: approval.at },
             claimant: bounty.claimant, challengeEnds: new Date(this.nowMs() +
               (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS)).toISOString() } });
-      // 2. The escrow release is the explicit consequence of the approval.
+      // 2. The escrow release is the explicit consequence of the approval:
+      // finality (attribute) requires the terminal acceptance verdict above.
       const lotId = newId("lot_");
+      this._requireFinalityMove(bounty, "attribute");
       const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.claimant, state: "attributed" },
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
         memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
@@ -833,6 +1000,8 @@ export class BountyEscrow {
       check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
+      // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
+      this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
       // The dispute bond is exactly 25% of the bounty: the >= 25% minimum
       // and the <= 25% total-dispute-cost cap (v2 economics) coincide.
@@ -932,18 +1101,24 @@ export class BountyEscrow {
   }
 
   // The single consumer of the dispute machine's onDisputeFinalized: exactly
-  // one settlement per dispute. Disputes delay, never confiscate.
+  // one settlement per dispute. The dispute machine hooks the acceptance
+  // track only — its packet is always an acceptance verdict, asserted here
+  // before anything settles. Disputes delay, never confiscate.
   _onDisputeFinalized(packet) {
     const { bountyId, outcome, terminal } = packet;
+    check(packet.track === TRACK_ACCEPTANCE, "internal",
+      "dispute finalized packet is not an acceptance-track verdict");
     const row = this.db.prepare("SELECT * FROM bounty_records WHERE bounty_id=?").get(bountyId);
     if (!row || row.resolution_json) return; // unknown bounty, or already settled (recovery is via finalizeBounty)
     const bounty = this._mutable(row);
     if (bounty.state !== "disputed") return;
     const actor = this._settlementActor ?? RULE_ACTOR;
-    this._settlementSigned = this._settleDispute(bounty, { outcome, terminal, bondSnapshot: packet.bondSnapshot, forfeitedBond: packet.forfeitedBond, actor }) ?? [];
+    this._settlementSigned = this._settleDispute(bounty, { outcome, terminal,
+      reasonCodes: packet.reasonCodes ?? [], bondSnapshot: packet.bondSnapshot,
+      forfeitedBond: packet.forfeitedBond, actor }) ?? [];
   }
 
-  _settleDispute(bounty, { outcome, terminal, bondSnapshot, forfeitedBond, actor }) {
+  _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor }) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const at = isoNow(this.nowMs());
     const amount = bounty.amountMillis;
@@ -959,58 +1134,78 @@ export class BountyEscrow {
     const signed = [];
     const collect = movement => { if (movement.receipt) signed.push(movement.receipt); };
 
-    if (settleKind === "cancel") {
-      // CANCEL: full refund to the poster, challenger's bond returned (they
-      // were right), no fee. The claimant's anti-flake bond is slashed to the
-      // pool — upheld means the work was judged bad, which is what the bond
-      // prices. (The award itself is never confiscated: disputes delay, never
-      // confiscate.)
-      collect(this._move({ roomId, at, from: awardFrom, to: { account: bounty.poster, state: "payable" },
-        amountMillis: amount, kind: "refund", bountyId, lotId, memo: `dispute ${outcome}: refund`, actor,
-        receipt: { type: "refund-issued", payload: { reason: "dispute-cancel", refundTo: bounty.poster } } }));
-      if (typeof bondSnapshot === "number")
-        this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
-          amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
-      this._settleClaimBond(bounty, at, { forfeit: true, actor });
-      this._transition(bounty, "refunded");
-    } else if (settleKind === "split") {
-      // SPLIT: half the award vests with the worker (fee at sweep), half
-      // refunds to the poster, bond returned.
-      const workerHalf = Math.floor(amount / 2), posterHalf = amount - workerHalf;
-      if (awardFrom.state === "locked")
-        collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
-          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor,
-          receipt: { type: "attributed", payload: { claimant: worker } } }));
-      this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
-        amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
-      collect(this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
-        amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor,
-        receipt: { type: "refund-issued", payload: { reason: "split", refundTo: bounty.poster } } }));
-      if (typeof bondSnapshot === "number")
-        this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
-          amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
-      this._transition(bounty, "approved");
-    } else {
-      // RELEASE: the award vests with the worker (swept at the epoch, 1% fee
-      // then); the challenger's bond compensates the worker for the delay —
-      // in full, no fee on penalty compensation. A forfeited bond (frivolous
-      // ruling, withdrawn challenge) goes to the room pool instead.
-      if (awardFrom.state === "locked")
-        collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
-          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "release: attribute after dispute", actor,
-          receipt: { type: "attributed", payload: { claimant: worker } } }));
-      this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
-        amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
-      if (typeof bondSnapshot === "number") {
-        if (forfeited)
-          this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: POOL_ACCOUNT, state: "payable" },
-            amountMillis: bondSnapshot, kind: "bond-forfeit", bountyId, lotId: newId("lot_"), memo: `dispute ${outcome}: bond forfeited to pool`, actor });
-        else
-          this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: worker, state: "payable" },
-            amountMillis: bondSnapshot, kind: "bond-compensate", bountyId, lotId: newId("lot_"), memo: "dispute bond compensates worker for delay", actor });
+    // Phase 1 — acceptance track: record the verdict first (evidence = the
+    // dispute resolution). Finality stays frozen until this lands.
+    const verdictTo = settleKind === "cancel" ? "refunded" : "approved";
+    this._acceptanceTransition(bounty, verdictTo,
+      { evidence: { outcome, reasonCodes, terminal, disputeId: bounty.disputeId } });
+
+    // Phase 2 — finality track: the settlement's own award movements, gated
+    // on the recorded verdict. The freeze is lifted only for this bounty,
+    // only inside this settlement.
+    this._disputeSettling = bountyId;
+    try {
+      if (settleKind === "cancel") {
+        // CANCEL: full refund to the poster, challenger's bond returned (they
+        // were right), no fee. The claimant's anti-flake bond is slashed to the
+        // pool — upheld means the work was judged bad, which is what the bond
+        // prices. (The award itself is never confiscated: disputes delay, never
+        // confiscate.)
+        this._requireFinalityMove(bounty, "refund");
+        collect(this._move({ roomId, at, from: awardFrom, to: { account: bounty.poster, state: "payable" },
+          amountMillis: amount, kind: "refund", bountyId, lotId, memo: `dispute ${outcome}: refund`, actor,
+          receipt: { type: "refund-issued", payload: { reason: "dispute-cancel", refundTo: bounty.poster } } }));
+        if (typeof bondSnapshot === "number")
+          this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
+            amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
+        this._settleClaimBond(bounty, at, { forfeit: true, actor });
+      } else if (settleKind === "split") {
+        // SPLIT: half the award vests with the worker (fee at sweep), half
+        // refunds to the poster, bond returned.
+        const workerHalf = Math.floor(amount / 2), posterHalf = amount - workerHalf;
+        if (awardFrom.state === "locked") {
+          this._requireFinalityMove(bounty, "attribute");
+          collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
+            amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor,
+            receipt: { type: "attributed", payload: { claimant: worker } } }));
+        }
+        this._requireFinalityMove(bounty, "approve");
+        this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
+          amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
+        this._requireFinalityMove(bounty, "refund");
+        collect(this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
+          amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor,
+          receipt: { type: "refund-issued", payload: { reason: "split", refundTo: bounty.poster } } }));
+        if (typeof bondSnapshot === "number")
+          this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
+            amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
+      } else {
+        // RELEASE: the award vests with the worker (swept at the epoch, 1% fee
+        // then); the challenger's bond compensates the worker for the delay —
+        // in full, no fee on penalty compensation. A forfeited bond (frivolous
+        // ruling, withdrawn challenge) goes to the room pool instead.
+        if (awardFrom.state === "locked") {
+          this._requireFinalityMove(bounty, "attribute");
+          collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
+            amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "release: attribute after dispute", actor,
+            receipt: { type: "attributed", payload: { claimant: worker } } }));
+        }
+        this._requireFinalityMove(bounty, "approve");
+        this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
+          amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
+        if (typeof bondSnapshot === "number") {
+          if (forfeited)
+            this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: POOL_ACCOUNT, state: "payable" },
+              amountMillis: bondSnapshot, kind: "bond-forfeit", bountyId, lotId: newId("lot_"), memo: `dispute ${outcome}: bond forfeited to pool`, actor });
+          else
+            this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: worker, state: "payable" },
+              amountMillis: bondSnapshot, kind: "bond-compensate", bountyId, lotId: newId("lot_"), memo: "dispute bond compensates worker for delay", actor });
+        }
       }
-      this._transition(bounty, "approved");
+    } finally {
+      this._disputeSettling = null;
     }
+    this._transition(bounty, verdictTo);
     bounty.resolution = Object.freeze({ kind: settleKind, outcome, terminal,
       decidedAt: at, bondForfeited: forfeited });
     this._saveBounty(bounty);
@@ -1057,6 +1252,9 @@ export class BountyEscrow {
   _timeoutRefund(bounty, at, actor) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const lotId = newId("lot_");
+    // Finality: the timeout refund needs no acceptance verdict — the work
+    // never entered the acceptance track.
+    this._requireFinalityMove(bounty, "refund");
     const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
       amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
       memo: "timeout: award refunded in full, no fee", actor,
@@ -1086,6 +1284,9 @@ export class BountyEscrow {
   _approve(bounty, at, actor) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const lotId = newId("lot_");
+    // Finality: vesting requires the terminal acceptance verdict — the
+    // challenge window passed unchallenged on an accepted bounty.
+    this._requireFinalityMove(bounty, "approve");
     this._move({ roomId, at, from: { account: bounty.claimant, state: "attributed" }, to: { account: bounty.claimant, state: "approved" },
       amountMillis: bounty.amountMillis, kind: "approve", bountyId, lotId,
       memo: "challenge window passed unchallenged", actor });
@@ -1110,13 +1311,17 @@ export class BountyEscrow {
     const fee = Math.floor(amount * FEE_NUMERATOR / FEE_DENOMINATOR);
     const earner = amount - fee;
     const lotId = newId("lot_");
+    // Finality: payout requires the bounty to sit in approved (vested).
+    this._requireFinalityMove(bounty, "payout");
     const movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
       amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
       receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
         grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
-    if (fee > 0)
+    if (fee > 0) {
+      this._requireFinalityMove(bounty, "fee");
       this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
         amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+    }
     // The claim bond was an anti-flake lock, not a fee: it comes home now.
     this._settleClaimBond(bounty, at, { forfeit: false, actor });
     this._transition(bounty, "paid");
@@ -1146,6 +1351,7 @@ export class BountyEscrow {
         // The onDisputeFinalized callback already ran inline; if the bounty
         // is still unsettled the handler must have thrown — retry now.
         const signed = this._settleDispute(bounty, { outcome: dispute.resolution?.outcome ?? null, terminal: dispute.state,
+          reasonCodes: dispute.resolution?.reasonCodes ?? [],
           bondSnapshot: dispute.bondSnapshot, forfeitedBond: dispute.forfeitedBond, actor });
         return { action: bounty.state === "refunded" ? "refunded" : "released", signed };
       }
@@ -1260,12 +1466,13 @@ export class BountyEscrow {
     check(Number.isInteger(sinceSeq) && sinceSeq >= 0, "invalid_input", "sinceSeq must be a non-negative integer");
     const rows = this.db.prepare(`SELECT seq, at, type, bounty_id AS bountyId,
         actor_kind AS actorKind, actor_id AS actorId,
-        before_state AS beforeState, after_state AS afterState, data
+        before_state AS beforeState, after_state AS afterState, track, data
       FROM bounty_events WHERE room_id=? AND seq > ? ORDER BY seq ASC`).all(roomId, sinceSeq);
     return rows.map(r => Object.freeze({ seq: r.seq, at: r.at, type: r.type, bountyId: r.bountyId,
       actor: r.actorKind === null && r.actorId === null ? null
         : Object.freeze({ kind: r.actorKind, id: r.actorId }),
-      before: r.beforeState, after: r.afterState, data: JSON.parse(r.data) }));
+      before: r.beforeState, after: r.afterState, track: r.track,
+      data: JSON.parse(r.data) }));
   }
 
   metrics(roomId) {
@@ -1422,8 +1629,13 @@ export class BountyEscrow {
         let prev = "genesis";
         for (const e of this.db.prepare("SELECT * FROM bounty_journal WHERE room_id=? AND account_id=? ORDER BY seq").all(roomId, account_id)) {
           if (e.prev_hash !== prev) { violations.push(`hash chain break for ${account_id} at ${e.entry_id}`); break; }
-          const core = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
-            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? ""].join("|");
+          // Mirror _append: the track element joins the core only when the
+          // row carries one, so pre-track rows verify against their original
+          // 12-element core.
+          const coreParts = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
+            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? ""];
+          if (e.track != null) coreParts.push(e.track);
+          const core = coreParts.join("|");
           if (sha256(core) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
           prev = e.hash;
         }

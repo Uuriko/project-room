@@ -38,7 +38,7 @@ import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
-import { BountyEscrow, bountyEscrowSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
+import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
@@ -800,7 +800,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Escrowed bounties (agent work exchange, slice 1): purely additive,
       // intentionally outside the writer fence (see unfencedAdditiveTables in
       // server/writer-fence.mjs) so same-schema packaged fallbacks that
-      // predate it still verify.
+      // predate it still verify. Slice 1 shipped to production before the
+      // receipt_id/track columns (#778, integration-map candidate #2), so
+      // converge deployed databases first: ALTER TABLE cannot rewrite the
+      // stored CREATE TABLE text that verifySchema compares.
+      convergeBountyDeployedSchema(this.db);
       this.db.exec(bountyEscrowSchema);
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
