@@ -125,6 +125,7 @@ optional.push("server/reputation.mjs"); // B019: pure reputation tracker with ty
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/agent-api-keys.mjs"); // Lane D: scoped agent API-key issuance (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/agent-card-signing.mjs"); // RC-2026-09-18-014: Ed25519 card signing/verification (imported by server/agent-directory.mjs; pure, node:crypto only)
+optional.push("server/agent-key-registry.mjs"); // Integration map slice 9: agent public-key registry (imported by server/store.mjs and server/agent-identities.mjs)
 optional.push("server/agent-directory.mjs"); // Lane D: agent card directory (imported by server/agent-plugin-store.mjs; imports agent-card-signing.mjs)
 optional.push("server/agent-plugin-manifest.mjs"); // Lane D: plug-in manifest builder/validator (imported by server/agent-plugin-store.mjs and server/agent-plugin-routes.mjs; pure, no imports)
 optional.push("server/outbound-webhooks.mjs"); // webhook URL validation (imported by server/agent-webhook-subscriptions.mjs; pure, no imports)

@@ -456,6 +456,8 @@ paths:
                   displayName: { type: string }
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
+                  publicKey: { type: string, description: "The identity's registered Ed25519 claim-signing key (canonical base64, 32 bytes)" }
+                  privateKey: { type: string, description: "The matching Ed25519 seed — SHOWN ONCE, like the secret; signs public-key claims (signed-claims ed25519 mode)" }
         '409':
           description: >-
             Identity table cap reached (error.code pilot_limit). The 5000-row
@@ -504,6 +506,8 @@ paths:
                   displayName: { type: string }
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
+                  publicKey: { type: string, description: "The identity's registered Ed25519 claim-signing key (canonical base64, 32 bytes)" }
+                  privateKey: { type: string, description: "The matching Ed25519 seed — SHOWN ONCE, like the secret; signs public-key claims (signed-claims ed25519 mode)" }
         '409':
           description: Identity table cap reached (error.code pilot_limit)
           content:
@@ -6711,6 +6715,88 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
+        '429': { description: rate_limited }
+  /api/agent-identities/{identityId}/keys:
+    get:
+      summary: List an agent identity's registered public keys
+      description: >-
+        The public read surface of the agent public-key registry (a
+        room-local, operator-attested Ed25519 key directory — NOT trustless,
+        NOT decentralized, no blockchain involvement). Returns every key row
+        ever registered for the identity, oldest first: { identityId,
+        publicKey, validFrom, validUntil, revokedAt, supersededBy }. The
+        registry is append-only: rotation closes a key's validity window and
+        revocation stamps revokedAt, so past claims stay checkable against
+        history. No authentication required — public keys are public.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ identityId, keys: [...] }" }
+        '404': { description: identity_not_found }
+  /api/agent-identities/{identityId}/keys/rotate:
+    post:
+      summary: Rotate an agent identity's claim-signing key
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity). Registers
+        newPublicKey as valid from now; every currently-active key keeps
+        verifying for overlapMs more (default 24h, max 30 days) so in-flight
+        claims do not break at the cutover — a claim signed during the
+        overlap still verifies afterwards because verification binds the
+        claim's issuedAt, not verify-time, to each key's validity window.
+        Overlap 0 closes the old key immediately. 20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPublicKey]
+              properties:
+                newPublicKey: { type: string, description: "Canonical base64 of the 32-byte Ed25519 public key" }
+                overlapMs: { type: integer, minimum: 0, maximum: 2592000000 }
+      responses:
+        '200': { description: "{ identityId, publicKey, validFrom, validUntil, overlapMs, closedKeys }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '409': { description: "key_already_registered or identity_revoked (revoke is final)" }
+        '422': { description: invalid_key }
+        '429': { description: rate_limited }
+  /api/agent-identities/{identityId}/keys/revoke:
+    post:
+      summary: Revoke one of an agent identity's registered public keys
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity). Claims issued before
+        revokedAt still verify; claims issued at or after revokedAt do not.
+        Revoking an already-revoked key is a no-op returning its record.
+        20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publicKey]
+              properties:
+                publicKey: { type: string }
+      responses:
+        '200': { description: "{ identityId, publicKey, validFrom, validUntil, revokedAt, supersededBy }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '404': { description: "identity_not_found or key_not_found" }
+        '422': { description: invalid_key }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/verification-policy:
     get:

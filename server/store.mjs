@@ -45,6 +45,7 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
@@ -552,6 +553,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
     this.delegation = new MembershipDelegation(this);
+    this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
@@ -703,6 +705,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
+      // Integration map slice 9: the agent public-key registry is purely
+      // additive — IF NOT EXISTS is idempotent, no schema version bump,
+      // and the table is intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Applied here (not only in createRoomServer)
+      // so store-only fixtures and the recovery audit see it.
+      this.db.exec(agentKeyRegistrySchema);
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
