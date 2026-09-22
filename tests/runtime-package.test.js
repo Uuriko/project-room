@@ -170,7 +170,16 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 249); // Includes host runner, process adapter and CLI. +1 membership delegation (RC-2026-09-18-038) + 4 bounty-escrow modules.
+  const receipt = createRuntimePackage({ repository: candidate.repository, commit: candidate.commit, destination });
+  // The allowlist (scripts/runtime-package.mjs) is the single source of truth.
+  // The expected file count derives from the fixture's packaged paths
+  // intersected with the allowlist, so registering a new module never requires
+  // a hand-bumped count here (regression guard for #590/#592/#606, which broke
+  // clean main on a stale number).
+  const expectedFiles = [...candidate.packagedPaths].filter(path => allowed.has(path)).length;
+  assert.equal(receipt.files, expectedFiles,
+    `candidate package ships ${receipt.files} files but the allowlisted fixture set has ${expectedFiles}`);
+  // Cold imports below exercise the host runner, process adapter and CLI.
   for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};

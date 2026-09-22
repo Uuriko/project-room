@@ -94,5 +94,9 @@ paths.add('server/attachment-schema.mjs');
     '-c', 'init.templateDir=', '-c', 'user.name=Room fixture', '-c', 'user.email=fixture@example.invalid', ...args],
   { cwd: candidate, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init', '-q'); git('add', '--', ...paths); git('commit', '-qm', 'Synthetic candidate packaging fixture');
-  return { repository: candidate, commit: git('rev-parse', 'HEAD').trim() };
+  // packagedPaths is the exact file set committed to the synthetic fixture.
+  // Tests derive expected package counts from it (intersected with the
+  // runtime-package allowlist) so registering a new module never requires a
+  // hand-bumped count (regression guard for #590/#592/#606).
+  return { repository: candidate, commit: git('rev-parse', 'HEAD').trim(), packagedPaths: paths };
 }
