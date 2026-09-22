@@ -49,7 +49,7 @@ const packetsFor = (escrow, bountyId) => escrow.getReviewPackets(ROOM, { bountyI
 // Slice-8-era schema: drop the slice-10 table chunks and the
 // submission_hash column, the same chunk-aware way the module splits them.
 const bountyEscrowSchemaForTest = () => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
-  .filter(sql => !sql.includes("bounty_review_packets"))
+  .filter(sql => !sql.includes("bounty_review_packets") && !sql.includes("bounty_sybil_flags"))
   .map(sql => sql.replace("    submission_hash TEXT,\n", ""))
   .join(";\n") + ";";
 const expectConserved = escrow => {
@@ -66,8 +66,13 @@ test("the fingerprint is normalized: field order and checksClaimed order do not 
   assert.match(submissionHashOf(EVIDENCE_A), /^[0-9a-f]{64}$/);
   assert.notEqual(submissionHashOf(EVIDENCE_A), submissionHashOf(EVIDENCE_B),
     "different work hashes differently");
-  assert.notEqual(submissionHashOf({ ...EVIDENCE_A, summary: "did the thing " }),
-    submissionHashOf(EVIDENCE_A), "no trimming: near-duplicates hash differently");
+  // Slice-10 spec: whitespace is normalized (line endings, runs, trim), so
+  // copy-paste with trivial whitespace tweaks still correlates. Case is NOT
+  // folded — case changes are meaningful in code.
+  assert.equal(submissionHashOf({ ...EVIDENCE_A, summary: "did the  thing\r\n" }),
+    submissionHashOf(EVIDENCE_A), "whitespace runs collapse, line endings normalize, ends trim");
+  assert.notEqual(submissionHashOf({ ...EVIDENCE_A, summary: "Did the thing" }),
+    submissionHashOf(EVIDENCE_A), "case changes still hash differently");
 });
 
 test("a lone submission pins its fingerprint and creates no packet", () => {
@@ -169,9 +174,10 @@ test("correlation is room-scoped: identical work in another room creates no pack
   expectConserved(escrow);
 });
 
-test("convergence creates the packets table and persists fingerprints on a slice-8-era database", () => {
+test("convergence creates the packets and sybil-flags tables and persists fingerprints on a slice-8-era database", () => {
   // Simulate a deployed database from before slice 10: every slice-8 table
-  // present, but no bounty_review_packets and no submission_hash column.
+  // present, but no bounty_review_packets, no bounty_sybil_flags, and no
+  // submission_hash column.
   const legacySchema = bountyEscrowSchemaForTest();
   const db = new DatabaseSync(":memory:");
   db.exec(legacySchema);

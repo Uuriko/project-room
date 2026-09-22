@@ -327,6 +327,32 @@ export const bountyEscrowSchema = `
     evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json))
   );
   CREATE INDEX IF NOT EXISTS bounty_review_packets_bounty ON bounty_review_packets(room_id, bounty_id);
+`
+// Slice 10 (integration map #10): the sybil-cluster flag table. One row per
+// above-threshold correlated cluster: the correlation signal, the member
+// submissions (bounty + lane refs), the frozen evidence packet, and the
+// review lifecycle — open -> dismissed (honest coincidence, e.g. the same
+// template on a trivial task) or confirmed (an arbiter agrees). REVIEW-ONLY:
+// rows here never drive bans, slashes, or balance/bond/reputation movement;
+// resolution is a human/arbiter record, not an enforcement action.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_sybil_flags (
+    room_id TEXT NOT NULL,
+    flag_id TEXT PRIMARY KEY,
+    cluster_id TEXT NOT NULL,
+    signal TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','dismissed','confirmed')),
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT,
+    resolution_reason TEXT,
+    submission_hash TEXT NOT NULL,
+    member_lanes_json TEXT NOT NULL CHECK(json_valid(member_lanes_json)),
+    member_bounties_json TEXT NOT NULL CHECK(json_valid(member_bounties_json)),
+    evidence_packet_json TEXT NOT NULL CHECK(json_valid(evidence_packet_json))
+  );
+  CREATE INDEX IF NOT EXISTS bounty_sybil_flags_room ON bounty_sybil_flags(room_id, status);
+  CREATE INDEX IF NOT EXISTS bounty_sybil_flags_cluster ON bounty_sybil_flags(room_id, cluster_id);
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -451,16 +477,34 @@ export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
 
+// Slice 10: sybil-cluster detection thresholds (integration map #10).
+// Review-only: crossing a threshold creates an arbiter-review flag — it
+// never auto-bans, auto-slashes, or moves balances, bonds, or reputation.
+export const SYBIL_COPY_PASTE_MIN_LANES = 2;         // distinct lanes, byte-identical normalized fingerprint
+export const SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES = 3;  // one lane's shared fingerprint spans N distinct bounties with another lane
+
+// Slice 10: normalized text for the submission fingerprint. Deterministic:
+// line endings -> \n, horizontal whitespace runs collapse to one space,
+// blank-line runs collapse to one newline, ends trimmed. Case is NOT
+// folded — case changes are meaningful in code — so "Fix" and "fix" hash
+// differently while "did   the thing\n" and "did the thing" hash alike.
+const canonText = value => String(value)
+  .replace(/\r\n?/g, "\n")
+  .replace(/[ \t]+/g, " ")
+  .replace(/\n[ \t]*\n+/g, "\n")
+  .trim();
+
 // Slice 10: the normalized submission fingerprint. Canonicalization is
-// deterministic — fixed field order, sorted checksClaimed, no timestamps,
-// no reporter identity — so the same work always hashes to the same
-// 64-hex fingerprint regardless of who submits it or when.
+// deterministic — fixed field order, sorted checksClaimed, normalized
+// text, no timestamps, no reporter identity — so the same work always
+// hashes to the same 64-hex fingerprint regardless of who submits it or
+// when.
 export function canonicalSubmissionOf(evidence) {
   const pick = {};
   for (const key of ["evidenceKind", "evidenceUrl", "producerId", "summary"])
-    if (evidence[key] !== undefined && evidence[key] !== null) pick[key] = String(evidence[key]);
+    if (evidence[key] !== undefined && evidence[key] !== null) pick[key] = canonText(evidence[key]);
   if (Array.isArray(evidence.checksClaimed))
-    pick.checksClaimed = [...evidence.checksClaimed].map(String).sort();
+    pick.checksClaimed = [...evidence.checksClaimed].map(canonText).sort();
   return JSON.stringify(pick);
 }
 export const submissionHashOf = evidence => sha256(canonicalSubmissionOf(evidence));
@@ -585,7 +629,7 @@ export class BountyEscrow {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
           "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-          "bounty_review_packets"];
+          "bounty_review_packets", "bounty_sybil_flags"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         else this._migrateColumns();
         this._ready = true;
@@ -609,7 +653,7 @@ export class BountyEscrow {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
       "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-      "bounty_review_packets"];
+      "bounty_review_packets", "bounty_sybil_flags"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
@@ -671,7 +715,7 @@ export class BountyEscrow {
     // All chunks are IF NOT EXISTS: safe no-ops when already present.
     const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
       .filter(sql => sql.includes(name));
-    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets"])
+    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
@@ -1321,11 +1365,12 @@ export class BountyEscrow {
       const at = isoNow(this.nowMs());
       const event = this._event(roomId, "bounty.submitted",
         { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
-      // Slice 10: claim-graph correlation. Review-only: a packet never
-      // changes bounty state, balances, bonds, or reputation — no auto-ban,
-      // no auto-slash.
-      const packet = this._analyzeSubmissionCorrelation(roomId, bounty, bounty.submissionHash, receipt);
-      return { bounty: this._getBounty(roomId, bountyId), packet,
+      // Slice 10: claim-graph correlation -> review packet; above-threshold
+      // clusters -> sybil flags for the arbiter review queue. Review-only:
+      // packets and flags never change bounty state, balances, bonds, or
+      // reputation — no auto-ban, no auto-slash.
+      const { packet, flags } = this._analyzeSubmissionCorrelation(roomId, bounty, bounty.submissionHash, receipt);
+      return { bounty: this._getBounty(roomId, bountyId), packet, flags,
         receipt: { kind: "submit", bountyId, evidence: receipt, at, actor: act, event } };
     });
   }
@@ -1337,9 +1382,19 @@ export class BountyEscrow {
   //   - repeat-claimant-poster: this claimant already claimed from this
   //     poster before (a repeat pairing — productive lane or collusion,
   //     for a human to decide).
-  // Above-threshold (>= 1 signal) creates an arbiter review packet with
-  // the matched bounties, the claim graph, and the evidence attached.
-  // REVIEW-ONLY: the packet is stored and journaled; nothing else moves.
+  //   - copy-paste: >= SYBIL_COPY_PASTE_MIN_LANES distinct lanes submitted
+  //     the byte-identical normalized fingerprint (copy-paste / sockpuppet
+  //     ring). The room lifecycle admits one submission per bounty, so the
+  //     distinct-lane form is the operational reading of "supposedly
+  //     independent lanes, identical work".
+  //   - claim-graph: another lane's submissions carry this fingerprint on
+  //     >= SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES distinct bounties (a lane pair
+  //     sharing submitters/evidence fingerprints across bounties).
+  // Any signal stores one review packet; the copy-paste / claim-graph
+  // signals additionally raise a sybil flag — one per signal — for the
+  // arbiter review queue. REVIEW-ONLY: packets and flags are stored and
+  // journaled; nothing else moves — no auto-ban, no auto-slash, no
+  // balance/bond/reputation change.
   _analyzeSubmissionCorrelation(roomId, bounty, fingerprint, evidence) {
     const signals = [];
     const matched = new Map(); // bountyId -> matched bounty summary
@@ -1351,13 +1406,19 @@ export class BountyEscrow {
         submittedAt: new Date(row.state_changed_ms).toISOString(),
       });
     };
-    const dupes = this.db.prepare(`SELECT * FROM bounty_records
-      WHERE room_id=? AND submission_hash=? AND bounty_id<>?`).all(roomId, fingerprint, bounty.bountyId);
-    for (const row of dupes) noteMatch(row);
-    if (dupes.length > 0)
+    // Every submission carrying this fingerprint (the current one included):
+    // the spec thresholds read off this set.
+    const shared = this.db.prepare(`SELECT bounty_id, claimant, poster, verifier, state,
+        submission_hash, state_changed_ms FROM bounty_records
+      WHERE room_id=? AND submission_hash=?`).all(roomId, fingerprint);
+    const other = shared.filter(r => r.bounty_id !== bounty.bountyId);
+    const toMember = r => ({ bountyId: r.bounty_id, lane: r.claimant,
+      submittedAt: new Date(r.state_changed_ms).toISOString() });
+    for (const row of other) noteMatch(row);
+    if (other.length > 0)
       signals.push({ type: "duplicate-submission",
-        detail: `${dupes.length} other submission(s) carry the identical fingerprint`,
-        matchedBountyIds: dupes.map(r => r.bounty_id) });
+        detail: `${other.length} other submission(s) carry the identical fingerprint`,
+        matchedBountyIds: other.map(r => r.bounty_id) });
     const repeats = this.db.prepare(`SELECT * FROM bounty_records
       WHERE room_id=? AND claimant=? AND poster=? AND bounty_id<>? AND claimant IS NOT NULL`)
       .all(roomId, bounty.claimant, bounty.poster, bounty.bountyId);
@@ -1366,7 +1427,30 @@ export class BountyEscrow {
       signals.push({ type: "repeat-claimant-poster",
         detail: `claimant ${bounty.claimant} previously claimed ${repeats.length} bounty/bounties from poster ${bounty.poster}`,
         matchedBountyIds: repeats.map(r => r.bounty_id) });
-    if (signals.length === 0) return null;
+    // Spec thresholds (integration map #10): named constants, deterministic.
+    const specSignals = [];
+    const lanes = new Set(shared.map(r => r.claimant).filter(Boolean));
+    if (lanes.size >= SYBIL_COPY_PASTE_MIN_LANES)
+      specSignals.push({ type: "copy-paste",
+        detail: `${lanes.size} distinct lanes submitted the byte-identical normalized fingerprint`,
+        matchedBountyIds: shared.map(r => r.bounty_id),
+        lanes: [...lanes].sort(), members: shared.map(toMember) });
+    const byLane = new Map(); // other lane -> its rows with this fingerprint
+    for (const row of other) {
+      if (!row.claimant || row.claimant === bounty.claimant) continue;
+      const list = byLane.get(row.claimant) ?? [];
+      if (!list.some(r => r.bounty_id === row.bounty_id)) list.push(row);
+      byLane.set(row.claimant, list);
+    }
+    for (const [lane, rows] of byLane)
+      if (rows.length >= SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES)
+        specSignals.push({ type: "claim-graph",
+          detail: `lane ${lane} shares the identical fingerprint on ${rows.length} distinct bounties with ${bounty.claimant}`,
+          matchedBountyIds: [bounty.bountyId, ...rows.map(r => r.bounty_id)],
+          lanes: [bounty.claimant, lane].sort(),
+          members: [toMember(shared.find(r => r.bounty_id === bounty.bountyId)), ...rows.map(toMember)] });
+    for (const s of specSignals) signals.push(s);
+    if (signals.length === 0) return { packet: null, flags: [] };
     // Claim graph: lanes as nodes (poster/claimant/verifier roles), the
     // claim/post/verify relationships as edges, over this submission and
     // every matched one.
@@ -1405,7 +1489,98 @@ export class BountyEscrow {
       { bountyId: bounty.bountyId, actor: RULE_ACTOR,
         data: { packetId: packet.packetId, submissionHash: fingerprint,
           signalTypes: signals.map(s => s.type), matchedBountyIds: [...matched.keys()] } });
-    return deepFreeze(packet);
+    // Above-threshold clusters -> one sybil flag per spec signal, for the
+    // arbiter review queue. Review-only: the flag is stored and journaled;
+    // bounty state, balances, bonds, and reputation are untouched.
+    const flags = specSignals.map(s => this._flagSybilCluster(roomId, bounty, fingerprint, s, packet));
+    return { packet: deepFreeze(packet), flags };
+  }
+
+  // Slice 10: raise one sybil flag per above-threshold cluster signal. The
+  // flag is a review-queue record — open until an arbiter dismisses (honest
+  // coincidence) or confirms it. It never touches bounty state, balances,
+  // bonds, or reputation.
+  _flagSybilCluster(roomId, bounty, fingerprint, signal, packet) {
+    const flagId = newId("sybf_"), clusterId = newId("sycl_");
+    const createdAt = isoNow(this.nowMs());
+    const memberLanes = [...(signal.lanes ?? [])];
+    const memberBounties = [...(signal.members ?? [])];
+    this.db.prepare(`INSERT INTO bounty_sybil_flags
+      (room_id, flag_id, cluster_id, signal, status, created_at, submission_hash,
+       member_lanes_json, member_bounties_json, evidence_packet_json)
+      VALUES (?,?,?,?, 'open',?,?,?,?,?)`)
+      .run(roomId, flagId, clusterId, signal.type, createdAt, fingerprint,
+        JSON.stringify(memberLanes), JSON.stringify(memberBounties), JSON.stringify(packet));
+    this._event(roomId, "sybil.flag-created",
+      { bountyId: bounty.bountyId, actor: RULE_ACTOR,
+        data: { flagId, clusterId, signal: signal.type, submissionHash: fingerprint,
+          memberLanes, memberBountyIds: memberBounties.map(m => m.bountyId), packetId: packet.packetId } });
+    return Object.freeze({
+      flagId, clusterId, roomId, signal: signal.type, status: "open",
+      createdAt, resolvedAt: null, resolvedBy: null, resolutionReason: null,
+      submissionHash: fingerprint,
+      memberLanes: Object.freeze(memberLanes),
+      memberBounties: Object.freeze(memberBounties.map(m => Object.freeze({ ...m }))),
+      evidencePacket: packet,
+    });
+  }
+
+  _flagOf(row) {
+    return Object.freeze({
+      flagId: row.flag_id, clusterId: row.cluster_id, roomId: row.room_id,
+      signal: row.signal, status: row.status,
+      createdAt: row.created_at, resolvedAt: row.resolved_at,
+      resolvedBy: row.resolved_by, resolutionReason: row.resolution_reason,
+      submissionHash: row.submission_hash,
+      memberLanes: Object.freeze(JSON.parse(row.member_lanes_json)),
+      memberBounties: Object.freeze(JSON.parse(row.member_bounties_json).map(m => Object.freeze({ ...m }))),
+      evidencePacket: deepFreeze(JSON.parse(row.evidence_packet_json)),
+    });
+  }
+
+  // Slice 10: arbiter inspection of sybil flags — the review queue.
+  // Room-scoped read; ?status= filters to open / dismissed / confirmed.
+  getSybilFlags(roomId, { status = null } = {}) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      if (status !== null) check(["open", "dismissed", "confirmed"].includes(status),
+        "invalid_input", "status must be one of open, dismissed, confirmed");
+      const rows = status === null
+        ? this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? ORDER BY created_at`).all(roomId)
+        : this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? AND status=? ORDER BY created_at`)
+          .all(roomId, status);
+      return rows.map(row => this._flagOf(row));
+    });
+  }
+
+  // Slice 10: arbiter resolution of a sybil flag — dismissed (honest
+  // coincidence: the same template, the same trivial task) or confirmed
+  // (the arbiter agrees the cluster is correlated). A reason is required
+  // either way. REVIEW-ONLY: resolution records the verdict; it never
+  // moves bounty state, balances, bonds, or reputation — no auto-ban,
+  // no auto-slash.
+  resolveSybilFlag(roomId, flagId, { resolution, reason, resolver } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      check(resolution === "dismissed" || resolution === "confirmed", "invalid_input",
+        `resolution must be "dismissed" or "confirmed"`);
+      check(typeof reason === "string" && reason.trim().length >= 1 && reason.length <= 500, "invalid_input",
+        "resolution reason is required (1..500 characters)");
+      const row = this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? AND flag_id=?`)
+        .get(roomId, flagId);
+      if (!row) fail("unknown_flag", `unknown sybil flag "${flagId}"`);
+      check(row.status === "open", "invalid_state", `flag is ${row.status}, not open`);
+      const by = canonicalLane(resolver);
+      const resolvedAt = isoNow(this.nowMs());
+      const trimmed = reason.trim();
+      this.db.prepare(`UPDATE bounty_sybil_flags SET status=?, resolved_at=?, resolved_by=?, resolution_reason=?
+        WHERE room_id=? AND flag_id=?`).run(resolution, resolvedAt, by, trimmed, roomId, flagId);
+      this._event(roomId, "sybil.flag-resolved",
+        { actor: normalizeActor(null, by),
+          data: { flagId, clusterId: row.cluster_id, signal: row.signal, resolution, reason: trimmed } });
+      return this._flagOf({ ...row, status: resolution, resolved_at: resolvedAt,
+        resolved_by: by, resolution_reason: trimmed });
+    });
   }
 
   // Slice 10: arbiter inspection of review packets. Room-scoped read;

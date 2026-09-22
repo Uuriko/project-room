@@ -2425,6 +2425,116 @@ paths:
                     items: { $ref: '#/components/schemas/ReviewPacket' }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags:
+    get:
+      summary: List sybil-cluster flags (slice 10)
+      description: |
+        Arbiter review queue for correlated-submission (Sybil) clusters. A
+        flag is raised when above-threshold correlation is detected between
+        submissions: >= 2 distinct lanes submitting the byte-identical
+        normalized fingerprint (copy-paste), or one lane's submissions
+        sharing submitters/evidence fingerprints with another lane across
+        >= 3 distinct bounties (claim-graph). REVIEW-ONLY: flags never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — an
+        arbiter dismisses (honest coincidence: same template, same trivial
+        task) or confirms each flag with a recorded reason. Filter by
+        lifecycle with `?status=`. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, dismissed, confirmed] }
+      responses:
+        '200':
+          description: The room's sybil flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flags:
+                    type: array
+                    items: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/dismiss:
+    post:
+      summary: Dismiss a sybil flag (slice 10)
+      description: |
+        Arbiter dismisses an open sybil flag as honest coincidence (same
+        template, same trivial task) with a recorded reason. REVIEW-ONLY:
+        dismissal records the verdict; it never moves bounty state,
+        balances, bonds, or reputation. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: flagId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: 1..500 characters }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The dismissed flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flag: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown sybil flag }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/confirm:
+    post:
+      summary: Confirm a sybil flag (slice 10)
+      description: |
+        Arbiter confirms an open sybil flag — agreeing the cluster is
+        correlated — with a recorded reason. REVIEW-ONLY: confirmation
+        records the verdict; follow-up enforcement (if any) is a separate
+        human decision. Nothing here auto-bans, auto-slashes, or moves
+        bounty state, balances, bonds, or reputation. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: flagId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: 1..500 characters }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The confirmed flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flag: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown sybil flag }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/decline:
     post:
       summary: Decline a proposed bounty
@@ -7215,6 +7325,61 @@ components:
                 properties:
                   criterionId: { type: string }
                   description: { type: string }
+    ReviewPacket:
+      type: object
+      description: |
+        Slice 10 — frozen claim-graph correlation evidence packet attached to
+        a submission: the signals that fired, the matched bounties, the lane
+        graph (poster/claimant/verifier nodes, claim/post/verify edges), and
+        the submitted evidence. Review-only; packets are immutable once
+        created.
+      properties:
+        packetId: { type: string }
+        roomId: { type: string }
+        createdAt: { type: string, format: date-time }
+        bountyId: { type: string }
+        submissionHash: { type: string, description: Normalized SHA-256 fingerprint of the canonicalized evidence }
+        signals:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [duplicate-submission, repeat-claimant-poster, copy-paste, claim-graph] }
+              detail: { type: string }
+              matchedBountyIds: { type: array, items: { type: string } }
+        matchedBounties: { type: array, items: { type: object } }
+        graph: { type: object }
+        evidence: { type: object }
+    SybilFlag:
+      type: object
+      description: |
+        Slice 10 — one above-threshold correlated cluster awaiting arbiter
+        review. status is open until an arbiter dismisses (honest
+        coincidence) or confirms it with a recorded reason. REVIEW-ONLY:
+        flags never auto-ban, auto-slash, or move bounty state, balances,
+        bonds, or reputation.
+      properties:
+        flagId: { type: string }
+        clusterId: { type: string }
+        roomId: { type: string }
+        signal: { type: string, enum: [copy-paste, claim-graph] }
+        status: { type: string, enum: [open, dismissed, confirmed] }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        resolvedBy: { type: string, nullable: true }
+        resolutionReason: { type: string, nullable: true }
+        submissionHash: { type: string, description: Normalized SHA-256 fingerprint shared by the cluster members }
+        memberLanes: { type: array, items: { type: string }, description: Distinct lanes in the cluster }
+        memberBounties:
+          type: array
+          description: Member submissions (bounty + lane refs) of the cluster
+          items:
+            type: object
+            properties:
+              bountyId: { type: string }
+              lane: { type: string }
+              submittedAt: { type: string, format: date-time }
+        evidencePacket: { $ref: '#/components/schemas/ReviewPacket' }
     BountyReceipt:
       type: object
       description: A bounty transition receipt: actor-attributed with before/after states and the lifecycle event.

@@ -45,7 +45,7 @@ const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
     if (error instanceof EscrowError) {
-      if (error.code === "unknown_bounty") reject(404, error.code, error.message);
+      if (error.code === "unknown_bounty" || error.code === "unknown_flag") reject(404, error.code, error.message);
       if (error.code === "not_authorized") reject(403, error.code, error.message);
       if (error.code === "already_claimed" || error.code === "dispute_exists") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
@@ -85,7 +85,7 @@ const readPayload = async (reject, readBody, req) => {
   return payload;
 };
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, helpers }) {
   const { json, reject, body } = helpers;
   const escrow = store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store);
   const caller = canonicalLane(auth.member.id);
@@ -124,6 +124,27 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const bountyId = url.searchParams.get("bountyId");
     const packets = runPure(reject, () => escrow.getReviewPackets(roomId, { bountyId }));
     return json(res, 200, { roomId, packets });
+  }
+  // Slice 10: the sybil-flag arbiter review queue. Read-only (rooms:read);
+  // ?status= filters to open / dismissed / confirmed.
+  if (escrowRoute === "sybil-flags" && req.method === "GET") {
+    const status = url.searchParams.get("status");
+    if (status !== null && !["open", "dismissed", "confirmed"].includes(status))
+      invalidInput(reject, "status one of open, dismissed, confirmed");
+    const flags = runPure(reject, () => escrow.getSybilFlags(roomId, { status }));
+    return json(res, 200, { roomId, flags });
+  }
+  // Slice 10: arbiter resolution of a sybil flag — dismissed (honest
+  // coincidence) or confirmed. REVIEW-ONLY: records the verdict; never
+  // moves bounty state, balances, bonds, or reputation.
+  if ((escrowRoute === "sybil-dismiss" || escrowRoute === "sybil-confirm") && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{reason, idempotencyKey?}");
+    const resolution = escrowRoute === "sybil-dismiss" ? "dismissed" : "confirmed";
+    return idem(payload, `bounty.sybil-${resolution}`, 200, () =>
+      runPure(reject, () => ({ roomId,
+        flag: escrow.resolveSybilFlag(roomId, sybilFlagId, { resolution, reason: payload.reason, resolver: caller }) })));
   }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
