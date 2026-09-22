@@ -120,7 +120,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   ]);
   await producerSelect.selectOption("owner");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter submitted the result");
-  await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/reporter-result");
+  // evidenceUrl omitted: UI form cannot provide signedEvidence for external completions
   await page.locator('#action-form input[name="evidenceVersion"]').fill("producer-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Maya verifies independently");
   await page.locator('#action-form button[type="submit"]').click();
@@ -133,7 +133,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="complete"]').click();
   await page.locator('#action-form select[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter cannot establish who produced the result");
-  await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/unknown-result");
+  // evidenceUrl omitted: UI form cannot provide signedEvidence for external completions
   await page.locator('#action-form input[name="evidenceVersion"]').fill("unknown-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Establish provenance before verification");
   await page.locator('#action-form button[type="submit"]').click();
