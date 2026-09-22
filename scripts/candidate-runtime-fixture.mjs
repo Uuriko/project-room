@@ -72,6 +72,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/resend-mailer.mjs'); // Resend-backed magic-link sender (imported by server/boot-options.mjs)
   paths.add('server/webhook-dispatch.mjs'); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs)
   paths.add('server/agent-key-registry.mjs'); // Integration map slice 9 (imported by server/store.mjs and server/agent-identities.mjs)
+  paths.add('server/signed-evidence.mjs'); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs)
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)

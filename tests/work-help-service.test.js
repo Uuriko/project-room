@@ -12,6 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { workHelpContext } from "../src/work-help.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 function setup(t) {
@@ -24,7 +25,8 @@ function setup(t) {
     expectedHelpRevision: f.store.room("commons").state.workItems["test-handoff"].helpWanted?.revision ?? 0,
     status: "open", scope: "Suggest two agenda items. 🪷", expiresAt: new Date(now + 3600000).toISOString(), ...data } });
   const withdraw = () => { const c = command({ status: "withdrawn" }); delete c.data.scope; delete c.data.expiresAt; return c; };
-  return { ...f, filename, now: () => now, command, withdraw, send: (c = command(), actor = "producer") => f.store.command(f.keys[actor], "commons", c) };
+  const signEvidence = makeTestSigner(f.store);
+  return { ...f, filename, now: () => now, command, withdraw, send: (c = command(), actor = "producer") => f.store.command(f.keys[actor], "commons", c), signEvidence };
 }
 
 test("help commands preserve exact receipts, work revisions and read markers through restart", t => {
@@ -130,11 +132,11 @@ test("help history crosses checkpoints and rework without resuming old consent",
   const sendWork = (type, data = {}, actor = "producer") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type,
     data: { workItemId: "test-handoff", expectedRevision: f.store.room("commons").state.workItems["test-handoff"].revision, ...data } });
   const done = { summary: "Agenda", evidenceUrl: "https://example.test/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer" };
-  sendWork("work.completed", done); const oldCompletion = f.store.room("commons").state.workItems["test-handoff"].receipt.eventId;
+  sendWork("work.completed", { ...done, signedEvidence: f.signEvidence() }); const oldCompletion = f.store.room("commons").state.workItems["test-handoff"].receipt.eventId;
   sendWork("work.blocked", { reason: "Revise", nextAction: "Discuss" });
   assert.equal(workHelpContext(f.store.room("commons").state, "test-handoff", "guest", new Date(f.now()).toISOString()).status, "consent_changed");
   f.send(); sendWork("work.blocker_resolved", { resolution: "Clear plan" });
-  sendWork("work.completed", { ...done, evidenceVersion: "v2" }); sendWork("work.blocked", { reason: "Polish", nextAction: "Ask" }); f.send();
+  sendWork("work.completed", { ...done, evidenceVersion: "v2", signedEvidence: f.signEvidence() }); sendWork("work.blocked", { reason: "Polish", nextAction: "Ask" }); f.send();
   sendWork("verification.recorded", { result: "fail", completionEventId: oldCompletion, evidenceVersion: "v1", summary: "Historical finding" }, "reviewer");
   const before = auditRecovery(f.store);
   const readOnly = new RoomStore(f.filename, { readOnly: true });

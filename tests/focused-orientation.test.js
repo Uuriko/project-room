@@ -11,6 +11,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { openMcpTestClient } from '../scripts/mcp-test-client.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
+import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 
 async function setup(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
@@ -21,6 +22,7 @@ async function setup(t) {
   const send = (actor, type, data) => f.store.command(f.keys[actor], 'commons', { id: crypto.randomUUID(), type, data });
   const change = (actor, type, data = {}) => send(actor, type, { workItemId: 'test-handoff',
     expectedRevision: f.store.room('commons').state.workItems['test-handoff'].revision, ...data });
+  const signEvidence = makeTestSigner(f.store);
   const focused = async actor => {
     const before = auditRecovery(f.store).dataSha256;
     const result = await client(actor).orient({ focus: 'needs_me' });
@@ -29,7 +31,7 @@ async function setup(t) {
   };
   t.after(async () => { server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  return { ...f, config, client, send, change, focused };
+  return { ...f, config, client, send, change, focused, signEvidence };
 }
 
 test('focused work follows producer, reviewer and human decision handoffs without executing or marking read', async t => {
@@ -49,7 +51,7 @@ test('focused work follows producer, reviewer and human decision handoffs withou
   assert.equal(blocked.next.action, 'revise'); assert.ok(blocked.availableRoomActions.some(a => a.action === 'resolve'));
   f.change('producer', 'work.blocker_resolved', { resolution: 'Owner clarified the request' });
   f.change('producer', 'work.completed', { producerId: 'producer', summary: 'Synthetic agenda',
-    evidenceUrl: 'https://example.invalid/agenda', evidenceVersion: 'v1', nextAction: 'Review' });
+    evidenceUrl: 'https://example.invalid/agenda', evidenceVersion: 'v1', nextAction: 'Review', signedEvidence: f.signEvidence() });
   assert.equal((await f.focused('producer')).work.length, 0);
   const review = (await f.focused('reviewer')).work[0];
   assert.equal(review.next.action, 'verify'); assert.equal(review.next.evidenceVersion, 'v1');

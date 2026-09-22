@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -36,6 +37,11 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await login();
   const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
+  const signEvidence = makeTestSigner(f.store);
+  const sendWithEvidence = (type, data) => {
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+    return send(type, data);
+  };
   const form = page.locator("#new-work-form"), title = page.locator("#work-title-input"), done = page.locator("#work-done-input");
   const open = async (id = "test-handoff") => {
     const card = page.locator(`[data-work-record-id="${id}"]`);
@@ -46,7 +52,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   };
   const people = async () => { await page.locator("#assignee-select").selectOption("producer"); await page.locator("#verifier-select").selectOption("reviewer"); };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/reuse-${name}.png`, fullPage: true }); };
-  return { ...f, page, errors, login, snapshot, send, form, title, done, open, people, capture };
+  return { ...f, page, errors, login, snapshot, send: sendWithEvidence, form, title, done, open, people, capture };
 }
 
 for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {

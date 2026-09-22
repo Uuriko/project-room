@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const guide = readFileSync(new URL("../docs/SWARM-PLUG-IN.md", import.meta.url), "utf8");
 const examples = new Map([...guide.matchAll(/<!-- room-command: ([a-z-]+) -->\s*```json\n([\s\S]*?)\n```/g)]
@@ -37,6 +38,7 @@ async function fixture(t) {
     rmSync(directory, { recursive: true, force: true });
   });
   store.initialize(initialRoom());
+  const signEvidence = makeTestSigner(store);
   const ownerToken = store.issueAccessKey("commons", "owner");
   for (const [memberId, permissions] of [["worker", ["accept_work", "complete_work"]], ["author", []], ["reviewer", ["verify"]]]) {
     store.command(ownerToken, "commons", { id: `fixture-add-${memberId}`, type: T.MEMBER_ADDED, data: {
@@ -69,7 +71,8 @@ async function fixture(t) {
     // Non-retrievable fixture evidence is deliberate; no hosted artifact or AI execution claim.
     const evidenceVersion = version(text);
     await send(worker, "complete", { summary: text, evidenceVersion,
-      evidenceUrl: `https://example.invalid/agent-guide/${evidenceVersion.slice(7)}.txt` });
+      evidenceUrl: `https://example.invalid/agent-guide/${evidenceVersion.slice(7)}.txt`,
+      signedEvidence: signEvidence() });
     return current(reviewer);
   };
   const review = async name => {

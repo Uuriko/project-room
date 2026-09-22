@@ -9,6 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { issueSignedEvidence, contentHashOf } from '../server/signed-evidence.mjs';
 
 export async function startAssistedAgentExercise() {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-assisted-agents-'));
@@ -62,6 +63,16 @@ export async function startAssistedAgentExercise() {
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
     const credentialFiles = {};
+    // Sign using production API directly (not test helper) for packaging safety.
+    const exerciseIdentity = store.identities.create("Assisted exercise agent");
+    const exerciseSeedHex = Buffer.from(exerciseIdentity.privateKey, "base64").toString("hex");
+    const signEvidence = (overrides = {}) => issueSignedEvidence({
+      signerIdentityId: exerciseIdentity.identityId,
+      issuedAt: new Date(store.now()).toISOString(),
+      contentHash: contentHashOf("assisted-exercise-bytes"),
+      seedHex: exerciseSeedHex,
+      ...overrides,
+    });
     for (const participant of participants) {
       const path = join(directory, `${participant.memberId}.json`);
       writeFileSync(path, JSON.stringify({ fixture: 'project-room-assisted-agents-v1', origin, roomId: 'commons',
@@ -69,7 +80,7 @@ export async function startAssistedAgentExercise() {
       { mode: 0o600, flag: 'wx' });
       credentialFiles[participant.memberId] = path;
     }
-    return { origin, credentialFiles, close };
+    return { origin, credentialFiles, close, signEvidence };
   } catch (error) {
     await close();
     throw error;

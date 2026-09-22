@@ -9,6 +9,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { fillAccessKey } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -25,7 +26,8 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   propose('finished', 'Previous Orbit outcome');
   const mutate = (type, extra = {}) => send(type, { workItemId: 'finished', expectedRevision: f.store.room('commons').state.workItems.finished.revision, ...extra });
   mutate('work.accepted');
-  const finish = summary => mutate('work.completed', { summary, evidenceUrl: 'https://example.invalid/not-fetched',
+  const signEvidence = makeTestSigner(f.store);
+  const finish = summary => mutate('work.completed', { summary, evidenceUrl: 'https://example.invalid/not-fetched', signedEvidence: signEvidence(),
     evidenceVersion: crypto.randomUUID(), producerId: 'owner', nextAction: 'Discuss any follow-up.' });
   finish('The handoff-only finding is ready.');
   for (let index = 0; index < 27; index++) propose(`bounded-${index}`, `Bounds fixture ${index}`);

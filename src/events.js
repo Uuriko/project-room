@@ -369,7 +369,7 @@ function validateEnvelope(incoming) {
     if (key === "segments" && (!Array.isArray(value) || value.length === 0 || value.length > 20
       || value.some(segment => !segment || typeof segment !== "object" || Array.isArray(segment)
         || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1076,18 +1076,26 @@ function completeWork(state, incoming) {
     requirePermission(state, incoming.actorId, "write_external");
     if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
   }
-  let nativeText = null;
+  let nativeText = null, signedEvidence = null;
   if (incoming.data.evidenceKind === "room_text") {
     requireFields(incoming.data, ["summary", "evidenceVersion", "nextAction"]);
     nativeText = nativeTextEvidence(state, item, incoming.data);
   }
   else {
     if (["evidenceKind", "evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId"].some(key => Object.hasOwn(incoming.data, key))) throw new Error("Choose one evidence format");
-    requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
-    try {
-      const url = new URL(incoming.data.evidenceUrl);
-      if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-    } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+    // Integration map slice 5: external evidence is a signed object
+    // (room-signed-evidence/1). The live command path rejects an external
+    // completion whose evidence does not verify against the agent key
+    // registry; the applier only records it. The freeform evidenceUrl /
+    // evidenceVersion pair stays for display but authenticates nothing.
+    requireFields(incoming.data, ["summary", "nextAction"]);
+    signedEvidence = incoming.data.signedEvidence ?? null;
+    if (incoming.data.evidenceUrl !== undefined && incoming.data.evidenceUrl !== null) {
+      try {
+        const url = new URL(incoming.data.evidenceUrl);
+        if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+      } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+    }
   }
   const attribution = reportedProducer(incoming.data), { producerId } = attribution;
   if (producerId !== null) knownMember(state, producerId);
@@ -1102,9 +1110,12 @@ function completeWork(state, incoming) {
     reportedById: incoming.actorId,
     ...attribution,
     summary: incoming.data.summary,
-    evidenceUrl: nativeText ? null : incoming.data.evidenceUrl,
+    evidenceUrl: nativeText ? null : (incoming.data.evidenceUrl ?? null),
     ...(nativeText ? { nativeText } : {}),
-    evidenceVersion: incoming.data.evidenceVersion,
+    // Slice 5: the verified signed evidence rides the receipt so readers
+    // can check the signature without fetching any URL.
+    ...(!nativeText && signedEvidence !== null ? { signedEvidence } : {}),
+    evidenceVersion: incoming.data.evidenceVersion ?? null,
     checksClaimed: incoming.data.checksClaimed || [],
     // RC-2026-09-19-063: optional fact/inference/proposal marks, validated on
     // the way in. Unmarked completions replay exactly as before — the field

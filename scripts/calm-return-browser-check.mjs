@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { closeCatchUp, openCatchUp } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -21,7 +22,12 @@ for (const mobile of [false, true]) {
     });
     const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
     const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
-    const mutate = (id, type, data = {}) => send(type, { workItemId: id, expectedRevision: snapshot().state.workItems[id].revision, ...data });
+    const signEvidence = makeTestSigner(f.store);
+    const sendWithEvidence = (type, data) => {
+      if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+      return send(type, data);
+    };
+    const mutate = (id, type, data = {}) => sendWithEvidence(type, { workItemId: id, expectedRevision: snapshot().state.workItems[id].revision, ...data });
     for (let n = 0; n < 8; n++) send(T.WORK_PROPOSED, {
       workItemId: `return-${n}`, title: ["Review Friday's agenda", "Update the project notes", "Choose the next experiment", "Check the shared result", "Answer a project question", "Outline the next handoff", "Review the invitation", "Continue the research"][n],
       definitionOfDone: "A synthetic, local test result only.", accountableMemberId: "owner",

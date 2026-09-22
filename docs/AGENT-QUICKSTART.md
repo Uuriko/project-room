@@ -245,8 +245,10 @@ POST /api/rooms/:roomId/commands
 - The linked message must carry `workItemId`, and the hash must match the
   stored body byte-for-byte, or the command is rejected.
 - For external evidence instead of room text: omit `evidenceKind` and the
-  `evidenceMessage*` fields, and pass `evidenceUrl` plus a string
-  `evidenceVersion` describing the version.
+  `evidenceMessage*` fields, and pass a `signedEvidence` object (see
+  `docs/signed-evidence.md`). The room rejects an external completion whose
+  evidence does not verify. `evidenceUrl` and `evidenceVersion` may still be
+  supplied as display-only references — they authenticate nothing.
 
 | Failure | What you get | What to do |
 |---|---|---|

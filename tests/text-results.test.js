@@ -11,6 +11,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { spawn } from "node:child_process";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture(), workItemId = "test-handoff", server = createRoomServer({ store: f.store });
@@ -25,7 +26,7 @@ async function setup(t) {
   const input = posted => ({ workItemId, expectedRevision: item().revision, evidenceKind: "room_text", evidenceMessageId: posted.event.data.messageId,
     evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(posted.event.data.body), previousCompletionEventId: item().receipt?.eventId ?? null,
     producerId: "producer", summary: "An exact room result", nextAction: "Review the stored text" });
-  return { ...f, origin, config, client: new RoomAgentClient(config), workItemId, send, item, mutate, post, input };
+  return { ...f, origin, config, client: new RoomAgentClient(config), workItemId, send, item, mutate, post, input, signEvidence: makeTestSigner(f.store) };
 }
 
 test("native text preserves exact stored UTF-8 and old post/proposal provenance across restart", async t => {
@@ -86,7 +87,7 @@ test("help revisions never masquerade as work revisions when reading or adopting
 });
 
 test("external and native lineage share exact version review; same body does not inherit approval", async t => {
-  const f = await setup(t), external = f.mutate(T.WORK_COMPLETED, { summary: "Old external", evidenceUrl: "https://example.invalid", evidenceVersion: "external-v1", producerId: "producer", nextAction: "Check" });
+  const f = await setup(t), external = f.mutate(T.WORK_COMPLETED, { summary: "Old external", evidenceUrl: "https://example.invalid", evidenceVersion: "external-v1", producerId: "producer", nextAction: "Check", signedEvidence: f.signEvidence() });
   assert.equal((await f.client.workResult(f.workItemId)).result.kind, "external");
   f.mutate(T.WORK_BLOCKED, { reason: "Revise", nextAction: "Write native" }); f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Prepared" });
   const post = f.post("Same exact result"), original = f.input(post), first = f.send(T.WORK_COMPLETED, original, "producer", "first-native");

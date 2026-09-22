@@ -12,6 +12,7 @@ import { searchWork } from '../src/work-selectors.js';
 import { auditRecovery } from '../server/recovery.mjs';
 import { openMcpTestClient } from '../scripts/mcp-test-client.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
+import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 
 async function setup(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
@@ -24,13 +25,14 @@ async function setup(t) {
     workItemId: id, title, definitionOfDone: done, accountableMemberId: owner, independentVerificationRequired: false, ownerDecisionRequired: false });
   const state = () => f.store.room('commons').state;
   const change = (id, type, data = {}) => send('producer', type, { workItemId: id, expectedRevision: state().workItems[id].revision, ...data });
+  const signEvidence = makeTestSigner(f.store);
   const read = async (query, focus = 'all') => {
     const before = auditRecovery(f.store).dataSha256, result = await client('producer').orient({ query, focus });
     assert.equal(auditRecovery(f.store).dataSha256, before, 'querying never changes any Room table'); return result;
   };
   t.after(async () => { server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  return { ...f, config, client, send, propose, state, change, read };
+  return { ...f, config, client, send, propose, state, change, read, signEvidence };
 }
 
 test('agent search shares human matching, returns exact read pointers, and leaves default orientation unchanged', async t => {
@@ -89,7 +91,7 @@ test('agent search finds completed outcomes but excludes replaced result text an
   assert.equal((await f.read('Prior observation', 'needs_me')).work.length, 0);
   assert.equal((await f.read('Prior observation')).work[0].state, 'working');
   const finish = summary => f.change(id, 'work.completed', { summary, evidenceUrl: 'https://example.invalid/not-fetched',
-    evidenceVersion: crypto.randomUUID(), producerId: 'producer', nextAction: 'Consider follow-up' });
+    evidenceVersion: crypto.randomUUID(), producerId: 'producer', nextAction: 'Consider follow-up', signedEvidence: f.signEvidence() });
   finish('Historical-phrase in the reported result');
   const complete = await f.read('Historical-phrase'); assert.equal(complete.work[0].state, 'completed');
   assert.equal((await f.read('Historical-phrase', 'needs_me')).work.length, 0);

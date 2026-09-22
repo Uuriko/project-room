@@ -12,6 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { validateResultSegments } from "../src/work-packet.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-work-controls-"));
@@ -46,7 +47,7 @@ async function serve(t) {
     .json.sessions.find(s => s.workItemId === workItemId);
   const feed = async token => (await request("/api/rooms/commons/notifications", { token })).json;
   const send = (token, type, data, id = randomUUID()) => store.command(token, "commons", { id, type, data });
-  return { store, origin, ownerKey, agentKey, propose, claim, mutate, card, request, feed, send };
+  return { store, origin, ownerKey, agentKey, propose, claim, mutate, card, request, feed, send, signEvidence: makeTestSigner(store) };
 }
 
 test("round limit: reporting past maxRounds auto-suspends; the pause is recorded, not silent", async t => {
@@ -156,7 +157,7 @@ test("usage counters are monotonic: stale reports never rewind them", async t =>
 });
 
 test("accept/complete/record are idempotent: exact retry duplicates, reused IDs conflict", async t => {
-  const { store, ownerKey, agentKey, propose } = await serve(t);
+  const { store, ownerKey, agentKey, propose, signEvidence } = await serve(t);
   const workItemId = propose("idempotent run");
   const op = randomUUID();
   const accept = { id: op, type: T.WORK_ACCEPTED, data: { workItemId, expectedRevision: 0 } };
@@ -173,7 +174,7 @@ test("accept/complete/record are idempotent: exact retry duplicates, reused IDs 
   const recordOp = randomUUID();
   const complete = { id: recordOp, type: T.WORK_COMPLETED,
     data: { workItemId, expectedRevision: 2, summary: "done", evidenceUrl: "https://example.com/out.txt",
-      evidenceVersion: "v1", nextAction: "none" } };
+      evidenceVersion: "v1", nextAction: "none", signedEvidence: signEvidence() } };
   store.command(agentKey, "commons", complete);
   const recordRetry = store.command(agentKey, "commons", structuredClone(complete));
   assert.equal(recordRetry.duplicate, true, "the exact record retry returns duplicate");
@@ -184,7 +185,7 @@ test("accept/complete/record are idempotent: exact retry duplicates, reused IDs 
 });
 
 test("fact/inference/proposal segments validate and persist on the completion receipt", async t => {
-  const { store, agentKey, propose } = await serve(t);
+  const { store, agentKey, propose, signEvidence } = await serve(t);
   const workItemId = propose("segmented run");
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId, expectedRevision: 0 } });
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_STARTED, data: { workItemId, expectedRevision: 1 } });
@@ -195,7 +196,7 @@ test("fact/inference/proposal segments validate and persist on the completion re
   ];
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_COMPLETED,
     data: { workItemId, expectedRevision: 2, summary: "done", evidenceUrl: "https://example.com/out.txt",
-      evidenceVersion: "v1", nextAction: "none", segments } });
+      evidenceVersion: "v1", nextAction: "none", segments, signedEvidence: signEvidence() } });
   const receipt = store.room("commons").state.workItems[workItemId].receipt;
   assert.deepEqual(receipt.segments, segments, "the validated segments persist on the receipt");
   // The validator accepts the valid set and rejects everything else.
@@ -209,13 +210,13 @@ test("fact/inference/proposal segments validate and persist on the completion re
 });
 
 test("a completion without segments still works: the receipt carries segments null", async t => {
-  const { store, agentKey, propose } = await serve(t);
+  const { store, agentKey, propose, signEvidence } = await serve(t);
   const workItemId = propose("plain completion");
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId, expectedRevision: 0 } });
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_STARTED, data: { workItemId, expectedRevision: 1 } });
   store.command(agentKey, "commons", { id: randomUUID(), type: T.WORK_COMPLETED,
     data: { workItemId, expectedRevision: 2, summary: "done", evidenceUrl: "https://example.com/out.txt",
-      evidenceVersion: "v1", nextAction: "none" } });
+      evidenceVersion: "v1", nextAction: "none", signedEvidence: signEvidence() } });
   const receipt = store.room("commons").state.workItems[workItemId].receipt;
   assert.equal(receipt.segments, null, "unmarked completions replay with segments null, never guessed");
 });

@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -70,7 +71,8 @@ test("access preview: a work card shows exactly what an agent can read before a 
   f.store.command(f.keys.producer, "commons", { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: revision() } });
   f.store.mutateWorkSession(f.keys.producer, "commons", { requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: revision(), action: "set_status", status: "processing", budget: { maxSpendCents: 500 } });
   f.store.command(f.keys.producer, "commons", { id: crypto.randomUUID(), type: T.WORK_STARTED, data: { workItemId: "test-handoff", expectedRevision: revision() } });
-  f.store.command(f.keys.producer, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version" } });
+  const signEvidence = makeTestSigner(f.store);
+  f.store.command(f.keys.producer, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version", signedEvidence: signEvidence() } });
   await card.locator(".work-details > summary").filter({ hasText: "Evidence & details" }).waitFor();
   if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
   await card.getByRole("button", { name: "What this agent can access" }).click();

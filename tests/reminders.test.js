@@ -11,11 +11,13 @@ import { RoomClient } from "../src/client.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { reminderLimits } from "../server/reminders.mjs";
 import { localReminderTime, reminderTime, formatReminderTime } from "../src/reminder-time.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   let at = Date.now(); f.store.now = () => at; f.advance = ms => { at += ms; };
+  f.signEvidence = makeTestSigner(f.store);
   f.request = (extra = {}) => ({ requestId: randomUUID(), workItemId: "test-handoff", expectedRevision: 0, action: "schedule", dueAt: at + 3600000, ...extra });
   f.read = (actor = "owner") => f.store.reminders.list(f.keys[actor], "commons");
   f.save = (request, actor = "owner") => f.store.reminders.mutate(f.keys[actor], "commons", request);
@@ -78,7 +80,7 @@ test("receipt storage failure rolls back the reminder; immutable receipts fail c
 test("review and owner approval retire reminders only on genuine resolution; reopening never resurrects them", t => {
   const f = fixture(t), request = f.request(); f.save(request); f.save(request, "guest");
   f.mutate(T.WORK_ACCEPTED);
-  f.mutate(T.WORK_COMPLETED, { summary: "Agenda", evidenceUrl: "https://example.invalid/agenda", evidenceVersion: "v1", producerId: "producer", nextAction: "Review" });
+  f.mutate(T.WORK_COMPLETED, { summary: "Agenda", evidenceUrl: "https://example.invalid/agenda", evidenceVersion: "v1", producerId: "producer", nextAction: "Review", signedEvidence: f.signEvidence() });
   assert.equal(f.read().reminders[0].state, "active");
   const evidence = { completionEventId: f.work().receipt.eventId, evidenceVersion: "v1" };
   f.mutate(T.VERIFICATION_RECORDED, { ...evidence, result: "pass", summary: "Checked" }, "reviewer");

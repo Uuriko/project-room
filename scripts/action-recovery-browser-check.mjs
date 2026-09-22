@@ -8,16 +8,25 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { verificationSatisfied } from "../src/workflow.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, { action = "complete", mobile = false, live = true } = {}) {
   const f = createAcceptanceFixture(), workId = "action-recovery";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
+  const signEvidence = makeTestSigner(f.store);
+  const sendWithEvidence = (type, data, actor = "owner") => {
+    // External completions require signed evidence under the new contract.
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) {
+      data = { ...data, signedEvidence: signEvidence() };
+    }
+    return send(type, data, actor);
+  };
   send(T.MEMBER_ADDED, { memberId: "human-reviewer", displayName: "Test reviewer", kind: "human", permissions: ["verify"] });
   f.keys["human-reviewer"] = f.store.issueAccessKey("commons", "human-reviewer");
   send(T.WORK_PROPOSED, { workItemId: workId, title: "Synthetic room result", definitionOfDone: "A versioned result with a clear next step.",
     accountableMemberId: "owner", independentVerificationRequired: true, verifierMemberId: "human-reviewer", ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: action === "claim" ? "write" : "read" });
   const snapshot = () => f.store.snapshot(f.keys.owner, "commons"), item = () => snapshot().state.workItems[workId];
-  const mutate = (type, data = {}, actor = "owner") => send(type, { workItemId: workId, expectedRevision: item().revision, ...data }, actor);
+  const mutate = (type, data = {}, actor = "owner") => sendWithEvidence(type, { workItemId: workId, expectedRevision: item().revision, ...data }, actor);
   mutate(T.WORK_ACCEPTED);
   const evidence = () => ({ completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion });
   const complete = (version = "v1", producerId = "owner") => mutate(T.WORK_COMPLETED, { summary: `Synthetic result ${version}`, evidenceUrl: `https://example.invalid/result/${version}`, evidenceVersion: version, producerId, nextAction: "Review this version" });
@@ -57,7 +66,9 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   const input = name => page.locator(`#action-fields [name='${name}']`);
   const open = async (selected = action) => { await card.locator(`[data-action='${selected}']`).click(); await dialog.waitFor({ state: "visible" }); };
   const fill = async () => {
-    const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review the exact result" }
+    const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review the exact result",
+        // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.
+        signedEvidence: JSON.stringify(signEvidence()) }
       : action === "claim" ? { repository: "test/project", ref: "synthetic", paths: "src/app.js\ntest/**", expiresAt: new Date(Date.now() + 3600000).toISOString() }
         : action === "verify" ? { result: "pass", summary: "Checked this exact result" } : { decision: "approved", reason: "Accept this exact result" };
     for (const [name, value] of Object.entries(values)) {

@@ -79,12 +79,16 @@ read it from the item or the events log — a stale revision is rejected).
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "work.completed", "data": { "workItemId": "<workItemId>", "expectedRevision": 1, "summary": "...", "evidenceUrl": "https://...", "evidenceVersion": "v1", "nextAction": "..." } }
+{ "id": "<uuid>", "type": "work.completed", "data": { "workItemId": "<workItemId>", "expectedRevision": 1, "summary": "...", "evidenceUrl": "https://...", "evidenceVersion": "v1", "nextAction": "...", "signedEvidence": "<signed-evidence-object>" } }
 ```
 
 Again: `expectedRevision` is the item's current revision (1 after accepting it
 in the previous step). Completion also records a receipt — `summary`,
 `evidenceUrl` (HTTPS), `evidenceVersion`, and `nextAction` are all required.
+External completions also require `signedEvidence`: a `room-signed-evidence/1`
+object signed with your room identity key (see the signed-evidence contract).
+Unsigned external evidence is rejected with 422 `missing_signed_evidence`.
+Native room-text results (via `submit_text_result`) do not use `signedEvidence`.
 
 ### 8. Read a message thread
 
