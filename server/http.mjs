@@ -1,3 +1,4 @@
+import { GmailSync } from './gmail-sync.mjs';
 import { GmailActions } from './gmail-actions.mjs';
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
@@ -617,7 +618,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const completed = await gmail.complete(new URL(expectedOrigin() + url.pathname + url.search), cookie(req, "gmail_oauth"));
             setCookie(res, 'gmail_oauth', '', 0, 'Lax');
             result = 'connected';
-            try { await gmail.sync(completed.token, completed.binding); } catch { result = 'sync-error'; }
+            try { await gmail.sync(completed.token, completed.binding, completed.mailboxId); } catch { result = 'sync-error'; }
           }
         } catch (error) { if (error.code === 'gmail_consent_denied') result = 'cancelled'; }
         const href = '/?account=1&gmail=' + result + '#pr-view/inbox';
@@ -1445,16 +1446,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!gmail) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
           if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
           protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 60);
-          if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req))));
+          if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req, { limit: 16 * 1024 * 1024 }))));
           if (url.pathname === "/api/inbox/gmail/connect") {
-            const authorizationUrl = gmail.begin(token, binding);
+            const authorizationUrl = gmail.begin(token, binding, await body(req));
             // Lax admits Google's top-level return while the account cookie
             // stays Strict. HttpOnly + __Host- binds consent to this browser.
             setCookie(res, 'gmail_oauth', new URL(authorizationUrl).searchParams.get('state'), 600, 'Lax');
             return json(res, 200, projection({ authorizationUrl }));
           }
-          if (url.pathname === "/api/inbox/gmail/sync") return json(res, 200, projection({ imported: await gmail.sync(token, binding) }));
-          if (url.pathname === "/api/inbox/gmail/disconnect") { gmail.disconnect(token, binding); return json(res, 200, projection(gmail.status(auth))); }
+          if (url.pathname === "/api/inbox/gmail/sync") return json(res, 200, projection(await new GmailSync(gmail).mailboxTick(auth.account.id, (await body(req)).mailboxId ?? gmail.record(auth)?.connectionId, () => gmail.auth(token, binding))));
+          if (url.pathname === "/api/inbox/gmail/disconnect") { gmail.disconnect(token, binding, (await body(req)).mailboxId ?? null); return json(res, 200, projection(gmail.status(auth))); }
           reject(404, 'not_found', 'Not found');
         }
         const view = url.searchParams.get("view");

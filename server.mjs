@@ -1,3 +1,5 @@
+import { GmailMailbox } from './server/gmail-mailbox.mjs';
+import { startGmailSync } from './server/gmail-sync.mjs';
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
@@ -66,6 +68,8 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer(serverArgs);
+const gmailScheduler = !paused && serverArgs.gmailAuth ? startGmailSync(new GmailMailbox(store, serverArgs.gmailAuth)) : null;
+server.on('close', () => gmailScheduler?.stop());
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.

@@ -25,7 +25,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-draft.mjs');
   paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
-  paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add('src/gmail-ui.js'); paths.add('src/account-setup-ui.js');
+  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add('src/gmail-ui.js'); paths.add('src/account-setup-ui.js');
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
   paths.add('src/room-roster.js');

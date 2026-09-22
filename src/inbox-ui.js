@@ -29,7 +29,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   if (callbackResult) { const url = new URL(location.href); url.searchParams.delete('gmail'); history.replaceState(null, '', url.pathname + url.search + url.hash); }
   $('#inbox-gmail-notice').textContent = gmailNotice;
   const setupUI = installAccountSetup({ api, owns, gmailNotice, onInbox: () => load() });
-  const gmailUI = installGmailWorkspace({ api, ownerKey: () => owns() ? owner : null });
+  const gmailUI = installGmailWorkspace({ api, ownerKey: () => owns() ? owner : null, onConnectionsChanged: () => load() });
   $('#inbox-gmail-open').addEventListener('click', () => gmailUI.open());
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
@@ -385,7 +385,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const turn = ++gmailGeneration;
     try {
       const value = await api.request('/gmail'); if (!owns() || turn !== gmailGeneration) return;
-      gmailUI.setStatus(value); $('#inbox-gmail-open').hidden = value.state !== 'connected';
+      gmailUI.setStatus(value); $('#inbox-gmail-open').hidden = !(value.mailboxes ?? [value]).some(m => m.state === 'connected');
       const connected = value.state === 'connected';
       $('#inbox-gmail-status').textContent = connected ? value.address : value.state === 'unavailable' ? 'Gmail connection is not enabled here yet.' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';
       $('#inbox-gmail-connect').textContent = connected && value.canWrite ? 'Sync Gmail' : value.state === 'reconnect_required' || connected && !value.canWrite ? 'Reconnect Gmail' : 'Connect Gmail';

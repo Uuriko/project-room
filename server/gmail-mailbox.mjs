@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS gmail_mailboxes (
  account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
  auth_epoch INTEGER NOT NULL, encrypted TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS gmail_linked_mailboxes (
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, mailbox_id TEXT NOT NULL, auth_epoch INTEGER NOT NULL, encrypted TEXT NOT NULL, PRIMARY KEY(account_id,mailbox_id)
+);
 CREATE TABLE IF NOT EXISTS gmail_operations (
  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT NOT NULL CHECK(json_valid(result_json)), at INTEGER NOT NULL, PRIMARY KEY(account_id,request_id)
 );
@@ -42,25 +45,34 @@ export class GmailMailbox {
     } catch { fail('gmail_reconnect_required'); }
   }
   auth(token, binding) { return this.store.inbox.auth(token, binding); }
-  record(auth) {
-    const row = this.store.db.prepare('SELECT * FROM gmail_mailboxes WHERE account_id=?').get(auth.account.id);
-    if (!row) return null;
-    const data = this.unseal(row.encrypted, auth.account.id);
-    const connection = this.store.connections.connection(auth.account.id, data.connectionId);
-    return { ...data, usable: row.auth_epoch === auth.account.authEpoch && connection?.state === 'active' && connection.authEpoch === auth.account.authEpoch };
+  records(auth) {
+    const rows = [...this.store.db.prepare('SELECT * FROM gmail_mailboxes WHERE account_id=?').all(auth.account.id),
+      ...this.store.db.prepare('SELECT * FROM gmail_linked_mailboxes WHERE account_id=? ORDER BY mailbox_id').all(auth.account.id)];
+    return rows.map(row => {
+      const data = this.unseal(row.encrypted, auth.account.id);
+      const connection = this.store.connections.connection(auth.account.id, data.connectionId);
+      return { ...data, usable: auth.account.active && row.auth_epoch === auth.account.authEpoch && connection?.state === 'active' && connection.authEpoch === auth.account.authEpoch };
+    });
+  }
+  record(auth, mailboxId = null) {
+    const records = this.records(auth);
+    return mailboxId ? records.find(r => r.connectionId === mailboxId) ?? null : records[0] ?? null;
   }
   status(auth) {
-    const data = this.record(auth);
-    return data ? { state: data.usable && !data.reconnectRequired ? 'connected' : 'reconnect_required', canWrite: data.scopes?.includes(scope) === true, address: data.address, syncedAt: data.syncedAt ?? null } : { state: 'disconnected', address: null, syncedAt: null };
+    const mailboxes = this.records(auth).map(data => ({ id: data.connectionId, state: data.usable && !data.reconnectRequired ? 'connected' : 'reconnect_required', canWrite: data.scopes?.includes(scope) === true, address: data.address, syncedAt: data.syncedAt ?? null, syncError: data.syncError ?? null }));
+    return { ...(mailboxes[0] ?? { state: 'disconnected', address: null, syncedAt: null }), mailboxes };
   }
-  begin(token, binding) {
+  begin(token, binding, { mailboxId = null, add = false } = {}) {
     const auth = this.auth(token, binding), state = randomBytes(32).toString('base64url'), verifier = randomBytes(32).toString('base64url');
+    if (typeof add !== 'boolean' || mailboxId !== null && (typeof mailboxId !== 'string' || !this.record(auth, mailboxId))) fail('gmail_invalid_mailbox');
+    if (add && this.records(auth).length >= 10) fail('gmail_mailbox_limit');
+    const target = add ? null : this.record(auth, mailboxId)?.connectionId ?? null;
     const key = hash(state), expires = this.store.now() + 600000;
     this.store.transaction(() => {
       this.store.db.prepare('DELETE FROM gmail_pending WHERE expires_at<=? OR account_id=?').run(this.store.now(), auth.account.id);
       if (this.store.db.prepare('SELECT count(*) n FROM gmail_pending').get().n >= 100) fail('gmail_busy', 429);
       this.store.db.prepare('INSERT INTO gmail_pending VALUES(?,?,?,?)').run(key, auth.account.id, expires,
-        this.seal({ token, binding, verifier, revision: auth.sessionRevision, epoch: auth.account.authEpoch }, key));
+        this.seal({ token, binding, verifier, revision: auth.sessionRevision, epoch: auth.account.authEpoch, target }, key));
     });
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({ client_id: this.config.clientId, redirect_uri: this.config.redirectUri, response_type: 'code', scope,
@@ -72,16 +84,16 @@ export class GmailMailbox {
     let response;
     try { response = await this.fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) }); }
     catch { fail('gmail_unavailable', 502); }
-    if (!response.ok) { await response.body?.cancel(); fail([400, 401, 403].includes(response.status) ? 'gmail_reconnect_required' : 'gmail_unavailable', 502); }
+    if (!response.ok) { await response.body?.cancel(); fail(response.status === 404 ? 'gmail_not_found' : [400, 401, 403].includes(response.status) ? 'gmail_reconnect_required' : 'gmail_unavailable', 502); }
     const reader = response.body?.getReader(); if (!reader) fail('gmail_invalid_response', 502);
     const chunks = []; let size = 0;
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
       size += value.byteLength;
-      if (size > 2 * 1024 * 1024) { await reader.cancel(); fail('gmail_message_too_large'); }
+      if (size > 16 * 1024 * 1024) { await reader.cancel(); fail('gmail_message_too_large'); }
       chunks.push(Buffer.from(value));
     }
-    try { return JSON.parse(Buffer.concat(chunks).toString()); } catch { fail('gmail_invalid_response', 502); }
+    try { const text = Buffer.concat(chunks).toString(); return text ? JSON.parse(text) : {}; } catch { fail('gmail_invalid_response', 502); }
   }
   exchange(fields) {
     return this.json(tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -115,7 +127,7 @@ export class GmailMailbox {
     const address = profile.emailAddress;
     if (typeof address !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address) || address.length > 254) fail('gmail_invalid_response');
     this.store.transaction(() => {
-      const auth = check(), prior = this.record(auth);
+      const auth = check(), prior = pending.target ? this.record(auth, pending.target) : null;
       // One mailbox per account for the first release. Reconnect cannot silently switch it.
       if (prior && prior.address !== address) fail('gmail_mailbox_changed');
       const connectionId = 'gmail-' + hash(address).slice(0, 24);
@@ -126,21 +138,26 @@ export class GmailMailbox {
       this.save(auth, { address, connectionId, refreshToken: tokens.refresh_token, scopes: tokens.scope.split(/\s+/), syncedAt: null });
       this.store.db.prepare('DELETE FROM gmail_pending WHERE state_hash=?').run(key);
     });
-    return { token: pending.token, binding: pending.binding };
+    return { token: pending.token, binding: pending.binding, mailboxId: 'gmail-' + hash(address).slice(0, 24) };
   }
   save(auth, data) {
-    this.store.db.prepare('INSERT INTO gmail_mailboxes VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET auth_epoch=excluded.auth_epoch,encrypted=excluded.encrypted')
-      .run(auth.account.id, auth.account.authEpoch, this.seal(data, auth.account.id));
+    const primary = this.store.db.prepare('SELECT encrypted FROM gmail_mailboxes WHERE account_id=?').get(auth.account.id);
+    const extra = this.store.db.prepare('SELECT 1 FROM gmail_linked_mailboxes WHERE account_id=? AND mailbox_id=?').get(auth.account.id, data.connectionId);
+    if (!primary && !extra || primary && this.unseal(primary.encrypted, auth.account.id).connectionId === data.connectionId) {
+      this.store.db.prepare('INSERT INTO gmail_mailboxes VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET auth_epoch=excluded.auth_epoch,encrypted=excluded.encrypted')
+        .run(auth.account.id, auth.account.authEpoch, this.seal(data, auth.account.id));
+    } else this.store.db.prepare('INSERT INTO gmail_linked_mailboxes VALUES(?,?,?,?) ON CONFLICT(account_id,mailbox_id) DO UPDATE SET auth_epoch=excluded.auth_epoch,encrypted=excluded.encrypted')
+      .run(auth.account.id, data.connectionId, auth.account.authEpoch, this.seal(data, auth.account.id));
   }
-  async sync(token, binding) {
-    const auth = this.auth(token, binding), record = this.record(auth);
+  async sync(token, binding, mailboxId = null) {
+    const auth = this.auth(token, binding), record = this.record(auth, mailboxId);
     if (!record?.usable) fail('gmail_reconnect_required');
     const c = this.store.connections.connection(auth.account.id, record.connectionId);
     let tokens;
     try { tokens = await this.exchange({ refresh_token: record.refreshToken, grant_type: 'refresh_token' }); }
     catch (error) {
       if (error.code === 'gmail_reconnect_required') this.store.transaction(() => {
-        const current = this.auth(token, binding), latest = this.record(current);
+        const current = this.auth(token, binding), latest = this.record(current, record.connectionId);
         if (latest?.refreshToken === record.refreshToken && latest.usable) this.save(current, { ...latest, usable: undefined, reconnectRequired: true });
       });
       throw error;
@@ -159,7 +176,7 @@ export class GmailMailbox {
       observations.push({ kind: 'message', envelope });
     }
     return this.store.transaction(() => {
-      const current = this.auth(token, binding), latest = this.record(current);
+      const current = this.auth(token, binding), latest = this.record(current, record.connectionId);
       if (!latest?.usable || latest.refreshToken !== record.refreshToken || current.account.authEpoch !== auth.account.authEpoch) fail('gmail_session_changed');
       for (const item of observations) item.expectedSourceRevision = this.store.db.prepare('SELECT revision FROM private_inbox_sources WHERE account_id=? AND id=?').get(auth.account.id, item.envelope.sourceId)?.revision ?? 0;
       const state = this.store.connections.state(token, record.connectionId, 'INBOX', binding);
@@ -169,14 +186,16 @@ export class GmailMailbox {
       return observations.length;
     });
   }
-  disconnect(token, binding) {
+  disconnect(token, binding, mailboxId = null) {
     this.store.transaction(() => {
-      const auth = this.auth(token, binding), record = this.record(auth);
+      const auth = this.auth(token, binding), record = this.record(auth, mailboxId);
       if (record) {
         const c = this.store.connections.connection(auth.account.id, record.connectionId);
         if (c && c.state !== 'disconnected') this.store.connections.apply(token, { action: 'connection.disconnect', requestId: randomUUID(), connectionId: record.connectionId, expectedRevision: c.profile.revision }, binding);
       }
-      this.store.db.prepare('DELETE FROM gmail_mailboxes WHERE account_id=?').run(auth.account.id);
+      const primary = this.store.db.prepare('SELECT encrypted FROM gmail_mailboxes WHERE account_id=?').get(auth.account.id);
+      if (primary && (!mailboxId || this.unseal(primary.encrypted, auth.account.id).connectionId === mailboxId)) this.store.db.prepare('DELETE FROM gmail_mailboxes WHERE account_id=?').run(auth.account.id);
+      if (record) this.store.db.prepare('DELETE FROM gmail_linked_mailboxes WHERE account_id=? AND mailbox_id=?').run(auth.account.id, record.connectionId);
       this.store.db.prepare('DELETE FROM gmail_pending WHERE account_id=?').run(auth.account.id);
     });
   }
