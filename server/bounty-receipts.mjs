@@ -275,7 +275,6 @@ export function createReceiptSigner({ seedHex, ref }) {
 
 // --- receipt shape ------------------------------------------------------------
 
-const HEX32 = /^[0-9a-f]{32}$/;
 const DECIMAL = /^[1-9][0-9]*$/; // positive milli-credit amounts, no leading zeros
 const ENTRY_ID = /^ent_[0-9a-f]{16}$/;
 const LOT_ID = /^lot_[0-9a-f]{16}$/;
