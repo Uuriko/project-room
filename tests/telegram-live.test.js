@@ -82,7 +82,8 @@ test("the config reader reports not configured, invalid and configured states wi
   const view = telegramLiveView({ config: ok, connection: { webhook: { secretHash: ok.webhookSecretHash(), updatedAt: 1_699_999_999_000 } }, record, status, importAvailable: true });
   assert.deepEqual(view, { contractVersion: 1, channel: "telegram", state: "configured", bindings: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_API_BASE"], missing: [], invalid: [],
     webhook: "matches", webhookSetAt: "2023-11-14T22:13:19.000Z", lastUpdateReceivedAt: "2023-11-14T22:13:20.000Z", receivedUpdates: 2,
-    lastSendResult: { at: "2023-11-14T22:13:21.000Z", outcome: "accepted", code: null }, importAvailable: true });
+    lastSendResult: { at: "2023-11-14T22:13:21.000Z", outcome: "accepted", code: null }, importAvailable: true,
+    rotation: { contractVersion: 1, state: "none", windowExpiresAt: null } });
   assert.equal(telegramLiveView({ config: ok, connection: { webhook: { secretHash: "0".repeat(64), updatedAt: 1 } }, record }).webhook, "differs");
   assert.equal(telegramLiveView({ config: missing, connection: { webhook: { secretHash: "0".repeat(64), updatedAt: 1 } }, record }).webhook, "set");
   assert.equal(telegramLiveView({ config: missing, connection: {}, record }).webhook, "unset");
@@ -209,7 +210,8 @@ test("the owner-authenticated import trigger works off loopback, enforces sessio
   let response = await hosted.get(path); let value = await response.json();
   assert.equal(response.status, 200); assert.equal(value.syncAvailable, false); assert.equal(value.webhook, false); assert.equal(value.webhookSetAt, null);
   assert.deepEqual(value.live, { contractVersion: 1, channel: "telegram", state: "configured", bindings: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_API_BASE"], missing: [], invalid: [],
-    webhook: "unset", webhookSetAt: null, lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null, importAvailable: true });
+    webhook: "unset", webhookSetAt: null, lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null, importAvailable: true,
+    rotation: { contractVersion: 1, state: "none", windowExpiresAt: null } });
   // Authority: no session 401, bearer 401, another account's session 404, missing CSRF 403, wrong origin 403.
   response = await fetch(hosted.origin + trigger, { method: "POST", body: JSON.stringify({ requestId: "t-1" }), headers: { "Content-Type": "application/json", Origin: hosted.origin, "X-Session-Binding": f.auth.sessionBinding } });
   assert.equal(response.status, 401);

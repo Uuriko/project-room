@@ -6,6 +6,7 @@ import { channelProfile, connectionState, isEmailProfile, profileExternalId, toC
 import { adapterForChannel, readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { webhookRotationDefaults } from "./channel-adapters/telegram-rotation.mjs";
 
 const fail = (code, message, status = 409) => { throw new ServiceError(status, code, message); };
 const require = (condition, code = "invalid_email_import") => { if (!condition) fail(code, "Email import could not be confirmed.", 422); };
@@ -44,6 +45,7 @@ function validateRequest(request, legacy = false) {
   emailInput(request);
   const common = ["action", "requestId", "connectionId", "expectedRevision"], fields = {
     "connection.configure": [...common, "profile"], "connection.disconnect": common, "connection.webhook": [...common, "secretHash"],
+    "connection.webhook.rotate": [...common, "secretHash", "previousSecretHash", "rotationExpiresAt"], "connection.webhook.complete": [...common],
     "page.apply": [...common, "connectionRevision", "folderId", "expectedCursor", "cursor", "complete", "reset", "observations"]
   }[request?.action];
   require(fields && exactEmailFields(request, fields) && validId(request.requestId) && validId(request.connectionId) && revision(request.expectedRevision));
@@ -52,6 +54,10 @@ function validateRequest(request, legacy = false) {
     require(request.profile.id === request.connectionId && request.profile.revision === request.expectedRevision + 1);
   }
   if (request.action === "connection.webhook") require(typeof request.secretHash === "string" && /^[a-f0-9]{64}$/.test(request.secretHash));
+  if (request.action === "connection.webhook.rotate")
+    require(typeof request.secretHash === "string" && /^[a-f0-9]{64}$/.test(request.secretHash)
+      && typeof request.previousSecretHash === "string" && /^[a-f0-9]{64}$/.test(request.previousSecretHash)
+      && request.previousSecretHash !== request.secretHash && Number.isSafeInteger(request.rotationExpiresAt));
   if (request.action === "page.apply") {
     require(revision(request.connectionRevision) && request.connectionRevision > 0 && typeof request.complete === "boolean" && typeof request.reset === "boolean");
     emailOpaqueId(request.folderId); emailText(request.cursor, 16384);
@@ -88,10 +94,28 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
       next = { profile: request.profile, state: "active", mode: "fixture", authEpoch, updatedAt: at };
     } else if (request.action === "connection.webhook") {
       // Only the SHA-256 of the owner-chosen webhook secret is retained. The
-      // connection revision does not move: envelopes stay valid.
+      // connection revision does not move: envelopes stay valid. A plain
+      // re-registration also ends any pending rotation (hard swap).
       if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       if (connection.state !== "active" || connection.authEpoch !== authEpoch) fail("email_connection_changed", "Connection changed. Reconnect before configuring a webhook.");
       next = { ...connection, webhook: { secretHash: request.secretHash, updatedAt: at } };
+    } else if (request.action === "connection.webhook.rotate") {
+      // Rotation: the new secret verifies immediately while the previous one
+      // stays accepted until rotationExpiresAt, so in-flight Telegram
+      // deliveries are never refused mid-swap. The connection revision does
+      // not move: envelopes stay valid.
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
+      if (connection.state !== "active" || connection.authEpoch !== authEpoch) fail("email_connection_changed", "Connection changed. Reconnect before rotating a webhook secret.");
+      require(request.rotationExpiresAt > at && request.rotationExpiresAt <= at + webhookRotationDefaults.maxWindowMs, "invalid_email_import");
+      next = { ...connection, webhook: { secretHash: request.secretHash, previousSecretHash: request.previousSecretHash,
+        rotationExpiresAt: request.rotationExpiresAt, rotationState: "pending", updatedAt: at } };
+    } else if (request.action === "connection.webhook.complete") {
+      // End a pending rotation early: the previous secret stops verifying at
+      // once. An expired window needs no call; verification already rejects it.
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
+      if (connection.state !== "active" || connection.authEpoch !== authEpoch) fail("email_connection_changed", "Connection changed. Reconnect before completing a webhook rotation.");
+      if (connection.webhook?.rotationState !== "pending") fail("webhook_rotation_not_pending", "No webhook rotation is pending.", 409);
+      next = { ...connection, webhook: { secretHash: connection.webhook.secretHash, rotationState: "complete", rotationCompletedAt: at, updatedAt: at } };
     } else {
       if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       next = { ...connection, profile: { ...connection.profile, revision: request.expectedRevision + 1 }, state: "disconnected", updatedAt: at };

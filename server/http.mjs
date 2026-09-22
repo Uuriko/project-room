@@ -16,6 +16,7 @@ import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
+import { webhookAcceptsHash, webhookRotationDefaults } from "./channel-adapters/telegram-rotation.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
@@ -1556,12 +1557,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const current = store.connections.connectionRecord(token, connectionId, binding);
           if (current.connection.channel !== "telegram") reject(409, "channel_sync_unsupported", "Live import is available for Telegram connections only.");
           // Re-register: when the bindings are set, the connection accepts deliveries
-          // signed with TELEGRAM_WEBHOOK_SECRET (only its SHA-256 is stored).
+          // signed with TELEGRAM_WEBHOOK_SECRET (only its SHA-256 is stored). A
+          // changed binding starts a rotation instead of a hard swap: the new
+          // secret verifies at once and the old one stays accepted until the
+          // rotation window ends, so in-flight Telegram deliveries are never
+          // refused mid-swap. A pending rotation is left alone.
           let registered = false;
-          const stored = store.connections.connection(auth.account.id, connectionId)?.webhook?.secretHash ?? null;
-          if (telegram.configured && current.connection.state === "active" && stored !== telegram.webhookSecretHash()) {
-            store.connections.apply(token, { action: "connection.webhook", requestId: data.requestId + "-webhook", connectionId,
-              expectedRevision: current.connection.revision, secretHash: telegram.webhookSecretHash() }, binding);
+          const webhook = store.connections.connection(auth.account.id, connectionId)?.webhook ?? null;
+          const bindingHash = telegram.configured ? telegram.webhookSecretHash() : null;
+          if (telegram.configured && current.connection.state === "active" && bindingHash && !webhookAcceptsHash(webhook, bindingHash, store.now())) {
+            const webhookRequestId = data.requestId + "-webhook", now = store.now();
+            if (webhook?.secretHash && webhook.secretHash !== bindingHash) {
+              store.connections.apply(token, { action: "connection.webhook.rotate", requestId: webhookRequestId + "-rotate", connectionId,
+                expectedRevision: current.connection.revision, secretHash: bindingHash, previousSecretHash: webhook.secretHash,
+                rotationExpiresAt: now + webhookRotationDefaults.windowMs }, binding);
+            } else {
+              store.connections.apply(token, { action: "connection.webhook", requestId: webhookRequestId, connectionId,
+                expectedRevision: current.connection.revision, secretHash: bindingHash }, binding);
+            }
             registered = true;
           }
           if (!channelWebhooks && !registered) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
