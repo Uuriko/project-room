@@ -533,6 +533,7 @@ test("lost guest cookie keeps the original join request and shows recovery inste
     assert.equal(calls.length, 1);
     assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
     assert.match(dom.node("#join-link-status").textContent, /original browser session/);
+    assert.equal(dom.node("#join-account-choices").hidden, false, "the recovery message offers a visible sign-in action");
     assert.doesNotMatch(dom.node("#join-link-status").textContent, /couldn't confirm/);
     await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
     assert.deepEqual(calls[1], calls[0]);

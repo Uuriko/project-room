@@ -537,6 +537,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion) return;
       failed = true;
       joinStatus(joinFailureStatus(error));
+      if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
