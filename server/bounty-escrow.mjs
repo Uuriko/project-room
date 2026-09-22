@@ -260,6 +260,39 @@ export const bountyEscrowSchema = `
   );
 `;
 
+// Slice 1 (#762) shipped these tables to production before receipt_id /
+// track existed (#778, integration-map candidate #2). ALTER TABLE adds the
+// columns but cannot rewrite the stored CREATE TABLE text, so the strict
+// DDL-text verifySchema would refuse a deployed database ("Bounty escrow
+// schema requires operator reconciliation") and take the room down. Rebuild
+// the tables whose DDL changed, copying every row verbatim (the new columns
+// stay NULL for pre-existing rows; nothing reads them yet). Idempotent:
+// converged databases already match the expected DDL and are left alone.
+// Runs inside the store's boot transaction, before the writer fence is
+// installed (the bounty tables are unfenced).
+export function convergeBountyDeployedSchema(db) {
+  const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+  const expected = new Map();
+  for (const sql of bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
+    const m = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
+    if (m) expected.set(m[1], { ddl: sql, norm: normalize(sql) });
+  }
+  for (const table of ["bounty_journal", "bounty_events"]) {
+    const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
+    if (!actual) continue; // Fresh database: the schema exec below creates it.
+    if (normalize(actual) === expected.get(table).norm) continue; // Already converged.
+    const legacy = `${table}_legacy_v762`;
+    const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map(r => r.name);
+    if (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(legacy))
+      throw new Error(`Bounty schema convergence blocked: ${legacy} already exists`);
+    db.exec(`ALTER TABLE ${table} RENAME TO ${legacy}`);
+    db.exec(expected.get(table).ddl);
+    const colList = cols.join(", ");
+    db.exec(`INSERT INTO ${table} (${colList}) SELECT ${colList} FROM ${legacy}`);
+    db.exec(`DROP TABLE ${legacy}`);
+  }
+}
+
 class EscrowError extends Error {
   constructor(code, message) { super(message); this.name = "EscrowError"; this.code = code; }
 }
@@ -355,9 +388,11 @@ export class BountyEscrow {
     }
   }
 
-  // Additive column migration for databases created by the pre-triage schema
-  // (unreleased; in practice only dev databases). Fresh databases get the
-  // full schema from bountyEscrowSchema above.
+  // Additive column migration for databases created by the slice-1 schema
+  // (#762 shipped to production, so deployed databases predate receipt_id /
+  // track). Fresh databases get the full schema from bountyEscrowSchema
+  // above; the RoomStore boot convergence rebuilds deployed tables first so
+  // the stored DDL text matches for verifySchema.
   _migrateColumns() {
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
     const addCol = (table, ddl) => {
@@ -372,10 +407,11 @@ export class BountyEscrow {
     addCol("bounty_events", "before_state TEXT");
     addCol("bounty_events", "after_state TEXT");
     addCol("bounty_events", "track TEXT");
-    // Track is derived from kind, so backfill it for pre-track rows.
-    this.db.exec(`UPDATE bounty_journal SET track = CASE kind
-      WHEN 'genesis' THEN NULL WHEN 'transfer' THEN NULL ELSE '${TRACK_FINALITY}' END
-      WHERE track IS NULL`);
+    // No track backfill for pre-track rows: the journal hash core is the
+    // 12-element form when track is NULL, so backfilling would change the
+    // verification core and invalidate their stored hashes. NULL track =
+    // "written before tracks existed" (or a null-track kind like
+    // genesis/transfer); nothing reads the column yet.
     addCol("bounty_records", "state_changed_ms INTEGER");
     addCol("bounty_records", "snoozed_until_ms INTEGER");
     addCol("bounty_records", "decline_reason TEXT");
@@ -410,11 +446,15 @@ export class BountyEscrow {
     const entryId = newId("ent_");
     const prevHash = this._lastHash(roomId, accountId);
     const actorKind = actor?.kind ?? null, actorId = actor?.id ?? null;
-    // Track attribution is tamper-evident: it joins the hash core (null
-    // renders as "", so pre-track rows keep their hashes).
+    // Track attribution is tamper-evident: it joins the hash core, but only
+    // when non-null. Pre-track rows (and null-track kinds like
+    // genesis/transfer) keep the original 12-element core so their stored
+    // hashes keep verifying.
     const track = trackOfJournalKind(kind);
-    const core = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
-      lotState, memo ?? "", actorKind ?? "", actorId ?? "", track ?? ""].join("|");
+    const coreParts = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
+      lotState, memo ?? "", actorKind ?? "", actorId ?? ""];
+    if (track != null) coreParts.push(track);
+    const core = coreParts.join("|");
     const hash = sha256(core);
     this.db.prepare(`INSERT INTO bounty_journal
       (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
@@ -1589,8 +1629,13 @@ export class BountyEscrow {
         let prev = "genesis";
         for (const e of this.db.prepare("SELECT * FROM bounty_journal WHERE room_id=? AND account_id=? ORDER BY seq").all(roomId, account_id)) {
           if (e.prev_hash !== prev) { violations.push(`hash chain break for ${account_id} at ${e.entry_id}`); break; }
-          const core = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
-            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? "", e.track ?? ""].join("|");
+          // Mirror _append: the track element joins the core only when the
+          // row carries one, so pre-track rows verify against their original
+          // 12-element core.
+          const coreParts = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
+            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? ""];
+          if (e.track != null) coreParts.push(e.track);
+          const core = coreParts.join("|");
           if (sha256(core) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
           prev = e.hash;
         }
