@@ -14,7 +14,7 @@ import { fillAccessKey } from "./auth-signin.mjs";
 async function setup(t, { mobile = false, member = false } = {}) {
   const f = createAcceptanceFixture();
   const accountId = member ? f.store.accountForMember("commons", "guest").id : "inbox-only";
-  if (!member) f.store.createAccount(accountId);
+  if (!member) { f.store.createAccount(accountId); f.store.completeOnboarding(accountId); } // Existing inbox owner, with saved mail.
   const key = f.store.issueAccountAccessKey(accountId), slot = f.store.createAccountSessionSlot();
   const session = f.store.loginAccountSession(slot.token, key, 0);
   f.store.inbox.apply(slot.token, { action: "source.save", requestId: "sample", sourceId: "private", expectedRevision: 0,
@@ -155,7 +155,7 @@ test("account confirmation failure keeps the draft and reports uncertainty witho
 test("invitation account replacement warns about an account-only draft and clears the old private view", { timeout: 25000 }, async t => {
   const f = await setup(t), p = f.page; await f.login(); await p.locator("#inbox-reader").waitFor();
   await p.locator("#inbox-draft").fill("Private thought from the original account");
-  f.store.createAccount("invited-account"); const key = f.store.issueAccountAccessKey("invited-account");
+  f.store.createAccount("invited-account"); f.store.completeOnboarding("invited-account"); const key = f.store.issueAccountAccessKey("invited-account");
   const owner = f.store.accountForMember("commons", "owner"), slot = f.store.createAccountSessionSlot();
   const auth = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(owner.id), 0);
   const token = randomBytes(32).toString("base64url");
@@ -195,7 +195,7 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
   const f = await setup(t, { mobile: mode === "signup" }), p = f.page;
   const email = `${mode}-invitation@example.invalid`, password = "invitation-fixture-password";
   if (mode === "login") {
-    f.store.createAccount("invitation-existing", "test");
+    f.store.createAccount("invitation-existing", "test"); f.store.completeOnboarding("invitation-existing");
     f.store.accountLogins.linkPasswordMethod("invitation-existing", { email, verifier: hashPassword(password) });
   }
   const token = randomBytes(32).toString("base64url");

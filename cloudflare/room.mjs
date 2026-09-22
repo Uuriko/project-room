@@ -1,3 +1,5 @@
+import { GmailSync } from '../server/gmail-sync.mjs';
+import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -43,8 +45,13 @@ export class ProjectRoom {
     let googleAuth = null;
     try { googleAuth = googleConfig(env, env.ROOM_ORIGIN); }
     catch (error) { console.warn(`room google auth disabled: ${error.message}`); }
+    let gmailAuth = null;
+    try { gmailAuth = gmailConfig(env, env.ROOM_ORIGIN, googleAuth); }
+    catch (error) { console.warn(`room Gmail disabled: ${error.message}`); }
+    this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
       googleAuth,
+      gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
       // the mailer seam reports mail_not_configured instead of breaking boot.
       magicLinkMailer: (() => {
@@ -74,6 +81,11 @@ export class ProjectRoom {
     this.handler = httpServerHandler(this.server);
   }
   fetch(request) { return this.paused ? maintenanceResponse(request) : this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+
+  async syncGmailMailboxes() {
+    if (this.paused || !this.gmailSync) return { completed: 0 };
+    return this.gmailSync.tick();
+  }
 
   // E1 — RPC: active email connections whose identity or alias lists this
   // routing key. Runs in the DO so no connection data leaves it. Returns the
@@ -194,6 +206,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
+    ctx.waitUntil(room.syncGmailMailboxes().catch(() => console.warn('[gmail-sync] tick delayed')));
     ctx.waitUntil(room.drainChannelBacklog()
       .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
     ctx.waitUntil(room.drainWebhookDeliveries()

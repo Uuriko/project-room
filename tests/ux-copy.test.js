@@ -22,8 +22,8 @@ test("inbox empty state contains no dev-facing fixture/deploy copy", () => {
   }
 });
 
-test("inbox empty state orients the user toward a first task or room", () => {
+test("inbox empty state offers a concrete Gmail connection action", () => {
   assert.ok(copy.length > 20, "the empty state says something useful");
-  assert.ok(/room/i.test(copy), "it points the user at a room");
-  assert.ok(/task|work|mention/i.test(copy), "it says what lands in the inbox");
+  assert.ok(/gmail/i.test(copy), "it names the available email provider");
+  assert.ok(/connect/i.test(copy) && /email/i.test(copy), "it explains how email arrives");
 });

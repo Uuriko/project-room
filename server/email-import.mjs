@@ -1,3 +1,4 @@
+import { gmailImportAuth } from './gmail-import-authority.mjs';
 // Account-owned fixture import for every channel connection (email, Telegram).
 // No OAuth credentials, bot tokens, network driver or send grant.
 import { emailConnection, emailDigest, emailInput, emailOpaqueId, emailText, exactEmailFields } from "./email-envelope.mjs";
@@ -177,7 +178,7 @@ export class EmailImport {
   }
   apply(token, request, binding) {
     return this.store.transaction(() => {
-      const auth = this.store.inbox.auth(token, binding), accountId = auth.account.id;
+      const auth = gmailImportAuth(this.store, token, request) ?? this.store.inbox.auth(token, binding), accountId = auth.account.id;
       // Historical requests may retrieve their receipt, never perform an unfenced write.
       validate(request, true);
       const connection = this.connection(accountId, request.connectionId);

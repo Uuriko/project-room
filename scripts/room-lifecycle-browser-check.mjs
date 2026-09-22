@@ -17,7 +17,7 @@ async function setup(t, viewport) {
   const f = createAcceptanceFixture();
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "admin", displayName: "Test admin", kind: "human", permissions: ["manage_members"] } });
-  f.store.createAccount("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
+  f.store.createAccount("admin-account"); f.store.completeOnboarding("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
   const server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = "http://127.0.0.1:" + server.address().port;

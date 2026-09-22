@@ -55,6 +55,7 @@ export function installQuarantineReview({ api, ownerKey }) {
     let el = $("#inbox-quarantine");
     if (el) return el;
     el = document.createElement("section");
+    el.hidden = true; // Keep a new inbox focused on connection and reading.
     el.id = "inbox-quarantine"; el.className = "inbox-quarantine"; el.setAttribute("aria-label", "Quarantine review");
     const header = document.createElement("header"); header.className = "inbox-quarantine-header";
     const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = "Quarantine review";
@@ -114,6 +115,7 @@ export function installQuarantineReview({ api, ownerKey }) {
   function renderCoverage(report) {
     coverageSection();
     const t = report.totals;
+    section().hidden = t.total === 0;
     const summary = $("#inbox-quarantine-coverage-summary");
     if (t.total === 0) {
       summary.textContent = "No quarantined messages yet — nothing to measure coverage over.";
@@ -271,6 +273,7 @@ export function installQuarantineReview({ api, ownerKey }) {
     try {
       const result = await api.quarantine({ status });
       if (!owns() || turn !== epoch) return;
+      if (result.items.length) el.hidden = false;
       armed.clear(); // Fresh cards rebuild the buttons; a stale arm would skip the two-tap guard.
       text("#inbox-quarantine-count", `${result.counts.held} held`);
       $("#inbox-quarantine-list").replaceChildren(
@@ -280,7 +283,7 @@ export function installQuarantineReview({ api, ownerKey }) {
       if (!silent) text("#inbox-quarantine-status-line", "");
     } catch (error) {
       if (owns() && turn !== epoch) return;
-      if (owns()) text("#inbox-quarantine-status-line", "Couldn’t load the quarantine review. Try again.");
+      if (owns()) { el.hidden = false; text("#inbox-quarantine-status-line", "Couldn’t load the quarantine review. Try again."); }
     } finally { if (owns() && turn === epoch) reload.disabled = false; }
   }
   function reset() {

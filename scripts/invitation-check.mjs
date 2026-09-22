@@ -53,7 +53,7 @@ async function fixture(t) {
   store.bindHumanAccount("studio", "studio-owner", "account-studio-owner");
   const ownerAccountKey = store.issueAccountAccessKey("account-studio-owner");
   const targetAccountKey = store.issueAccountAccessKey("account-target");
-  store.createAccount("account-other");
+  store.createAccount("account-other"); store.completeOnboarding("account-other");
   const otherAccountKey = store.issueAccountAccessKey("account-other");
   const ownerSlot = store.createAccountSessionSlot();
   const ownerSession = store.loginAccountSession(ownerSlot.token, ownerAccountKey, ownerSlot.session.sessionRevision);

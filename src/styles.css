@@ -1163,3 +1163,46 @@ summary { overflow-wrap: anywhere; }
 #join-account-choices { padding-bottom: .75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
 
 #join-account-google { display: inline-flex; margin: .75rem 0; }
+
+/* Gmail-first inbox and resumable account setup. */
+.inbox-gmail { display: grid; gap: .65rem; padding: 1rem 0; border-bottom: 1px solid var(--border, #ddd); }
+.inbox-gmail > .button { justify-self: start; }
+.inbox-gmail details { font-size: .85rem; }
+.account-setup-dialog { width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1.5rem; border: 1px solid var(--border, #ddd); border-radius: 16px; }
+.account-setup-dialog::backdrop { background: #0006; }
+.account-setup-content { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.account-setup-content label { display: grid; gap: .4rem; }
+.account-setup-content input:not([type=checkbox]), .account-setup-content select { width: 100%; min-height: 44px; }
+.account-setup-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.setup-platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+.setup-platforms label { display: flex; align-items: center; padding: .5rem; gap: .5rem; }
+@media (max-width: 420px) { .setup-platforms { grid-template-columns: 1fr; } }
+
+.setup-platforms input[type=checkbox] { width: 20px; height: 20px; min-height: 20px; margin: 0; flex: 0 0 20px; }
+
+/* Gmail's provider-specific tools sit inside the private, unified inbox. */
+#inbox-panel.gmail-active > :not(.gmail-workspace) { display: none; }
+.gmail-workspace { grid-column: 1 / -1; width: 100%; min-width: 0; padding: 16px; }
+.gmail-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.gmail-toolbar strong { flex: 1; overflow-wrap: anywhere; }
+.gmail-toolbar label { display: flex; gap: 8px; align-items: center; }
+.gmail-columns { display: grid; grid-template-columns: minmax(220px, 32%) minmax(0, 1fr); gap: 24px; }
+.gmail-columns nav { max-height: 70vh; overflow: auto; }
+.gmail-message { display: block; width: 100%; text-align: left; padding: 12px; border: 0; border-bottom: 1px solid var(--line, #ddd); background: transparent; }
+.gmail-message strong, .gmail-message span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: normal; }
+.gmail-message.unread strong { font-weight: 700; }
+.gmail-columns article { min-width: 0; overflow-wrap: anywhere; }
+.gmail-columns pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gmail-compose { width: min(680px, calc(100vw - 24px)); max-height: 90vh; overflow: auto; padding: 24px; border: 1px solid #ccc; border-radius: 12px; }
+.gmail-compose::backdrop { background: #0006; }
+.gmail-compose label { display: grid; gap: 5px; margin: 12px 0; }
+.gmail-compose input, .gmail-compose textarea { width: 100%; box-sizing: border-box; }
+.gmail-compose footer { display: flex; flex-wrap: wrap; gap: 10px; position: sticky; bottom: -24px; padding: 12px 0; background: var(--panel); }
+@media (max-width: 700px) { .gmail-compose textarea { max-height: 28vh; } .gmail-columns { grid-template-columns: 1fr; } .gmail-columns nav { max-height: 35vh; } .gmail-toolbar input { max-width: 180px; } }
+.gmail-compose [data-rich] { min-height: 200px; max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; }
+.gmail-html { white-space: normal !important; }
+.gmail-html table { border-collapse: collapse; max-width: 100%; }
+.gmail-html td, .gmail-html th { border: 1px solid var(--line); padding: 6px; }
+.gmail-html blockquote { border-left: 3px solid var(--line); margin: 12px 0; padding-left: 12px; }
+.gmail-compose [data-files-list] { padding-left: 20px; overflow-wrap: anywhere; }
+.gmail-toolbar [data-mailbox] { max-width: min(320px, 75vw); }

@@ -240,3 +240,11 @@ It lists the caller's active linked memberships, with room ID, name, member ID
 and archive timestamp only. Removed members disappear immediately. It does not
 accept room keys or account cookies. Pages scan 100 links; use `nextCursor`
 even for an empty page. No room ID is needed to make the first request.
+
+Gmail mailbox OAuth return: `GET /api/auth/gmail/callback` is public but requires expiring, single-use, encrypted PKCE state bound to the initiating authenticated account session. It grants no Room or account login.
+
+| Route | Authentication | Boundary |
+|---|---|---|
+| `GET /api/inbox/setup`, `POST /api/inbox/setup` | account session + binding; POST also CSRF + Origin | own saved preferences only |
+| `GET /api/inbox/gmail` | account session + binding | no credentials in projection |
+| `POST /api/inbox/gmail/connect`, `POST /api/inbox/gmail/sync`, `POST /api/inbox/gmail/disconnect`, `POST /api/inbox/gmail/mailbox` | account session + binding + CSRF + Origin | own mailbox; 60/account/min; mutations require modify grant and durable request ID |

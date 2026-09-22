@@ -24,6 +24,7 @@ async function setup(t) {
   const f = createAcceptanceFixture();
   const accountId = "slice7-browser";
   f.store.createAccount(accountId, "settings-browser-fixture");
+  f.store.completeOnboarding(accountId); // Existing-account settings journey; first-run setup has its own browser coverage.
   f.store.accountLogins.linkPasswordMethod(accountId, { email: "browser@example.invalid", verifier: "fixture-verifier" });
   f.store.accountLogins.linkMagicMethod(accountId, { email: "browser@example.invalid" });
   const key = f.store.issueAccountAccessKey(accountId);
@@ -114,6 +115,8 @@ test("sign-in UI: password signup, magic honest-unconfigured, recovery-code logi
   await signup.locator('[data-signin-form="password"] [name="password"]').fill("fixture-password-browser-1");
   await signup.locator('[data-signin-form="password"] button[type="submit"]').click();
   await signup.locator("#inbox-panel").waitFor();
+  await signup.locator("#account-setup-dialog").getByRole("heading", { name: "Make Project Room yours" }).waitFor();
+  await signup.locator("#account-setup-dialog").getByRole("button", { name: "Set up later" }).click();
 
   // 2. Magic link is honest when no mail provider is configured.
   const magic = await freshPage();
