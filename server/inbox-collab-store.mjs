@@ -624,34 +624,33 @@ export class InboxCollabStore {
   // directly. store.inbox.handoff cannot serve agent credentials (it requires
   // an account-session binding), so this path synthesizes the packet from
   // explicit caller-supplied fields instead of the inbox thread view. ----
+  // Returns { accountId, roomId }. roomId is null for a caller who holds the
+  // account (their own journal, across their rooms), and set for a caller who
+  // does not, who may then act only on handoffs recorded in this room.
   resolveHandoffAccount(roomId, callerId, authAccountId = null) {
-    if (typeof authAccountId === "string" && authAccountId) return authAccountId;
+    if (typeof authAccountId === "string" && authAccountId) return { accountId: authAccountId, roomId: null };
     const direct = this.store.accountForMember(roomId, callerId);
-    if (direct) return direct.id;
-    // A caller with no account of their own used to fall back to the ROOM
-    // OWNER's account. That is not a scope they hold, and inbox_handoffs is
-    // keyed on account_id with no room column at all (server/inbox-handoff.mjs),
-    // so the journal an account addresses spans every room that account owns.
-    // Together those two facts let an agent that is a member of one room read
-    // the full packets of the owner's handoffs in their OTHER rooms, and move
-    // them through their lifecycle. Refusing is the honest answer: the caller
-    // genuinely has no account scope here, and this is the same 409 the route
-    // already returns for a room with no human account bound at all.
-    //
-    // Proper room-scoping of the journal would let these callers back in
-    // safely, but that is a schema change to a shipped table and a decision
-    // for whoever owns this lane, not something to infer from a leak.
+    if (direct) return { accountId: direct.id, roomId: null };
+    // A caller with no account of their own (an agent identity) works under
+    // the room owner's account, as this feature always intended, but only
+    // inside this room. inbox_handoffs is keyed on account alone, so without
+    // the room scope the owner's account opened every handoff in every room
+    // that account owns: an agent in one room could read the full packets of
+    // the owner's handoffs elsewhere and move them through their lifecycle.
+    const ownerId = this.store.roomAuthority(roomId).ownerId;
+    const ownerAccount = ownerId === callerId ? null : this.store.accountForMember(roomId, ownerId);
+    if (ownerAccount) return { accountId: ownerAccount.id, roomId };
     const error = new Error("No account scope is bound for this handoff; bind a human account to the room first.");
     error.code = "handoff_no_account_scope";
     throw error;
   }
 
-  createHandoff(roomId, accountId, { threadId, to, summary = null, openQuestions = null,
+  createHandoff(roomId, scope, { threadId, to, summary = null, openQuestions = null,
     pendingActions = null, excerpt = null, subject = null }, { from }) {
     // The journal's packet names the recipient as a plain agent id string;
     // the HTTP route validates {kind, id} and the id rides through here.
     const toId = typeof to === "object" && to !== null ? to.id : to;
-    return this.store.handoffs.create(accountId, {
+    return this.store.handoffs.create(scope.accountId, {
       threadId,
       channel: "room",
       sourceIds: [threadId],
@@ -661,14 +660,14 @@ export class InboxCollabStore {
       sla: null,
       triage: { action: "needs_human", reasons: ["Handed off for a person or agent to pick up."] },
       summary, openQuestions, pendingActions, excerpt,
-    }, { from, to: toId });
+    }, { from, to: toId, roomId: scope.roomId, recordRoom: roomId });
   }
 
-  listHandoffs(accountId, { status = null } = {}) {
-    return this.store.handoffs.list(accountId, { status });
+  listHandoffs(scope, { status = null } = {}) {
+    return this.store.handoffs.list(scope.accountId, { status, roomId: scope.roomId });
   }
 
-  transitionHandoff(accountId, handoffId, status, { note = null } = {}) {
-    return this.store.handoffs.transition(accountId, handoffId, status, { note });
+  transitionHandoff(scope, handoffId, status, { note = null } = {}) {
+    return this.store.handoffs.transition(scope.accountId, handoffId, status, { note, roomId: scope.roomId });
   }
 }

@@ -30,7 +30,7 @@ import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColum
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
+import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
@@ -776,6 +776,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(inboxHandoffSchema);
+      this.db.exec(inboxHandoffRoomSchema); // Which room a collab-route handoff was made in; see server/inbox-handoff.mjs.
       // The typed handoff envelope journal (RC-2026-09-19-062) follows the
       // same additive pattern: IF NOT EXISTS is idempotent, no schema version
       // bump, and the table is intentionally outside the writer fence

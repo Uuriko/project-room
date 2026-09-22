@@ -253,8 +253,8 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
             || !["agent", "human"].includes(fields.to.kind) || typeof fields.to.id !== "string" || !fields.to.id) {
             return reject(422, "invalid_input", "to must be { kind: agent|human, id }.");
           }
-          const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
-          const { duplicate, receipt } = collab.createHandoff(roomId, accountId, {
+          const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+          const { duplicate, receipt } = collab.createHandoff(roomId, scope, {
             threadId: fields.threadId,
             to: fields.to,
             summary: fields.summary ?? null,
@@ -268,10 +268,10 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
           return json(res, duplicate ? 200 : 201, { duplicate, handoff: receipt });
         }
         if (req.method === "GET") {
-          const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+          const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
           const status = url.searchParams.get("status");
           return json(res, 200, {
-            handoffs: collab.listHandoffs(accountId, { status }),
+            handoffs: collab.listHandoffs(scope, { status }),
           });
         }
         return reject(405, "method_not_allowed", "Method not allowed");
@@ -282,8 +282,8 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
         if (!shape(fields, { required: ["status"], optional: ["note"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
         }
-        const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
-        const handoff = collab.transitionHandoff(accountId, collabId, fields.status, { note: fields.note ?? null });
+        const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+        const handoff = collab.transitionHandoff(scope, collabId, fields.status, { note: fields.note ?? null });
         return json(res, 200, { handoff });
       }
       // Typed handoff envelopes (RC-2026-09-19-062): agent-to-agent delegation

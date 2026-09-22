@@ -358,20 +358,36 @@ test("handoffs: room-scoped journal writes with account resolution", async t => 
   assert.equal(scopedList.status, 409);
   assert.equal(await codeOf(scopedList), "handoff_no_account_scope");
 
-  // An agent member of a room that DOES have a human owner is the case that
-  // used to fall through to the owner's account. inbox_handoffs is keyed on
-  // account_id with no room column, so borrowing that scope meant reading the
-  // owner's handoff packets from their other rooms, and transitioning them.
-  // The caller holds no account scope here either, and now says so.
-  const agentInHumanRoom = await get(f, `${base}/handoffs`, f.agent.secret);
-  assert.equal(agentInHumanRoom.status, 409, "an agent does not inherit the room owner's account");
-  assert.equal(await codeOf(agentInHumanRoom), "handoff_no_account_scope");
-  const writeAttempt = await post(f, `${base}/handoffs`, f.agent.secret,
-    { threadId: "thread-borrowed", to: { kind: "agent", id: "claude" } });
-  assert.equal(writeAttempt.status, 409, "and cannot write into it either");
+  // An agent member of a room with a human owner works under the owner's
+  // account, but only inside this room. inbox_handoffs is keyed on account
+  // alone, so before the room scope that account opened the owner's handoffs
+  // in EVERY room they own. Here the owner has a second handoff in another
+  // room of the same account, recorded straight into the journal the way the
+  // account inbox path writes it, and the agent must never see or move it.
+  const ownerAccount = f.store.accountForMember("commons", "owner").id;
+  const elsewhere = f.store.handoffs.create(ownerAccount,
+    { threadId: "other-room-thread", channel: "room", sourceIds: ["other-room-thread"], sender: { id: "owner", label: "owner" },
+      subject: "OTHER-ROOM-PRIVATE", occurredAt: new Date().toISOString(), sla: null,
+      triage: { action: "needs_human", reasons: ["elsewhere"] }, summary: "OTHER-ROOM-SUMMARY" },
+    { from: "owner", to: "claude", recordRoom: "some-other-room" }).receipt;
+
+  const agentView = await get(f, `${base}/handoffs`, f.agent.secret);
+  assert.equal(agentView.status, 200, "an agent still gets handoffs in its own room");
+  const agentText = await agentView.text();
+  assert.ok(agentText.includes(handoff.handoffId), "including the one the owner made in this room");
+  assert.equal(agentText.includes("OTHER-ROOM-SUMMARY"), false, "and never another room's packet");
+  assert.equal(agentText.includes(elsewhere.handoffId), false);
+
+  const moved = await post(f, `${base}/handoffs/${elsewhere.handoffId}/transition`, f.agent.secret, { status: "released" });
+  assert.equal(moved.status, 404, "another room's handoff answers exactly like one that does not exist");
+  assert.equal(f.store.handoffs.list(ownerAccount).find(entry => entry.handoffId === elsewhere.handoffId).status, "open");
+
+  // What an agent creates lands in this room, and the owner sees it.
+  const agentMade = await post(f, `${base}/handoffs`, f.agent.secret,
+    { threadId: "thread-agent", to: { kind: "human", id: "owner" }, summary: "Needs the owner." });
+  assert.equal(agentMade.status, 201);
   const ownerView = await (await get(f, `${base}/handoffs`, f.humanKey)).json();
-  assert.ok(ownerView.handoffs.every(entry => entry.threadId !== "thread-borrowed"),
-    "the refusal wrote nothing into the owner's journal");
+  assert.ok(ownerView.handoffs.some(entry => entry.threadId === "thread-agent"));
 });
 
 test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async t => {

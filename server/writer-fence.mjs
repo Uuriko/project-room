@@ -58,6 +58,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
   "inbox_handoffs",
+  // inbox_handoff_rooms records which room a collab-route handoff was made in,
+  // so an agent acting under the owner's account is held to that room. Purely
+  // additive beside inbox_handoffs, with no path from any older writer.
+  "inbox_handoff_rooms",
   // handoff_envelopes (typed handoff envelopes, RC-2026-09-19-062) is purely
   // additive and intentionally NOT fenced: same rationale — older writers
   // have no code path to it, and the journal's
