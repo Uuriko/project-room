@@ -31,10 +31,10 @@ const compare = (older, reference) => {
   return result;
 };
 
-test('equal independently captured data is not permission to reopen; all 85 tables are compared', async t => {
+test('equal independently captured data is not permission to reopen; all 86 tables are compared', async t => {
   const f = await fixture(t), reference = await f.capture(), report = compare(f.older, reference);
-  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 85,
-    "a table was added or removed: confirm the comparison covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: collab_assignments, collab_notes, collab_draft_locks, collab_approvals, collab_routing_events (RC-2026-09-18-011); +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (#658 mention lifecycle); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762)
+  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 86,
+    "a table was added or removed: confirm the comparison covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: collab_assignments, collab_notes, collab_draft_locks, collab_approvals, collab_routing_events (RC-2026-09-18-011); +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (#658 mention lifecycle); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9)
   assert.equal(report.history.equalRooms, 2); assert.equal(report.history.olderHistoryIsPrefix, true);
   assert.equal(report.accessDifferences, false);
   assert.ok(report.tables.every(row => row.added + row.removed + row.changed === 0));
