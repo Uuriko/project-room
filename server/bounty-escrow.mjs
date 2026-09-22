@@ -51,6 +51,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, PROBATION_MAX_CLAIM_CREDITS } from "./bounty-reputation.mjs";
+import { issueBountyReceipt } from "./bounty-receipts.mjs";
 
 export const GENESIS_LANES = Object.freeze([
   "id:agent/jill", "id:agent/instinct", "id:agent/grokbot", "id:agent/codex",
@@ -67,6 +68,19 @@ export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes 
 export const MAX_CREDITS = 1000000;
 export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 export const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
+
+// Journal kinds eligible for an Ed25519-signed, externally verifiable
+// receipt, mapped to the receipt type issued for them. approve / fee /
+// bond-return / bond-forfeit / bond-compensate / transfer / genesis move
+// value internally or release bonds, but are not attested transitions —
+// they are journal-only.
+const SIGNABLE_KINDS = new Map([
+  ["escrow-lock", "escrow-locked"],
+  ["bond-lock", "bond-locked"],
+  ["attribute", "attributed"],
+  ["payout", "payout-released"],
+  ["refund", "refund-issued"],
+]);
 
 export const BOUNTY_STATES = Object.freeze([
   "proposed", "funded", "claimed", "submitted", "accepted", "disputed",
@@ -106,7 +120,8 @@ export const bountyEscrowSchema = `
     hash TEXT NOT NULL,
     memo TEXT,
     actor_kind TEXT,
-    actor_id TEXT
+    actor_id TEXT,
+    receipt_id TEXT
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
@@ -230,7 +245,7 @@ const isoNow = ms => new Date(ms).toISOString();
 const roomSlug = roomId => roomId.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12) || "ROOM";
 
 export class BountyEscrow {
-  constructor(store, { now } = {}) {
+  constructor(store, { now, receipts = null } = {}) {
     this.store = store;
     this.db = store.db;
     this._now = typeof now === "function" ? now : null;
@@ -239,6 +254,12 @@ export class BountyEscrow {
     this._disputeRecords = null; // Map(disputeId -> frozen dispute), write-through to bounty_disputes
     this._arbiters = createArbiters();
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
+    this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
+    // Receipt signer: createReceiptSigner({ seedHex, ref }) from
+    // server/bounty-receipts.mjs. When null (the default — production key
+    // provisioning is a later slice), transitions return `signed: []` and
+    // journal entries are not stamped.
+    this._receipts = receipts;
   }
 
   nowMs() { return this._now ? this._now() : this.store.now(); }
@@ -276,6 +297,7 @@ export class BountyEscrow {
     };
     addCol("bounty_journal", "actor_kind TEXT");
     addCol("bounty_journal", "actor_id TEXT");
+    addCol("bounty_journal", "receipt_id TEXT");
     addCol("bounty_events", "actor_kind TEXT");
     addCol("bounty_events", "before_state TEXT");
     addCol("bounty_events", "after_state TEXT");
@@ -323,12 +345,49 @@ export class BountyEscrow {
   }
 
   // One zero-sum movement: debit one (account, lot_state), credit another.
-  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null }) {
+  // `receipt: { type, payload }` requests an Ed25519-signed, externally
+  // verifiable receipt for the movement (bounty-receipts.mjs). Only journal
+  // kinds in SIGNABLE_KINDS may carry one; when no signer is configured the
+  // receipt comes back null and the movement proceeds unsigned.
+  _move({ roomId, at, from, to, amountMillis, kind, bountyId = null, lotId = null, memo = null, actor = null, receipt = null }) {
     check(Number.isSafeInteger(amountMillis) && amountMillis > 0, "invalid_amount", "movement amount must be positive");
     const debit = this._append({ roomId, accountId: from.account, at, kind, bountyId, lotId, amount: -amountMillis, lotState: from.state, memo, actor });
     const credit = this._append({ roomId, accountId: to.account, at, kind, bountyId, lotId, amount: amountMillis, lotState: to.state, memo, actor });
-    return { debitEntryId: debit.entryId, creditEntryId: credit.entryId, lotId };
+    const movement = { debitEntryId: debit.entryId, creditEntryId: credit.entryId, lotId, receipt: null };
+    if (receipt !== null && receipt !== undefined) {
+      const expected = SIGNABLE_KINDS.get(kind);
+      check(expected !== undefined, "invalid_input", `signed receipts are not issued for journal kind "${kind}"`);
+      check(receipt.type === expected, "invalid_input", `receipt type "${receipt.type}" does not match journal kind "${kind}"`);
+      check(actor !== null && typeof actor === "object", "invalid_input", "signed receipts require an actor");
+      movement.receipt = this._issueReceipt({ type: receipt.type, payload: receipt.payload ?? {},
+        roomId, bountyId, lotId, amountMillis, actor, at,
+        entries: [debit.entryId, credit.entryId] });
+    }
+    return movement;
   }
+
+  // Issue a signed receipt for a completed movement, stamp both journal
+  // entries with its receiptId, and return it. Returns null when no signer
+  // is configured (production key provisioning is a later slice).
+  _issueReceipt({ type, payload, roomId, bountyId, lotId, amountMillis, actor, at, entries }) {
+    if (!this._receipts) return null;
+    const hashes = new Map(this.db.prepare(
+      "SELECT entry_id, hash FROM bounty_journal WHERE room_id=? AND entry_id IN (?,?)")
+      .all(roomId, entries[0], entries[1]).map(r => [r.entry_id, r.hash]));
+    for (const id of entries)
+      if (!hashes.has(id)) throw new EscrowError("internal", `journal entry ${id} not found`);
+    const receipt = issueBountyReceipt({ type, roomId, bountyId, lotId, amountMillis, actor,
+      entries, entryHashes: entries.map(id => hashes.get(id)),
+      payload, issuer: { pubkey: this._receipts.pubkeyHex, role: "escrow-keeper", ref: this._receipts.ref },
+      issuedAt: at, seedHex: this._receipts.seedHex });
+    this.db.prepare("UPDATE bounty_journal SET receipt_id=? WHERE room_id=? AND entry_id IN (?,?)")
+      .run(receipt.receiptId, roomId, entries[0], entries[1]);
+    return receipt;
+  }
+
+  // Spread into a transition receipt: { signed: [...] } — empty when the
+  // movement is unsigned (no signer configured).
+  _signed(movement) { return { signed: movement.receipt ? [movement.receipt] : [] }; }
 
   _balanceMillis(roomId, accountId, lotState) {
     const row = this.db.prepare(
@@ -550,13 +609,15 @@ export class BountyEscrow {
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
         amountMillis: bounty.amountMillis, kind: "escrow-lock", bountyId, lotId,
-        memo: `escrow for bounty ${bountyId}`, actor: act });
+        memo: `escrow for bounty ${bountyId}`, actor: act,
+        receipt: { type: "escrow-locked", payload: { fromAccount: lane, fromLotState: "payable" } } });
       this._transition(bounty, "funded");
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.funded",
         { bountyId, actor: act, before: "proposed", after: "funded", data: { amount: toCredits(bounty.amountMillis) } });
       return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "fund", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event } };
+        receipt: { kind: "fund", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+          ...this._signed(movement) } };
     });
   }
 
@@ -644,14 +705,16 @@ export class BountyEscrow {
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
         amountMillis: CLAIM_BOND_MILLIS, kind: "bond-lock", bountyId, lotId,
-        memo: `anti-flake claim bond for ${bountyId}`, actor: act });
+        memo: `anti-flake claim bond for ${bountyId}`, actor: act,
+        receipt: { type: "bond-locked", payload: { bondKind: "claim", fromAccount: lane } } });
       bounty.claimant = lane;
       this._transition(bounty, "claimed");
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.claimed",
         { bountyId, actor: act, before: "funded", after: "claimed", data: { bond: toCredits(CLAIM_BOND_MILLIS) } });
       return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event } };
+        receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+          ...this._signed(movement) } };
     });
   }
 
@@ -731,7 +794,8 @@ export class BountyEscrow {
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.claimant, state: "attributed" },
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
-        memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act });
+        memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
+        receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
       bounty.attestation = Object.freeze({ ...verifierAttestation, recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
@@ -739,7 +803,8 @@ export class BountyEscrow {
       return { bounty: this._getBounty(roomId, bountyId),
         approval,
         attribution: { attributionId: lotId, bountyId, claimant: bounty.claimant, amount: toCredits(bounty.amountMillis), at },
-        receipt: { kind: "attribute", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event } };
+        receipt: { kind: "attribute", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+          ...this._signed(movement) } };
     });
   }
 
@@ -779,7 +844,8 @@ export class BountyEscrow {
       const disputeId = newId("dsp_");
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
-        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId, memo: `dispute bond for ${disputeId}`, actor: act });
+        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId, memo: `dispute bond for ${disputeId}`, actor: act,
+        receipt: { type: "bond-locked", payload: { bondKind: "dispute", fromAccount: lane } } });
       // Walk the pure machine to adjudication: open -> challenged -> evidence
       // (grounds are the first evidence) -> seat the designated verifier.
       const machine = this._disputes;
@@ -821,7 +887,8 @@ export class BountyEscrow {
       return { bounty: this._getBounty(roomId, bountyId),
         dispute: { disputeId, state: dispute.state, decider: dispute.decider ?? null, unavailable: dispute.unavailable,
           bond: toCredits(bondMillis), raisedBy: lane },
-        receipt: { kind: "bond-lock", bountyId, disputeId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event } };
+        receipt: { kind: "bond-lock", bountyId, disputeId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+          ...this._signed(movement) } };
     });
   }
 
@@ -838,6 +905,7 @@ export class BountyEscrow {
       check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
+      this._settlementSigned = [];
       try {
         const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
         this._persistDispute(roomId, decided);
@@ -849,6 +917,8 @@ export class BountyEscrow {
       } finally {
         this._settlementActor = null;
       }
+      const signed = this._settlementSigned ?? [];
+      this._settlementSigned = null;
       const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
       const event = this._event(roomId, "bounty.decided",
         { bountyId, actor: act, before: "disputed", after: settled.state,
@@ -857,7 +927,7 @@ export class BountyEscrow {
             claimant: bounty.claimant,
             challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null } });
       return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
-        receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event } };
+        receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
     });
   }
 
@@ -870,7 +940,7 @@ export class BountyEscrow {
     const bounty = this._mutable(row);
     if (bounty.state !== "disputed") return;
     const actor = this._settlementActor ?? RULE_ACTOR;
-    this._settleDispute(bounty, { outcome, terminal, bondSnapshot: packet.bondSnapshot, forfeitedBond: packet.forfeitedBond, actor });
+    this._settlementSigned = this._settleDispute(bounty, { outcome, terminal, bondSnapshot: packet.bondSnapshot, forfeitedBond: packet.forfeitedBond, actor }) ?? [];
   }
 
   _settleDispute(bounty, { outcome, terminal, bondSnapshot, forfeitedBond, actor }) {
@@ -886,6 +956,8 @@ export class BountyEscrow {
       ? { account: bounty.poster, state: "locked" } : { account: worker, state: "attributed" };
     const settleKind = outcome === "upheld" ? "cancel" : outcome === "split" ? "split" : "release";
     const forfeited = typeof bondSnapshot === "number" && forfeitedBond >= bondSnapshot;
+    const signed = [];
+    const collect = movement => { if (movement.receipt) signed.push(movement.receipt); };
 
     if (settleKind === "cancel") {
       // CANCEL: full refund to the poster, challenger's bond returned (they
@@ -893,8 +965,9 @@ export class BountyEscrow {
       // pool — upheld means the work was judged bad, which is what the bond
       // prices. (The award itself is never confiscated: disputes delay, never
       // confiscate.)
-      this._move({ roomId, at, from: awardFrom, to: { account: bounty.poster, state: "payable" },
-        amountMillis: amount, kind: "refund", bountyId, lotId, memo: `dispute ${outcome}: refund`, actor });
+      collect(this._move({ roomId, at, from: awardFrom, to: { account: bounty.poster, state: "payable" },
+        amountMillis: amount, kind: "refund", bountyId, lotId, memo: `dispute ${outcome}: refund`, actor,
+        receipt: { type: "refund-issued", payload: { reason: "dispute-cancel", refundTo: bounty.poster } } }));
       if (typeof bondSnapshot === "number")
         this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
           amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
@@ -905,12 +978,14 @@ export class BountyEscrow {
       // refunds to the poster, bond returned.
       const workerHalf = Math.floor(amount / 2), posterHalf = amount - workerHalf;
       if (awardFrom.state === "locked")
-        this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
-          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor });
+        collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
+          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor,
+          receipt: { type: "attributed", payload: { claimant: worker } } }));
       this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
         amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
-      this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
-        amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor });
+      collect(this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
+        amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor,
+        receipt: { type: "refund-issued", payload: { reason: "split", refundTo: bounty.poster } } }));
       if (typeof bondSnapshot === "number")
         this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
           amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
@@ -921,8 +996,9 @@ export class BountyEscrow {
       // in full, no fee on penalty compensation. A forfeited bond (frivolous
       // ruling, withdrawn challenge) goes to the room pool instead.
       if (awardFrom.state === "locked")
-        this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
-          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "release: attribute after dispute", actor });
+        collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
+          amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "release: attribute after dispute", actor,
+          receipt: { type: "attributed", payload: { claimant: worker } } }));
       this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
         amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
       if (typeof bondSnapshot === "number") {
@@ -940,6 +1016,7 @@ export class BountyEscrow {
     this._saveBounty(bounty);
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });
+    return signed;
   }
 
   // Whether the dispute froze a pre-accept submission (award still locked)
@@ -980,9 +1057,10 @@ export class BountyEscrow {
   _timeoutRefund(bounty, at, actor) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const lotId = newId("lot_");
-    this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
+    const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
       amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
-      memo: "timeout: award refunded in full, no fee", actor });
+      memo: "timeout: award refunded in full, no fee", actor,
+      receipt: { type: "refund-issued", payload: { reason: "timeout", refundTo: bounty.poster } } });
     // No submission by the deadline: the award refunds and the claim bond
     // returns to the claimant (spec: "bond returned").
     this._settleClaimBond(bounty, at, { forfeit: false, actor });
@@ -992,6 +1070,7 @@ export class BountyEscrow {
     this._event(roomId, "bounty.refunded",
       { bountyId, actor, before: "claimed", after: "refunded",
         data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant } });
+    return movement.receipt ? [movement.receipt] : [];
   }
 
   _expireUnfunded(bounty, at, actor) {
@@ -1031,8 +1110,10 @@ export class BountyEscrow {
     const fee = Math.floor(amount * FEE_NUMERATOR / FEE_DENOMINATOR);
     const earner = amount - fee;
     const lotId = newId("lot_");
-    this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
-      amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor });
+    const movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
+      amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
+      receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
+        grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
     if (fee > 0)
       this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
         amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
@@ -1042,21 +1123,21 @@ export class BountyEscrow {
     this._saveBounty(bounty);
     this._event(roomId, "bounty.paid",
       { bountyId, actor, before: "approved", after: "paid", data: { earner: bounty.claimant, paid: toCredits(earner), fee: toCredits(fee) } });
-    return { paid: toCredits(earner), fee: toCredits(fee) };
+    return { paid: toCredits(earner), fee: toCredits(fee), signed: movement.receipt ? [movement.receipt] : [] };
   }
 
-  // One mechanical pass over a single bounty; returns the action taken or null.
+  // One mechanical pass over a single bounty; returns { action, signed } or null.
   _keeperPass(bounty, now, at) {
     const actor = RULE_ACTOR;
     if (bounty.state === "proposed" && now >= bounty.deadlineMs
         && (bounty.snoozedUntilMs === null || now >= bounty.snoozedUntilMs)) {
-      this._expireUnfunded(bounty, at, actor); return "expired-unfunded";
+      this._expireUnfunded(bounty, at, actor); return { action: "expired-unfunded", signed: [] };
     }
     if (bounty.state === "accepted" && bounty.challengeEndsMs !== null && now >= bounty.challengeEndsMs) {
-      this._approve(bounty, at, actor); return "approved";
+      this._approve(bounty, at, actor); return { action: "approved", signed: [] };
     }
     if ((bounty.state === "funded" || bounty.state === "claimed") && now >= bounty.deadlineMs) {
-      this._timeoutRefund(bounty, at, actor); return "refunded";
+      const signed = this._timeoutRefund(bounty, at, actor); return { action: "refunded", signed };
     }
     if (bounty.state === "disputed" && bounty.disputeId && !bounty.resolution) {
       const dispute = this._disputes.get(bounty.disputeId);
@@ -1064,15 +1145,15 @@ export class BountyEscrow {
       if (terminal) {
         // The onDisputeFinalized callback already ran inline; if the bounty
         // is still unsettled the handler must have thrown — retry now.
-        this._settleDispute(bounty, { outcome: dispute.resolution?.outcome ?? null, terminal: dispute.state,
+        const signed = this._settleDispute(bounty, { outcome: dispute.resolution?.outcome ?? null, terminal: dispute.state,
           bondSnapshot: dispute.bondSnapshot, forfeitedBond: dispute.forfeitedBond, actor });
-        return bounty.state === "refunded" ? "refunded" : "released";
+        return { action: bounty.state === "refunded" ? "refunded" : "released", signed };
       }
       if (bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS) {
         // Unresolved > 14d: permissionless finalize defaults to RELEASE.
-        this._settleDispute(bounty, { outcome: "timeout-default", terminal: "timeout",
+        const signed = this._settleDispute(bounty, { outcome: "timeout-default", terminal: "timeout",
           bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor });
-        return "released";
+        return { action: "released", signed };
       }
     }
     return null;
@@ -1086,10 +1167,10 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       const now = this.nowMs(), at = isoNow(now);
-      const action = this._keeperPass(bounty, now, at);
-      check(action !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize`);
-      return { bounty: this._getBounty(roomId, bountyId), action,
-        receipt: { kind: "finalize", bountyId, action, at, actor: RULE_ACTOR, triggeredBy } };
+      const pass = this._keeperPass(bounty, now, at);
+      check(pass !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize`);
+      return { bounty: this._getBounty(roomId, bountyId), action: pass.action,
+        receipt: { kind: "finalize", bountyId, action: pass.action, at, actor: RULE_ACTOR, triggeredBy, signed: pass.signed } };
     });
   }
 
@@ -1105,14 +1186,17 @@ export class BountyEscrow {
         const bounty = this._mutable(row);
         try {
           if (bounty.state === "approved") {
-            const { paid, fee } = this._sweep(bounty, at, RULE_ACTOR);
+            const { paid, fee, signed } = this._sweep(bounty, at, RULE_ACTOR);
             summary.swept.push(bounty.bountyId); summary.paid.push({ bountyId: bounty.bountyId, paid, fee });
+            if (signed.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = signed; }
           } else {
-            const action = this._keeperPass(bounty, now, at);
+            const pass = this._keeperPass(bounty, now, at);
+            const action = pass?.action ?? null;
             if (action === "approved") summary.approved.push(bounty.bountyId);
             else if (action === "refunded") summary.refunded.push(bounty.bountyId);
             else if (action === "released") summary.released.push(bounty.bountyId);
             else if (action === "expired-unfunded") summary.expiredUnfunded.push(bounty.bountyId);
+            if (pass?.signed?.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = pass.signed; }
           }
         } catch (error) {
           // The keeper is mechanical but never half-applies: one bounty
@@ -1277,6 +1361,7 @@ export class BountyEscrow {
           amount: toCredits(Math.abs((credit ?? first).amount)),
           amountMillis: Math.abs((credit ?? first).amount),
           entries: entries.map(e => e.entry_id),
+          signedReceiptIds: Object.freeze([...new Set(entries.map(e => e.receipt_id).filter(Boolean))]),
           hash: first.hash, prevHash: first.prev_hash,
         }));
       }
@@ -1307,7 +1392,7 @@ export class BountyEscrow {
       // Per-bounty award coverage. Proposed bounties lock nothing (triage
       // holds no budget); terminal bounties must hold nothing at all.
       const awardKinds = [...AWARD_KINDS].map(k => `'${k}'`).join(",");
-      for (const b of this.db.prepare("SELECT bounty_id, amount_millis, state, resolution_json FROM bounty_records WHERE room_id=?").all(roomId)) {
+      for (const b of this.db.prepare("SELECT bounty_id, amount_millis, state, dispute_id, resolution_json FROM bounty_records WHERE room_id=?").all(roomId)) {
         const lots = this.db.prepare(`SELECT lot_state, COALESCE(SUM(amount),0) AS t FROM bounty_journal
           WHERE room_id=? AND bounty_id=? AND kind IN (${awardKinds}) GROUP BY lot_state`).all(roomId, b.bounty_id);
         const bucket = Object.fromEntries(lots.map(r => [r.lot_state, r.t]));
@@ -1324,7 +1409,7 @@ export class BountyEscrow {
           if (any !== 0) violations.push(`proposed bounty ${b.bounty_id} locks budget (${any} journal rows)`);
         } else if (["funded", "claimed", "submitted"].includes(b.state)) {
           if ((bucket.locked ?? 0) !== b.amount_millis) violations.push(`bounty ${b.bounty_id} (${b.state}) locked ${bucket.locked ?? 0} != ${b.amount_millis}`);
-        } else if (b.state === "accepted" || (b.state === "disputed" && !b.disputeId)) {
+        } else if (b.state === "accepted" || (b.state === "disputed" && !b.dispute_id)) {
           if ((bucket.attributed ?? 0) !== b.amount_millis) violations.push(`bounty ${b.bounty_id} (${b.state}) attributed ${bucket.attributed ?? 0} != ${b.amount_millis}`);
         } else if (b.state === "approved" || b.state === "disputed") {
           // disputed: award is locked (pre-accept dispute) or attributed/approved (post-accept)
