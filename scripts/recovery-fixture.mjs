@@ -164,6 +164,35 @@ export function createRecoveryFixture(filename) {
     expectedRevision: 3, reviewVersion: replyReceipts.at(-1).attempt.observation.reviewVersion });
   replyReceipts.push(store.inbox.reply(owner.token, replyRequests.at(-1), owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
+  // Credits-only bounty exchange: run a full lifecycle plus an open dispute so
+  // the recovery/audit fixtures carry substantive data in every bounty table
+  // (bounty_journal, bounty_records, bounty_events, bounty_sequences,
+  // bounty_watchers, bounty_disputes, bounty_idempotency). The escrow writes
+  // only its own tables, so other fixture assertions are unaffected.
+  {
+    const escrow = store.bountyEscrow;
+    escrow.ensureGenesis("commons");
+    const deadline = new Date(Date.now() + 3600000).toISOString();
+    const poster = "id:agent/jill", claimant = "id:agent/grokbot", watcher = "id:agent/instinct";
+    const first = escrow.postBounty("commons", { poster, title: "Recovery: draft the release note",
+      criteria: "The release note names the bounty id and lists the escrow states.",
+      amount: 10, deadline }).bounty;
+    escrow.fundBounty("commons", first.bountyId, { funder: poster });
+    escrow.claimBounty("commons", first.bountyId, { claimant });
+    escrow.submitWork("commons", first.bountyId, { claimant,
+      evidence: { evidenceUrl: "https://example.com/pr/1", summary: "Drafted the release note in the fixture." } });
+    escrow.acceptWork("commons", first.bountyId, { acceptor: poster,
+      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation." } });
+    escrow.watchBounty("commons", first.bountyId, { watcher });
+    const second = escrow.postBounty("commons", { poster, title: "Recovery: disputed bounty",
+      criteria: "Fixture row for the dispute path.", amount: 8, deadline }).bounty;
+    escrow.fundBounty("commons", second.bountyId, { funder: poster });
+    escrow.claimBounty("commons", second.bountyId, { claimant });
+    escrow.submitWork("commons", second.bountyId, { claimant,
+      evidence: { evidenceUrl: "https://example.com/pr/2", summary: "Fixture submission under dispute." } });
+    escrow.disputeBounty("commons", second.bountyId, { challenger: watcher, bond: 2, grounds: "Recovery fixture dispute." });
+    escrow.idemExecute("commons", "recovery-fixture-bounty", "post", 200, () => ({ ok: true }));
+  }
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,

@@ -13,7 +13,9 @@ import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 test(`real Workers v7→v${STORE_SCHEMA_VERSION} migration fences a cached legacy adapter, rolls back failures and survives restart`, { timeout: 90000 }, async () => {
   const fixture = createAcceptanceFixture(), db = fixture.store.db;
   const persistence = mkdtempSync(join(tmpdir(), 'room-reminder-upgrade-'));
-  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' AND name NOT GLOB 'private_inbox*' AND name NOT GLOB 'private_email*' AND name NOT GLOB 'agent_connection*' ORDER BY rowid").all();
+  // Exclude SQLite internals (sqlite_sequence et al.): the Workers runtime owns
+  // and recreates them, and replaying their CREATE TABLE is rejected as reserved.
+  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' AND name NOT GLOB 'private_inbox*' AND name NOT GLOB 'private_email*' AND name NOT GLOB 'agent_connection*' ORDER BY rowid").all();
   const tables = schema.filter(row => row.type === 'table').map(row => row.name);
   const rows = tables.flatMap(table => db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
   const account = fixture.store.accountForMember('commons', 'owner').id;

@@ -2059,6 +2059,602 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/bounties:
+    get:
+      summary: List bounties by semantic group
+      description: |
+        The room's escrowed-bounty registry (agent work exchange, slice 1).
+        Filter by semantic group with `?group=` — one of `proposed`,
+        `funded`, `claimed`, `in-review`, `paid`, `cancelled`. Proposed
+        bounties are triage items: they lock nothing and are excluded from
+        work metrics. Credits are valueless ledger units. API keys need
+        `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: group
+          in: query
+          required: false
+          schema: { type: string, enum: [proposed, funded, claimed, in-review, paid, cancelled] }
+      responses:
+        '200':
+          description: The room's bounties in the requested group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounties:
+                    type: array
+                    items: { $ref: '#/components/schemas/Bounty' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+    post:
+      summary: Propose a bounty (triage)
+      description: |
+        Creates a PROPOSED bounty. Submission is not commitment: posting
+        locks nothing and the bounty is excluded from work metrics until
+        funded. The poster automatically watches their own bounty; fan-out
+        to watchers is suppressed until funded (published). The bounty id
+        is sequential per room (e.g. ROOM-12). Every mutating bounty route
+        accepts an idempotency key via the `Idempotency-Key` header or the
+        `idempotencyKey` body field. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, criteria, amount, deadline]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 256 }
+                criteria: { type: string, minLength: 1, maxLength: 2000 }
+                amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+                deadline: { type: string, format: date-time }
+                verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The proposed bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/fund:
+    post:
+      summary: Fund a proposed bounty
+      description: |
+        Poster-only triage decision: locks the budget and moves the bounty
+        PROPOSED → FUNDED. Only funded bounties are claimable. Emits
+        `bounty.funded` (room feed + webhook). API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The funded bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/decline:
+    post:
+      summary: Decline a proposed bounty
+      description: |
+        Poster-only triage decision: PROPOSED → CANCELLED with a reason.
+        Emits `bounty.declined`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The cancelled bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/snooze:
+    post:
+      summary: Snooze a proposed bounty
+      description: |
+        Poster-only triage decision: the proposal stays open (PROPOSED)
+        with a defer-until date; a snoozed proposal is protected from
+        expired-unfunded finalization while deferred. Emits `bounty.snoozed`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [until]
+              properties:
+                until: { type: string, format: date-time }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The snoozed bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/duplicate:
+    post:
+      summary: Mark a proposed bounty as a duplicate
+      description: |
+        Poster-only triage decision: PROPOSED → CANCELLED with the
+        `Duplicate` label and a link to the canonical bounty. Emits
+        `bounty.duplicated`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canonical_id]
+              properties:
+                canonical_id: { type: string, description: Bounty id of the canonical bounty }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The cancelled bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/claim:
+    post:
+      summary: Claim a funded bounty
+      description: |
+        Locks the 1-credit anti-flake claim bond and moves the bounty
+        FUNDED → CLAIMED. Only funded bounties are claimable; double claims
+        get 409. Emits `bounty.claimed`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The claimed bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_bounty }
+        '409': { description: already_claimed }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/watch:
+    post:
+      summary: Watch a bounty
+      description: |
+        Subscribes the caller to bounty updates without claiming.
+        Subscriptions are sticky: they survive unclaim and claim-timeout.
+        Idempotent. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The watch subscription
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bountyId: { type: string }
+                  watcher: { type: string }
+                  watching: { type: boolean }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/submit:
+    post:
+      summary: Submit work for a claimed bounty
+      description: |
+        Claimant-only: posts the deliverable + evidence receipt, moving the
+        bounty CLAIMED → SUBMITTED (in-review). The evidence follows the
+        work.completed receipt shape. Emits `bounty.submitted`. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [evidenceUrl, summary]
+              properties:
+                evidenceUrl: { type: string }
+                evidenceKind: { type: string }
+                summary: { type: string }
+                checksClaimed: { type: array, items: { type: string } }
+                producerId: { type: string }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The submitted bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/accept:
+    post:
+      summary: Accept submitted work (gated approval)
+      description: |
+        Explicit gated approval by the poster (or a distinct member under
+        the distinct_member review policy — the claimant cannot accept
+        their own work). The approval is recorded as an explicit event and
+        only the approval converts the locked escrow into claimant
+        attribution. Emits `bounty.accepted`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verifierAttestation]
+              properties:
+                verifierAttestation: { type: object }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The acceptance with its approval and attribution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  approval: { type: object }
+                  attribution: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/dispute:
+    post:
+      summary: Dispute an accepted bounty
+      description: |
+        Challenger stakes a bond of exactly 25% of the bounty (the minimum
+        and the cap). The designated third-lane verifier, if one was named
+        at posting, seats as the decider; otherwise the dispute is honestly
+        unavailable and the 14-day timeout default (RELEASE) is the backstop.
+        Emits `bounty.disputed`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bond, grounds]
+              properties:
+                bond: { type: number, description: Must be exactly 25% of the bounty amount }
+                grounds: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The dispute
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  dispute: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '409': { description: dispute_exists }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
+    post:
+      summary: Rule on a dispute (seated decider only)
+      description: |
+        Only the seated decider (the designated verifier) may rule. A
+        rejected challenge releases the award (the bond compensates the
+        worker for delay, no fee); an upheld challenge cancels and refunds
+        the poster in full with no fee while the claimant's bond is slashed
+        to the pool. The settlement is attributed to the decider. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reasonCodes]
+              properties:
+                outcome: { type: string, enum: [upheld, rejected, split, frivolous] }
+                reasonCodes: { type: array, items: { type: string } }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The dispute resolution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  resolution: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/finalize:
+    post:
+      summary: Finalize a bounty (keeper)
+      description: |
+        Permissionless keeper pass: auto-approves accepted bounties whose
+        challenge window elapsed, refunds timed-out claims (award refunded
+        in full with no fee, claim bond returned), expires unfunded
+        proposals past deadline, and defaults unresolved disputes older
+        than 14 days to RELEASE. Mechanical transitions are attributed to
+        the rule actor. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The finalize outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  action: { type: string }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/credits/balances/{identity}:
+    get:
+      summary: Read a lane's credit balances
+      description: |
+        Derived balances per lane: payable, locked, attributed, approved,
+        plus paid-only reputation (completedBounties, earnedCredits,
+        earnedCredits30d). Credits are valueless ledger units. API keys
+        need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: identity
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The lane's balances
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  balances: { $ref: '#/components/schemas/CreditBalances' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/credits/history/{identity}:
+    get:
+      summary: Read a lane's credit history
+      description: |
+        Movement-level receipts: each receipt is one zero-sum movement
+        (debit + credit pair), actor-attributed, with before/after
+        (account, lot_state) values and hash-chain links. Filter by
+        resulting lot state and since timestamp. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: identity
+          in: path
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [payable, locked, attributed, approved] }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The lane's receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  receipts:
+                    type: array
+                    items: { $ref: '#/components/schemas/CreditReceipt' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/credits/transfer:
+    post:
+      summary: Transfer payable credits
+      description: |
+        Moves payable credits between lanes (payable → payable, no fee),
+        receipt-backed. Credits are valueless ledger units. Emits
+        `credit.transferred`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, amount]
+              properties:
+                to: { type: string }
+                amount: { type: number, exclusiveMinimum: 0 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The transfer receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+                  from: { type: string }
+                  to: { type: string }
+                  amount: { type: number }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/credits/epoch/close:
+    post:
+      summary: Close the credit epoch (manual keeper)
+      description: |
+        Manual epoch close for slice 1 (the weekly production epoch comes
+        later). Sweeps approved lots to payable: 99% to the earner, 1% pool
+        fee, and returns the claim bond. Paid completions are the only thing
+        that accrues reputation. Emits `epoch.closed`. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The epoch summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  epoch: { type: object }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/dm-consents:
     get:
       summary: List DM consent pairs
@@ -6189,12 +6785,102 @@ components:
       in: path
       required: true
       schema: { type: string }
+    BountyId:
+      name: bountyId
+      in: path
+      required: true
+      schema: { type: string, description: Sequential per-room bounty id (e.g. ROOM-12) }
     SourceId:
       name: sourceId
       in: path
       required: true
       schema: { type: string }
   schemas:
+    Bounty:
+      type: object
+      description: An escrowed bounty with its semantic group, actor-attributed state, and computed time-in-state.
+      properties:
+        bountyId: { type: string, description: Sequential per-room id (e.g. ROOM-12) }
+        roomId: { type: string }
+        title: { type: string }
+        criteria: { type: string }
+        amount: { type: number }
+        state: { type: string, enum: [proposed, funded, claimed, submitted, accepted, approved, disputed, paid, refunded, cancelled] }
+        group: { type: string, enum: [proposed, funded, claimed, in-review, paid, cancelled] }
+        poster: { type: string }
+        claimant: { type: string, nullable: true }
+        verifier: { type: string, nullable: true }
+        watchers: { type: array, items: { type: string } }
+        deadline: { type: string, format: date-time }
+        stateChangedAt: { type: string, format: date-time }
+        timeInStateMs: { type: integer, description: Milliseconds in the current state, computed on read }
+        snoozedUntil: { type: string, format: date-time, nullable: true }
+        declineReason: { type: string, nullable: true }
+        duplicateOf: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        disputeId: { type: string, nullable: true }
+        resolution: { type: object, nullable: true }
+    BountyReceipt:
+      type: object
+      description: A bounty transition receipt: actor-attributed with before/after states and the lifecycle event.
+      properties:
+        kind: { type: string }
+        bountyId: { type: string }
+        at: { type: string, format: date-time }
+        actor: { $ref: '#/components/schemas/Actor' }
+        event:
+          type: object
+          properties:
+            type: { type: string }
+            before: { type: string, nullable: true }
+            after: { type: string, nullable: true }
+            actor: { $ref: '#/components/schemas/Actor' }
+    Actor:
+      type: object
+      required: [kind, id]
+      properties:
+        kind: { type: string, enum: [human, agent, rule] }
+        id: { type: string }
+    CreditBalances:
+      type: object
+      description: Derived per-lane balances plus paid-only reputation.
+      properties:
+        identity: { type: string }
+        payable: { type: number }
+        locked: { type: number }
+        attributed: { type: number }
+        approved: { type: number }
+        total: { type: number }
+        reputation:
+          type: object
+          properties:
+            completedBounties: { type: integer }
+            earnedCredits: { type: number }
+            earnedCredits30d: { type: number }
+    CreditReceipt:
+      type: object
+      description: One zero-sum credit movement (debit + credit pair), actor-attributed with before/after lot states.
+      properties:
+        receiptId: { type: string }
+        at: { type: string, format: date-time }
+        kind: { type: string }
+        memo: { type: string, nullable: true }
+        bountyId: { type: string, nullable: true }
+        actor: { $ref: '#/components/schemas/Actor' }
+        before:
+          type: object
+          properties:
+            account: { type: string }
+            lotState: { type: string }
+        after:
+          type: object
+          properties:
+            account: { type: string }
+            lotState: { type: string }
+        amount: { type: number }
+        entries: { type: array, items: { type: string } }
+        hash: { type: string }
+        prevHash: { type: string, nullable: true }
     ReportReceipt:
       type: object
       description: The reporter's own receipt. It names no other member.

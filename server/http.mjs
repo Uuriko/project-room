@@ -10,6 +10,7 @@ import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectS
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -2275,12 +2276,41 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
+      // Escrowed bounties + credit ledger (agent work exchange, slice 1):
+      // every route template below is documented in docs/openapi.yaml — the
+      // route-docs gate extracts these literals from this file. The
+      // /dispute/decide template is listed before /dispute so the literal
+      // segment is never mistaken for part of a dispute id (each regex is
+      // anchored, so this is belt-and-braces). :identity may carry a lane id
+      // like id:agent/jill — callers percent-encode the slash.
+      const bountyListMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties$/.exec(url.pathname);
+      const bountyFundMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/fund$/.exec(url.pathname);
+      const bountyDeclineMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/decline$/.exec(url.pathname);
+      const bountySnoozeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/snooze$/.exec(url.pathname);
+      const bountyDuplicateMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/duplicate$/.exec(url.pathname);
+      const bountyWatchMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/watch$/.exec(url.pathname);
+      const bountyClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/claim$/.exec(url.pathname);
+      const bountySubmitMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/submit$/.exec(url.pathname);
+      const bountyAcceptMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/accept$/.exec(url.pathname);
+      const bountyDisputeDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute\/decide$/.exec(url.pathname);
+      const bountyDisputeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute$/.exec(url.pathname);
+      const bountyFinalizeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/finalize$/.exec(url.pathname);
+      const bountyMatch = bountyListMatch ?? bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch
+        ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
+        ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch;
+      const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
+      const creditsHistoryMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/history\/([^/]{1,256})$/.exec(url.pathname);
+      const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
+      const creditsEpochMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/epoch\/close$/.exec(url.pathname);
+      const creditsMatch = creditsBalancesMatch ?? creditsHistoryMatch ?? creditsTransferMatch ?? creditsEpochMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+        && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+        ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -2367,6 +2397,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
+      }
+      // Escrowed bounties + credit ledger (agent work exchange, slice 1):
+      // room-scoped bounty lifecycle and derived-balance credit routes share
+      // the credential, fence and rate-limit checks above; the handler maps
+      // escrow-module errors to stable 4xx codes. Credits are valueless
+      // ledger units — no cash-out, no on-chain touch, no real money.
+      if (bountyMatch || creditsMatch) {
+        const escrowRoute = bountyListMatch ? (req.method === "GET" ? "list" : "create")
+          : bountyFundMatch ? "fund" : bountyDeclineMatch ? "decline" : bountySnoozeMatch ? "snooze"
+          : bountyDuplicateMatch ? "duplicate" : bountyWatchMatch ? "watch"
+          : bountyClaimMatch ? "claim" : bountySubmitMatch ? "submit" : bountyAcceptMatch ? "accept"
+          : bountyDisputeDecideMatch ? "dispute-decide" : bountyDisputeMatch ? "dispute"
+          : bountyFinalizeMatch ? "finalize"
+          : creditsBalancesMatch ? "balances" : creditsHistoryMatch ? "history"
+          : creditsTransferMatch ? "transfer" : "epoch-close";
+        const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch
+          ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
+          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch;
+        const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
+        return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
+          bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
+          identity: identityMatch ? identityMatch[2] : null, helpers: { json, reject, body } });
       }
       if (route === "thread" && req.method === "GET") {
         // RC-2026-09-19-070: a DM thread root is invisible to non-participants

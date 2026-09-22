@@ -13,7 +13,11 @@ const script = await readFile(new URL('./compatibility-worker.mjs', import.meta.
 const store = new RoomStore(':memory:');
 store.initialize(initialRoom('compatibility', 'owner'));
 // Extract schema from the REAL current store, not a hand-maintained copy.
-const nativeSchema = store.db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid").all();
+// sqlite_% tables are SQLite's internal bookkeeping (sqlite_sequence et al.):
+// SQLite owns and recreates them automatically, and their names are reserved,
+// so shipping their CREATE TABLE to the Worker fails. Exclude them; fixture
+// rows for AUTOINCREMENT tables still flow through the table dumps below.
+const nativeSchema = store.db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all();
 const fences = new Map(writerFenceDefinitions.map(({ name, sql }) => [name, sql]));
 const schema = nativeSchema.map(row => {
   if (!fences.has(row.name)) return row.sql;
