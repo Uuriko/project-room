@@ -516,7 +516,7 @@ test("open-room failure after a join recovers the credential and navigates", asy
 test("lost guest cookie keeps the original join request and shows recovery instead of blind retry", async () => {
   const dom = guestJoinDom(), calls = [];
   const accountClient = {
-    session: {}, async restore() { return this.session; },
+    session: { authenticated: false, account: null }, async restore() { return this.session; },
     async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
     async joinShareLink(request) {
       calls.push(structuredClone(request));
@@ -531,6 +531,8 @@ test("lost guest cookie keeps the original join request and shows recovery inste
     dom.node("#join-link-name").value = "Jill";
     await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
     assert.equal(calls.length, 1);
+    assert.equal(dom.node("#join-link-signout").hidden, false);
+    assert.match(dom.node("#join-link-signout").textContent, /uses another place/);
     assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
     assert.match(dom.node("#join-link-status").textContent, /original browser session/);
     assert.equal(dom.node("#join-account-choices").hidden, false, "the recovery message offers a visible sign-in action");

@@ -548,7 +548,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       failed = true;
       joinStatus(joinFailureStatus(error));
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
-      $("#join-link-signout").hidden = error.code !== "guest_session_ended";
+      const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
+      $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
+      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Sign out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);
@@ -569,6 +571,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const signedOut = await accountClient.logout();
       if (version !== joinVersion || !joinDialog.open) return;
       if (signedOut?.authenticated !== false || signedOut.account !== null) throw new Error("Sign-out was not confirmed. Try again.");
+      clearUncertainJoin();
       redemptionId = crypto.randomUUID(); $("#join-link-signout").hidden = true;
       joinStatus("Signed out. You can now join with a new guest identity.");
     } catch (error) {
