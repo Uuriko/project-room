@@ -1,3 +1,4 @@
+import { GmailActions } from './gmail-actions.mjs';
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
 import { createServer } from "node:http";
@@ -1443,7 +1444,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return json(res, 200, projection(gmail ? gmail.status(auth) : { state: 'unavailable', address: null, syncedAt: null }));
           if (!gmail) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
           if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
-          protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 10);
+          protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 60);
+          if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req, { limit: 512 * 1024 }))));
           if (url.pathname === "/api/inbox/gmail/connect") {
             const authorizationUrl = gmail.begin(token, binding);
             // Lax admits Google's top-level return while the account cookie

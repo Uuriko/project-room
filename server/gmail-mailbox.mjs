@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { ServiceError } from './store.mjs';
 import { normalizeGmailMessage } from './channel-adapters/gmail.mjs';
 export const GMAIL_CALLBACK = '/api/auth/gmail/callback';
-const scope = 'https://www.googleapis.com/auth/gmail.readonly';
+const scope = 'https://www.googleapis.com/auth/gmail.modify';
 const tokenUrl = 'https://oauth2.googleapis.com/token';
 const apiUrl = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const hash = s => createHash('sha256').update(s).digest('hex');
@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS account_setup (account_id TEXT PRIMARY KEY REFERENCES
 CREATE TABLE IF NOT EXISTS gmail_mailboxes (
  account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
  auth_epoch INTEGER NOT NULL, encrypted TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gmail_operations (
+ account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT NOT NULL CHECK(json_valid(result_json)), at INTEGER NOT NULL, PRIMARY KEY(account_id,request_id)
 );
 CREATE TABLE IF NOT EXISTS gmail_pending (
  state_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -48,7 +51,7 @@ export class GmailMailbox {
   }
   status(auth) {
     const data = this.record(auth);
-    return data ? { state: data.usable && !data.reconnectRequired ? 'connected' : 'reconnect_required', address: data.address, syncedAt: data.syncedAt ?? null } : { state: 'disconnected', address: null, syncedAt: null };
+    return data ? { state: data.usable && !data.reconnectRequired ? 'connected' : 'reconnect_required', canWrite: data.scopes?.includes(scope) === true, address: data.address, syncedAt: data.syncedAt ?? null } : { state: 'disconnected', address: null, syncedAt: null };
   }
   begin(token, binding) {
     const auth = this.auth(token, binding), state = randomBytes(32).toString('base64url'), verifier = randomBytes(32).toString('base64url');
@@ -120,7 +123,7 @@ export class GmailMailbox {
       this.store.connections.apply(pending.token, { action: 'connection.configure', requestId: randomUUID(), connectionId, expectedRevision: existing?.profile.revision ?? 0,
         profile: { accountId: auth.account.id, id: connectionId, revision: (existing?.profile.revision ?? 0) + 1, provider: 'gmail-api', mailboxId: address,
           identity: { address, name: '' }, aliases: [] } }, pending.binding);
-      this.save(auth, { address, connectionId, refreshToken: tokens.refresh_token, syncedAt: null });
+      this.save(auth, { address, connectionId, refreshToken: tokens.refresh_token, scopes: tokens.scope.split(/\s+/), syncedAt: null });
       this.store.db.prepare('DELETE FROM gmail_pending WHERE state_hash=?').run(key);
     });
     return { token: pending.token, binding: pending.binding };

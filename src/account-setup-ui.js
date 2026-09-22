@@ -54,11 +54,11 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
         if (url.origin !== 'https://accounts.google.com' || url.pathname !== '/o/oauth2/v2/auth') throw new Error('Invalid provider');
         location.assign(url.href);
       }), true);
-      connect.disabled = true; content.append(connect, el('p', 'Read recent email in your private inbox. Nothing is sent or shared with a room automatically.', 'form-hint'));
+      connect.disabled = true; content.append(connect, el('p', 'Read, send, and organize Gmail in your private inbox. Nothing is sent or shared with a room automatically.', 'form-hint'));
       const turn = generation;
       api.request('/gmail').then(value => {
         if (turn !== generation || !owns() || !connection.isConnected) return;
-        connection.textContent = value.state === 'unavailable' ? 'Gmail connection is not enabled here yet. Save your choices and continue.' : value.state === 'connected' ? `Connected: ${value.address}` : 'Choose a Google account and approve read access.';
+        connection.textContent = value.state === 'unavailable' ? 'Gmail connection is not enabled here yet. Save your choices and continue.' : value.state === 'connected' ? `Connected: ${value.address}` : 'Choose a Google account and approve access to read, send, and organize email.';
         connect.disabled = value.state === 'unavailable' || value.state === 'connected';
         if (value.state === 'connected') connect.textContent = 'Gmail connected';
       }).catch(() => { if (connection.isConnected) connection.textContent = 'Couldn’t check Gmail. You can continue and connect later.'; });

@@ -5,7 +5,7 @@ import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { gmailContractFixture } from '../scripts/gmail-contract-fixture.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
 import { createRoomServer } from '../server/http.mjs';
-const scope = 'https://www.googleapis.com/auth/gmail.readonly';
+const scope = 'https://www.googleapis.com/auth/gmail.modify';
 function setup(t, options = {}) {
   const f = createAcceptanceFixture(), store = f.store;
   t.after(() => { store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -28,7 +28,7 @@ function setup(t, options = {}) {
   const complete = url => gmail.complete(url, url.searchParams.get('state'));
   return { ...f, account, slot, session, gmail, auth, begin, callback, complete, calls, config };
 }
-test('Gmail connect uses read-only PKCE, survives a new service, encrypts credentials, imports idempotently, disconnects', async t => {
+test('Gmail connect uses Gmail modify consent and PKCE, survives a new service, encrypts credentials, imports idempotently, disconnects', async t => {
   const f = setup(t), url = f.begin();
   assert.equal(url.searchParams.get('scope'), scope); assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   const pending = f.store.db.prepare('SELECT encrypted FROM gmail_pending').get().encrypted;
@@ -95,8 +95,9 @@ test('account deletion removes grants, pending connections and setup answers', a
   const { planAccountDeletion, executeAccountDeletion } = await import('../server/account-deletion.mjs');
   const f = setup(t); await f.complete(f.callback(f.begin())); f.begin();
   f.store.db.prepare('INSERT INTO account_setup VALUES(?,?)').run(f.account.id, '{}');
+  f.store.db.prepare('INSERT INTO gmail_operations VALUES(?,?,?,?,?)').run(f.account.id, 'deletion-test', 'f'.repeat(64), '{"state":"unknown"}', 0);
   executeAccountDeletion(f.store, planAccountDeletion(f.store, f.account.id).plan);
-  for (const table of ['gmail_mailboxes', 'gmail_pending', 'account_setup']) assert.equal(f.store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n, 0);
+  for (const table of ['gmail_mailboxes', 'gmail_pending', 'gmail_operations', 'account_setup']) assert.equal(f.store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n, 0);
 });
 test('revoked refresh grant offers reconnect instead of an endless sync retry', async t => {
   const f = setup(t); await f.complete(f.callback(f.begin()));

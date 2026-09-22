@@ -2,11 +2,19 @@
 
 New accounts see three optional steps: name and intended use; messaging-platform choices and Connect Gmail; then open the inbox. Progress and choices are account-owned and saved before OAuth. “Set up later” dismisses the guide; Manage inbox → Personalize setup reopens it. Existing completed accounts are not forced through setup. Guest invitations go straight to the room; adding a durable sign-in method makes personal setup available. Empty quarantine dashboards stay out of a new inbox. Outlook, Slack, Discord, Telegram and WhatsApp are preference choices labeled “coming later”, not grants or working consumer connections.
 
-Gmail mailbox access is separate from Google sign-in. Connect Gmail starts Google account selection and consent with PKCE and only `gmail.readonly`. The return imports up to 25 recent INBOX messages. “Sync Gmail” repeats that bounded import without duplicate sources. This is an initial recent-mail reader, not full mailbox synchronization: no background polling, historical pagination, sending, Gmail read-status writes, deletion propagation, or attachment downloads. Saved copies remain after disconnect. One Gmail mailbox per account; disconnect before choosing a different mailbox. Existing advanced fixture and Telegram-bot controls remain under Advanced connections.
+Gmail mailbox access is separate from Google sign-in. Connect Gmail starts Google account selection and consent with PKCE and `gmail.modify`. Previously saved read-only grants still read, but require reconnecting before sending or organizing email. The OAuth return imports the latest 25 inbox messages into the unified private inbox; Open Gmail provides a live provider view with Inbox, Starred, Sent, Drafts, All mail and Trash, Gmail search and older-page navigation.
+
+The live Gmail workspace supports plain-text compose, reply/reply-all using Reply-To and Gmail thread headers, text forwarding, To/Cc/Bcc, explicit save/reopen/update of Gmail drafts, send, archive, read/unread, star/unstar, trash and restore. All remote bodies render as text; HTML is converted without executing it. Formatted drafts or drafts containing attachments are viewable but must be edited in Gmail, preserving their contents. The sender is the connected mailbox, shown in the composer. Sending does not share mail with a room.
+
+`gmail_operations` durably reserves each mutation before contacting Google. An identical request replays its receipt and never repeats the provider write. Network uncertainty stays `unknown`; the UI asks the user to inspect Gmail rather than silently retrying. The journal stores operation fingerprints and provider receipts, not addresses or body text. A changed Gmail draft message ID blocks stale edits. Account/session/connection checks fence provider calls and browser rendering; Gmail credentials remain encrypted. The operation journal is included in backup/recovery and account deletion.
+
+**Still required for full Gmail:** attachment upload/download and forwarding, rich HTML compose/reader, full thread conversation display, draft autosave/delete and cross-tab conflict refinement, push/history background synchronization (including imported-copy deletions and labels), multiple Gmail accounts/aliases, custom labels/spam controls, snooze/scheduled send, automatic reconciliation of uncertain operations, and approved-account live validation plus production configuration/Google verification. Current reads refresh on explicit navigation, Search, or Refresh. The unified imported copies are a bounded snapshot; Gmail actions do not yet update that snapshot automatically. Saved copies remain after disconnect. One Gmail mailbox per account; disconnect before choosing another.
+
+See [competitive design decisions](GMAIL-DESIGN-BENCHMARKS.md) for the source-backed comparison and acceptance criteria.
 
 ## Standing product requirements — John, 2026-09-22
 
-The target is a fully functional Gmail client within a unified personal inbox. The read-only recent-message implementation below is an initial checkpoint, not the accepted finished scope. Complete Gmail requires compose, send, reply/reply-all, forward, drafts, attachments, mailbox actions, search, older mail, reliable automatic synchronization, and account management.
+The target is a fully functional Gmail client within a unified personal inbox. The recent-message reader was the first checkpoint; the live actions workspace is the next, not the accepted finished scope. Complete Gmail requires compose, send, reply/reply-all, forward, drafts, attachments, mailbox actions, search, older mail, reliable automatic synchronization, and account management.
 
 Before designing or implementing the next inbox slices, compare the proposed experience with:
 
@@ -21,20 +29,28 @@ Keep the user's desired experience central: a short, skippable setup questionnai
 
 No deployment or Google Console change is performed by this change. The user-facing action remains unavailable until the service is configured:
 
-1. Enable Gmail API in the Google project that owns the OAuth web client. Configure the consent screen for Gmail read access, and test users while the app is in testing. Broad public access requires Google's applicable restricted-scope verification.
+1. Enable Gmail API in the Google project that owns the OAuth web client. Configure the consent screen for Gmail read, send and organize access (`gmail.modify`), and test users while the app is in testing. Broad public access requires Google's applicable restricted-scope verification.
 2. Register the exact canonical redirect URI: `https://<ROOM_ORIGIN host>/api/auth/gmail/callback`. It is distinct from the existing Google sign-in callback. All entry Workers must continue using the canonical Room service.
 3. Retain `ROOM_GOOGLE_CLIENT_ID` and `ROOM_GOOGLE_CLIENT_SECRET`. Supply `ROOM_GMAIL_TOKEN_KEY` as a cryptographically random 32-byte key encoded as 64 hex characters; store it as a deployment secret, not a checked-in variable. Set `ROOM_GMAIL_ENABLED=1` only with that configuration. Keep the encryption key stable across restarts and recovery; replacing it makes existing encrypted grants unreadable.
 4. Deploy the tested revision through the normal release procedure. In Cloudflare, invalid Gmail settings disable Gmail without preventing Room startup. Local boot uses the same explicit configuration.
-5. Verify with an approved test account: complete setup, consent, see recent mail, repeat sync, disconnect, and verify no further mailbox reads. No real mailbox connection was made by the automated tests.
+5. Verify with an approved test account: complete setup, consent, see recent mail, repeat sync, disconnect, and verify no further mailbox reads or writes. Use deliberately addressed test messages to check live send/drafts and revoke/reconnect behavior. No real mailbox connection was made by the automated tests.
 
 OAuth state and refresh grants use AES-256-GCM with context-bound authenticated encryption. Pending state expires after ten minutes, is consumed once, survives service restarts, and is cancelled by disconnect or a new authorization attempt. A short-lived HttpOnly SameSite=Lax flow cookie binds the Google return to the initiating browser; the account cookie stays Strict. Completion rechecks the initiating session before and after provider calls. Reads and writes require account sessions; writes require Origin and CSRF. The API never returns tokens. Account deletion removes grants and saved setup preferences. Disconnect deletes local credentials; Google’s app permission can also be removed in the user's Google Account.
 
 Sources: [Gmail server authorization](https://developers.google.com/workspace/gmail/api/auth/web-server), [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
-## Validation receipt (local, 2026-09-22)
+## Earlier read-only checkpoint validation (2026-09-22)
 
 - Full `node scripts/check.mjs`: 4,962 passed, 0 failed, 1 existing TODO. Includes source syntax, route docs, schema, lint, secret scan, wiki and the core suite.
 - Latest Gmail guards: 10/10 targeted tests pass, including wrong-browser callbacks, revoked grants, account isolation, expiry, consent refusal, reconnect/disconnect races and deletion cleanup. Google sign-in regressions also pass.
 - Inbox/setup/unified browser run: 90/90 pass. Account workspace/settings: 15/15. Guest/invitation/room lifecycle: 12/12. Latest setup/quarantine run: 5/5. Desktop and phone screenshots inspected in `test-results/gmail-setup/`.
 - Recovery suite: 21/21 pass, covering all 89 tables and substantive encrypted Gmail/setup rows. Release packaging and empty-state checks: 13/13 pass.
 - Final browser-cookie and quiet-empty-inbox refinements were verified with their focused suites after the full check. No live provider credentials or mailbox data were used.
+
+## Live-actions checkpoint validation (2026-09-22)
+
+- Full `node scripts/check.mjs`: 4,970 passed, 0 failed, 1 existing TODO; syntax, route/schema checks, lint, secret scan, recovery and release packaging passed. Recovery covers all 90 tables, including the operation journal.
+- Final Gmail service/OAuth tests: 18/18. Includes consent upgrades, threaded draft sends, CC/BCC, duplicate and concurrent request handling, uncertain receipts across service restart, changed/unsupported drafts, session/disconnect fencing, CSRF, account isolation and deletion.
+- Inbox/unified/Gmail browser regression: 89/89. Setup plus Gmail focused run: 23/23. Final desktop/mobile Gmail scenarios: 2/2, extended after the broad run to cover lost HTTP send acknowledgements and cross-tab sign-out clearing both reader and unsaved composer.
+- Final changed-module lint and `git diff --check` passed. Updated phone/desktop screenshots inspected in `test-results/gmail-workspace/`.
+- Provider behavior is tested with an in-process stateful Gmail double. No real outbound email, live OAuth, deployment or Google Console change was performed. Production quotas, provider behavior, verification and live account compatibility remain to validate.

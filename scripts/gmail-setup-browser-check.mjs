@@ -47,7 +47,7 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
   const key = f.store.issueAccountAccessKey(account.id), message = gmailContractFixture().messages[0].response.message;
   const config = { clientId: 'fixture.apps.googleusercontent.com', clientSecret: 'fixture-secret', tokenKey: '42'.repeat(32), redirectUri: '',
     fetchImpl: async url => {
-      if (url.includes('/token')) return Response.json({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', scope: 'https://www.googleapis.com/auth/gmail.readonly' });
+      if (url.includes('/token')) return Response.json({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', scope: 'https://www.googleapis.com/auth/gmail.modify' });
       if (url.endsWith('/profile')) return Response.json({ emailAddress: 'morgan@gmail.test' });
       if (url.includes('/messages?')) return Response.json({ messages: [{ id: message.id }] });
       return Response.json(message);
@@ -59,7 +59,7 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('https://accounts.google.com/**', route => {
-    const url = new URL(route.request().url()); assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.readonly');
+    const url = new URL(route.request().url()); assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
     return route.fulfill({ status: 302, headers: { Location: config.redirectUri + '?state=' + url.searchParams.get('state') + '&code=fixture-code' }, body: '' });
   });
   await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();

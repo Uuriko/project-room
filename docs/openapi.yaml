@@ -69,9 +69,46 @@ paths:
         '403': { description: Origin or CSRF rejected. }
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail/mailbox:
+    post:
+      summary: Read, search, compose, save provider drafts and organize the owner's Gmail mailbox.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token. Mutations require gmail.modify and a unique requestId; accepted and unknown receipts replay without repeating the provider write. Plain-text compose only; unsupported fields are rejected. Payload limit 512 KiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [list, read, save, send, archive, inbox, trash, untrash, read-mark, unread, star, unstar] }
+                requestId: { type: string, maxLength: 128 }
+                id: { type: string, maxLength: 128 }
+                draftId: { type: string, maxLength: 128 }
+                expectedMessageId: { type: string, maxLength: 128 }
+                replyId: { type: string, maxLength: 128 }
+                folder: { type: string, enum: [inbox, sent, starred, trash, all, drafts] }
+                query: { type: string, maxLength: 500 }
+                pageToken: { type: string, maxLength: 2048 }
+                to: { type: string, maxLength: 4096 }
+                cc: { type: string, maxLength: 4096 }
+                bcc: { type: string, maxLength: 4096 }
+                subject: { type: string, maxLength: 4096 }
+                body: { type: string, maxLength: 100000 }
+      responses:
+        '200': { description: Owner-bound mailbox data or accepted/unknown operation receipt. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '413': { description: Request exceeds the payload limit. }
+        '422': { description: Invalid input, draft changed or Gmail needs reconnecting. }
+        '429': { description: Rate limit exceeded. }
+        '502': { description: Gmail unavailable. }
+        '503': { description: Gmail is not configured. }
   /api/inbox/gmail/connect:
     post:
-      summary: Start read-only Gmail OAuth; returns authorizationUrl.
+      summary: Start Gmail read, send and organize OAuth; returns authorizationUrl.
       security:
         - accountSession: []
       description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.

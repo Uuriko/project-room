@@ -1,3 +1,4 @@
+import { installGmailWorkspace } from './gmail-ui.js';
 import { installAccountSetup } from './account-setup-ui.js';
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from "./inbox-send-ui.js";
@@ -24,10 +25,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   };
   const owns = () => owner !== null && owner === ownerKey();
   const callbackResult = new URL(location.href).searchParams.get('gmail');
-  const gmailNotice = { connected: 'Gmail connected. Your recent email is ready.', 'sync-error': 'Gmail connected, but email could not be loaded. Choose Sync Gmail to try again.', cancelled: 'Gmail connection cancelled. You can connect later.', error: 'Gmail wasn’t connected. Please try again and approve read access.' }[callbackResult] ?? '';
+  const gmailNotice = { connected: 'Gmail connected. Your recent email is ready.', 'sync-error': 'Gmail connected, but email could not be loaded. Choose Sync Gmail to try again.', cancelled: 'Gmail connection cancelled. You can connect later.', error: 'Gmail wasn’t connected. Please try again and approve email access.' }[callbackResult] ?? '';
   if (callbackResult) { const url = new URL(location.href); url.searchParams.delete('gmail'); history.replaceState(null, '', url.pathname + url.search + url.hash); }
   $('#inbox-gmail-notice').textContent = gmailNotice;
   const setupUI = installAccountSetup({ api, owns, gmailNotice, onInbox: () => load() });
+  const gmailUI = installGmailWorkspace({ api, ownerKey: () => owns() ? owner : null });
+  $('#inbox-gmail-open').addEventListener('click', () => gmailUI.open());
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
@@ -125,7 +128,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   function reset({ preservePending = false } = {}) {
     navigationEpoch++;
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
-    setupUI.reset(); gmailGeneration++; $('#inbox-gmail-notice').textContent = '';
+    setupUI.reset(); gmailUI.reset(); $('#inbox-gmail-open').hidden = true; gmailGeneration++; $('#inbox-gmail-notice').textContent = '';
     $('#inbox-gmail-status').textContent = 'Bring your email into your private inbox.';
     $('#inbox-gmail-connect').disabled = true; $('#inbox-gmail-connect').textContent = 'Connect Gmail';
     $('#inbox-gmail-disconnect').hidden = true; $('#inbox-gmail-disconnect').textContent = 'Disconnect';
@@ -382,11 +385,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const turn = ++gmailGeneration;
     try {
       const value = await api.request('/gmail'); if (!owns() || turn !== gmailGeneration) return;
+      gmailUI.setStatus(value); $('#inbox-gmail-open').hidden = value.state !== 'connected';
       const connected = value.state === 'connected';
       $('#inbox-gmail-status').textContent = connected ? value.address : value.state === 'unavailable' ? 'Gmail connection is not enabled here yet.' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';
-      $('#inbox-gmail-connect').textContent = connected ? 'Sync Gmail' : value.state === 'reconnect_required' ? 'Reconnect Gmail' : 'Connect Gmail';
+      $('#inbox-gmail-connect').textContent = connected && value.canWrite ? 'Sync Gmail' : value.state === 'reconnect_required' || connected && !value.canWrite ? 'Reconnect Gmail' : 'Connect Gmail';
       $('#inbox-gmail-connect').disabled = value.state === 'unavailable';
-      $('#inbox-gmail-connect').dataset.state = value.state;
+      $('#inbox-gmail-connect').dataset.state = connected && !value.canWrite ? 'reconnect_required' : value.state;
       $('#inbox-gmail-disconnect').hidden = !['connected', 'reconnect_required'].includes(value.state);
     } catch { if (owns() && turn === gmailGeneration) $('#inbox-gmail-status').textContent = 'Couldn’t check Gmail. Refresh to try again.'; }
   }
