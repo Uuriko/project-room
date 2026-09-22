@@ -38,6 +38,16 @@ const fmtWhen = value => {
   const ms = Date.parse(value ?? "");
   return Number.isFinite(ms) ? new Date(ms).toLocaleString() : String(value ?? "");
 };
+// Every other externally-authored URL in this app goes through a scheme gate
+// before it becomes an href (safeUrl in src/app.js). esc() is not that gate: it
+// escapes HTML metacharacters, and "javascript:alert(1)" contains none of them.
+// server/work-handoff.mjs does validate url inputs as https today, so this is
+// not a live hole - it is the difference between two independent checks and
+// one, for a field an agent authors and a person clicks.
+const safeHref = value => {
+  try { const url = new URL(String(value)); return url.protocol === "https:" ? esc(url.href) : "#"; }
+  catch { return "#"; }
+};
 const section = (title, body) => body
   ? `<div class="handoff-section"><h5>${esc(title)}</h5>${body}</div>` : "";
 const kvRow = (term, value) => value == null || value === ""
@@ -48,7 +58,7 @@ function inputsHtml(inputs) {
   return `<ul class="handoff-inputs">${inputs.map(input => {
     const kind = INPUT_KIND_LABELS[input?.kind] ?? esc(input?.kind ?? "input");
     const ref = input?.kind === "url"
-      ? `<a class="source-link" href="${esc(input.ref)}" target="_blank" rel="noopener noreferrer">${esc(input.label ?? input.ref)}</a>`
+      ? `<a class="source-link" href="${safeHref(input.ref)}" target="_blank" rel="noopener noreferrer">${esc(input.label ?? input.ref)}</a>`
       : esc(input.label ?? input.ref);
     const sha = input?.sha ? ` · <code>sha ${esc(input.sha.slice(0, 12))}</code>` : "";
     const detail = input?.detail ? `<p class="handoff-note">${esc(input.detail)}</p>` : "";
