@@ -58,6 +58,7 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'approved-result');
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft');
   await open(); await page.locator('#room-overview-close').click();
+  await page.waitForFunction(() => document.querySelector('#room-overview-open') === document.activeElement);
   assert.equal(await page.locator('#room-overview-open').evaluate(node => node === document.activeElement), true);
   await open();
   f.store.issueAccessKey('commons', 'owner');
