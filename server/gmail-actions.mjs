@@ -80,12 +80,18 @@ export class GmailActions {
   async run(token, binding, input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail('gmail_invalid_action', 'Choose a Gmail action.');
     const { action } = input;
-    const allowed = ['action', 'requestId', 'id', 'draftId', 'expectedMessageId', 'replyId', 'folder', 'query', 'pageToken', 'to', 'cc', 'bcc', 'subject', 'body', 'html', 'attachments', 'mailboxId', 'partId', 'threadId'];
+    const allowed = ['sourceId', 'action', 'requestId', 'id', 'draftId', 'expectedMessageId', 'replyId', 'folder', 'query', 'pageToken', 'to', 'cc', 'bcc', 'subject', 'body', 'html', 'attachments', 'mailboxId', 'partId', 'threadId'];
     if (Object.keys(input).some(k => !allowed.includes(k))) fail('gmail_invalid_message', 'Unsupported Gmail message fields.');
     if (!['list', 'read', 'attachment', 'thread', 'save', 'draft-delete', 'send', 'archive', 'inbox', 'trash', 'untrash', 'read-mark', 'unread', 'star', 'unstar'].includes(action)) fail('gmail_invalid_action', 'Choose a Gmail action.');
     const write = !['list', 'read', 'attachment', 'thread'].includes(action);
     if (input.mailboxId != null && !validId(input.mailboxId)) fail('gmail_invalid_mailbox', 'Choose a connected Gmail account.');
     const c = await this.context(token, binding, write, input.mailboxId);
+    if (input.sourceId !== undefined) {
+      if (action !== 'read' || typeof input.sourceId !== 'string' || !input.sourceId || input.sourceId.length > 1024) fail('gmail_invalid_message', 'Choose an imported Gmail message.');
+      const source = this.store.inbox.read(token, input.sourceId, binding).source;
+      if (source.adapter !== 'email' || source.envelope.connection.id !== c.record.connectionId) fail('gmail_invalid_message', 'Choose a message from this Gmail account.');
+      input = { ...input, id: source.envelope.message.id };
+    }
     if (action === 'thread') {
       if (!validId(input.threadId)) fail('gmail_invalid_message', 'Choose a conversation.');
       const thread = await c.request('/threads/' + input.threadId + '?format=full');

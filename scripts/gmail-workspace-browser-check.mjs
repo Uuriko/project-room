@@ -10,14 +10,17 @@ import { fillAccessKey } from './auth-signin.mjs';
 for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage and search at ${width}px`, { timeout: 35000 }, async t => {
   const f = createAcceptanceFixture(), provider = gmailLiveFixture(), account = f.store.accountForMember('commons', 'owner');
   f.store.completeOnboarding(account.id); const key = f.store.issueAccountAccessKey(account.id), slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, key, 0), m = new GmailMailbox(f.store, provider.config);
-  const url = new URL(m.begin(slot.token, session.sessionBinding)); url.host = 'room.example'; url.pathname = '/api/auth/gmail/callback'; url.searchParams.set('code', 'fixture'); await m.complete(url, url.searchParams.get('state'));
+  const url = new URL(m.begin(slot.token, session.sessionBinding)); url.host = 'room.example'; url.pathname = '/api/auth/gmail/callback'; url.searchParams.set('code', 'fixture'); await m.complete(url, url.searchParams.get('state')); await m.sync(slot.token, session.sessionBinding);
   const server = createRoomServer({ store: f.store, gmailAuth: provider.config }); await new Promise(r => server.listen(0, '127.0.0.1', r));
   const origin = 'http://127.0.0.1:' + server.address().port, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(r => server.close(r)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const context = await browser.newContext({ viewport: { width, height: 950 } }), page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();
-  await page.locator('#inbox-gmail-open').click(); const root = page.locator('.gmail-workspace'), dialog = page.locator('.gmail-compose');
-  await root.getByRole('button', { name: 'Taylor' }).click(); await root.locator('[data-reader]').getByText('Meet at noon.', { exact: true }).waitFor();
+  const root = page.locator('.gmail-workspace'), dialog = page.locator('.gmail-compose');
+  await root.locator('[data-reader]').getByText('Meet at noon.', { exact: true }).waitFor();
+  await root.getByRole('button', { name: 'All messages', exact: false }).click();
+  await page.locator('.inbox-row').filter({ hasText: 'Friday plan' }).click();
+  await root.locator('[data-reader]').getByText('Meet at noon.', { exact: true }).waitFor();
   await root.getByRole('button', { name: 'Reply', exact: true }).click(); await dialog.getByLabel('Message', { exact: true }).fill('Friday works.');
   await dialog.getByRole('button', { name: 'Save to Gmail drafts' }).click(); await dialog.getByText('Saved to Gmail drafts.', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Close', exact: true }).click(); await root.getByLabel('Folder').selectOption('drafts');
@@ -30,7 +33,19 @@ for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage 
   mkdirSync('test-results/gmail-workspace', { recursive: true }); await page.screenshot({ path: `test-results/gmail-workspace/compose-${width}.png`, fullPage: true });
   assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
   await dialog.getByRole('button', { name: 'Send email', exact: true }).click(); await dialog.waitFor({ state: 'hidden' }); assert.equal(provider.calls.filter(c => c.url.endsWith('/messages/send')).length, 1);
-  await root.getByLabel('Folder').selectOption('inbox'); await root.locator('.gmail-message').click(); await root.getByRole('button', { name: 'Star', exact: true }).click(); await root.getByRole('button', { name: 'Unstar', exact: true }).waitFor();
+  let releaseInbox, reachedInbox;
+  const heldInbox = new Promise(resolve => { reachedInbox = resolve; });
+  const inboxGate = new Promise(resolve => { releaseInbox = resolve; });
+  const holdFolder = async route => {
+    const data = route.request().postDataJSON();
+    if (data.action === 'list' && data.folder === 'inbox') { reachedInbox(); await inboxGate; }
+    await route.continue();
+  };
+  await page.route('**/api/inbox/gmail/mailbox', holdFolder);
+  await root.getByLabel('Folder').selectOption('inbox'); await heldInbox;
+  assert.equal(await root.locator('.gmail-message').count(), 0, 'old-folder messages cannot be selected while the new folder loads');
+  releaseInbox(); await root.getByRole('button', { name: 'Taylor', exact: false }).click();
+  await page.unroute('**/api/inbox/gmail/mailbox', holdFolder); await root.getByRole('button', { name: 'Star', exact: true }).click(); await root.getByRole('button', { name: 'Unstar', exact: true }).waitFor();
   await root.getByRole('button', { name: 'Archive', exact: true }).click(); await root.getByLabel('Folder').selectOption('all'); await root.getByLabel('Search Gmail').fill('New note'); await root.getByRole('button', { name: 'Search', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.gmail-message').length === 1 && document.querySelector('.gmail-message').textContent.includes('New note'));
   await page.screenshot({ path: `test-results/gmail-workspace/mailbox-${width}.png`, fullPage: true });

@@ -537,6 +537,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
+      // Refreshing imported copies must preserve the user's All messages view.
+      if (selected && rows.some(row => row.id === selected && row.connection?.provider === 'gmail-api')) return;
       const pending = pendingShare(), saved = savedPosition();
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
@@ -545,6 +547,15 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   async function open(sourceId) {
     if (!owns()) return;
+    const imported = rows.find(row => row.id === sourceId);
+    if (imported?.connection?.provider === 'gmail-api') {
+      const turn = ++epoch, navigation = navigationEpoch;
+      await loadGmail();
+      if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;
+      if (gmailUI.open(imported.connection.id, sourceId)) {
+        selected = sourceId; renderList(); $('#inbox-panel').classList.remove('reading'); return;
+      }
+    }
     if (selected !== sourceId) $("#inbox-email-details").open = false;
     remember(); selected = sourceId; renderList();
     threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
@@ -567,7 +578,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     readToggle.textContent = d.source.readAt ? "Mark unread" : "Mark read";
     readToggle.disabled = d.busy || d.pending;
     const email = d.source.email, channel = d.source.channel, live = connectionRecords.get(rows.find(r => r.id === selected)?.connection?.id)?.live?.state === "configured";
-    text("#inbox-source-label", email ? "Sample email · only you" : channel ? `${live ? "" : "Sample "}${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
+    text("#inbox-source-label", email ? "Email copy · only you" : channel ? `${live ? "" : "Sample "}${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
     $("#inbox-ask").hidden = Boolean(email || channel) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email && !channel;
     const metadata = email ? ["Mailbox: " + d.source.recipient,

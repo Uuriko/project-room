@@ -28,8 +28,9 @@ CREATE TABLE IF NOT EXISTS gmail_pending (
 export function gmailConfig(env = {}, origin, google = null) {
   if (env.ROOM_GMAIL_ENABLED !== '1') return null;
   if (!google || !/^[a-f0-9]{64}$/i.test(env.ROOM_GMAIL_TOKEN_KEY ?? '')) throw new Error('Gmail requires Google OAuth and a 32-byte ROOM_GMAIL_TOKEN_KEY');
-  if (env.ROOM_GMAIL_PILOT_ONLY === '1' && !env.ROOM_OPERATOR_ACCOUNT_ID) throw new Error('Gmail pilot requires the operator account');
-  return { allowedAccountIds: env.ROOM_GMAIL_PILOT_ONLY === '1' ? [env.ROOM_OPERATOR_ACCOUNT_ID] : null, clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: env.ROOM_GMAIL_TOKEN_KEY };
+  const pilotAccountId = env.ROOM_GMAIL_PILOT_ACCOUNT_ID || env.ROOM_OPERATOR_ACCOUNT_ID;
+  if (env.ROOM_GMAIL_PILOT_ONLY === '1' && !pilotAccountId) throw new Error('Gmail pilot requires the operator account');
+  return { allowedAccountIds: env.ROOM_GMAIL_PILOT_ONLY === '1' ? [pilotAccountId] : null, clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: env.ROOM_GMAIL_TOKEN_KEY };
 }
 export class GmailMailbox {
   constructor(store, config) { this.store = store; this.config = config; this.fetch = (...args) => (config.fetchImpl ?? fetch)(...args); }

@@ -86,6 +86,7 @@ paths:
                 action: { type: string, enum: [list, read, thread, attachment, save, draft-delete, send, archive, inbox, trash, untrash, read-mark, unread, star, unstar] }
                 requestId: { type: string, maxLength: 128 }
                 id: { type: string, maxLength: 128 }
+                sourceId: { type: string, maxLength: 1024, description: For read only; resolves an owned imported message within the selected Gmail connection. }
                 draftId: { type: string, maxLength: 128 }
                 expectedMessageId: { type: string, maxLength: 128 }
                 replyId: { type: string, maxLength: 128 }

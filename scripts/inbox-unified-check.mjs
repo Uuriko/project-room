@@ -161,7 +161,7 @@ test("a Telegram reply goes through the fixture transport with sample labels; em
   assert.equal(await p.locator("#inbox-send-panel").isVisible(), false);
   await p.locator("#inbox-email-details summary").click();
   await p.locator("#inbox-email-metadata", { hasText: "Sending unavailable" }).waitFor();
-  assert.equal(await p.locator("#inbox-source-label").textContent(), "Sample email · only you");
+  assert.equal(await p.locator("#inbox-source-label").textContent(), "Email copy · only you");
 });
 
 test("connection management: add a Telegram bot and a fixture mailbox, reconnect, then remove with a deliberate confirmation", { timeout: 40000 }, async t => {
