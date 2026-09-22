@@ -11,8 +11,9 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "
 const SCAN_EXT = /\.(mjs|js|cjs|json|yaml|yml|toml|md|txt|html|css|env|example|sh)$/i;
 // File paths never scanned (lockfiles carry hashes, not secrets).
 // Fixture/check scripts and READMEs use placeholder secrets (verified 2026-09-16).
-const SKIP_FILES = [/package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
-  /server\/vendor\/gmail-html-sanitizer\.mjs$/, // generated bundle: scripts/build-gmail-sanitizer.mjs esbuild-bundles sanitize-html; license provenance in server/vendor/gmail-html-LICENSES.txt — minified constant tables trip the entropy heuristic
+// Pinned, reproducibly bundled sanitize-html dependencies contain HTML entity tables,
+// base64 alphabets and parser messages, not credentials (build-gmail-sanitizer.mjs).
+const SKIP_FILES = [/server\/vendor\/gmail-html-sanitizer\.mjs$/, /package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
   /-fixture\.mjs$/, /-check\.mjs$/, /README\.md$/];
 // Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
 // and variable assignments (not hardcoded values).

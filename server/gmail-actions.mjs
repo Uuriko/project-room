@@ -20,9 +20,10 @@ export class GmailActions {
     const m = this.mailbox, auth = m.auth(token, binding), record = m.record(auth, mailboxId);
     if (!record?.usable || record.reconnectRequired) fail('gmail_reconnect_required', 'Reconnect Gmail to continue.');
     if (write && !record.scopes?.includes(scope)) fail('gmail_write_permission_required', 'Reconnect Gmail to allow sending and organizing mail.');
+    const revision = this.store.connections.connection(auth.account.id, record.connectionId).profile.revision;
     const check = () => {
       const next = m.auth(token, binding), latest = m.record(next, record.connectionId);
-      if (next.account.id !== auth.account.id || next.sessionRevision !== auth.sessionRevision || !latest?.usable || latest.refreshToken !== record.refreshToken) fail('gmail_session_changed', 'Your Gmail connection changed.');
+      if (next.account.id !== auth.account.id || next.sessionRevision !== auth.sessionRevision || !latest?.usable || latest.refreshToken !== record.refreshToken || this.store.connections.connection(auth.account.id, record.connectionId)?.profile.revision !== revision) fail('gmail_session_changed', 'Your Gmail connection changed.');
     };
     const tokens = await m.exchange({ refresh_token: record.refreshToken, grant_type: 'refresh_token' }); check();
     if (write && tokens.scope && !tokens.scope.split(/\s+/).includes(scope)) fail('gmail_write_permission_required', 'Reconnect Gmail to allow sending and organizing mail.');
@@ -43,6 +44,20 @@ export class GmailActions {
       data = (await c.request('/messages/' + message.id + '/attachments/' + encodeURIComponent(part.body.attachmentId))).data;
     }
     return { name: part.filename || 'Attachment', type: part.mimeType || 'application/octet-stream', bytes: attachmentBytes({ data }) };
+  }
+  async hydrate(c, message) {
+    let total = 0;
+    const walk = async part => {
+      if (!part) return;
+      if (!part.filename && ['text/plain', 'text/html'].includes(part.mimeType) && part.body?.attachmentId && !part.body.data) {
+        const file = await this.attachment(c, { id: message.id, payload: part }, '0');
+        total += file.bytes.length;
+        if (total > gmailAttachmentLimit) fail('gmail_attachment_too_large', 'Message text exceeds 10 MiB.');
+        part.body.data = file.bytes.toString('base64url');
+      }
+      for (const child of part.parts ?? []) await walk(child);
+    };
+    await walk(message.payload); return message;
   }
   async reconcile(c, requestId, previous) {
     if (previous.state !== 'unknown' || !['send', 'save'].includes(previous.action) || previous.mailboxId !== c.record.connectionId || !previous.messageKey) return previous;
@@ -74,7 +89,8 @@ export class GmailActions {
     if (action === 'thread') {
       if (!validId(input.threadId)) fail('gmail_invalid_message', 'Choose a conversation.');
       const thread = await c.request('/threads/' + input.threadId + '?format=full');
-      return { messages: (thread.messages ?? []).map(m => project(m)) };
+      const messages = []; for (const message of thread.messages ?? []) messages.push(project(await this.hydrate(c, message)));
+      return { messages };
     }
     if (action === 'attachment') {
       if (!validId(input.id)) fail('gmail_invalid_message', 'Choose a message.');
@@ -107,7 +123,7 @@ export class GmailActions {
       if (!validId(input.id) || input.draftId != null && !validId(input.draftId)) fail('gmail_invalid_message', 'Choose a message.');
       const data = await c.request(input.draftId ? '/drafts/' + input.draftId + '?format=full' : '/messages/' + input.id + '?format=full');
       const message = input.draftId ? data.message : data;
-      return { message: project(message, input.draftId ?? null) };
+      return { message: project(await this.hydrate(c, message), input.draftId ?? null) };
     }
     if (!validId(input.requestId)) fail('gmail_invalid_request', 'A request identifier is required.');
     const fingerprint = digest(JSON.stringify(input)), db = this.store.db, accountId = c.auth.account.id;

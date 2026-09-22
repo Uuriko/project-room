@@ -126,3 +126,13 @@ test('mailbox credentials stay account-scoped and expired consent never calls Go
   await assert.rejects(() => f.complete(callback), { code: 'gmail_expired' });
   assert.equal(f.calls.length, before);
 });
+
+test('operator-only Gmail pilot does not expose OAuth or background grants to other accounts', async t => {
+  const f = setup(t); await f.complete(f.callback(f.begin()));
+  const restricted = new GmailMailbox(f.store, { ...f.config, allowedAccountIds: ['different-account'] });
+  assert.equal(restricted.status(f.auth()).state, 'unavailable');
+  assert.deepEqual(restricted.records(f.auth()), []);
+  assert.throws(() => restricted.begin(f.slot.token, f.session.sessionBinding), { code: 'gmail_not_configured' });
+  const allowed = new GmailMailbox(f.store, { ...f.config, allowedAccountIds: [f.account.id] });
+  assert.equal(allowed.status(f.auth()).state, 'connected');
+});

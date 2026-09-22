@@ -35,6 +35,32 @@ for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage 
   await page.waitForFunction(() => document.querySelectorAll('.gmail-message').length === 1 && document.querySelector('.gmail-message').textContent.includes('New note'));
   await page.screenshot({ path: `test-results/gmail-workspace/mailbox-${width}.png`, fullPage: true });
   assert.ok(await root.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  // Rich drafts preserve file bytes across saves, reopen and forwarding.
+  await root.getByRole('button', { name: 'New email' }).click();
+  await dialog.getByLabel('To', { exact: true }).fill('friend@example.com');
+  await dialog.getByLabel('Subject', { exact: true }).fill('Formatted attachment');
+  await dialog.getByRole('button', { name: 'Formatting', exact: true }).click();
+  await dialog.getByRole('textbox', { name: 'Formatted message' }).fill('Rich content');
+  await dialog.getByRole('textbox', { name: 'Formatted message' }).press('ControlOrMeta+a');
+  await dialog.getByRole('button', { name: 'Bold', exact: true }).click();
+  await dialog.getByLabel('Attach files').setInputFiles({ name: 'hello.txt', mimeType: 'text/plain', buffer: Buffer.from('attachment bytes') });
+  await dialog.getByText('hello.txt', { exact: false }).waitFor();
+  await dialog.getByRole('button', { name: 'Save to Gmail drafts' }).click();
+  await dialog.getByText('Saved to Gmail drafts.', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await root.getByLabel('Search Gmail').fill(''); await root.getByLabel('Folder').selectOption('drafts');
+  await root.locator('.gmail-message').click();
+  const downloaded = page.waitForEvent('download'); await root.getByRole('button', { name: 'Download hello.txt' }).click();
+  assert.equal((await downloaded).suggestedFilename(), 'hello.txt');
+  await root.getByRole('button', { name: 'Edit draft' }).click();
+  assert.equal(await dialog.locator('[data-rich] b').textContent(), 'Rich content');
+  await dialog.getByRole('button', { name: 'Save to Gmail drafts' }).click();
+  await dialog.getByText('Saved to Gmail drafts.', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await root.getByRole('button', { name: 'New email' }).click();
+  assert.equal(await dialog.getByLabel('Message', { exact: true }).inputValue(), '');
+  assert.equal(await dialog.locator('[data-files-list]').textContent(), '');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   // Lose the HTTP receipt after Gmail has accepted the message. The browser
   // must check the same durable request, never generate another send.
   let lost = false;

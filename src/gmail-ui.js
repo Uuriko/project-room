@@ -71,7 +71,7 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
   }
   function compose(mode = 'new', m = null) {
     if (!status?.canWrite || !ownerKey()) return;
-    form.reset(); files = []; richMode = false; setRich(false); renderFiles(); editing = null; pending = null; dirty = false; busy = false; lock(false); d('[data-result]').textContent = ''; d('[data-send]').textContent = 'Send email';
+    d('[data-rich]').replaceChildren(); form.reset(); files = []; richMode = false; setRich(false); renderFiles(); editing = null; pending = null; dirty = false; busy = false; lock(false); d('[data-result]').textContent = ''; d('[data-send]').textContent = 'Send email';
     d('[data-from]').textContent = 'From ' + status.address; d('h2').textContent = mode === 'draft' ? 'Edit draft' : mode.startsWith('reply') ? 'Reply' : mode === 'forward' ? 'Forward' : 'New email';
     if (m) {
       if (mode === 'draft') { editing = { draftId: m.draftId, expectedMessageId: m.id }; for (const k of ['to', 'cc', 'bcc', 'subject', 'body']) form.elements[k].value = m[k]; if (m.html) setRich(true, m.html); }

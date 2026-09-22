@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS gmail_pending (
 export function gmailConfig(env = {}, origin, google = null) {
   if (env.ROOM_GMAIL_ENABLED !== '1') return null;
   if (!google || !/^[a-f0-9]{64}$/i.test(env.ROOM_GMAIL_TOKEN_KEY ?? '')) throw new Error('Gmail requires Google OAuth and a 32-byte ROOM_GMAIL_TOKEN_KEY');
-  return { clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: env.ROOM_GMAIL_TOKEN_KEY };
+  if (env.ROOM_GMAIL_PILOT_ONLY === '1' && !env.ROOM_OPERATOR_ACCOUNT_ID) throw new Error('Gmail pilot requires the operator account');
+  return { allowedAccountIds: env.ROOM_GMAIL_PILOT_ONLY === '1' ? [env.ROOM_OPERATOR_ACCOUNT_ID] : null, clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: env.ROOM_GMAIL_TOKEN_KEY };
 }
 export class GmailMailbox {
   constructor(store, config) { this.store = store; this.config = config; this.fetch = (...args) => (config.fetchImpl ?? fetch)(...args); }
@@ -44,8 +45,10 @@ export class GmailMailbox {
       return JSON.parse(Buffer.concat([decipher.update(data.subarray(12, -16)), decipher.final()]).toString());
     } catch { fail('gmail_reconnect_required'); }
   }
-  auth(token, binding) { return this.store.inbox.auth(token, binding); }
+  allowed(auth) { return !this.config.allowedAccountIds || this.config.allowedAccountIds.includes(auth.account.id); }
+  auth(token, binding) { const auth = this.store.inbox.auth(token, binding); if (!this.allowed(auth)) fail('gmail_not_configured', 503); return auth; }
   records(auth) {
+    if (!this.allowed(auth)) return [];
     const rows = [...this.store.db.prepare('SELECT * FROM gmail_mailboxes WHERE account_id=?').all(auth.account.id),
       ...this.store.db.prepare('SELECT * FROM gmail_linked_mailboxes WHERE account_id=? ORDER BY mailbox_id').all(auth.account.id)];
     return rows.map(row => {
@@ -59,6 +62,7 @@ export class GmailMailbox {
     return mailboxId ? records.find(r => r.connectionId === mailboxId) ?? null : records[0] ?? null;
   }
   status(auth) {
+    if (!this.allowed(auth)) return { state: 'unavailable', address: null, syncedAt: null, mailboxes: [] };
     const mailboxes = this.records(auth).map(data => ({ id: data.connectionId, state: data.usable && !data.reconnectRequired ? 'connected' : 'reconnect_required', canWrite: data.scopes?.includes(scope) === true, address: data.address, syncedAt: data.syncedAt ?? null, syncError: data.syncError ?? null }));
     return { ...(mailboxes[0] ?? { state: 'disconnected', address: null, syncedAt: null }), mailboxes };
   }
@@ -182,7 +186,7 @@ export class GmailMailbox {
       const state = this.store.connections.state(token, record.connectionId, 'INBOX', binding);
       this.store.connections.apply(token, { action: 'page.apply', requestId: randomUUID(), connectionId: record.connectionId, connectionRevision: c.profile.revision,
         folderId: 'INBOX', expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor, cursor: 'gmail-recent:' + randomUUID(), complete: true, reset: true, observations }, binding);
-      this.save(current, { ...record, usable: undefined, syncedAt: new Date(this.store.now()).toISOString() });
+      this.save(current, { ...latest, usable: undefined, historyId: null, historyPage: null, syncedAt: new Date(this.store.now()).toISOString() });
       return observations.length;
     });
   }

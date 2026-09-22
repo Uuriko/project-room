@@ -1443,7 +1443,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision }, ...extra });
           if (url.pathname === "/api/inbox/gmail" && req.method === 'GET')
             return json(res, 200, projection(gmail ? gmail.status(auth) : { state: 'unavailable', address: null, syncedAt: null }));
-          if (!gmail) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
+          if (!gmail || !gmail.allowed(auth)) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
           if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
           protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 60);
           if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req, { limit: 16 * 1024 * 1024 }))));
