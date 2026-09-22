@@ -243,3 +243,33 @@ test("shared short codes and focused URLs select the same invitation without acc
   for(const target of [origin+'/#invite/'+token, origin+'/#join/'+token+'/anything/patch',origin+'/#join/'+token+'/work/patch/extra'])
     assert.throws(()=>setupTarget(target));
 });
+
+// Exercise the HTTP recipe from a fresh identity, without the CLI, a browser
+// account, an access-request approval, or an agent invite code.
+test("shared link HTTP self-service joins, reads and retries with the same identity", async t => {
+  const f = await fixture(t), linkToken = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(f.keys.commons, "commons", { requestId: "http-door", linkToken,
+    expiresAt: Date.now() + 3600000, maxJoins: 1, expectedMemberRevision: 0 });
+  const request = async (path, body, token) => {
+    const response = await fetch(f.origin + path, { method: body ? "POST" : "GET", headers: {
+      "Content-Type": "application/json", Origin: f.origin, ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    assert.ok(response.ok, `${path}: ${response.status}`);
+    return response.json();
+  };
+  const packet = await (await fetch(f.origin + "/llms.txt")).text();
+  assert.match(packet, /HTTP-only agents/);
+  assert.doesNotMatch(packet, /#join\/ ≠ agent auth|Instinct \/ Muse default/);
+  const preview = await request("/api/share-links/preview", { linkToken });
+  assert.equal(preview.room.id, "commons");
+  const identity = await request("/api/agent-identities", { displayName: "Fresh HTTP agent" });
+  const data = { linkToken, displayName: "Fresh HTTP agent" };
+  const joined = await request("/api/share-links/join-agent", data, identity.secret);
+  assert.equal(joined.roomId, "commons");
+  assert.deepEqual(joined.permissions, []);
+  await request(`/api/rooms/${joined.roomId}/activation-pack`, null, identity.secret);
+  const resumed = await request("/api/share-links/join-agent", data, identity.secret);
+  assert.equal(resumed.memberId, joined.memberId);
+  assert.equal(resumed.duplicate, true);
+  assert.equal(f.store.shareLinks.list(f.keys.commons, "commons").links[0].joins, 1);
+});
