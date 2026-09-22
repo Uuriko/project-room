@@ -540,3 +540,25 @@ test("lost guest cookie keeps the original join request and shows recovery inste
     assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
   } finally { dom.uninstall(); }
 });
+
+
+test("reload recovers a pending join even when its success filled the invitation", async () => {
+  const dom = guestJoinDom(); let recovered = null, opened = false;
+  const token = "s".repeat(43), redemptionId = crypto.randomUUID();
+  const accountClient = {
+    session: {}, async restore() { return this.session; },
+    async prepareShareLink() { throw Object.assign(new Error("Full invitation"), { code: "link_unavailable", status: 410 }); },
+    async joinShareLink(request) { recovered = request; return { roomId: "commons", session: { member: { id: "same-guest" } } }; }
+  };
+  dom.install();
+  try {
+    writeUncertainJoin({ linkToken: token, redemptionId, displayName: "Jill", roomId: "commons", roomTitle: "Room" });
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { opened = true; } });
+    await ui.open({ token });
+    assert.equal(recovered.redemptionId, redemptionId);
+    assert.equal(recovered.linkToken, token);
+    assert.equal(opened, true);
+    assert.equal(readUncertainJoin(), null);
+  } finally { dom.uninstall(); }
+});

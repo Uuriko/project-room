@@ -452,6 +452,16 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
     } catch (error) {
       if (version !== joinVersion) return;
+      if (resume && error.code === "link_unavailable") {
+        // The earlier join may have consumed the final place. Preview refuses
+        // new joins, but the authenticated idempotent replay can still recover it.
+        previewRoomId = resume.roomId; previewRoomTitle = resume.roomTitle;
+        $("#join-link-name").value = resume.displayName;
+        $("#join-link-form").hidden = false;
+        $("#join-link-scope").textContent = "Checking your earlier join…";
+        await performJoin({ resume: true });
+        return;
+      }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
       const retryable = canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
