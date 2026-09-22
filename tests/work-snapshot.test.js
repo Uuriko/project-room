@@ -10,6 +10,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { currentWorkRecord } from '../server/work-context.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
+import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
@@ -19,7 +20,8 @@ async function fixture(t) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const config = { origin, roomId: 'commons', memberId: 'producer', token: f.keys.producer };
   const get = (query = '', headers = { Authorization: `Bearer ${f.keys.producer}` }) => fetch(`${origin}/api/rooms/commons${query}`, { headers });
-  return { ...f, server, origin, config, get };
+  const signEvidence = makeTestSigner(f.store);
+  return { ...f, server, origin, config, get, signEvidence };
 }
 
 test('work snapshot is a current-only committed read without messages, historical receipts or cursor reads', async t => {
@@ -28,7 +30,7 @@ test('work snapshot is a current-only committed read without messages, historica
     data: { workItemId: 'test-handoff', expectedRevision: f.store.room('commons').state.workItems['test-handoff'].revision, ...data } });
   change('work.accepted');
   const complete = summary => change('work.completed', { summary, nextAction: 'Review', producerId: 'producer',
-    evidenceUrl: 'https://example.invalid/not-fetched', evidenceVersion: crypto.randomUUID() });
+    evidenceUrl: 'https://example.invalid/not-fetched', evidenceVersion: crypto.randomUUID(), signedEvidence: f.signEvidence() });
   complete('Historical-only summary');
   change('work.blocked', { reason: 'Correction', nextAction: 'Revise' });
   change('work.blocker_resolved', { resolution: 'Prepared' }); complete('Current-only summary');

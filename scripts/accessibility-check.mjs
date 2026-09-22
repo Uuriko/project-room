@@ -12,13 +12,21 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 test("stale return brief cannot cross a session; skip, local alerts, focus return, and AA primary controls hold", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-accessibility-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
-  const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+  const signEvidence = makeTestSigner(store);
+  const send = (key, type, data) => {
+    // External completions require signed evidence under the new contract.
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) {
+      data = { ...data, signedEvidence: signEvidence() };
+    }
+    return store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+  };
   send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
   const maya = store.issueAccessKey("commons", "maya");
   send(owner, T.WORK_PROPOSED, { workItemId: "owner-only", title: "Owner-only return item", definitionOfDone: "Owner accepts", accountableMemberId: "owner" });
@@ -115,6 +123,8 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/reporter-result");
   await page.locator('#action-form input[name="evidenceVersion"]').fill("producer-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Maya verifies independently");
+  // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.
+  await page.locator('#action-form textarea[name="signedEvidence"]').fill(JSON.stringify(signEvidence()));
   await page.locator('#action-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('[data-work-record-id="producer-choice"] .receipt')?.textContent.includes("Room owner"));
   const knownReceipt = await page.locator('[data-work-record-id="producer-choice"] .receipt').textContent();
@@ -128,6 +138,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/unknown-result");
   await page.locator('#action-form input[name="evidenceVersion"]').fill("unknown-v1");
   await page.locator('#action-form textarea[name="nextAction"]').fill("Establish provenance before verification");
+  await page.locator('#action-form textarea[name="signedEvidence"]').fill(JSON.stringify(signEvidence()));
   await page.locator('#action-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('[data-work-record-id="producer-unknown-choice"] .receipt')?.textContent.includes("Unknown"));
   assert.equal(completionCommands.at(-1).data.producerId, null, "unknown is an explicit submitted choice");

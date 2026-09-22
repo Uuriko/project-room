@@ -9,10 +9,12 @@ import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function fixture(t) {
   const f = await startWorkLifecycleFixture(), handles = new Set();
   t.after(async () => { for (const handle of handles) await handle.close(); await f.close(); });
+  const signEvidence = makeTestSigner(f.store);
   const open = async path => { const handle = await openMcpTestClient(path); handles.add(handle); return handle; };
   const close = async handle => { handles.delete(handle); return handle.close(); };
   const ownerToken = JSON.parse(readFileSync(f.ownerFile, "utf8")).token;
@@ -24,7 +26,7 @@ async function fixture(t) {
     const config = { version: 1, origin: f.origin, roomId: "commons", memberId, token };
     saveAgentConnection(configDirectory, config); return { mcp: await open(configDirectory), client: new RoomAgentClient(config), configDirectory };
   };
-  return { ...f, open, close, send, enroll };
+  return { ...f, open, close, send, enroll, signEvidence };
 }
 const read = async (mcp, workItemId) => (await mcp.call("room_read_work", { workItemId })).result.structuredContent;
 async function recorded(mcp, name, args) {
@@ -91,14 +93,15 @@ test("managed contributor and reviewer complete rework and exact-version review 
     expectedRevision: (await read(actor.mcp, workItemId)).work.revision, ...data });
   await action(writer, "room_accept_work"); await action(writer, "room_start_work");
   const original = { requestId: "first-completion", workItemId, expectedRevision: 2, summary: "Version one", evidenceUrl: "https://example.invalid/not-fetched",
-    evidenceVersion: digest("Version one"), nextAction: "Review exact summary", producerId: "managed-writer", checksClaimed: ["one", "two"] };
+    evidenceVersion: digest("Version one"), nextAction: "Review exact summary", producerId: "managed-writer", checksClaimed: ["one", "two"],
+    signedEvidence: f.signEvidence() };
   const first = await recorded(writer.mcp, "room_record_completion", original);
   const changed = (await writer.mcp.call("room_record_completion", { ...original, checksClaimed: ["two", "one"] })).result;
   assert.equal(changed.structuredContent.code, "idempotency_conflict");
   await action(reviewer, "room_record_verification", { result: "fail", completionEventId: first.eventId, evidenceVersion: original.evidenceVersion, summary: "Revise the summary", nextAction: "Write version two" });
   assert.equal((await read(writer.mcp, workItemId)).work.state, "blocked");
   await action(writer, "room_resolve_blocker", { resolution: "Prepared replacement" }); await action(writer, "room_start_work");
-  const second = await action(writer, "room_record_completion", { summary: "Version two", evidenceUrl: original.evidenceUrl, evidenceVersion: digest("Version two"), nextAction: "Review new version", producerId: "managed-writer" });
+  const second = await action(writer, "room_record_completion", { summary: "Version two", evidenceUrl: original.evidenceUrl, evidenceVersion: digest("Version two"), nextAction: "Review new version", producerId: "managed-writer", signedEvidence: f.signEvidence() });
   await f.close(writer.mcp); writer.mcp = await f.open(writer.configDirectory);
   const retry = await recorded(writer.mcp, "room_record_completion", original);
   assert.equal(retry.eventId, first.eventId); assert.equal(retry.duplicate, true); assert.equal(retry.appliedRevision, 3);
@@ -130,7 +133,7 @@ test("chat-only and wrong-assignee tools cannot widen enrollment; unknown produc
   assert.equal(proposed.structuredContent.code, "command_rejected"); assert.equal(auditRecovery(f.store).dataSha256, before);
   await recorded(writer.mcp, "room_accept_work", { requestId: "accept", workItemId, expectedRevision: 0 });
   const done = await recorded(writer.mcp, "room_record_completion", { requestId: "unknown-producer", workItemId, expectedRevision: 1,
-    summary: "Reported result", evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", nextAction: "Review" });
+    summary: "Reported result", evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", nextAction: "Review", signedEvidence: f.signEvidence() });
   await recorded(reviewer.mcp, "room_record_verification", { requestId: "unknown-producer-check", workItemId, expectedRevision: 2,
     completionEventId: done.eventId, evidenceVersion: "v1", result: "pass", summary: "The text was checked; its producer is unknown" });
   const current = await read(reviewer.mcp, workItemId); assert.equal(current.work.verification.independenceConfirmed, false);
@@ -197,7 +200,7 @@ test("expired claim rejects new work while its original successful acquisition r
   const before = auditRecovery(f.store).dataSha256;
   const start = (await a.call("room_start_work", { requestId: "expired-start", workItemId, expectedRevision: 2 })).result;
   const completion = (await a.call("room_record_completion", { requestId: "expired-result", workItemId, expectedRevision: 2,
-    summary: "Must not be saved", evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", nextAction: "Review", producerId: "agent-a" })).result;
+    summary: "Must not be saved", evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", nextAction: "Review", producerId: "agent-a", signedEvidence: f.signEvidence() })).result;
   for (const result of [start, completion]) assert.equal(result.structuredContent.code, "command_rejected");
   const retry = await recorded(a, "room_acquire_claim", input);
   assert.equal(retry.eventId, original.eventId); assert.equal(retry.duplicate, true); assert.equal(retry.currentStateVerified, false);

@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -37,11 +38,12 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   }));
   store.command(agent, "commons", command(T.WORK_ACCEPTED, { workItemId: "work-review", expectedRevision: 0 }));
   store.command(agent, "commons", command(T.WORK_STARTED, { workItemId: "work-review", expectedRevision: 1 }));
+  const signEvidence = makeTestSigner(store);
   store.command(agent, "commons", command(T.WORK_COMPLETED, {
     workItemId: "work-review", expectedRevision: 2, producerId: "codex",
     summary: "Four consistency corrections before implementation.",
     evidenceUrl: "https://example.invalid/review", evidenceVersion: "v1",
-    nextAction: "Keep the receipt on the rail"
+    nextAction: "Keep the receipt on the rail", signedEvidence: signEvidence()
   }));
   store.command(owner, "commons", command(T.WORK_PROPOSED, {
     workItemId: "work-build", title: "Build the first executable Room slice",

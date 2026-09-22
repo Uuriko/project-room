@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { attentionReport } from "../server/owner-attention.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -26,8 +27,9 @@ function setup(t) {
   keys.member = store.issueAccessKey("commons", "member");
   keys.agent = store.issueAccessKey("commons", "agent");
   const report = () => attentionReport({ store, accessRequests }, keys.owner, "commons", null, clock.now);
+  const signEvidence = makeTestSigner(store);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, accessRequests, keys, send, clock, report };
+  return { store, accessRequests, keys, send, clock, report, signEvidence };
 }
 
 function proposeWork(f, id, overrides = {}) {
@@ -39,7 +41,8 @@ function completeWork(f, id) {
   f.send("agent", T.WORK_ACCEPTED, { workItemId: id, expectedRevision: f.store.room("commons").state.workItems[id].revision });
   f.send("agent", T.WORK_STARTED, { workItemId: id, expectedRevision: f.store.room("commons").state.workItems[id].revision });
   f.send("agent", T.WORK_COMPLETED, { workItemId: id, expectedRevision: f.store.room("commons").state.workItems[id].revision,
-    summary: "did it", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "none" });
+    summary: "did it", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "none",
+    signedEvidence: f.signEvidence() });
 }
 
 test("empty room: zero items and owner-only gate", t => {

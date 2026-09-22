@@ -25,6 +25,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
       import { RoomStore as OldStore } from ${JSON.stringify(join(destination, 'server/store.mjs'))};
       import { DurableDatabase as OldDatabase, durableStorage as oldStorage } from ${JSON.stringify(join(destination, 'cloudflare/storage.mjs'))};
       import { RoomStore } from ${JSON.stringify(join(repository, 'server/store.mjs'))};
+      import { issueSignedEvidence, contentHashOf } from ${JSON.stringify(join(repository, 'server/signed-evidence.mjs'))};
       import { AgentConnections } from ${JSON.stringify(join(repository, 'server/agent-connections.mjs'))};
       import { DurableDatabase, durableStorage } from ${JSON.stringify(join(repository, 'cloudflare/storage.mjs'))};
       import { auditRecovery } from ${JSON.stringify(join(repository, 'server/recovery.mjs'))};
@@ -147,9 +148,14 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
               {action:'send.observe',requestId:'worker-observed',sourceId:'private-source',sendId:'worker-send',expectedRevision:1,outcome:'accepted',providerId:'synthetic-worker-message'}
             ];
             const sendSaved=sendRequests.map(req=>(req.action==='send.reserve'?store.inbox.apply(f.token,req,f.session.sessionBinding):store.inbox.transport(f.token,req,f.session.sessionBinding)).receipt);
+            // External completion requires signed evidence under the new contract.
+            const upgradeIdentity=store.identities.create('Upgrade check agent');
+            const upgradeSeedHex=Buffer.from(upgradeIdentity.privateKey,'base64').toString('hex');
+            const upgradeEvidence=issueSignedEvidence({signerIdentityId:upgradeIdentity.identityId,
+              issuedAt:new Date(store.now()).toISOString(),contentHash:contentHashOf('upgrade-check-bytes'),seedHex:upgradeSeedHex});
             const outsideCommand={id:'outside-credit',type:'work.completed',data:{workItemId:'help-task',expectedRevision:1,
               summary:'Outside draft',evidenceUrl:'https://example.invalid/draft',evidenceVersion:'v1',nextAction:'Review',
-              producerId:null,externalProducer:'Outside collaborator + AI'}};
+              producerId:null,externalProducer:'Outside collaborator + AI',signedEvidence:upgradeEvidence}};
             const outsideSaved=store.command(f.token,'commons',outsideCommand,f.session.sessionBinding);
             assert.equal(store.room('commons').state.workItems['help-task'].receipt.externalProducer,'Outside collaborator + AI');
             assert.throws(()=>store.inbox.list(this.env.AGENT,f.session.sessionBinding),{status:401});

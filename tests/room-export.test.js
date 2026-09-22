@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { createServer } from "node:http";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-export-"));
@@ -301,6 +302,7 @@ import { renderRoomExportHtml, safeEvidenceHref, EXPORT_HTML_CSP } from "../serv
 
 async function seedReadableRoom(store, ownerKey) {
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
+  const signEvidence = makeTestSigner(store);
   cmd(T.MESSAGE_POSTED, { messageId: "script", body: "<script>alert(1)</script> stays text" });
   cmd(T.MESSAGE_POSTED, { messageId: "breakout", body: "\" onmouseover=\"alert(2)\" data-x=\"' onfocus='alert(3)" });
   cmd(T.MESSAGE_POSTED, { messageId: "gone", body: "original secret wording" });
@@ -310,7 +312,7 @@ async function seedReadableRoom(store, ownerKey) {
   cmd(T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 });
   cmd(T.WORK_STARTED, { workItemId: "w1", expectedRevision: 1 });
   cmd(T.WORK_COMPLETED, { workItemId: "w1", expectedRevision: 2, summary: "Merged the <fix>", nextAction: "Review",
-    evidenceUrl: "https://example.com/pr/1?q=<a>&r=\"b\"", evidenceVersion: "abc123" });
+    evidenceUrl: "https://example.com/pr/1?q=<a>&r=\"b\"", evidenceVersion: "abc123", signedEvidence: signEvidence() });
 }
 
 test("HTML export renders the same event walk for people: escaped, tombstoned, framed and sandboxed", async t => {

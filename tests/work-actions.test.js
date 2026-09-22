@@ -100,6 +100,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T, replay, roomPolicy } from "../src/events.js";
 import { confirmsWorkProposal } from "../src/workflow.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 function policyFixture(t) {
   const f = createAcceptanceFixture();
@@ -108,7 +109,8 @@ function policyFixture(t) {
   const propose = (actor, workItemId, data) => send(actor, T.WORK_PROPOSED, { workItemId, title: `Outcome ${workItemId}`, definitionOfDone: "Exact result recorded", accountableMemberId: "producer", mode: "read", ...data });
   const setPolicy = (actor, data) => send(actor, T.ROOM_POLICY_SET, data);
   const state = () => f.store.room("commons").state;
-  return { ...f, send, propose, setPolicy, state };
+  const signEvidence = makeTestSigner(f.store);
+  return { ...f, send, propose, setPolicy, state, signEvidence };
 }
 
 test("room policy: altered client fields cannot disable the independent gate or the owner decision", t => {
@@ -130,7 +132,7 @@ test("room policy: altered client fields cannot disable the independent gate or 
   assert.equal(f.state().workItems["no-verifier"], undefined);
   // The gate itself holds downstream: completion without an independent PASS cannot be approved.
   f.send("producer", T.WORK_ACCEPTED, { workItemId: "forced", expectedRevision: 0 });
-  f.send("producer", T.WORK_COMPLETED, { workItemId: "forced", expectedRevision: 1, summary: "Done", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer" });
+  f.send("producer", T.WORK_COMPLETED, { workItemId: "forced", expectedRevision: 1, summary: "Done", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer", signedEvidence: f.signEvidence() });
   const completed = f.state().workItems.forced;
   assert.throws(() => f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: "forced", expectedRevision: completed.revision, decision: "approved", completionEventId: completed.receipt.eventId, evidenceVersion: "v1", reason: "Looks fine" }), /independent PASS/);
   assert.equal(f.state().workItems.forced.decision, null);

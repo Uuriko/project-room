@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 function fixture(t) {
@@ -25,7 +26,8 @@ function fixture(t) {
   store.dmConsents.request("commons", "human", "agent", "test fixture");
   store.dmConsents.decide("commons", "agent", "human", "approve");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, filename, owner, human, agent };
+  const signEvidence = makeTestSigner(store);
+  return { store, filename, owner, human, agent, signEvidence };
 }
 async function http(t) {
   const f = fixture(t);
@@ -413,7 +415,7 @@ test("an exact-scope write claim can be released at event and projection capacit
 });
 
 test("open work can be completed, unblocked, and superseded at event and projection capacity", t => {
-  const { store, owner } = fixture(t);
+  const { store, owner, signEvidence } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-complete", title: "Finish at capacity", definitionOfDone: "Completion lands", accountableMemberId: "owner" }));
   store.command(owner, "commons", command(T.WORK_ACCEPTED, { workItemId: "cap-complete", expectedRevision: 0 }));
   store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-complete", expectedRevision: 1 }));
@@ -430,7 +432,7 @@ test("open work can be completed, unblocked, and superseded at event and project
   assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-blocked", expectedRevision: 2, resolvedBlocker: "skip" })), { code: "pilot_limit" });
   assert.throws(() => store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "still capped" })), { code: "pilot_limit" });
   // Completion is a terminal action and stays available exactly once per open item.
-  const completion = command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 2, summary: "Done", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "Verify" });
+  const completion = command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 2, summary: "Done", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "Verify", signedEvidence: signEvidence() });
   assert.equal(store.command(owner, "commons", completion).sequence, 10001);
   assert.equal(store.command(owner, "commons", completion).duplicate, true);
   assert.equal(store.room("commons").state.workItems["cap-complete"].state, "completed");
@@ -466,10 +468,10 @@ test("new work mutations recheck capability changes and preserve the original wo
 });
 
 test("verifier findings cannot bypass the exact verification command or a revoked verify grant", t => {
-  const { store, owner, human, agent } = fixture(t);
+  const { store, owner, human, agent, signEvidence } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "verified-only", title: "Evidence-bound finding", definitionOfDone: "Exact evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "verified-only", expectedRevision: 0 }));
-  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "verified-only", expectedRevision: 1, producerId: "human", summary: "Result", evidenceUrl: "https://example.com/result", evidenceVersion: "v1", nextAction: "Verify" }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "verified-only", expectedRevision: 1, producerId: "human", summary: "Result", evidenceUrl: "https://example.com/result", evidenceVersion: "v1", nextAction: "Verify", signedEvidence: signEvidence() }));
   const beforeGeneric = store.snapshot(owner, "commons");
   assert.throws(() => store.command(agent, "commons", command(T.WORK_BLOCKED, { workItemId: "verified-only", expectedRevision: 2, reason: "Versionless finding", nextAction: "Redo" })), /verifier findings use verification\.recorded/);
   assert.deepEqual(store.snapshot(owner, "commons"), beforeGeneric);
@@ -481,10 +483,10 @@ test("verifier findings cannot bypass the exact verification command or a revoke
 });
 
 test("the service rejects independent verification by a receipt's reported producer", t => {
-  const { store, owner, human, agent } = fixture(t);
+  const { store, owner, human, agent, signEvidence } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "producer-bound", title: "Producer-bound result", definitionOfDone: "Independent check", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "producer-bound", expectedRevision: 0 }));
-  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "producer-bound", expectedRevision: 1, producerId: "agent", summary: "Agent-produced result reported by human", evidenceUrl: "https://example.com/agent-result", evidenceVersion: "v1", nextAction: "Verify independently" }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "producer-bound", expectedRevision: 1, producerId: "agent", summary: "Agent-produced result reported by human", evidenceUrl: "https://example.com/agent-result", evidenceVersion: "v1", nextAction: "Verify independently", signedEvidence: signEvidence() }));
   const before = store.snapshot(owner, "commons");
   assert.equal(before.state.workItems["producer-bound"].receipt.reportedById, "human");
   assert.equal(before.state.workItems["producer-bound"].receipt.producerId, "agent");

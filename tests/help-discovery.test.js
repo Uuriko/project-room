@@ -12,11 +12,17 @@ import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture } from "../scripts/frozen-runtime-fixture.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function fixture(t, createFixture = createAcceptanceFixture, createServer = createRoomServer) {
   const f = createFixture();
   let now = Date.now();
   f.store.now = () => now;
+  // Old (frozen) fixtures predate the identities API; they never complete
+  // work with signed evidence, so the signer is only created when available.
+  const signEvidence = f.store.identities ? makeTestSigner(f.store) : () => {
+    throw new Error("signed evidence not available on this fixture");
+  };
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   send("owner", "member.added", { memberId: "helper", displayName: "Synthetic helper", kind: "agent",
     permissions: [], accountableHumanId: "owner" });
@@ -39,7 +45,7 @@ async function fixture(t, createFixture = createAcceptanceFixture, createServer 
     ...(["helper", "producer", "reviewer"].includes(actor) ? { memberId: actor } : {}) });
   const client = actor => new RoomAgentClient(config(actor));
   const list = actor => client(actor).orient({ focus: "help_wanted" });
-  return { ...f, server, origin, send, work, invite, withdraw, config, client, list, now: () => now, advance: ms => { now += ms; } };
+  return { ...f, server, origin, send, work, invite, withdraw, config, client, list, signEvidence, now: () => now, advance: ms => { now += ms; } };
 }
 
 test("help discovery is opt-in, scoped and read-only for helpers, humans and independent reviewers", async t => {
@@ -80,7 +86,7 @@ test("service-clock expiry, withdrawal and completed-work consent govern discove
   f.invite(); f.work("work.started");
   assert.equal((await f.list()).work.length, 1, "ordinary progress preserves the invitation");
   f.work("work.completed", { summary: "Synthetic agenda", nextAction: "Review", producerId: "producer",
-    evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1" });
+    evidenceUrl: "https://example.invalid/not-fetched", evidenceVersion: "v1", signedEvidence: f.signEvidence() });
   assert.equal((await f.list()).work.length, 0);
   f.work("work.blocked", { reason: "Revise", nextAction: "Discuss" });
   assert.equal((await f.client().workContext("test-handoff")).help.status, "consent_changed");

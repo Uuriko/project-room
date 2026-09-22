@@ -8,10 +8,15 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 async function setup(t, mobile = false) {
   const f = createAcceptanceFixture(), snapshot = () => f.store.snapshot(f.keys.owner, "commons");
-  const mutate = (actor, type, data = {}) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data: { workItemId: "test-handoff", expectedRevision: snapshot().state.workItems["test-handoff"].revision, ...data } });
+  const signEvidence = makeTestSigner(f.store);
+  const mutate = (actor, type, data = {}) => {
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+    return f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data: { workItemId: "test-handoff", expectedRevision: snapshot().state.workItems["test-handoff"].revision, ...data } });
+  };
   mutate("producer", T.WORK_ACCEPTED);
   mutate("producer", T.WORK_COMPLETED, { summary: "An agenda naming the owner and the next discussion.\nReview dates before using it.", evidenceUrl: "https://example.invalid/private?token=not-for-export", evidenceVersion: "private-version", producerId: "producer", nextAction: "Review exact evidence" });
   const server = createRoomServer({ store: f.store, streamInterval: 40 });

@@ -7,6 +7,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
+import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 
 const command = (type, data) => ({ id: crypto.randomUUID(), type, data });
 function fixture(t) {
@@ -28,8 +29,9 @@ function fixture(t) {
     mutate(actor, T.WORK_ACCEPTED, id);
   };
   const scope = (paths = ['src/**']) => ({ repository: 'test/repo', ref: 'draft', paths, expiresAt: new Date(now + 60000).toISOString() });
+  const signEvidence = makeTestSigner(store);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, filename, keys, item, mutate, propose, scope, advance: ms => { now += ms; } };
+  return { store, filename, keys, item, mutate, propose, scope, signEvidence, advance: ms => { now += ms; } };
 }
 
 test('separate work claims serialize across database connections with no rejected event or receipt', t => {
@@ -88,7 +90,7 @@ test('blocked and completed work retains scope until release; expiry and superse
   f.mutate('a', T.WORK_BLOCKED, 'first', { reason: 'Need a decision', nextAction: 'Clarify scope' });
   assert.throws(() => f.mutate('b', T.CLAIM_ACQUIRED, 'second', f.scope()), { code: 'claim_conflict' });
   f.mutate('a', T.WORK_BLOCKER_RESOLVED, 'first', { resolution: 'Clarified' });
-  f.mutate('a', T.WORK_COMPLETED, 'first', { summary: 'Draft', evidenceUrl: 'https://example.invalid/draft', evidenceVersion: 'v1', producerId: 'a', nextAction: 'Review' });
+  f.mutate('a', T.WORK_COMPLETED, 'first', { summary: 'Draft', evidenceUrl: 'https://example.invalid/draft', evidenceVersion: 'v1', producerId: 'a', nextAction: 'Review', signedEvidence: f.signEvidence() });
   assert.throws(() => f.mutate('b', T.CLAIM_ACQUIRED, 'second', f.scope()), { code: 'claim_conflict' });
   f.advance(60001);
   f.mutate('b', T.CLAIM_ACQUIRED, 'second', f.scope());

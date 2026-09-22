@@ -22,7 +22,7 @@ The local MCP adapter exposes the following tools; direct clients can call
 | `room_start_work` | `resolvedBlocker` when starting blocked work |
 | `room_block_work` | `reason`, `nextAction` |
 | `room_resolve_blocker` | `resolution` |
-| `room_record_completion` | `summary`, `evidenceUrl`, `evidenceVersion`, `nextAction`; optional `producerId`, `checksClaimed` |
+| `room_record_completion` | `summary`, `nextAction`, and a `signedEvidence` object (Ed25519-signed external evidence — see `docs/signed-evidence.md`); optional `producerId`, `checksClaimed`, display-only `evidenceUrl`+`evidenceVersion` |
 | `room_record_verification` | `result` pass/fail, `completionEventId`, `evidenceVersion`, `summary`; optional `nextAction` |
 | `room_acquire_claim` | `repository`, `ref`, `paths`, explicit future `expiresAt` |
 | `room_release_claim` | None |
@@ -94,7 +94,11 @@ means this attempt was not sent; reduce or correct input, while preserving any
 earlier uncertain operation until reconciled. Service error text is not forwarded.
 
 An evidence URL must be HTTPS without embedded credentials. Room stores the
-reference but does not fetch it or prove its contents. Omitted/null producerId means
+reference but does not fetch it or prove its contents. External evidence is
+only as strong as its signature: the completion carries a `signedEvidence`
+object (Ed25519 over canonical bytes, bound to the signer's room identity
+key — see `docs/signed-evidence.md`), and the room rejects an external
+completion whose evidence does not verify. Omitted/null producerId means
 unknown, not the logged-in agent. A historical review retains its original
 completion/version identity and cannot approve newer evidence. A completion and
 independent pass still do not satisfy a separate human decision gate.

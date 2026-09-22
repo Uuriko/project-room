@@ -44,7 +44,7 @@ for (const review of [false, true]) for (const decision of [false, true]) {
     next("accept");
     f.mutate("producer", T.WORK_ACCEPTED);
     next("start");
-    assert.throws(() => f.mutate("producer", T.WORK_COMPLETED, { summary: "Not enough evidence" }), /missing evidenceUrl/);
+    assert.throws(() => f.mutate("producer", T.WORK_COMPLETED, { summary: "Not enough evidence" }), /missing nextAction/);
     f.mutate("producer", T.WORK_COMPLETED, { summary: "A useful finding", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding" });
     next(review ? "verify" : decision ? "decide" : "complete");
     assert.equal(terminalWork(f.item()), !review && !decision);
