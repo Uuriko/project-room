@@ -38,7 +38,7 @@ const definitions = [
   ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
-    externalProducer, segments: resultSegments,
+    externalProducer, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
@@ -76,10 +76,13 @@ export const isWorkTool = name => actions.has(name);
 export function conforms(value, shape) {
   if (value === null) return Array.isArray(shape.type) && shape.type.includes("null");
   const type = Array.isArray(shape.type) ? shape.type.find(type => type !== "null") : shape.type;
-  if (type === "object") return typeof value === "object" && !Array.isArray(value)
-    && Object.keys(value).every(key => Object.hasOwn(shape.properties, key))
-    && shape.required.every(key => Object.hasOwn(value, key))
-    && Object.entries(value).every(([key, value]) => conforms(value, shape.properties[key]));
+  if (type === "object") {
+    if (typeof value !== "object" || Array.isArray(value)) return false;
+    if (!shape.properties) return true;
+    return Object.keys(value).every(key => Object.hasOwn(shape.properties, key))
+      && shape.required.every(key => Object.hasOwn(value, key))
+      && Object.entries(value).every(([key, value]) => conforms(value, shape.properties[key]));
+  }
   if (type === "array") return Array.isArray(value) && value.length >= (shape.minItems ?? 0) && value.length <= shape.maxItems && Array.from(value).every(item => conforms(item, shape.items));
   if (type === "integer") return Number.isSafeInteger(value) && value >= shape.minimum && value <= shape.maximum;
   if (type === "boolean") return typeof value === "boolean";

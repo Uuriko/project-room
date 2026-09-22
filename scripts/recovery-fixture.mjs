@@ -6,6 +6,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { createEmailEnvelope } from "../server/email-envelope.mjs";
 import { prepareGraphReplyDraft } from "../server/graph-reply-draft.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
@@ -68,8 +69,10 @@ export function createRecoveryFixture(filename) {
   schedule("commons", keys.owner, "resolved", "schedule-resolved");
   send("commons", keys.owner, T.WORK_SUPERSEDED, { workItemId: "resolved", expectedRevision: 0, supersededByWorkItemId: "active", reason: "Synthetic replacement" });
   send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "evidence", expectedRevision: 0 });
+  const signEvidence = makeTestSigner(store);
   send("commons", keys.owner, T.WORK_COMPLETED, { workItemId: "evidence", expectedRevision: 1, producerId: "owner", summary: "Synthetic exact result",
-    evidenceUrl: "https://example.invalid/recovery", evidenceVersion: "fixture-v1", nextAction: "Owner review" });
+    evidenceUrl: "https://example.invalid/recovery", evidenceVersion: "fixture-v1", nextAction: "Owner review",
+    signedEvidence: signEvidence() });
   propose("commons", keys.owner, "owner", "native-evidence");
   send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "native-evidence", expectedRevision: 0 });
   const nativeBody = "Exact native recovery text 🪷\n", nativePost = send("commons", keys.owner, T.MESSAGE_POSTED, {

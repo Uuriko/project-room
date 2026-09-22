@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const brief = readFileSync(new URL("../connectors/muse.md", import.meta.url), "utf8");
 
@@ -48,6 +49,7 @@ test("connector brief: every example returns 2xx against the real API", async t 
   assert.equal(gets.length, 5, `expected 5 GET examples, found ${gets.length}`);
 
   const f = createAcceptanceFixture();
+  const signEvidence = makeTestSigner(f.store);
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
@@ -92,6 +94,10 @@ test("connector brief: every example returns 2xx against the real API", async t 
   for (const step of ordered) {
     if (step.kind === "command") {
       const body = JSON.parse(substitute(step.raw));
+      // The brief's work.completed example carries a placeholder for
+      // signedEvidence; the test injects a real signature so the example
+      // exercises the live 2xx path against the current server.
+      if (body.type === "work.completed") body.data.signedEvidence = signEvidence();
       const res = await post(body);
       const text = await res.text();
       assert.ok(res.status === 201 || res.status === 200,

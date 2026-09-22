@@ -17,3 +17,17 @@ export function signTestEvidence(identity, overrides = {}) {
     ...overrides,
   });
 }
+
+// Migration aid for pre-existing tests that complete work as setup rather
+// than testing evidence itself: issues a real identity on the store and
+// returns a signer closure. Each call mints a FRESH evidence object (unique
+// evidenceId, so replay dedup never fires), with issuedAt taken from the
+// store's own clock so fake-clock tests stay inside the key validity window.
+// Usage: const sign = makeTestSigner(f.store); ... signedEvidence: sign()
+export function makeTestSigner(store) {
+  const identity = issueTestIdentity(store);
+  return (overrides = {}) => signTestEvidence(identity, {
+    issuedAt: new Date(store.now()).toISOString(),
+    ...overrides,
+  });
+}

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T, applyEvent, emptyRoomState, event } from "../src/events.js";
+import { EVENT_TYPES as T, event } from "../src/events.js";
 import { canonicalJson, verifyBytes } from "../server/bounty-receipts.mjs";
 import { generateKeyPair } from "../server/agent-card-signing.mjs";
 import { textVersion } from "../server/text-results.mjs";
@@ -23,7 +23,7 @@ import {
   EVIDENCE_SCHEMA_VERSION,
   EvidenceError,
 } from "../server/signed-evidence.mjs";
-import { issueTestIdentity, signTestEvidence } from "./helpers/signed-evidence.mjs";
+import { issueTestIdentity, signTestEvidence } from "../scripts/helpers/signed-evidence.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures

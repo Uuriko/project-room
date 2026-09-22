@@ -58,7 +58,6 @@ class EvidenceError extends Error {
 }
 const fail = (code, message) => { throw new EvidenceError(code, message); };
 
-const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX128 = /^[0-9a-f]{128}$/;
 const EVIDENCE_ID = /^room-evidence:ex:[0-9a-f]{32}$/;

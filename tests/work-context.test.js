@@ -11,6 +11,7 @@ import { verifyAccessSummary } from "../src/client.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
@@ -23,7 +24,8 @@ async function fixture(t) {
   const client = actor => new RoomAgentClient({ origin, roomId: "commons", token: f.keys[actor] });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   const view = (actor = "producer", options) => f.store.workContext(f.keys[actor], "commons", "test-handoff", options);
-  return { ...f, origin, client, send, view };
+  const signEvidence = makeTestSigner(f.store);
+  return { ...f, origin, client, send, view, signEvidence };
 }
 
 test("selected context is one authenticated read with current actor/gates and explicit context omissions", async t => {
@@ -106,7 +108,7 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   await assert.rejects(producer.command({ id: crypto.randomUUID(), type: T.WORK_STARTED, data: { workItemId: stale.work.id, expectedRevision: stale.work.revision } }), error => error.status === 409);
   await mutate(producer, T.WORK_STARTED);
   assert.equal((await producer.workContext("test-handoff")).next.needsAttention, false);
-  const complete = version => mutate(producer, T.WORK_COMPLETED, { summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: version, producerId: "producer", nextAction: "Review exact version" });
+  const complete = version => mutate(producer, T.WORK_COMPLETED, { summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: version, producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   await complete("v1");
   let context = await reviewer.workContext("test-handoff");
   assert.equal(context.next.action, "verify"); assert.equal(context.next.addressedToViewer, true);
@@ -253,7 +255,7 @@ test("access summary lists only what the member can read; quoted mentions and im
   const budget = f.view().accessSummary.budget;
   assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, maxRounds: "unknown", maxToolCalls: "unknown", spendCents: "unknown", attemptCount: 1, sessionStatus: "processing" });
   f.send("producer", T.WORK_STARTED, { workItemId: "test-handoff", expectedRevision: revision() });
-  f.send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version" });
+  f.send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   const completed = f.view();
   assert.deepEqual(completed.accessSummary.evidence, { records: [{ record: "receipt", evidenceVersion: "v1", evidenceUrl: "https://example.invalid/synthetic" }], retrieved: false });
   assert.equal(completed.accessSummary.evidence.records[0].evidenceVersion, completed.work.receipt.evidenceVersion);

@@ -9,6 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { makeTestSigner } from './helpers/signed-evidence.mjs';
 
 export async function startAssistedAgentExercise() {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-assisted-agents-'));
@@ -62,6 +63,7 @@ export async function startAssistedAgentExercise() {
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
     const credentialFiles = {};
+    const signEvidence = makeTestSigner(store);
     for (const participant of participants) {
       const path = join(directory, `${participant.memberId}.json`);
       writeFileSync(path, JSON.stringify({ fixture: 'project-room-assisted-agents-v1', origin, roomId: 'commons',
@@ -69,7 +71,7 @@ export async function startAssistedAgentExercise() {
       { mode: 0o600, flag: 'wx' });
       credentialFiles[participant.memberId] = path;
     }
-    return { origin, credentialFiles, close };
+    return { origin, credentialFiles, close, signEvidence };
   } catch (error) {
     await close();
     throw error;

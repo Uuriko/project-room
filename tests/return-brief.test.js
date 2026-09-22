@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { needsAttention, workInvolvingMe } from "../server/return-selectors.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 // Return-brief wiring acceptance cases (disposition 5557850637, "next handoff" list):
 // fixed-H pagination beyond 100 events, H+1 after ack, N-versus-H boundary labeling,
@@ -23,17 +24,18 @@ function fixture(t) {
   for (const [id, kind] of [["human", "human"], ["agent", "agent"]]) store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] }));
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
+  const signEvidence = makeTestSigner(store);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, owner, human, agent };
+  return { store, owner, human, agent, signEvidence };
 }
 const postMessages = (store, token, n, prefix = "m") => { for (let i = 1; i <= n; i++) store.command(token, "commons", command(T.MESSAGE_POSTED, { body: `${prefix}${i}` })); };
 // Full lifecycle: owner proposes (independent verification + owner decision), human accepts,
 // starts, completes; agent verifies pass; owner approves. Returns the completion event id.
-function completeLifecycle(store, owner, human, agent, workItemId) {
+function completeLifecycle(store, owner, human, agent, workItemId, signEvidence) {
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId, title: `title-${workItemId}`, definitionOfDone: "done", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId, expectedRevision: 0 }));
   store.command(human, "commons", command(T.WORK_STARTED, { workItemId, expectedRevision: 1 }));
-  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId, expectedRevision: 2, producerId: "human", summary: "s", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "verify" }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId, expectedRevision: 2, producerId: "human", summary: "s", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "verify", signedEvidence: signEvidence() }));
   store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "checked" }));
   store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId, expectedRevision: 4, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "good" }));
 }
@@ -101,8 +103,8 @@ test("older unresolved work survives catch-up", t => {
 });
 
 test("verification and owner decisions are first-class history items and close the loop", t => {
-  const { store, owner, human, agent } = fixture(t);
-  completeLifecycle(store, owner, human, agent, "w-full");
+  const { store, owner, human, agent, signEvidence } = fixture(t);
+  completeLifecycle(store, owner, human, agent, "w-full", signEvidence);
   const brief = store.returnBrief(agent, "commons", {});
   const types = brief.history.items.map(i => i.event.type);
   assert.equal(types.includes(T.VERIFICATION_RECORDED), true);
@@ -112,10 +114,10 @@ test("verification and owner decisions are first-class history items and close t
 });
 
 test("an unknown producer PASS stays visible for accountable provenance and cannot unlock approval", t => {
-  const { store, owner, human, agent } = fixture(t);
+  const { store, owner, human, agent, signEvidence } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-unknown-producer", title: "Unknown producer", definitionOfDone: "Independent evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w-unknown-producer", expectedRevision: 0 }));
-  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-unknown-producer", expectedRevision: 1, summary: "Existing result", evidenceUrl: "https://example.com/unknown", evidenceVersion: "v1", nextAction: "Check exact evidence" }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-unknown-producer", expectedRevision: 1, summary: "Existing result", evidenceUrl: "https://example.com/unknown", evidenceVersion: "v1", nextAction: "Check exact evidence", signedEvidence: signEvidence() }));
   store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "w-unknown-producer", expectedRevision: 2, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "Exact evidence passed; producer remains unknown" }));
 
   const item = store.snapshot(owner, "commons").state.workItems["w-unknown-producer"];
@@ -129,17 +131,17 @@ test("an unknown producer PASS stays visible for accountable provenance and cann
 });
 
 test("a verifier named as producer routes independence resolution to the accountable member", t => {
-  const { store, owner, human, agent } = fixture(t);
+  const { store, owner, human, agent, signEvidence } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-producer-conflict", title: "Producer conflict", definitionOfDone: "Independent evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w-producer-conflict", expectedRevision: 0 }));
-  store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-producer-conflict", expectedRevision: 1, producerId: "agent", summary: "Verifier produced this result", evidenceUrl: "https://example.com/conflict", evidenceVersion: "v1", nextAction: "Assign independent evidence" }));
+  store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-producer-conflict", expectedRevision: 1, producerId: "agent", summary: "Verifier produced this result", evidenceUrl: "https://example.com/conflict", evidenceVersion: "v1", nextAction: "Assign independent evidence", signedEvidence: signEvidence() }));
   assert.deepEqual(store.returnBrief(human, "commons", {}).current.needsAttention.map(i => [i.workItemId, i.step]), [["w-producer-conflict", "resolve_independence"]]);
   assert.deepEqual(store.returnBrief(agent, "commons", {}).current.needsAttention, []);
 });
 
 test("an approved completion reopened for explicit rework remains visible and actionable", t => {
-  const { store, owner, human, agent } = fixture(t);
-  completeLifecycle(store, owner, human, agent, "w-rework");
+  const { store, owner, human, agent, signEvidence } = fixture(t);
+  completeLifecycle(store, owner, human, agent, "w-rework", signEvidence);
   store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "w-rework", expectedRevision: 5, reason: "A v2 was requested", nextAction: "Accept the v2 direction" }));
 
   let brief = store.returnBrief(human, "commons", {});
@@ -159,8 +161,8 @@ test("an approved completion reopened for explicit rework remains visible and ac
 
 for (const cause of ["block", "verification-failure"]) {
   test(`approved work reopened by ${cause} remains visible through the next completion`, t => {
-    const { store, owner, human, agent } = fixture(t);
-    completeLifecycle(store, owner, human, agent, "rework");
+    const { store, owner, human, agent, signEvidence } = fixture(t);
+    completeLifecycle(store, owner, human, agent, "rework", signEvidence);
     const item = () => store.snapshot(owner, "commons").state.workItems.rework;
     const old = item();
     if (cause === "block") store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "rework", expectedRevision: item().revision, reason: "New finding", nextAction: "Revise" }));
@@ -179,7 +181,7 @@ for (const cause of ["block", "verification-failure"]) {
     store.command(human, "commons", command(T.WORK_STARTED, { workItemId: "rework", expectedRevision: item().revision }));
     assert.deepEqual(store.returnBrief(human, "commons").current.needsAttention, []);
     assert.equal(store.returnBrief(human, "commons").current.workInvolvingMe[0].state, "working");
-    const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "rework", expectedRevision: item().revision, producerId: "human", summary: "Revised", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "Verify" }));
+    const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "rework", expectedRevision: item().revision, producerId: "human", summary: "Revised", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "Verify", signedEvidence: signEvidence() }));
     assert.equal(item().verification, null); assert.equal(item().decision, null);
     assert.equal(item().decisionHistory.length, 1);
     assert.deepEqual(item().decisionHistory[0], { ...old.decision, historical: true,
