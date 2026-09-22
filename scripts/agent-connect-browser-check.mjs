@@ -183,6 +183,8 @@ test("unknown enrollment survives close and retries the original digest and iden
 test("mobile disclosure stays lightweight, fits the viewport and conceals setup on close", { timeout: 30000 }, async t => {
   const f = await setup(t, true); await f.open(); await f.capture("mobile-form"); await f.create();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" }); await f.capture("mobile-ready");
+  assert.equal(await f.page.locator('#agent-import-checklist').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true,
+    'setup commands wrap within the mobile dialog');
   const config = await f.config();
   assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await f.page.locator("#agent-connect-close").click(); await f.open();

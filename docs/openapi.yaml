@@ -3616,7 +3616,11 @@ paths:
       description: >-
         Open: the link token is the credential. Discloses the room title and
         access description only, never message bodies, member lists or
-        credentials. 30 per address per minute.
+        credentials. 30 per address per minute. A closed link can still be
+        previewed by an existing active human member with their account-session
+        cookie and X-Session-Binding header. This read-only recovery neither
+        creates membership nor consumes another place; outsiders and removed
+        members still receive link_unavailable.
       security: []
       requestBody:
         required: true

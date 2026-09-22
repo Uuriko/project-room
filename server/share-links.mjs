@@ -142,10 +142,14 @@ export class ShareLinks {
     if (!row) unavailable();
     return row;
   }
-  preview(token) {
+  preview(token, accountToken = null, binding = null) {
     return this.store.readTransaction(() => {
       const row = this.find(token), link = this.view(row);
-      if (link.status !== "active") unavailable();
+      if (link.status !== "active") {
+        if (!accountToken || !binding) unavailable();
+        try { this.store.authenticateAccountSession(accountToken, row.room_id, binding); }
+        catch (error) { if ([401, 403, 409].includes(error.status)) unavailable(); throw error; }
+      }
       return { link, room: { id: row.room_id, title: this.store.room(row.room_id).state.room.title },
         access: "Read the room and its history, post messages, and react. No membership administration or work approvals.",
         identity: "Names are self-chosen, not verified. New guest sessions last up to 8 hours in this browser." };

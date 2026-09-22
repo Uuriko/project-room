@@ -288,3 +288,23 @@ test("Room account mode carries auth and binding through restore, writes, and SS
   assert.equal(client.session, null);
   assert.equal(accountClient.session, replacement);
 });
+
+test('closed invitation fallback is bound to existing account ownership and ignores a late identity switch', async () => {
+  for (const switched of [false, true]) {
+    const current = accountSession('member', 2), pending = deferred(), calls = [];
+    const client = new AccountClient({ fetcher: async (path, options) => {
+      calls.push({ path, options });
+      return calls.length === 1 ? response({ error: { code: 'link_unavailable', message: 'Closed' } }, 410) : pending.promise;
+    } });
+    client.session = current;
+    const preparing = client.prepareShareLink('saved-invitation');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls[0].options.credentials, 'omit');
+    assert.equal(calls[1].options.credentials, 'same-origin');
+    assert.equal(calls[1].options.headers['X-Session-Binding'], current.sessionBinding);
+    if (switched) { client.generation++; client.session = accountSession('replacement', 3); }
+    pending.resolve(response({ room: { id: 'commons' }, link: { status: 'full' } }));
+    assert.equal((await preparing).session, switched ? null : current);
+    assert.equal(client.session.account.id, switched ? 'replacement' : 'member');
+  }
+});
