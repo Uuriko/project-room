@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 // F4: a resubmitted native result shows the reviewer the changed bytes against
 // the exact previous version, and states that earlier approval never carries
@@ -22,10 +23,15 @@ test("result diff: resubmitted native results show changed bytes; first versions
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
+  const signEvidence = makeTestSigner(f.store);
+  const sendWithEvidence = (actor, type, data) => {
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+    return send(actor, type, data);
+  };
   const item = id => f.store.room("commons").state.workItems[id];
   const completeWithText = (workItemId, body) => {
     const posted = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), workItemId, body });
-    return send("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: item(workItemId).revision,
+    return sendWithEvidence("producer", T.WORK_COMPLETED, { workItemId, expectedRevision: item(workItemId).revision,
       evidenceKind: "room_text", evidenceMessageId: posted.event.data.messageId, evidenceMessageEventId: posted.event.id,
       evidenceVersion: textVersion(body), previousCompletionEventId: item(workItemId).receipt?.eventId ?? null,
       producerId: "producer", summary: "An exact room result", nextAction: "Review the stored text" });

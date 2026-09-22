@@ -12,13 +12,21 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 test("stale return brief cannot cross a session; skip, local alerts, focus return, and AA primary controls hold", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-accessibility-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
-  const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+  const signEvidence = makeTestSigner(store);
+  const send = (key, type, data) => {
+    // External completions require signed evidence under the new contract.
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) {
+      data = { ...data, signedEvidence: signEvidence() };
+    }
+    return store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+  };
   send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
   const maya = store.issueAccessKey("commons", "maya");
   send(owner, T.WORK_PROPOSED, { workItemId: "owner-only", title: "Owner-only return item", definitionOfDone: "Owner accepts", accountableMemberId: "owner" });
