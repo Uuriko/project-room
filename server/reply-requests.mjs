@@ -230,6 +230,21 @@ export function auditReplyRequests(state, history, checkpoint = null) {
   for (const row of history) {
     const e = typeof row.body === "string" ? JSON.parse(row.body) : row.event, data = e.data;
     if (e.type === "room.created") { check(!projected.room); projected.room = { id: e.roomId, ownerId: data.ownerId }; }
+    // A room can change hands, and cancelReplyRequest below authorizes against
+    // state.room.ownerId. Taking the owner from room.created alone meant an
+    // owner who RECEIVED the room cancelling somebody else's request replayed
+    // as "Only the requester or Room owner may cancel" and threw, which fails
+    // auditRecovery and takes backupRoom down for the whole database
+    // permanently. The same mistake auditCharters and auditWorkHelp each made.
+    //
+    // Only ownerId is replayed here, unlike auditWorkHelp: this projection
+    // holds no permissions or revisions to keep in step, and prepareReplyPost
+    // and cancelReplyRequest read nothing else off the room.
+    if (e.type === "ownership.transferred") {
+      check(projected.room && validId(data.toMemberId) && Object.hasOwn(projected.members, data.toMemberId)
+        && e.actorId === projected.room.ownerId);
+      projected.room.ownerId = data.toMemberId;
+    }
     if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
       check(validId(data.memberId) && !Object.hasOwn(projected.members, data.memberId));
       projected.members[data.memberId] = { id: data.memberId, kind: data.kind ?? "human", active: true };
