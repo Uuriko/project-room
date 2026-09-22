@@ -117,6 +117,14 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const bounties = runPure(reject, () => escrow.listBounties(roomId, { group }));
     return json(res, 200, { roomId, bounties });
   }
+  // Slice 10: arbiter inspection of correlation review packets. Read-only
+  // (rooms:read); packets are immutable once created. ?bountyId= filters
+  // to one bounty's packets.
+  if (escrowRoute === "reviews" && req.method === "GET") {
+    const bountyId = url.searchParams.get("bountyId");
+    const packets = runPure(reject, () => escrow.getReviewPackets(roomId, { bountyId }));
+    return json(res, 200, { roomId, packets });
+  }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "rubric", "idempotencyKey"] }))

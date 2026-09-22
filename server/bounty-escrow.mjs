@@ -225,6 +225,7 @@ export const bountyEscrowSchema = `
     rubric_json TEXT,
     rubric_hash TEXT,
     rubric_version INTEGER,
+    submission_hash TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -306,6 +307,26 @@ export const bountyEscrowSchema = `
     cooldown_end_journaled INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS bounty_flakes_lane ON bounty_flakes(room_id, lane, struck_at_ms);
+`
+// Slice 10 (integration map #10): submission fingerprinting + claim-graph
+// correlation -> arbiter review packets. The fingerprint is a normalized
+// SHA-256 over the canonicalized submission evidence; above-threshold
+// correlation (duplicate fingerprints, repeat claimant<->poster pairs)
+// creates a packet for HUMAN review. Review-only: packets never auto-ban,
+// auto-slash, or touch balances, bonds, or reputation.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_review_packets (
+    room_id TEXT NOT NULL,
+    packet_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    submission_hash TEXT NOT NULL,
+    signals_json TEXT NOT NULL CHECK(json_valid(signals_json)),
+    matched_bounties_json TEXT NOT NULL CHECK(json_valid(matched_bounties_json)),
+    graph_json TEXT NOT NULL CHECK(json_valid(graph_json)),
+    evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json))
+  );
+  CREATE INDEX IF NOT EXISTS bounty_review_packets_bounty ON bounty_review_packets(room_id, bounty_id);
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -429,6 +450,30 @@ export function toMillis(amount) {
 export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
+
+// Slice 10: the normalized submission fingerprint. Canonicalization is
+// deterministic — fixed field order, sorted checksClaimed, no timestamps,
+// no reporter identity — so the same work always hashes to the same
+// 64-hex fingerprint regardless of who submits it or when.
+export function canonicalSubmissionOf(evidence) {
+  const pick = {};
+  for (const key of ["evidenceKind", "evidenceUrl", "producerId", "summary"])
+    if (evidence[key] !== undefined && evidence[key] !== null) pick[key] = String(evidence[key]);
+  if (Array.isArray(evidence.checksClaimed))
+    pick.checksClaimed = [...evidence.checksClaimed].map(String).sort();
+  return JSON.stringify(pick);
+}
+export const submissionHashOf = evidence => sha256(canonicalSubmissionOf(evidence));
+
+// Deep-freeze a JSON-shaped value (packets carry nested graph/signal
+// structures that a top-level freeze would leave mutable).
+function deepFreeze(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
 const newId = prefix => `${prefix}${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 const isoNow = ms => new Date(ms).toISOString();
 
@@ -539,7 +584,8 @@ export class BountyEscrow {
       } else {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes"];
+          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
+          "bounty_review_packets"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         else this._migrateColumns();
         this._ready = true;
@@ -562,7 +608,8 @@ export class BountyEscrow {
   _checkSchemaReadOnly() {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes"];
+      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
+      "bounty_review_packets"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
@@ -617,13 +664,14 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_json TEXT");
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
+    addCol("bounty_records", "submission_hash TEXT");
     // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
     // compares stored DDL verbatim, so a reformatted copy would fail it.
     // A name may own several chunks (table + its indexes), so collect all.
     // All chunks are IF NOT EXISTS: safe no-ops when already present.
     const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
       .filter(sql => sql.includes(name));
-    for (const name of ["bounty_rubric_versions", "bounty_flakes"])
+    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
@@ -854,6 +902,7 @@ export class BountyEscrow {
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
       rubric: this._rubricOfRow(row),
+      submissionHash: row.submission_hash ?? null,
       watchers: this._watchersOf(roomId ?? row.room_id, row.bounty_id),
       createdAt: row.created_at, updatedAt: row.updated_at,
       stateChangedAt: new Date(row.state_changed_ms).toISOString(),
@@ -868,7 +917,7 @@ export class BountyEscrow {
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
       evidence_json=?, attestation_json=?, resolution_json=?,
-      rubric_json=?, rubric_hash=?, rubric_version=?, updated_at=? WHERE bounty_id=?`)
+      rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
       .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
@@ -878,7 +927,8 @@ export class BountyEscrow {
         bounty.resolution ? JSON.stringify(bounty.resolution) : null,
         bounty.rubric ? JSON.stringify(bounty.rubric.criteria) : null,
         bounty.rubric ? bounty.rubric.hash : null,
-        bounty.rubric ? bounty.rubric.version : null, at, bounty.bountyId);
+        bounty.rubric ? bounty.rubric.version : null,
+        bounty.submissionHash ?? null, at, bounty.bountyId);
   }
 
   _mutable(row) {
@@ -893,6 +943,7 @@ export class BountyEscrow {
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
       rubric: this._rubricOfRow(row),
+      submissionHash: row.submission_hash ?? null,
     };
   }
 
@@ -1262,13 +1313,118 @@ export class BountyEscrow {
       // Acceptance track: the work enters review, evidence-cited.
       this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
       bounty.evidence = receipt;
+      // Slice 10: the normalized submission fingerprint, pinned before the
+      // save so correlation reads the stored value.
+      bounty.submissionHash = submissionHashOf(receipt);
       this._transition(bounty, "submitted");
       this._saveBounty(bounty);
       const at = isoNow(this.nowMs());
       const event = this._event(roomId, "bounty.submitted",
         { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      // Slice 10: claim-graph correlation. Review-only: a packet never
+      // changes bounty state, balances, bonds, or reputation — no auto-ban,
+      // no auto-slash.
+      const packet = this._analyzeSubmissionCorrelation(roomId, bounty, bounty.submissionHash, receipt);
+      return { bounty: this._getBounty(roomId, bountyId), packet,
         receipt: { kind: "submit", bountyId, evidence: receipt, at, actor: act, event } };
+    });
+  }
+
+  // --- slice 10: claim-graph correlation -> arbiter review packets -----------
+  // Deterministic, room-scoped signals:
+  //   - duplicate-submission: another bounty carries the same fingerprint
+  //     (identical canonicalized evidence).
+  //   - repeat-claimant-poster: this claimant already claimed from this
+  //     poster before (a repeat pairing — productive lane or collusion,
+  //     for a human to decide).
+  // Above-threshold (>= 1 signal) creates an arbiter review packet with
+  // the matched bounties, the claim graph, and the evidence attached.
+  // REVIEW-ONLY: the packet is stored and journaled; nothing else moves.
+  _analyzeSubmissionCorrelation(roomId, bounty, fingerprint, evidence) {
+    const signals = [];
+    const matched = new Map(); // bountyId -> matched bounty summary
+    const noteMatch = row => {
+      if (row.bounty_id === bounty.bountyId || matched.has(row.bounty_id)) return;
+      matched.set(row.bounty_id, {
+        bountyId: row.bounty_id, claimant: row.claimant, poster: row.poster,
+        verifier: row.verifier, state: row.state, submissionHash: row.submission_hash,
+        submittedAt: new Date(row.state_changed_ms).toISOString(),
+      });
+    };
+    const dupes = this.db.prepare(`SELECT * FROM bounty_records
+      WHERE room_id=? AND submission_hash=? AND bounty_id<>?`).all(roomId, fingerprint, bounty.bountyId);
+    for (const row of dupes) noteMatch(row);
+    if (dupes.length > 0)
+      signals.push({ type: "duplicate-submission",
+        detail: `${dupes.length} other submission(s) carry the identical fingerprint`,
+        matchedBountyIds: dupes.map(r => r.bounty_id) });
+    const repeats = this.db.prepare(`SELECT * FROM bounty_records
+      WHERE room_id=? AND claimant=? AND poster=? AND bounty_id<>? AND claimant IS NOT NULL`)
+      .all(roomId, bounty.claimant, bounty.poster, bounty.bountyId);
+    for (const row of repeats) noteMatch(row);
+    if (repeats.length > 0)
+      signals.push({ type: "repeat-claimant-poster",
+        detail: `claimant ${bounty.claimant} previously claimed ${repeats.length} bounty/bounties from poster ${bounty.poster}`,
+        matchedBountyIds: repeats.map(r => r.bounty_id) });
+    if (signals.length === 0) return null;
+    // Claim graph: lanes as nodes (poster/claimant/verifier roles), the
+    // claim/post/verify relationships as edges, over this submission and
+    // every matched one.
+    const nodes = new Map(), edges = [];
+    const touch = (lane, roles) => {
+      if (lane === null || lane === undefined) return;
+      const n = nodes.get(lane) ?? { lane, roles: [] };
+      for (const role of roles) if (!n.roles.includes(role)) n.roles.push(role);
+      nodes.set(lane, n);
+    };
+    const link = b => {
+      touch(b.poster, ["poster"]); touch(b.claimant, ["claimant"]); touch(b.verifier, ["verifier"]);
+      edges.push({ from: b.claimant, to: b.poster, kind: "claimed-from", bountyId: b.bountyId });
+      edges.push({ from: b.poster, to: b.claimant, kind: "posted-for", bountyId: b.bountyId });
+      if (b.verifier) edges.push({ from: b.verifier, to: b.claimant, kind: "verifies", bountyId: b.bountyId });
+    };
+    link(bounty);
+    for (const m of matched.values()) link(m);
+    const frozen = value => deepFreeze(JSON.parse(JSON.stringify(value)));
+    const packet = {
+      packetId: newId("rpkt_"), roomId, createdAt: isoNow(this.nowMs()),
+      bountyId: bounty.bountyId, submissionHash: fingerprint,
+      signals: frozen(signals),
+      matchedBounties: frozen([...matched.values()]),
+      graph: frozen({ nodes: [...nodes.values()], edges }),
+      evidence: frozen({ ...evidence }),
+    };
+    this.db.prepare(`INSERT INTO bounty_review_packets
+      (room_id, packet_id, created_at, bounty_id, submission_hash,
+       signals_json, matched_bounties_json, graph_json, evidence_json)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(roomId, packet.packetId, packet.createdAt, packet.bountyId, fingerprint,
+        JSON.stringify(packet.signals), JSON.stringify(packet.matchedBounties),
+        JSON.stringify(packet.graph), JSON.stringify(packet.evidence));
+    this._event(roomId, "review.packet-created",
+      { bountyId: bounty.bountyId, actor: RULE_ACTOR,
+        data: { packetId: packet.packetId, submissionHash: fingerprint,
+          signalTypes: signals.map(s => s.type), matchedBountyIds: [...matched.keys()] } });
+    return deepFreeze(packet);
+  }
+
+  // Slice 10: arbiter inspection of review packets. Room-scoped read;
+  // packets are immutable once created.
+  getReviewPackets(roomId, { bountyId = null } = {}) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const rows = bountyId === null
+        ? this.db.prepare(`SELECT * FROM bounty_review_packets WHERE room_id=? ORDER BY created_at`).all(roomId)
+        : this.db.prepare(`SELECT * FROM bounty_review_packets WHERE room_id=? AND bounty_id=? ORDER BY created_at`)
+          .all(roomId, bountyId);
+      return rows.map(row => Object.freeze({
+        packetId: row.packet_id, roomId: row.room_id, createdAt: row.created_at,
+        bountyId: row.bounty_id, submissionHash: row.submission_hash,
+        signals: Object.freeze(JSON.parse(row.signals_json)),
+        matchedBounties: Object.freeze(JSON.parse(row.matched_bounties_json)),
+        graph: Object.freeze(JSON.parse(row.graph_json)),
+        evidence: Object.freeze(JSON.parse(row.evidence_json)),
+      }));
     });
   }
 

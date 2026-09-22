@@ -2391,6 +2391,40 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/reviews:
+    get:
+      summary: Inspect correlation review packets (slice 10)
+      description: |
+        Arbiter inspection of claim-graph correlation review packets.
+        Read-only; packets are immutable once created. Every submission is
+        fingerprinted (normalized SHA-256 over canonicalized evidence);
+        above-threshold correlation — duplicate fingerprints or repeat
+        claimant<->poster pairings — creates a packet with the matched
+        bounties, the claim graph (lanes as nodes, claim/post/verify as
+        edges), and the evidence attached. REVIEW-ONLY: packets never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — a
+        human decides. Filter to one bounty with `?bountyId=`. API keys
+        need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: bountyId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The room's review packets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  packets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReviewPacket' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/decline:
     post:
       summary: Decline a proposed bounty
@@ -7159,6 +7193,15 @@ components:
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
         resolution: { type: object, nullable: true }
+        submissionHash:
+          type: string
+          nullable: true
+          description: |
+            Slice 10 — normalized SHA-256 fingerprint of the canonicalized
+            submission evidence (null until submitted). Above-threshold
+            claim-graph correlation (duplicate fingerprints, repeat
+            claimant<->poster pairs) creates an arbiter review packet —
+            review-only, never an auto-ban or auto-slash.
         rubric:
           type: object
           description: The currently pinned rubric (slice 6): version, sha256 hash, and canonical criteria. Acceptance citations and arbiter re-checks validate against this pin.

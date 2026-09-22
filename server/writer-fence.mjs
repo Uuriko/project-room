@@ -96,6 +96,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "bounty_sequences",
   "bounty_rubric_versions",
   "bounty_flakes",
+  "bounty_review_packets",
   // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
   // room_verification_policy (per-room gate). Purely additive and
   // intentionally NOT fenced: older writers have no code path to them, and
