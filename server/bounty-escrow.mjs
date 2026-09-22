@@ -368,14 +368,31 @@ export class BountyEscrow {
 
   // Idempotent schema convergence + dispute hydration. Runs at the top of
   // every public method (cheap after the first call).
+  //
+  // Read-only safety: when called inside a read-only Room transaction
+  // (db.readOnlyTransaction — e.g. a fresh Durable Object isolate serving its
+  // first read), this method must not write. Schema convergence already ran
+  // at RoomStore construction in a write-capable context (convergeBountyDeployedSchema
+  // + bountyEscrowSchema exec), so request-time migration here is only a
+  // fallback for direct (non-store) construction. Historically the
+  // unconditional backfill UPDATE in _migrateColumns ran on read paths and
+  // every cold-isolate read 500'd with "Cannot write inside a read-only Room
+  // transaction" until the first bounty write warmed the isolate.
   _ensure() {
     if (!this._ready) {
-      const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
-      const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-        "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
-      if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
-      else this._migrateColumns();
-      this._ready = true;
+      if (this.db.readOnlyTransaction) {
+        // Verify presence only; never write. _ready stays false so the next
+        // write-capable call still performs the idempotent migration if one
+        // is ever needed (it never is on a converged store).
+        this._checkSchemaReadOnly();
+      } else {
+        const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
+        const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
+          "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+        if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
+        else this._migrateColumns();
+        this._ready = true;
+      }
     }
     if (!this._disputes) {
       const records = new Map();
@@ -388,6 +405,28 @@ export class BountyEscrow {
     }
   }
 
+  // Read-only schema presence check for read-only request paths (see
+  // _ensure). Reads (PRAGMA, sqlite_master) are allowed inside read-only
+  // transactions; every write is forbidden.
+  _checkSchemaReadOnly() {
+    const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
+    const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
+      "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+    const missing = needed.filter(t => !tables.has(t));
+    if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
+    const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
+    const required = {
+      bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
+      bounty_events: ["actor_kind", "before_state", "after_state", "track"],
+      bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label"],
+    };
+    for (const [table, cols] of Object.entries(required)) {
+      const have = colsOf(table);
+      const absent = cols.filter(c => !have.has(c));
+      if (absent.length) throw new Error(`Bounty escrow schema not converged on read-only path (${table} missing columns: ${absent.join(", ")})`);
+    }
+  }
+
   // Additive column migration for databases created by the slice-1 schema
   // (#762 shipped to production, so deployed databases predate receipt_id /
   // track). Fresh databases get the full schema from bountyEscrowSchema
@@ -395,9 +434,10 @@ export class BountyEscrow {
   // the stored DDL text matches for verifySchema.
   _migrateColumns() {
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
+    let added = false;
     const addCol = (table, ddl) => {
       const name = ddl.split(" ")[0];
-      if (!colsOf(table).has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      if (!colsOf(table).has(name)) { this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`); added = true; }
     };
     addCol("bounty_journal", "actor_kind TEXT");
     addCol("bounty_journal", "actor_id TEXT");
@@ -417,7 +457,11 @@ export class BountyEscrow {
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
     addCol("bounty_records", "label TEXT");
-    this.db.exec(`UPDATE bounty_records SET state_changed_ms =
+    // The backfill is a write: run it only when migration actually added a
+    // column (first migration). New rows always set state_changed_ms at
+    // INSERT, so a converged database can never accumulate new NULLs; the
+    // only NULL source is the ALTER above, which coincides with added=true.
+    if (added) this.db.exec(`UPDATE bounty_records SET state_changed_ms =
       CAST(strftime('%s', updated_at) AS INTEGER) * 1000 WHERE state_changed_ms IS NULL`);
   }
 
