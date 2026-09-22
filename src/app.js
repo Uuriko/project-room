@@ -4383,6 +4383,10 @@ function loadReturnBrief() { return briefView.refresh(); }
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
 // evaluated through, so items arriving later stay unread.
 let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
+// Saved-but-not-refreshed, shown in the feed's own status line. Kept apart from
+// notificationError on purpose: it is not a failed save, and the feed reload
+// that follows a mark-read clears errors and must not clear this.
+let notificationNote = "";
 // DM consent pairs for the signed-in member (consent-bound DMs, PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
@@ -4398,7 +4402,7 @@ const NOTIFICATION_COALESCE_MS = 1500;
 const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
-  notificationSerial++; notificationOwner = null; notificationFeed = null; notificationBusy = false; notificationError = "";
+  notificationSerial++; notificationOwner = null; notificationFeed = null; notificationBusy = false; notificationError = ""; notificationNote = "";
   clearTimeout(notificationTimer); notificationTimer = null;
   $("#notification-count").textContent = ""; $("#notification-count").hidden = true;
   $("#notification-panel").hidden = true; $("#notification-list").replaceChildren(); delete $("#notification-list")._content;
@@ -4411,7 +4415,7 @@ function renderNotifications() {
   const badge = $("#notification-count");
   badge.textContent = count ? `${count} for you` : ""; badge.hidden = !count;
   $("#notification-panel").hidden = !owned;
-  const note = notificationError || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : "");
+  const note = notificationError || notificationNote || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : "");
   setText("#notification-status", note);
   $("#notification-status").classList.toggle("visible", Boolean(note));
   $("#notification-read-button").hidden = !owned || !count;
@@ -4576,7 +4580,7 @@ async function runDmConsentAction(action, peerId, button) {
 $("#notification-read-button").addEventListener("click", async () => {
   const ticket = notificationOwner, feed = notificationFeed;
   if (!ownsNotifications(ticket) || !feed?.unread || notificationBusy) return;
-  notificationBusy = true; renderNotifications();
+  notificationBusy = true; notificationNote = ""; renderNotifications();
   let saved = false;
   try {
     const result = await client.caughtUp(feed.sequence); // Exactly what the list was evaluated through.
@@ -4590,7 +4594,7 @@ $("#notification-read-button").addEventListener("click", async () => {
     // Truthful feedback: a stored marker is never reported as a failed save.
     // The feed's own status line, not the page notice: this button lives in
     // the catch-up dialog, and a page notice is painted under its backdrop.
-    if (saved) notificationError = "Marked read. The latest room view could not be refreshed; refresh before relying on this list.";
+    if (saved) notificationNote = "Marked read. The latest room view could not be refreshed; refresh before relying on this list.";
     else notificationError = "Could not mark read. Try again.";
     if ([401, 403].includes(error.status)) client.handleFailure(error);
   } finally {
@@ -4725,7 +4729,9 @@ function renderReturnBrief() {
     if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));
   }
   const newer = returnBrief && client.sequence > returnBrief.history.evaluatedThrough;
-  setText("#rb-status", owned ? briefView.message || briefReconcileNote || (newer ? "New changes available. Refresh catch-up." : "") : "");
+  // The reconciliation note comes first: it is the one thing here that says
+  // what was already saved, which the generic brief message does not.
+  setText("#rb-status", owned ? briefReconcileNote || briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
   $("#rb-refresh-button").disabled = !owned || briefView.busy;
   $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
   $("#rb-more-button").disabled = briefView.busy;

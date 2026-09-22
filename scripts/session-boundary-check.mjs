@@ -652,11 +652,14 @@ test("a committed caught-up marker is not reported as failed when reconciliation
   const sequence = store.snapshot(owner, "commons").sequence;
 
   await page.locator("#rb-ack-button").click();
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent.includes("position was saved"));
+  // In the brief's own status line, inside the open dialog, not in the page
+  // notice underneath its backdrop.
+  await page.waitForFunction(() => document.querySelector("#rb-status")?.textContent.includes("position was saved"));
+  assert.equal(await page.locator("#catchup-dialog").evaluate(node => node.open), true);
   assert.equal(store.snapshot(owner, "commons").cursor, sequence);
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
   assert.equal(await page.locator("#rb-ack-button").textContent(), "Refresh brief before acknowledging");
-  const status = await page.locator("#status").textContent();
+  const status = await page.locator("#rb-status").textContent();
   assert.match(status, /was saved.*could not be refreshed/);
   assert.doesNotMatch(status, /position (?:failed|was not saved)/i);
 });
@@ -684,7 +687,7 @@ test("a committed brief acknowledgement invalidates its old horizon when the bri
   });
 
   await page.locator("#rb-ack-button").click();
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent.includes("position was saved"));
+  await page.waitForFunction(() => document.querySelector("#rb-status")?.textContent.includes("position was saved"));
   assert.equal(store.snapshot(owner, "commons").cursor, horizon);
   assert.equal(await page.locator("#rb-history-list").textContent(), "");
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);

@@ -79,12 +79,14 @@ for (const mobile of [false, true]) {
     // A stored marker whose follow-up room refresh fails is reported truthfully as saved but not refreshed.
     failSnapshot = true;
     await page.locator("#notification-read-button").click();
-    await page.locator("#status .status-text").filter({ hasText: "Marked read. The latest room view could not be refreshed" }).waitFor();
+    // Said inside the catch-up dialog, in the feed's own status line: a page
+    // notice would be painted under the dialog's backdrop, where nobody reads it.
+    await page.locator("#notification-status").filter({ hasText: "Marked read. The latest room view could not be refreshed" }).waitFor();
+    assert.equal(await page.locator("#catchup-dialog").evaluate(node => node.open), true);
     assert.equal(f.store.snapshot(f.keys.owner, "commons").cursor, sequenceBefore, "the marker was stored");
-    assert.equal(await page.locator("#notification-status").textContent(), "", "no failed-save message for a stored marker");
+    assert.doesNotMatch(await page.locator("#notification-status").textContent(), /Could not mark read/, "no failed-save message for a stored marker");
     await badge.waitFor({ state: "hidden" });
     await closeCatchUp(page);
-    await page.locator("#status .status-dismiss").click();
     // Reset the marker so the ordinary path is exercised on the same page.
     f.store.db.prepare("DELETE FROM cursors WHERE room_id='commons' AND member_id='owner'").run();
     writes.length = 0;
