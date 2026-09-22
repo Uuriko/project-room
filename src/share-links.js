@@ -141,18 +141,20 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     try {
       return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
     } catch (error) {
+      if (error.code === "join_session_lost") throw uncertain(error);
       if (!canRetryInvitation(error)) throw error;
       try { await accountClient.restore(); }
       catch { throw uncertain(error); } // restore failed: the join outcome is still unknown
       try {
         return await accountClient.joinShareLink({ linkToken, displayName, redemptionId });
       } catch (retryError) {
-        throw canRetryInvitation(retryError) ? uncertain(error) : retryError;
+        throw canRetryInvitation(retryError) || retryError.code === "join_session_lost" ? uncertain(retryError) : retryError;
       }
     }
   }
   function joinFailureStatus(error) {
     const room = previewRoomTitle ? `“${previewRoomTitle}”` : "the room";
+    if (error?.code === "join_session_lost") return invitationFailureMessage(error);
     if (error?.uncertainJoin) {
       return `The connection was interrupted and we couldn't confirm whether you joined ${room}. ` +
         `Your invitation is kept — reopen it (or reload this page) and we'll check whether your join went through. You can't be joined twice.`;

@@ -511,3 +511,31 @@ test("open-room failure after a join recovers the credential and navigates", asy
     assert.equal(readUncertainJoin(), null);
   } finally { dom.uninstall(); }
 });
+
+
+test("lost guest cookie keeps the original join request and shows recovery instead of blind retry", async () => {
+  const dom = guestJoinDom(), calls = [];
+  const accountClient = {
+    session: {}, async restore() { return this.session; },
+    async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+    async joinShareLink(request) {
+      calls.push(structuredClone(request));
+      throw Object.assign(new Error("Return to your original browser session. No additional guest was created."), { code: "join_session_lost", status: 409 });
+    }
+  };
+  dom.install();
+  try {
+    const ui = installShareLinks({ client: { generation: 0 }, accountClient, getState: () => null, getSession: () => null,
+      async openRoom() { throw new Error("must not open another identity"); } });
+    await ui.open({ token: "s".repeat(43) });
+    dom.node("#join-link-name").value = "Jill";
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(calls.length, 1);
+    assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
+    assert.match(dom.node("#join-link-status").textContent, /original browser session/);
+    assert.doesNotMatch(dom.node("#join-link-status").textContent, /couldn't confirm/);
+    await dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+    assert.deepEqual(calls[1], calls[0]);
+    assert.equal(readUncertainJoin().redemptionId, calls[0].redemptionId);
+  } finally { dom.uninstall(); }
+});

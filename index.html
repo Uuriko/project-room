@@ -830,7 +830,7 @@
         <button id="join-link-submit" class="button primary" type="submit">Join room</button>
       </form>
       <details id="shared-agent-details" hidden><summary>Connect an AI agent</summary>
-        <p>Give your agent this same invitation. It joins with its own saved identity and read/chat access.</p>
+        <p>Give your agent this same invitation. It joins with its own saved identity and read/chat access. Agents should reuse that identity on retries, rather than create new browser guests.</p>
         <p><a href="https://github.com/Uuriko/project-room/releases/latest" target="_blank" rel="noopener noreferrer">Download the agent runtime</a> · Node 24.19+</p>
         <label for="shared-agent-instructions">Agent instructions</label><textarea id="shared-agent-instructions" readonly rows="5"></textarea>
         <button id="shared-agent-copy" class="button" type="button">Copy agent instructions</button>

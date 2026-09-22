@@ -257,6 +257,17 @@ export class ShareLinks {
         this.verifyJoin(prior);
         return this.result(slotToken, row.room_id, true);
       }
+      // A retried operation must not become a fresh guest just because its
+      // browser cookie disappeared. The request ID is an idempotency key, not
+      // a credential: never hand another session the original guest's access.
+      const otherSession = this.db.prepare("SELECT i.intended_account_id FROM share_link_joins j JOIN membership_invitations i ON i.id=j.invitation_id WHERE j.link_id=? AND j.redemption_id=? AND j.slot_hash<>?")
+        .get(row.id, redemptionId, slot.credentialHash);
+      if (otherSession && otherSession.intended_account_id !== auth?.account.id) {
+        fail(409, "join_session_lost", "Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity.");
+      }
+      if (auth && this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, auth.account.id)) {
+        return this.result(slotToken, row.room_id, true); // Existing membership survives a full or expired invitation; removed members still fail authentication.
+      }
       if (this.view(row).status !== "active") unavailable();
       if (!auth && revokeRoomToken) {
         let existingRoom = null;
@@ -265,9 +276,6 @@ export class ShareLinks {
         if (existingRoom?.kind === "session" && existingRoom.member.kind === "human") {
           return { roomId: row.room_id, duplicate: true, roomMode: true, session: this.store.sessionOwnership(existingRoom) };
         }
-      }
-      if (auth && this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, auth.account.id)) {
-        return this.result(slotToken, row.room_id, true); // Never recreate a removed membership.
       }
       const room = this.store.room(row.room_id), now = this.store.now();
       if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full; ask its owner for help");
