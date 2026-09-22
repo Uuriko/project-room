@@ -136,3 +136,11 @@ test('operator-only Gmail pilot does not expose OAuth or background grants to ot
   const allowed = new GmailMailbox(f.store, { ...f.config, allowedAccountIds: [f.account.id] });
   assert.equal(allowed.status(f.auth()).state, 'connected');
 });
+
+test('Gmail pilot can select an explicit account without replacing the operator identity', () => {
+  const env = { ROOM_GMAIL_ENABLED: '1', ROOM_GMAIL_TOKEN_KEY: '42'.repeat(32), ROOM_GMAIL_PILOT_ONLY: '1', ROOM_OPERATOR_ACCOUNT_ID: 'operator' };
+  const google = { clientId: 'fixture.apps.googleusercontent.com', clientSecret: 'fixture' };
+  assert.deepEqual(gmailConfig(env, 'https://room.example', google).allowedAccountIds, ['operator']);
+  assert.deepEqual(gmailConfig({ ...env, ROOM_GMAIL_PILOT_ACCOUNT_ID: 'pilot' }, 'https://room.example', google).allowedAccountIds, ['pilot']);
+  assert.equal(env.ROOM_OPERATOR_ACCOUNT_ID, 'operator');
+});
