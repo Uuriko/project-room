@@ -1,3 +1,5 @@
+import { GmailActions } from './gmail-actions.mjs';
+import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -123,7 +125,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null, directSendFetch = null,
+  googleAuth = null, gmailAuth = null, directSendFetch = null,
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
@@ -136,6 +138,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
+  const gmail = gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
   // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
   // honestly (mail_not_configured) and never pretend a code was sent.
   const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
@@ -486,8 +489,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         || !timingSafeEqual(Buffer.from(csrf), Buffer.from(auth.csrf))) reject(403, "csrf_denied", "Session confirmation required; sign in again");
     }
   }
-  function setCookie(res, name, token, maxAge) {
-    res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
+  function setCookie(res, name, token, maxAge, sameSite = "Strict") {
+    res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
   function json(res, status, value, head = false) {
     const body = JSON.stringify(value);
@@ -606,6 +609,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // the code exchange, upgrades the slot to the Google-provisioned account,
       // and returns a same-origin HTML page so the SameSite=Strict session
       // cookie is sent on the next load. Error responses never carry tokens.
+      if (url.pathname === "/api/auth/gmail/callback" && req.method === "GET") {
+        rate(`gmail-callback:${remoteAddress}`, 20);
+        let result = 'error';
+        try {
+          if (gmail) {
+            const completed = await gmail.complete(new URL(expectedOrigin() + url.pathname + url.search), cookie(req, "gmail_oauth"));
+            setCookie(res, 'gmail_oauth', '', 0, 'Lax');
+            result = 'connected';
+            try { await gmail.sync(completed.token, completed.binding); } catch { result = 'sync-error'; }
+          }
+        } catch (error) { if (error.code === 'gmail_consent_denied') result = 'cancelled'; }
+        const href = '/?account=1&gmail=' + result + '#pr-view/inbox';
+        res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${href.replaceAll('&', '&amp;')}"><title>Returning to Inbox</title></head><body><a href="${href.replaceAll('&', '&amp;')}">Return to Inbox</a></body></html>`);
+      }
       if (url.pathname === GOOGLE_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const signIn = google();
@@ -1393,6 +1412,51 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
+        if (url.pathname === "/api/inbox/setup") {
+          if (!['GET', 'POST'].includes(req.method)) reject(405, 'method_not_allowed', 'Method not allowed');
+          if (req.method === 'POST') {
+            protectWrite(req, auth, false); rate(`setup:${auth.account.id}`, 30);
+            const data = await body(req);
+            if (!exact(data, ['name', 'purpose', 'platforms', 'step', 'completed']) || typeof data.name !== 'string' || data.name.length > 80
+              || !['', 'personal', 'team', 'agents'].includes(data.purpose) || !Array.isArray(data.platforms) || data.platforms.length > 6
+              || !data.platforms.every(p => ['Gmail', 'Outlook', 'Slack', 'Discord', 'Telegram', 'WhatsApp'].includes(p))
+              || ![0, 1, 2].includes(data.step) || typeof data.completed !== 'boolean') reject(422, 'invalid_setup', 'Choose your setup preferences.');
+            store.transaction(() => {
+              if (data.name.trim()) store.updateAccountProfile(auth.account.id, { displayName: data.name.trim() });
+              store.db.prepare('INSERT INTO account_setup VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET data_json=excluded.data_json').run(auth.account.id, JSON.stringify(data));
+              if (data.completed) store.completeOnboarding(auth.account.id);
+            });
+          }
+          const saved = store.db.prepare('SELECT data_json FROM account_setup WHERE account_id=?').get(auth.account.id);
+          const profile = store.accountProfile(auth.account.id);
+          // A room guest has not created a durable sign-in account. Do not
+          // interrupt the invitation with personal-mail setup; offer it once
+          // they add a sign-in method, or open setup themselves.
+          const guest = store.db.prepare('SELECT origin FROM accounts WHERE id=?').get(auth.account.id)?.origin === 'share-link-guest'
+            && store.accountLogins.listMethods(auth.account.id).length === 0;
+          return json(res, 200, { contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision },
+            setup: saved ? JSON.parse(saved.data_json) : { name: profile.displayName ?? '', purpose: '', platforms: [], step: 0, completed: profile.onboardingComplete || guest } });
+        }
+        if (url.pathname === "/api/inbox/gmail" || url.pathname.startsWith('/api/inbox/gmail/')) {
+          const projection = extra => ({ contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
+            sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision }, ...extra });
+          if (url.pathname === "/api/inbox/gmail" && req.method === 'GET')
+            return json(res, 200, projection(gmail ? gmail.status(auth) : { state: 'unavailable', address: null, syncedAt: null }));
+          if (!gmail) reject(503, 'gmail_not_configured', 'Gmail is not available on this service yet.');
+          if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
+          protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 60);
+          if (url.pathname === "/api/inbox/gmail/mailbox") return json(res, 200, projection(await new GmailActions(gmail).run(token, binding, await body(req))));
+          if (url.pathname === "/api/inbox/gmail/connect") {
+            const authorizationUrl = gmail.begin(token, binding);
+            // Lax admits Google's top-level return while the account cookie
+            // stays Strict. HttpOnly + __Host- binds consent to this browser.
+            setCookie(res, 'gmail_oauth', new URL(authorizationUrl).searchParams.get('state'), 600, 'Lax');
+            return json(res, 200, projection({ authorizationUrl }));
+          }
+          if (url.pathname === "/api/inbox/gmail/sync") return json(res, 200, projection({ imported: await gmail.sync(token, binding) }));
+          if (url.pathname === "/api/inbox/gmail/disconnect") { gmail.disconnect(token, binding); return json(res, 200, projection(gmail.status(auth))); }
+          reject(404, 'not_found', 'Not found');
+        }
         const view = url.searchParams.get("view");
         const replySource = /^\/api\/inbox\/sources\/([^/]{1,384})\/reply-review$/.exec(url.pathname);
         if (replySource && req.method === "GET") {

@@ -1,3 +1,5 @@
+import { installGmailWorkspace } from './gmail-ui.js';
+import { installAccountSetup } from './account-setup-ui.js';
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from "./inbox-send-ui.js";
 import { installQuarantineReview } from "./inbox-quarantine-ui.js";
@@ -22,6 +24,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
+  const callbackResult = new URL(location.href).searchParams.get('gmail');
+  const gmailNotice = { connected: 'Gmail connected. Your recent email is ready.', 'sync-error': 'Gmail connected, but email could not be loaded. Choose Sync Gmail to try again.', cancelled: 'Gmail connection cancelled. You can connect later.', error: 'Gmail wasn’t connected. Please try again and approve email access.' }[callbackResult] ?? '';
+  if (callbackResult) { const url = new URL(location.href); url.searchParams.delete('gmail'); history.replaceState(null, '', url.pathname + url.search + url.hash); }
+  $('#inbox-gmail-notice').textContent = gmailNotice;
+  const setupUI = installAccountSetup({ api, owns, gmailNotice, onInbox: () => load() });
+  const gmailUI = installGmailWorkspace({ api, ownerKey: () => owns() ? owner : null });
+  $('#inbox-gmail-open').addEventListener('click', () => gmailUI.open());
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
@@ -119,6 +128,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   function reset({ preservePending = false } = {}) {
     navigationEpoch++;
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
+    setupUI.reset(); gmailUI.reset(); $('#inbox-gmail-open').hidden = true; gmailGeneration++; $('#inbox-gmail-notice').textContent = '';
+    $('#inbox-gmail-status').textContent = 'Bring your email into your private inbox.';
+    $('#inbox-gmail-connect').disabled = true; $('#inbox-gmail-connect').textContent = 'Connect Gmail';
+    $('#inbox-gmail-disconnect').hidden = true; $('#inbox-gmail-disconnect').textContent = 'Disconnect';
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
@@ -146,7 +159,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const next = ownerKey();
     if (!next) { if (owner) reset(); return; }
     if (owner && owner !== next) reset();
-    owner = next; $("#workspace-nav").hidden = false;
+    owner = next; setupUI.check(); $("#workspace-nav").hidden = false;
     // Room snapshot updates must not replace the current private destination.
     $("#main").hidden = active || browsing || !getRoom();
     $("#account-rooms-panel").hidden = !browsing && (active || Boolean(getRoom()));
@@ -365,8 +378,50 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const empty = $("#inbox-empty");
     if (empty) empty.textContent = idle.length
       ? `Nothing here yet. ${idle.map(r => channelLabel[r.connection.channel] ?? r.connection.channel).join(" and ")} can go live once configured — finish the connection below and new messages will land here.`
-      : "Nothing here yet. This inbox collects your mentions, assigned work, and messages from your connected accounts. Open a room to pick up your first task.";
+      : "Your inbox is empty. Connect Gmail to bring in your email.";
   }
+  let gmailGeneration = 0;
+  async function loadGmail() {
+    const turn = ++gmailGeneration;
+    try {
+      const value = await api.request('/gmail'); if (!owns() || turn !== gmailGeneration) return;
+      gmailUI.setStatus(value); $('#inbox-gmail-open').hidden = value.state !== 'connected';
+      const connected = value.state === 'connected';
+      $('#inbox-gmail-status').textContent = connected ? value.address : value.state === 'unavailable' ? 'Gmail connection is not enabled here yet.' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';
+      $('#inbox-gmail-connect').textContent = connected && value.canWrite ? 'Sync Gmail' : value.state === 'reconnect_required' || connected && !value.canWrite ? 'Reconnect Gmail' : 'Connect Gmail';
+      $('#inbox-gmail-connect').disabled = value.state === 'unavailable';
+      $('#inbox-gmail-connect').dataset.state = connected && !value.canWrite ? 'reconnect_required' : value.state;
+      $('#inbox-gmail-disconnect').hidden = !['connected', 'reconnect_required'].includes(value.state);
+    } catch { if (owns() && turn === gmailGeneration) $('#inbox-gmail-status').textContent = 'Couldn’t check Gmail. Refresh to try again.'; }
+  }
+  $('#inbox-setup').addEventListener('click', () => setupUI.check(true));
+  $('#inbox-gmail-connect').addEventListener('click', async event => {
+    const button = event.currentTarget; if (!owns() || button.disabled) return;
+    const actionOwner = owner;
+    button.disabled = true;
+    try {
+      if (button.dataset.state === 'connected') {
+        $('#inbox-gmail-status').textContent = 'Checking recent email…';
+        await api.request('/gmail/sync', { method: 'POST', data: {} });
+        if (owns() && owner === actionOwner) await load();
+      } else {
+        const value = await api.request('/gmail/connect', { method: 'POST', data: {} });
+        const url = new URL(value.authorizationUrl);
+        if (url.origin !== 'https://accounts.google.com' || url.pathname !== '/o/oauth2/v2/auth') throw new Error('Invalid provider');
+        location.assign(url.href);
+      }
+    } catch (error) { if (owns() && owner === actionOwner) { await loadGmail(); $('#inbox-gmail-status').textContent = error.code === 'gmail_reconnect_required' ? 'Gmail access expired. Reconnect to continue.' : 'Couldn’t connect or sync Gmail. Please try again.'; } }
+    finally { if (owns() && owner === actionOwner) button.disabled = false; }
+  });
+  $('#inbox-gmail-disconnect').addEventListener('click', async event => {
+    const button = event.currentTarget; if (!owns() || button.disabled) return;
+    if (button.textContent !== 'Confirm disconnect') { button.textContent = 'Confirm disconnect'; return; }
+    const actionOwner = owner;
+    button.disabled = true;
+    try { await api.request('/gmail/disconnect', { method: 'POST', data: {} }); if (owns() && owner === actionOwner) { button.textContent = 'Disconnect'; await load(); } }
+    catch { if (owns() && owner === actionOwner) $('#inbox-gmail-status').textContent = 'Couldn’t disconnect. Try again.'; }
+    finally { if (owns() && owner === actionOwner) button.disabled = false; }
+  });
   async function loadConnections() {
     if (!owns()) return;
     const turn = ++connectionEpoch;
@@ -375,7 +430,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const records = [];
       for (const c of listed.connections) { const record = await api.connection(c.id); if (!owns() || turn !== connectionEpoch) return; records.push(record); }
       connectionRecords.clear(); for (const record of records) connectionRecords.set(record.connection.id, record);
-      renderConnections(records); if (rows.length) { renderFilters(); renderList(); }
+      renderConnections(records.filter(r => r.connection.provider !== 'gmail-api')); if (rows.length) { renderFilters(); renderList(); }
     } catch { if (owns() && turn === connectionEpoch) renderConnections([]); }
   }
   async function disconnect(c, button, note) {
@@ -473,6 +528,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     show("inbox", true, push); text("#inbox-status", "Loading…");
     const turn = ++epoch, navigation = navigationEpoch;
     loadConnections();
+    loadGmail();
     quarantineUI.refresh();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;

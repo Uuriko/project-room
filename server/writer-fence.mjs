@@ -128,6 +128,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // have no code path to it, rows are short-lived (10min TTL, pruned on
   // write), and single-use consumption is the integrity gate.
   "oauth_pending_states",
+  "gmail_mailboxes", "gmail_pending", "gmail_operations", "account_setup",
   // Cross-channel thread stitching (task #19): stitch_identities,
   // stitch_links, stitch_revocations, stitch_suggestions, stitch_receipts.
   // Hash-only, purely additive, intentionally NOT fenced — older writers

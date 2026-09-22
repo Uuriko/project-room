@@ -103,9 +103,11 @@ const EXECUTORS = {
     store.db.prepare("DELETE FROM account_passkey_credentials WHERE account_id=?").run(accountId).changes,
   memberships: (store, accountId) =>
     store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(accountId).changes,
-  profile: (store, accountId) =>
-    store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
-      display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes,
+  profile: (store, accountId) => {
+    for (const table of ['gmail_mailboxes', 'gmail_pending', 'gmail_operations', 'account_setup']) store.db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(accountId);
+    return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
+      display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;
+  },
 };
 
 // Execute a validated plan inside one transaction: every PURGE step runs
