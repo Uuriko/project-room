@@ -306,12 +306,14 @@ const client = new RoomClient({
     $("#room-overview-content").replaceChildren();
     delete $("#room-overview-content")._content;
     if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-    // Every disclosure goes back to how index.html authored it. All of these
-    // are authored closed except People, which is authored open - closing that
-    // one was not a reset, it left the next person to sign in on this browser
-    // with a collapsed rail the markup says should be open.
-    for (const id of ["composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
-    $("#people-panel").open = true;
+    // Every disclosure goes back to how index.html authored it. Two are
+    // authored open - People, and About since it moved into the Settings
+    // dialog - and closing those is not a reset. It left the next person to
+    // sign in on this browser with a collapsed rail and, for About, with the
+    // room purpose, Room instructions, Archive and Leave hidden behind a
+    // closed summary for the rest of the session.
+    for (const id of ["composer-options", "work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    for (const id of ["people-panel", "room-about"]) $(`#${id}`).open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;

@@ -184,6 +184,14 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");
     assert.equal(await page.locator("#reminder-count").textContent(), "");
+    // The sign-out reset restores index.html's own authoring. Both of the
+    // disclosures the markup opens must come back open: a reset that closes
+    // one is how People was left collapsed, and About went the same way when
+    // it moved into the Settings dialog.
+    for (const id of ["#people-panel", "#room-about"]) {
+      assert.equal(await page.locator(id).evaluate(node => node.open), true,
+        `${id} is authored open and the reset must leave it open`);
+    }
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
   });
 }
