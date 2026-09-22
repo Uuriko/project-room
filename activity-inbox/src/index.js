@@ -1,9 +1,11 @@
+// Existing imports and exports
+import { kinds } from './kinds.js';
+import { project } from './project.js'; // <-- new import
+
+// ... other existing code ...
+
 export {
-  DEFAULT_NOTIFY_KINDS,
-  DEFAULT_TIER,
-  EVENT_TYPES,
-  FAILED_RECEIPT_STATUSES,
-  FEED_KINDS,
-  TIERS
-} from "./kinds.js";
-export { activityForViewer, mentionsDisplayName, projectActivity } from "./project.js";
+  kinds,
+  project, // expose project utilities
+  // ... other exports ...
+};
