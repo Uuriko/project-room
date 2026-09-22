@@ -18,25 +18,27 @@ for (const width of [390, 1440]) test(`new account setup saves answers, resumes,
   const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
   await page.locator('#setup-name').fill('Morgan'); await page.locator('#setup-purpose').selectOption('team');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-  await dialog.getByRole('heading', { name: 'Bring your messages together' }).waitFor();
-  await dialog.getByLabel('Gmail', { exact: true }).check(); await dialog.getByLabel('Slack · coming later', { exact: true }).check();
-  await dialog.getByText('Gmail connection is not enabled here yet.', { exact: false }).waitFor();
-  assert.equal(await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).isDisabled(), true);
-  await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  await dialog.getByRole('heading', { name: 'Connect your email' }).waitFor();
+  assert.equal(await dialog.getByRole('checkbox').count(), 0);
+  assert.doesNotMatch(await dialog.innerText(), /Outlook|Slack|Discord|Telegram|WhatsApp|coming later/);
+  await dialog.getByText('Gmail isn’t available for this account yet.', { exact: false }).waitFor();
+  assert.equal(await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).count(), 0);
+  await dialog.getByRole('button', { name: 'Skip', exact: true }).click();
   await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
   await page.reload(); await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
   const saved = JSON.parse(f.store.db.prepare('SELECT data_json FROM account_setup WHERE account_id=?').get(account.id).data_json);
-  assert.deepEqual(saved.platforms, ['Gmail', 'Slack']); assert.equal(saved.purpose, 'team'); assert.equal(saved.name, 'Morgan');
+  assert.deepEqual(saved.platforms, []); assert.equal(saved.purpose, 'team'); assert.equal(saved.name, 'Morgan');
   await dialog.getByRole('button', { name: 'Back', exact: true }).click();
-  await dialog.getByRole('heading', { name: 'Bring your messages together' }).waitFor();
+  await dialog.getByRole('heading', { name: 'Connect your email' }).waitFor();
   mkdirSync('test-results/gmail-setup', { recursive: true });
   await page.screenshot({ path: `test-results/gmail-setup/setup-${width}.png`, fullPage: true });
   assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await dialog.getByRole('button', { name: 'Skip', exact: true }).click();
   await dialog.getByRole('button', { name: 'Set up later', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
   await page.reload(); await page.locator('#inbox-panel').waitFor({ state: 'visible' });
   assert.equal(await dialog.isVisible(), false);
   await page.getByText('Manage inbox', { exact: true }).click(); await page.getByRole('button', { name: 'Personalize setup' }).click();
-  await dialog.getByRole('heading', { name: 'Bring your messages together' }).waitFor();
+  await dialog.getByRole('heading', { name: 'You’re ready' }).waitFor();
   assert.deepEqual(errors, []);
 });
 
@@ -65,6 +67,15 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
   await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();
   const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
   await page.locator('#setup-name').fill('Morgan'); await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).waitFor();
+    assert.equal(await dialog.getByRole('checkbox').count(), 0);
+    assert.doesNotMatch(await dialog.innerText(), /Outlook|Slack|Discord|Telegram|WhatsApp|coming later/);
+    assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+    mkdirSync('test-results/gmail-setup', { recursive: true });
+    await page.screenshot({ path: `test-results/gmail-setup/connect-${width}.png`, fullPage: true });
+  }
   await dialog.getByRole('button', { name: 'Connect Gmail', exact: true }).click();
   await dialog.getByText('Connected: morgan@gmail.test', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
