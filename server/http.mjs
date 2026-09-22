@@ -1991,7 +1991,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`link-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
-        return json(res, 200, store.shareLinks.preview(data.linkToken));
+        return json(res, 200, store.shareLinks.preview(data.linkToken, cookie(req, accountCookieName), expectedBinding(req)));
       }
       if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
         checkOrigin(req, true);

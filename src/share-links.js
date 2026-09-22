@@ -433,7 +433,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion || !account) return;
       previewRoomId = preview.room.id; previewRoomTitle = preview.room.title;
       $("#join-link-title").textContent = `Join ${preview.room.title}`;
-      $("#join-link-scope").textContent = "Read history and join the conversation. Everyone in the room can read your messages.";
+      const returning = preview.link.status !== "active";
+      $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
       $("#shared-agent-details").hidden = false;
@@ -442,7 +443,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
-      $("#join-link-submit").textContent = account.authenticated ? "Join room" : "Continue as guest";
+      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated ? "Join room" : "Continue as guest";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (resume && version === joinVersion && !joining) {
         // The guest already consented to this exact request; its outcome is

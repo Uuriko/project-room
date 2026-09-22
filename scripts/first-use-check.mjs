@@ -108,6 +108,9 @@ for (const touch of [false, true]) {
     assert.equal(await guest.locator('[data-work-record-id] [data-action]').count(), 0);
     assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.equal(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    const inputWidth = await guest.locator('#message-input').evaluate(node => node.getBoundingClientRect().width);
+    const composerWidth = await guest.locator('.composer-row').evaluate(node => node.getBoundingClientRect().width);
+    assert.ok(inputWidth > composerWidth / 2, 'guest message input retains the flexible column when New work is hidden');
     await guest.locator('#message-input').scrollIntoViewIfNeeded();
     await guest.screenshot({ path: `test-results/first-use-${touch ? 'touch' : 'desktop'}-guest.png`, fullPage: true });
     await owner.screenshot({ path: `test-results/first-use-${touch ? 'touch' : 'desktop'}-work.png`, fullPage: true });

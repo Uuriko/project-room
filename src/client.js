@@ -202,7 +202,19 @@ export class AccountClient {
     }
   }
   async prepareShareLink(linkToken) {
-    const preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
+    let preview;
+    try {
+      preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
+    } catch (error) {
+      if (error.code !== "link_unavailable") throw error;
+      const session = this.session ?? await this.restore();
+      if (!session?.authenticated) throw error;
+      const generation = this.generation;
+      // Closed invitations cannot admit anyone new, but remain a door for an
+      // existing member. The server checks membership without redeeming a place.
+      preview = await this.request("/api/share-links/preview", { method: "POST", session, data: { linkToken } });
+      if (!this.owns(generation, session)) return { preview, session: null };
+    }
     // Preview/cancel is not consent to replace an already-open account context.
     const session = this.session ?? await this.restore();
     return { preview, session };

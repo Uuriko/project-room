@@ -553,3 +553,22 @@ test("existing guest reopens a full invitation using a new request ID without an
   assert.equal(resumed.session.member.id, joined.session.member.id);
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 2);
 });
+
+test("closed-link preview only admits a bound active member without creating or redeeming anything", t => {
+  const f = fixture(t), guest = f.guest(), accepted = guest.accept();
+  f.guest('Other guest').accept();
+  const binding = accepted.session.sessionBinding;
+  const before = f.store.db.prepare('SELECT count(*) n FROM share_link_joins').get().n;
+  assert.equal(f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding).link.status, 'full');
+  for (const [token, fence] of [[null, null], [guest.slot.token, null], [guest.slot.token, 'wrong-binding']]) {
+    assert.throws(() => f.store.shareLinks.preview(f.linkToken, token, fence), { code: 'link_unavailable' });
+  }
+  const outsider = f.store.createAccount('Outsider', 'audit');
+  const slot = f.store.createAccountSessionSlot();
+  const session = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(outsider.id), 0);
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken, slot.token, session.sessionBinding), { code: 'link_unavailable' });
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM share_link_joins').get().n, before);
+  f.store.command(f.ownerKey, 'commons', { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: accepted.session.member.id, expectedMemberRevision: accepted.session.member.revision, permissions: [], active: false } });
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding), { code: 'link_unavailable' });
+});
