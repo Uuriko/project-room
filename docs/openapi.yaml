@@ -69,6 +69,23 @@ paths:
         '403': { description: Origin or CSRF rejected. }
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
+  /api/inbox/gmail/mailbox:
+    post:
+      summary: Run an account-scoped mailbox action (list, read, save/send draft, archive, trash, read/star toggles) via GmailActions.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200': { description: Current account-owned result or OAuth return page. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '422': { description: Invalid request or connection needs attention. }
+        '503': { description: Gmail is not configured on this deployment. }
   /api/inbox/gmail/connect:
     post:
       summary: Start read-only Gmail OAuth; returns authorizationUrl.
