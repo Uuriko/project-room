@@ -5,10 +5,12 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { confirmsWorkAction } from "../src/workflow.js";
 import { retryUnconfirmed } from "../src/client.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 test("work actions and help changes confirm only the exact owned operation, including ordered claim paths", async t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const signEvidence = makeTestSigner(f.store);
   const item = () => f.store.snapshot(f.keys.owner, "commons").state.workItems.recovery;
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: {
     workItemId: "recovery", title: "Synthetic action recovery", definitionOfDone: "One exact reviewed result", mode: "write",
@@ -47,7 +49,7 @@ test("work actions and help changes confirm only the exact owned operation, incl
   await send(T.CLAIM_ACQUIRED, scope);
   await send(T.WORK_BLOCKED, { reason: "Synthetic blocker", nextAction: "Resolve it" });
   await send(T.WORK_BLOCKER_RESOLVED, { resolution: "Synthetic resolution" });
-  await send(T.WORK_COMPLETED, { summary: "Synthetic result", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", producerId: "owner", nextAction: "Review it" });
+  await send(T.WORK_COMPLETED, { summary: "Synthetic result", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", producerId: "owner", nextAction: "Review it", signedEvidence: signEvidence() });
   const evidence = { completionEventId: item().receipt.eventId, evidenceVersion: "v1" };
   await send(T.VERIFICATION_RECORDED, { ...evidence, result: "pass", summary: "Checked exact v1" }, "reviewer");
   await send(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accept v1" });

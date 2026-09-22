@@ -9,6 +9,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 test("unified guest entry, account-bound draft recovery, catch-up and agent handoff share one room", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
@@ -59,8 +60,11 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   const agent = role => new RoomAgentClient({ origin, roomId: "commons", token: fixture.keys[role] });
   const producer = agent("producer"), reviewer = agent("reviewer");
   const item = () => fixture.store.snapshot(fixture.keys.owner, "commons").state.workItems["test-handoff"];
-  const mutate = (client, type, data = {}) => client.command({ id: crypto.randomUUID(), type,
-    data: { workItemId: "test-handoff", expectedRevision: item().revision, ...data } });
+  const signEvidence = makeTestSigner(fixture.store);
+  const mutate = (client, type, data = {}) => {
+    if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+    return client.command({ id: crypto.randomUUID(), type, data: { workItemId: "test-handoff", expectedRevision: item().revision, ...data } });
+  };
   await mutate(producer, T.WORK_ACCEPTED);
   await mutate(producer, T.WORK_STARTED);
   await mutate(producer, T.WORK_COMPLETED, { summary: "Owner: Room owner. Synthetic agenda.", evidenceVersion: "unified-inline-v1",

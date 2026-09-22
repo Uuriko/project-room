@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`workflow ${label}: lighter checks, exact retries, truthful status and later findings`, { timeout: 90000 }, async t => {
@@ -94,7 +95,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       assert.equal(item().ownerDecisionRequired, needsDecision);
       assert.equal(item().verifierMemberId, needsReview ? "human-reviewer" : null);
       assert.equal(item().humanDecisionMakerId, needsDecision ? "owner" : null);
-      const mutate = (role, type, data = {}) => agent(role).command({ id: crypto.randomUUID(), type, data: { workItemId: id, expectedRevision: item().revision, ...data } });
+      const signEvidence = makeTestSigner(fixture.store);
+      const mutate = (role, type, data = {}) => {
+        if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) data = { ...data, signedEvidence: signEvidence() };
+        return agent(role).command({ id: crypto.randomUUID(), type, data: { workItemId: id, expectedRevision: item().revision, ...data } });
+      };
       await mutate("producer", T.WORK_ACCEPTED);
       await mutate("producer", T.WORK_COMPLETED, { summary: "The source supports this small finding.", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding or review it as requested." });
       const card = page.locator(`[data-work-record-id="${id}"]`);

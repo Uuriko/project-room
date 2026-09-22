@@ -2,10 +2,21 @@
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
+import { issueSignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
 import { rmSync } from "node:fs";
 
 export function createResultsFixture() {
   const f = createAcceptanceFixture();
+  // Sign using production API directly (not test helper) for packaging safety.
+  const evidenceIdentity = f.store.identities.create("Results fixture evidence agent");
+  const evidenceSeedHex = Buffer.from(evidenceIdentity.privateKey, "base64").toString("hex");
+  const signEvidence = (overrides = {}) => issueSignedEvidence({
+    signerIdentityId: evidenceIdentity.identityId,
+    issuedAt: new Date(f.store.now()).toISOString(),
+    contentHash: contentHashOf("results-fixture-bytes"),
+    seedHex: evidenceSeedHex,
+    ...overrides,
+  });
   const state = () => f.store.room("commons").state;
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
   const change = (id, type, data = {}, actor = "producer") => send(actor, type, {
@@ -21,7 +32,8 @@ export function createResultsFixture() {
     change(id, T.WORK_COMPLETED, { summary: title + " — ready to revisit.", nextAction: "Read the result.",
       producerId: "producer",
       ...(native ? { evidenceKind: "room_text", previousCompletionEventId: null, evidenceMessageId: id + "-draft", evidenceMessageEventId: posted.event.id,
-        evidenceVersion: textVersion(body) } : { evidenceUrl: "https://example.invalid/fictional-result", evidenceVersion: id + "-v1" }) });
+        evidenceVersion: textVersion(body) } : { evidenceUrl: "https://example.invalid/fictional-result", evidenceVersion: id + "-v1",
+        signedEvidence: signEvidence() }) });
     return body;
   };
   const review = id => {

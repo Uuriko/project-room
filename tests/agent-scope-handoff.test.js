@@ -100,7 +100,8 @@ test('two real HTTP clients coordinate a fictional scope, preserve late proposal
   const text = 'Synthetic handoff note: the second claimant acquired the released scope. The old note remains a proposal; a person still decides whether to accept this result.';
   await mutate(loser, T.WORK_COMPLETED, { summary: text, producerId: loser.config.memberId,
     evidenceUrl: 'https://example.invalid/assisted-agent-exercise/recorded-note', evidenceVersion: digest(text),
-    nextAction: 'Local operator reviews the receipt. The fixture URL is not a hosted artifact.' });
+    nextAction: 'Local operator reviews the receipt. The fixture URL is not a hosted artifact.',
+    signedEvidence: fixture.signEvidence() });
   const completed = await current(loser);
   assert.equal(completed.receipt.reportedById, loser.config.memberId);
   assert.equal(completed.receipt.evidenceVersion, digest(text));

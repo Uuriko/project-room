@@ -6,6 +6,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 test("result draft selects exact reported text without reading or exporting authority", () => {
   const expected = { title: "  Outcome 🌱\r\nOne  ", summary: "One useful finding.\n  No implied author." };
@@ -42,7 +43,8 @@ async function fixture(t) {
   const client = actor => new RoomAgentClient({ origin, roomId: "commons", token: f.keys[actor] });
   const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
   const mutate = (actor, type, data = {}) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data: { workItemId: "test-handoff", expectedRevision: snapshot().state.workItems["test-handoff"].revision, ...data } });
-  return { ...f, origin, client, snapshot, mutate };
+  const signEvidence = makeTestSigner(f.store);
+  return { ...f, origin, client, snapshot, mutate, signEvidence };
 }
 
 test("result reads use one cancellable selected-context GET, not source, writes or evidence fetches", async t => {
@@ -50,7 +52,7 @@ test("result reads use one cancellable selected-context GET, not source, writes 
   f.store.reminders.mutate(f.keys.guest, "commons", { requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: 0, action: "schedule", dueAt: Date.now() + 3600000 });
   const reminders = f.store.reminders.list(f.keys.guest, "commons").reminders;
   f.mutate("producer", T.WORK_ACCEPTED);
-  f.mutate("producer", T.WORK_COMPLETED, { summary: "Selected synthetic summary", evidenceUrl: "https://example.invalid/private", evidenceVersion: "v1", producerId: "producer", nextAction: "Review" });
+  f.mutate("producer", T.WORK_COMPLETED, { summary: "Selected synthetic summary", evidenceUrl: "https://example.invalid/private", evidenceVersion: "v1", producerId: "producer", nextAction: "Review", signedEvidence: f.signEvidence() });
   let response = f.store.workContext(f.keys.guest, "commons", "test-handoff");
   const calls = [], actor = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.guest, fetchImpl: async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => response }; } });
   const controller = new AbortController(), before = f.snapshot();
@@ -74,7 +76,7 @@ test("reported copies never inherit review or approval across exact receipt/rewo
   const f = await fixture(t), actor = f.client("guest");
   await assert.rejects(actor.resultDraft("test-handoff"), /reported result/);
   f.mutate("producer", T.WORK_ACCEPTED);
-  const complete = (version, producerId) => f.mutate("producer", T.WORK_COMPLETED, { summary: `Synthetic summary ${version}`, evidenceUrl: "https://example.invalid/result", evidenceVersion: version, ...(producerId ? { producerId } : {}), nextAction: "Review" });
+  const complete = (version, producerId) => f.mutate("producer", T.WORK_COMPLETED, { summary: `Synthetic summary ${version}`, evidenceUrl: "https://example.invalid/result", evidenceVersion: version, ...(producerId ? { producerId } : {}), nextAction: "Review", signedEvidence: f.signEvidence() });
   const draft = async version => {
     const before = f.snapshot(), result = await actor.resultDraft("test-handoff");
     assert.deepEqual(result, { title: "Test: prepare an agenda", summary: `Synthetic summary ${version}` });

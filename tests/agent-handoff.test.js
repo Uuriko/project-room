@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 test("local API handoff: distinct scripted clients, revision correction, restart, review and human decision", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-handoff-contract-"));
@@ -22,6 +23,7 @@ test("local API handoff: distinct scripted clients, revision correction, restart
     } });
   }
   const producerKey = store.issueAccessKey("commons", "producer"), reviewerKey = store.issueAccessKey("commons", "reviewer");
+  let signEvidence = makeTestSigner(store);
   let server;
   const start = async () => {
     server = createRoomServer({ store });
@@ -49,7 +51,8 @@ test("local API handoff: distinct scripted clients, revision correction, restart
   const version = text => `sha256:${createHash("sha256").update(text).digest("hex")}`;
   const submit = async (id, text) => mutate(producer, id, T.WORK_COMPLETED, {
     summary: text, evidenceVersion: version(text), producerId: "producer",
-    evidenceUrl: "https://example.invalid/explicitly-synthetic-handoff-fixture", nextAction: "Review the text contained in this receipt; the fixture URL is not live."
+    evidenceUrl: "https://example.invalid/explicitly-synthetic-handoff-fixture", nextAction: "Review the text contained in this receipt; the fixture URL is not live.",
+    signedEvidence: signEvidence()
   });
   await submit("draft-1", "Agenda: discuss the proposal.");
   let received = await item(reviewer);
@@ -64,6 +67,7 @@ test("local API handoff: distinct scripted clients, revision correction, restart
 
   // Close every client transport and reopen the actual persisted database.
   await stop(); store = new RoomStore(filename); origin = await start();
+  signEvidence = makeTestSigner(store);
   owner = client(ownerKey); producer = client(producerKey); reviewer = client(reviewerKey);
   assert.equal((await item(producer)).next.action, "revise");
   await mutate(producer, "resolve", T.WORK_BLOCKER_RESOLVED, { resolution: "The correction is understood." });

@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { AssignmentWatcher, attentionNotices } from "../client/assignment-watcher.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 // Actual domain/service persistence; only the transport is a read-only adapter.
 // Credentials remain in this disposable fixture, never in journal state/output.
@@ -18,6 +19,7 @@ function fixture(t, viewer = "agent") {
   const store = new RoomStore(":memory:", { now: () => time });
   store.initialize(initialRoom());
   const keys = { owner: store.issueAccessKey("commons", "owner") };
+  const signEvidence = makeTestSigner(store);
   const send = (actor, type, data) => store.command(keys[actor], "commons", { id: randomUUID(), type, data });
   for (const memberId of ["agent", "reviewer"]) {
     send("owner", T.MEMBER_ADDED, { memberId, displayName: memberId, kind: "agent", accountableHumanId: "owner",
@@ -49,7 +51,8 @@ function fixture(t, viewer = "agent") {
     },
     complete(workItemId = "work", version = "v1", actor = "agent") {
       return f.mutate(actor, T.WORK_COMPLETED, workItemId, { summary: "Synthetic fixture evidence", producerId: actor,
-        evidenceVersion: version, evidenceUrl: "https://example.invalid/watcher-fixture", nextAction: "Review this fixture result" });
+        evidenceVersion: version, evidenceUrl: "https://example.invalid/watcher-fixture", nextAction: "Review this fixture result",
+        signedEvidence: signEvidence() });
     },
     watcher(options = {}) {
       return new AssignmentWatcher({ client, journal, origin: "http://127.0.0.1:1234", roomId: "commons", now: f.now,

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, PERMISSIONS, applyEvent, event, replay } from "../src/events.js";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -83,15 +84,16 @@ test("reopening a pre-upgrade database separates legacy reporters from unknown p
   const filename = join(directory, "room.sqlite");
   let store = new RoomStore(filename);
   store.initialize(initialRoom());
+  const signEvidence = makeTestSigner(store);
   const owner = store.issueAccessKey("commons", "owner");
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work"] } });
   const human = store.issueAccessKey("commons", "human");
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: "w-legacy-receipt", title: "Legacy receipt", definitionOfDone: "done", accountableMemberId: "human" } });
   store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: "w-legacy-receipt", expectedRevision: 0 } });
-  store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "w-legacy-receipt", expectedRevision: 1, summary: "v1", evidenceUrl: "https://example.com/v1", evidenceVersion: "v1", nextAction: "rework" } });
+  store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "w-legacy-receipt", expectedRevision: 1, summary: "v1", evidenceUrl: "https://example.com/v1", evidenceVersion: "v1", nextAction: "rework", signedEvidence: signEvidence() } });
   store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_BLOCKED, data: { workItemId: "w-legacy-receipt", expectedRevision: 2, reason: "v2 requested", nextAction: "accept v2" } });
   store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_BLOCKER_RESOLVED, data: { workItemId: "w-legacy-receipt", expectedRevision: 3, resolution: "v2 accepted" } });
-  store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "w-legacy-receipt", expectedRevision: 4, summary: "v2", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "done" } });
+  store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId: "w-legacy-receipt", expectedRevision: 4, summary: "v2", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "done", signedEvidence: signEvidence() } });
 
   const state = store.room("commons").state;
   const item = state.workItems["w-legacy-receipt"];
@@ -119,6 +121,7 @@ test("reopening backfills verification independence only from explicit producer 
   const filename = join(directory, "room.sqlite");
   let store = new RoomStore(filename);
   store.initialize(initialRoom());
+  const signEvidence = makeTestSigner(store);
   const owner = store.issueAccessKey("commons", "owner");
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work"] } });
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "agent", displayName: "agent", kind: "agent", permissions: ["verify"] } });
@@ -128,7 +131,7 @@ test("reopening backfills verification independence only from explicit producer 
   for (const [workItemId, producerId] of [["w-known-producer", "human"], ["w-unknown-producer", null]]) {
     store.command(owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId, title: workItemId, definitionOfDone: "done", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true } });
     store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId, expectedRevision: 0 } });
-    const completion = store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId, expectedRevision: 1, ...(producerId ? { producerId } : {}), summary: "done", evidenceUrl: `https://example.com/${workItemId}`, evidenceVersion: "v1", nextAction: "verify" } });
+    const completion = store.command(human, "commons", { id: crypto.randomUUID(), type: T.WORK_COMPLETED, data: { workItemId, expectedRevision: 1, ...(producerId ? { producerId } : {}), summary: "done", evidenceUrl: `https://example.com/${workItemId}`, evidenceVersion: "v1", nextAction: "verify", signedEvidence: signEvidence() } });
     store.command(agent, "commons", { id: crypto.randomUUID(), type: T.VERIFICATION_RECORDED, data: { workItemId, expectedRevision: 2, result: "pass", completionEventId: completion.event.id, evidenceVersion: "v1", summary: "checked" } });
   }
 
@@ -151,6 +154,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   const filename = join(directory, "room.sqlite");
   let store = new RoomStore(filename);
   store.initialize(initialRoom());
+  const signEvidence = makeTestSigner(store);
   const owner = store.issueAccessKey("commons", "owner");
   const run = (token, type, data) => store.command(token, "commons", { id: crypto.randomUUID(), type, data });
   run(owner, T.MEMBER_ADDED, { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work", "write_external"] });
@@ -166,7 +170,8 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   run(human, T.WORK_ACCEPTED, { workItemId: "legacy-approved", expectedRevision: 0 });
   const approvedCompletion = run(human, T.WORK_COMPLETED, {
     workItemId: "legacy-approved", expectedRevision: 1, producerId: "human", summary: "v1 result",
-    evidenceUrl: "https://example.com/legacy-approved", evidenceVersion: "v1", nextAction: "verify"
+    evidenceUrl: "https://example.com/legacy-approved", evidenceVersion: "v1", nextAction: "verify",
+    signedEvidence: signEvidence()
   });
   run(agent, T.VERIFICATION_RECORDED, {
     workItemId: "legacy-approved", expectedRevision: 2, result: "pass",
@@ -185,7 +190,8 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   run(human, T.WORK_ACCEPTED, { workItemId: "legacy-blocked", expectedRevision: 0 });
   const blockedCompletion = run(human, T.WORK_COMPLETED, {
     workItemId: "legacy-blocked", expectedRevision: 1, summary: "done",
-    evidenceUrl: "https://example.com/legacy-blocked", evidenceVersion: "v1", nextAction: "decide"
+    evidenceUrl: "https://example.com/legacy-blocked", evidenceVersion: "v1", nextAction: "decide",
+    signedEvidence: signEvidence()
   });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-blocked", expectedRevision: 2, decision: "approved",
@@ -203,7 +209,8 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   run(human, T.WORK_ACCEPTED, { workItemId: "legacy-valid", expectedRevision: 0 });
   const validCompletion = run(human, T.WORK_COMPLETED, {
     workItemId: "legacy-valid", expectedRevision: 1, summary: "done",
-    evidenceUrl: "https://example.com/legacy-valid", evidenceVersion: "v1", nextAction: "decide"
+    evidenceUrl: "https://example.com/legacy-valid", evidenceVersion: "v1", nextAction: "decide",
+    signedEvidence: signEvidence()
   });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-valid", expectedRevision: 2, decision: "approved",
@@ -218,7 +225,8 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   run(human, T.WORK_ACCEPTED, { workItemId: "legacy-forged-approval", expectedRevision: 0 });
   const forgedCompletion = run(human, T.WORK_COMPLETED, {
     workItemId: "legacy-forged-approval", expectedRevision: 1, summary: "done",
-    evidenceUrl: "https://example.com/legacy-forged", evidenceVersion: "v1", nextAction: "decide"
+    evidenceUrl: "https://example.com/legacy-forged", evidenceVersion: "v1", nextAction: "decide",
+    signedEvidence: signEvidence()
   });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-forged-approval", expectedRevision: 2, decision: "approved",
