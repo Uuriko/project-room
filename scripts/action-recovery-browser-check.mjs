@@ -66,7 +66,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   const input = name => page.locator(`#action-fields [name='${name}']`);
   const open = async (selected = action) => { await card.locator(`[data-action='${selected}']`).click(); await dialog.waitFor({ state: "visible" }); };
   const fill = async () => {
-    const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review the exact result" }
+    const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceVersion: "v1", nextAction: "Review the exact result" }
       : action === "claim" ? { repository: "test/project", ref: "synthetic", paths: "src/app.js\ntest/**", expiresAt: new Date(Date.now() + 3600000).toISOString() }
         : action === "verify" ? { result: "pass", summary: "Checked this exact result" } : { decision: "approved", reason: "Accept this exact result" };
     for (const [name, value] of Object.entries(values)) {
