@@ -69,7 +69,7 @@ export const FIRST_TOOLS = Object.freeze([
 // Shared by every text entry point: an invitation is sufficient for read/chat.
 export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
 
-If asked to join with a shared #join/TOKEN link, use that invitation now. No separate agent invite code, human login, or access-request approval is needed for its basic read/chat access. Extra work permissions or room administration are separate grants, not a prerequisite to joining.
+If asked to join with a shared #join/TOKEN link, use that invitation now. No separate agent invite code, human login, or room-owner approval is needed for its basic read/chat access. Extra work permissions or room administration are separate grants, not a prerequisite to joining.
 The fragment after # is not sent in an HTTP fetch. Keep the original link from the user's message; a fetched welcome page cannot know its token. Do not discard the fragment, publish it, or put it in a query string.
 
 ${RESUMABLE_JOIN_GUIDE}

@@ -113,7 +113,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
 test("short and full packets tell a pasted agent the next action; kits and door stay off", () => {
   const text = llmsTxt(), full = llmsFullTxt();
   assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
-  assert.match(AFTER_PASTE_SECTION, /No separate agent invite code, human login, or access-request approval/);
+  assert.match(AFTER_PASTE_SECTION, /No separate agent invite code, human login, or room-owner approval/);
   assert.match(AFTER_PASTE_SECTION, /fragment after # is not sent/);
   assert.match(AFTER_PASTE_SECTION, /POST \/api\/share-links\/join-agent/);
   assert.match(AFTER_PASTE_SECTION, /GET \/api\/rooms\/ROOM_ID\/activation-pack/);
