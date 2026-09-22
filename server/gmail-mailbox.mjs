@@ -37,7 +37,7 @@ export class GmailMailbox {
   seal(value, context) {
     const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', Buffer.from(this.config.tokenKey, 'hex'), iv);
     cipher.setAAD(Buffer.from(context));
-    return Buffer.concat([iv, cipher.update(JSON.stringify(value)), cipher.final(), cipher.getAuthTag()]).toString('base64');
+    return Buffer.concat([iv, cipher.update(Buffer.from(JSON.stringify(value))), cipher.final(), cipher.getAuthTag()]).toString('base64');
   }
   unseal(value, context) {
     try {
@@ -87,7 +87,7 @@ export class GmailMailbox {
   }
   async json(url, init = {}) {
     let response;
-    try { response = await this.fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) }); }
+    try { response = await this.fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15000) }); }
     catch { fail('gmail_unavailable', 502); }
     if (!response.ok) { await response.body?.cancel(); fail(response.status === 404 ? 'gmail_not_found' : [400, 401, 403].includes(response.status) ? 'gmail_reconnect_required' : 'gmail_unavailable', 502); }
     const reader = response.body?.getReader(); if (!reader) fail('gmail_invalid_response', 502);
