@@ -70,6 +70,12 @@ export function installQuarantineReview({ api, ownerKey }) {
     // the fetch is acting on a message that is not in the list they chose.
     filter.addEventListener("change", () => { if (owns()) refresh({ clear: true }); });
     const reload = document.createElement("button"); reload.type = "button"; reload.className = "button ghost";
+    // Identified, not found by position: the coverage panel is prepended below
+    // and carries its own header button, so "the first header button in this
+    // section" resolves to the coverage one. refresh() was holding that button
+    // and leaving this one live, so the review list had no busy state at all
+    // and every impatient click started another fetch.
+    reload.id = "inbox-quarantine-reload";
     reload.textContent = "↻"; reload.setAttribute("aria-label", "Refresh quarantine review");
     reload.addEventListener("click", () => { if (owns() && !reload.disabled) refresh(); });
     header.append(heading, count, filter, reload);
@@ -261,14 +267,22 @@ export function installQuarantineReview({ api, ownerKey }) {
         : error.code === "quarantine_already_split" ? "Already split off its thread."
         : error.code === "quarantine_not_held" ? "Only held messages can be split."
         : "Couldn’t complete that action. Try again.");
-    } finally { busy.delete(id); }
+    } finally {
+      busy.delete(id);
+      // A failure leaves the card on screen, and the status line tells the
+      // reviewer to try again. Re-enable so that advice is actionable: without
+      // this the only way back was the section reload or a filter change.
+      // On success the card has already been replaced by the refresh above, so
+      // these buttons belong to a detached node and this changes nothing.
+      for (const button of buttons) button.disabled = false;
+    }
   }
   async function refresh({ silent = false, clear = false } = {}) {
     const el = section();
     if (!owns()) return;
     const turn = ++epoch;
     const status = $("#inbox-quarantine-status").value;
-    const reload = el.querySelector("header button");
+    const reload = el.querySelector("#inbox-quarantine-reload");
     if (!silent) { reload.disabled = true; text("#inbox-quarantine-status-line", "Loading…"); }
     // Only on a status change: a plain reload keeps the same view's cards so
     // the list does not blink on every refresh.
