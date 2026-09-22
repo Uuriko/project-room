@@ -206,3 +206,41 @@ test("export: non-participants get no DM events in the JSONL export", async t =>
   assert.equal(ownerExport.status, 200);
   assert.equal((await ownerExport.text()).includes(DM_BODY), false, "the owner must not see the DM body in the HTML export");
 });
+
+// The notification feed was the one read surface the filter above never
+// reached. It derives its own items from the raw event tail rather than going
+// through the snapshot or store.eventsAfter, so a DM that happened to reply to
+// a public message put a "reply" item in the parent author's feed: existence,
+// author, timestamp, message id and a bump to their unread count, for a
+// conversation they are not part of.
+test("notifications: a DM replying to my public message is not my notification", async t => {
+  const f = await seed(t);
+  // The owner wrote thread-root; producer's DM to reviewer replies to it.
+  const owner = await f.get("/api/rooms/commons/notifications", f.keys.owner).then(r => r.json());
+  assert.ok(owner.notifications.every(item => item.messageId !== "thread-dm-reply"),
+    "the owner must not learn a DM exists by being the parent author");
+  assert.equal(JSON.stringify(owner).includes(DM_REPLY_BODY), false, "and certainly not its body");
+
+  // The guest is a plain bystander and must see none of the three DMs.
+  const guest = await f.get("/api/rooms/commons/notifications", f.keys.guest).then(r => r.json());
+  for (const messageId of ["dm-1", "dm-work-1", "thread-dm-reply"]) {
+    assert.ok(guest.notifications.every(item => item.messageId !== messageId), `guest must not see ${messageId}`);
+  }
+
+  // The filter must not cost the recipient their own notification.
+  const reviewer = await f.get("/api/rooms/commons/notifications", f.keys.reviewer).then(r => r.json());
+  assert.ok(reviewer.notifications.some(item => item.messageId === "dm-1"),
+    "the member the DM was sent to is still told about it");
+});
+
+test("notifications: an @mention inside a DM does not notify the person named", async t => {
+  const f = await seed(t);
+  const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
+  // Naming someone in a message they cannot read must not reach them: it would
+  // be a way to signal any member from a conversation they have no access to.
+  send("producer", T.MESSAGE_POSTED, { messageId: "dm-naming-guest", body: `@Test guest ${DM_BODY}`, toMemberId: "reviewer" });
+
+  const guest = await f.get("/api/rooms/commons/notifications", f.keys.guest).then(r => r.json());
+  assert.ok(guest.notifications.every(item => item.messageId !== "dm-naming-guest"),
+    "being named in a DM between two other people is not a mention of you");
+});

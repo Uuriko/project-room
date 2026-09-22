@@ -55,6 +55,16 @@ export function deriveNotifications({ events, state, member }) {
       const current = messages.get(messageId);
       if (current?.deletedAt) continue; // A tombstone hides the item with the body.
       const message = current ?? { id: messageId, body: event.data.body, replyToId: event.data.replyToId || null, toMemberId: event.data.toMemberId || null };
+      // RC-2026-09-19-070: a DM belongs to its two parties. Every other read
+      // surface applies this filter at the HTTP layer; this feed derives its
+      // own items from the raw event tail, so it has to apply it itself or it
+      // becomes the one way to learn a DM exists. Two ways it leaked: a DM
+      // that replies to your public message made you the parent author and so
+      // earned you a "reply" item, and an @name inside a DM notified someone
+      // who cannot read it, which would make DMs a way to signal any member
+      // from a conversation they have no access to. The sender is already
+      // skipped above; this leaves the recipient, who is owed their message.
+      if (message.toMemberId && message.toMemberId !== member.id) continue;
       const addressed = messageAddressesMember(message, member);
       const parent = message.replyToId ? messages.get(message.replyToId) : null;
       const replyToMe = Boolean(parent) && parent.authorId === member.id;
