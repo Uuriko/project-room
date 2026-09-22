@@ -92,9 +92,28 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   // enforcement-hold context is honest absence, not a verdict.
   assert.ok(firstCard.includes("No shadow decision recorded"), "shadow absence renders");
 
-  // Confirm removes the item from held and shows it in released history.
+  // A failed verdict leaves the card usable: the status line says "Try
+  // again", so the buttons it disabled for the request must come back.
+  await page.route("**/quarantine/release", route => route.fulfill({ status: 500, contentType: "application/json",
+    body: JSON.stringify({ error: { code: "internal", message: "synthetic" } }) }));
   await card(page, 0).getByRole("button", { name: "Confirm", exact: true }).click();
+  await page.waitForFunction(() => /Try again/.test(document.querySelector("#inbox-quarantine-status-line")?.textContent ?? ""));
+  for (const name of ["Confirm", "Dismiss"]) {
+    assert.equal(await card(page, 0).getByRole("button", { name, exact: true }).isDisabled(), false, `${name} is ready to try again`);
+  }
+  await page.unroute("**/quarantine/release");
+
+  // A note half-written on the second card survives a verdict on the first,
+  // and focus stays in the backlog instead of falling to the page body.
+  await card(page, 1).getByRole("textbox").fill("second card, still deciding");
+  await card(page, 0).getByRole("button", { name: "Confirm", exact: true }).focus();
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelectorAll(".inbox-quarantine-item").length === 1);
+  assert.equal(await card(page, 0).getByRole("textbox").inputValue(), "second card, still deciding",
+    "a verdict on one card does not throw away a note typed into another");
+  assert.equal(await page.evaluate(() => document.querySelector("#inbox-quarantine-list").contains(document.activeElement)), true,
+    "focus moves to the card that took the decided one's place");
+  await card(page, 0).getByRole("textbox").fill("");
   assert.equal(await page.locator("#inbox-quarantine-count").textContent(), "1 held");
   await page.locator("#inbox-quarantine-status").selectOption("released");
   await waitForRefresh(page);

@@ -39,6 +39,8 @@ export function installQuarantineReview({ api, ownerKey }) {
     verifiedConnector: "verified connector", serviceNotification: "service notification",
     flagOnlyChannel: "flag-only channel" };
   let epoch = 0, busy = new Set(), armed = new Set();
+  // The card a verdict was given from, so refresh() can put focus back there.
+  let focusAfterVerdict = -1;
   const ageOf = at => {
     const ms = Date.now() - at;
     if (ms < 60000) return "just now";
@@ -222,6 +224,7 @@ export function installQuarantineReview({ api, ownerKey }) {
       const note = document.createElement("input");
       note.type = "text"; note.maxLength = 2048; note.placeholder = "Review note (optional)";
       note.setAttribute("aria-label", "Review note for " + item.id);
+      note.dataset.quarantineNote = item.id;
       const actions = document.createElement("div"); actions.className = "inbox-draft-actions";
       const confirm = document.createElement("button"); confirm.type = "button"; confirm.className = "button secondary"; confirm.textContent = "Confirm";
       confirm.title = "Accept this message into the inbox (owner verdict: not spam).";
@@ -238,6 +241,9 @@ export function installQuarantineReview({ api, ownerKey }) {
         armed.delete(item.id); act(item.id, "dismiss", note.value, [confirm, dismiss, split]);
       });
       split.addEventListener("click", () => act(item.id, "split", note.value, [confirm, dismiss, split]));
+      for (const [button, role] of [[confirm, "release"], [dismiss, "dismiss"], [split, "split"]]) {
+        button.dataset.quarantineId = item.id; button.dataset.quarantineAction = role;
+      }
       actions.append(confirm, dismiss, split);
       card.append(note, actions);
     }
@@ -254,6 +260,13 @@ export function installQuarantineReview({ api, ownerKey }) {
       return;
     }
     busy.add(id); armed.delete(id);
+    // Disabling the focused button blurs it, so by the time the list is
+    // rebuilt focus has already fallen to the page body. Remember where the
+    // reviewer was working first, and let refresh() put them back there.
+    const list = $("#inbox-quarantine-list");
+    if (list?.contains(document.activeElement)) {
+      focusAfterVerdict = [...list.children].findIndex(card => card.contains(document.activeElement));
+    }
     for (const button of buttons) button.disabled = true;
     text("#inbox-quarantine-status-line", { release: "Confirming…", dismiss: "Dismissing…", split: "Splitting thread…" }[action]);
     try {
@@ -275,6 +288,12 @@ export function installQuarantineReview({ api, ownerKey }) {
       // On success the card has already been replaced by the refresh above, so
       // these buttons belong to a detached node and this changes nothing.
       for (const button of buttons) button.disabled = false;
+      // On a failure nothing was rebuilt, so refresh() never restored focus:
+      // give it back to the card the reviewer was working in.
+      if (focusAfterVerdict >= 0 && (document.activeElement === document.body || !document.activeElement)) {
+        buttons.find(button => button.isConnected && !button.disabled)?.focus();
+      }
+      focusAfterVerdict = -1;
     }
   }
   async function refresh({ silent = false, clear = false } = {}) {
@@ -297,10 +316,37 @@ export function installQuarantineReview({ api, ownerKey }) {
       if (result.items.length) el.hidden = false;
       armed.clear(); // Fresh cards rebuild the buttons; a stale arm would skip the two-tap guard.
       text("#inbox-quarantine-count", `${result.counts.held} held`);
-      $("#inbox-quarantine-list").replaceChildren(
+      // Every card is rebuilt here, and a reviewer working down a backlog has
+      // usually typed into more than one of them. Carry the typed notes and
+      // the focused control across the rebuild, the way the room timeline
+      // does with data-focus-key: before this, confirming card A silently
+      // threw away the note half-written on card B, and every verdict dropped
+      // keyboard focus to the page body.
+      const list = $("#inbox-quarantine-list");
+      const notes = new Map([...list.querySelectorAll("input[data-quarantine-note]")]
+        .filter(input => input.value).map(input => [input.dataset.quarantineNote, input.value]));
+      const active = list.contains(document.activeElement) ? document.activeElement : null;
+      const focusIndex = active ? [...list.children].findIndex(card => card.contains(active)) : focusAfterVerdict;
+      focusAfterVerdict = -1;
+      const focusSelector = active?.dataset.quarantineNote ? `input[data-quarantine-note="${CSS.escape(active.dataset.quarantineNote)}"]`
+        : active?.dataset.quarantineAction ? `button[data-quarantine-id="${CSS.escape(active.dataset.quarantineId)}"][data-quarantine-action="${active.dataset.quarantineAction}"]`
+        : null;
+      list.replaceChildren(
         ...result.items.map(itemCard),
         ...(!result.items.length ? [Object.assign(document.createElement("p"), { className: "form-hint", textContent:
           status === "held" ? "No messages held. The spam guard files tripped messages here for your review." : `No ${status} messages.` })] : []));
+      for (const [id, value] of notes) {
+        const input = list.querySelector(`input[data-quarantine-note="${CSS.escape(id)}"]`);
+        if (input) input.value = value;
+      }
+      if (active || focusIndex >= 0) {
+        // The same control if it survived; otherwise the card that moved into
+        // the place of the one just decided, so the next Tab continues the
+        // backlog instead of restarting at the top of the page.
+        const same = focusSelector ? list.querySelector(focusSelector) : null;
+        const next = list.children[Math.min(Math.max(focusIndex, 0), list.children.length - 1)];
+        (same ?? next?.querySelector("input, button:not([disabled])") ?? null)?.focus();
+      }
       if (!silent) text("#inbox-quarantine-status-line", "");
     } catch (error) {
       if (owns() && turn !== epoch) return;
@@ -308,7 +354,7 @@ export function installQuarantineReview({ api, ownerKey }) {
     } finally { if (owns() && turn === epoch) reload.disabled = false; }
   }
   function reset() {
-    epoch++; busy.clear(); armed.clear();
+    epoch++; busy.clear(); armed.clear(); focusAfterVerdict = -1;
     $("#inbox-quarantine")?.remove();
   }
   return { refresh, reset, section };
