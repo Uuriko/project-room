@@ -20,8 +20,23 @@ test("known secret patterns are found with redacted previews", () => {
   assert.ok(!findings[0].preview.includes(awsKey), "preview must be redacted");
   assert.ok(Object.isFrozen(findings));
 });
+// Deterministic PRNG for the high-entropy fixture below. A true random
+// 43-char base64url draw flakes ~0.4%: its empirical entropy can dip below
+// the 4.5 threshold (CI failure on main, 2026-09-21). Seeded output is fixed
+// across runs but no literal secret-shaped string sits in this file.
+const prngBytes = (seed, n) => {
+  let s = seed >>> 0;
+  const out = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) {
+    s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
+    out[i] = s & 0xff;
+  }
+  return out;
+};
+// 43 chars, empirical entropy ~5.04 (threshold 4.5) — verified stable.
+const highEntropySecret = () => prngBytes(0xC10C4, 32).toString("base64url");
 test("high-entropy strings are flagged; allowlist suppresses", () => {
-  const secret = randomBytes(32).toString("base64url"); // 43 chars, entropy ~5.3
+  const secret = highEntropySecret(); // 43 chars, entropy ~5.04
   const findings = scanLines([`deployed ${secret} ok`, "just a normal sentence here"]);
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, "high-entropy");
