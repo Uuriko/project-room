@@ -366,7 +366,7 @@ test("dispute CANCEL path: upheld challenge refunds the poster in full, no fee",
   expectConserved(escrow);
 });
 
-test("timeout refunds the award in full with no fee and returns the claim bond", () => {
+test("timeout refunds the award in full with no fee and forfeits the claim bond (anti-flake ladder rung 1)", () => {
   const { escrow } = makeEscrow();
   const bounty = post(escrow, { amount: 8 });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
@@ -379,8 +379,12 @@ test("timeout refunds the award in full with no fee and returns the claim bond",
   assert.equal(settled.state, "refunded");
   assert.equal(settled.group, "cancelled");
   assert.equal(bal(escrow, JILL).payable, 100); // full refund, no fee
-  assert.equal(bal(escrow, GROK).payable, 100); // claim bond returned (spec: "bond returned")
-  assert.equal(bal(escrow, "pool").payable, 0);
+  assert.equal(bal(escrow, GROK).payable, 99); // rung 1: claim bond forfeited to the pool, not returned
+  assert.equal(bal(escrow, "pool").payable, 1); // forfeited bond lands in the pool
+  const flake = escrow.balances(ROOM, GROK).flake;
+  assert.equal(flake.strikes, 1);
+  assert.equal(flake.rung, 1);
+  assert.equal(flake.bondMultiplier, 1);
   expectConserved(escrow);
 });
 

@@ -68,6 +68,14 @@ export const GENESIS_LANES = Object.freeze([
 export const GENESIS_CREDITS = 100;
 export const MILLIS_PER_CREDIT = 1000;
 export const CLAIM_BOND_MILLIS = 1000; // 1 credit anti-flake bond, fixed per room (slice 1)
+// Slice 8 (integration map #8): graduated anti-flake ladder. Flake strikes
+// decay (always a way back); the rung escalates forfeit -> 2x bond ->
+// cooldown. Credits-only: the ladder moves ledger units and gates claims,
+// never touches payouts and never bans.
+export const FLAKE_DECAY_MS = 30 * 24 * 3600 * 1000; // strikes older than 30d stop counting
+export const FLAKE_COOLDOWN_MS = 7 * 24 * 3600 * 1000; // rung 3+: no new claims for 7d
+export const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
+export const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
@@ -280,6 +288,24 @@ export const bountyEscrowSchema = `
     pinned_by TEXT NOT NULL,
     PRIMARY KEY(bounty_id, version)
   );
+`
+// Slice 8 (integration map #8): graduated anti-flake ladder. One row per
+// recorded flake (timeout without submitting, or work judged bad on an
+// upheld dispute). The rung is derived from strikes inside the decay window;
+// decay always offers a way back, so the table is append-only and never
+// pruned by the ladder itself.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_flakes (
+    room_id TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    struck_at_ms INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    rung INTEGER NOT NULL CHECK(rung >= 1),
+    decayed_journaled INTEGER NOT NULL DEFAULT 0,
+    cooldown_end_journaled INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS bounty_flakes_lane ON bounty_flakes(room_id, lane, struck_at_ms);
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -513,7 +539,7 @@ export class BountyEscrow {
       } else {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions"];
+          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         else this._migrateColumns();
         this._ready = true;
@@ -536,7 +562,7 @@ export class BountyEscrow {
   _checkSchemaReadOnly() {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions"];
+      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
@@ -591,12 +617,14 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_json TEXT");
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
-    // Reuse the exact schema-text chunk: the strict DDL-text verifySchema
+    // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
     // compares stored DDL verbatim, so a reformatted copy would fail it.
-    // IF NOT EXISTS makes this a safe no-op when the table is already there.
-    const rubricVersionsDdl = bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
-      .find(sql => sql.includes("bounty_rubric_versions"));
-    if (rubricVersionsDdl) this.db.exec(rubricVersionsDdl);
+    // A name may own several chunks (table + its indexes), so collect all.
+    // All chunks are IF NOT EXISTS: safe no-ops when already present.
+    const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .filter(sql => sql.includes(name));
+    for (const name of ["bounty_rubric_versions", "bounty_flakes"])
+      for (const ddl of schemaChunks(name)) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
     if (!hadRubricCols) _backfillRubricPins(this.db);
@@ -1101,6 +1129,76 @@ export class BountyEscrow {
     });
   }
 
+  // --- slice 8: graduated anti-flake ladder -------------------------------------
+  // Flake strikes decay (always a way back); the rung escalates
+  // forfeit -> 2x bond -> cooldown. Derived on read from the append-only
+  // bounty_flakes table; every step is journaled as a bounty_events row.
+  _flakeStrikes(roomId, lane, now) {
+    return this.db.prepare(`SELECT struck_at_ms FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND struck_at_ms > ? ORDER BY struck_at_ms DESC`)
+      .all(roomId, lane, now - FLAKE_DECAY_MS).map(r => r.struck_at_ms);
+  }
+
+  // The lane's ladder position: { strikes, rung, bondMultiplier,
+  // cooldownUntilMs }. rung 0 = clean, 1 = forfeit-on-flake, 2 = double
+  // bond, 3+ = cooldown. Pure read — the escalation is deterministic.
+  _flakeState(roomId, lane) {
+    const now = this.nowMs();
+    const strikes = this._flakeStrikes(roomId, lane, now);
+    const rung = Math.min(strikes.length, FLAKE_COOLDOWN_RUNG);
+    const rawCooldown = rung >= FLAKE_COOLDOWN_RUNG && strikes.length > 0
+      ? strikes[0] + FLAKE_COOLDOWN_MS : null;
+    return {
+      strikes: strikes.length, rung,
+      bondMultiplier: rung >= 2 ? FLAKE_BOND_MULTIPLIER : 1,
+      cooldownUntilMs: rawCooldown !== null && now < rawCooldown ? rawCooldown : null,
+    };
+  }
+
+  // Record one flake strike (timeout without submitting, or work judged bad
+  // on an upheld dispute) and journal the ladder step. Returns the lane's
+  // new ladder position.
+  _recordFlake(roomId, lane, bountyId, reason) {
+    const now = this.nowMs();
+    const rung = Math.min(this._flakeStrikes(roomId, lane, now).length + 1, FLAKE_COOLDOWN_RUNG);
+    this.db.prepare(`INSERT INTO bounty_flakes (room_id, lane, bounty_id, struck_at_ms, reason, rung)
+      VALUES (?,?,?,?,?,?)`).run(roomId, lane, bountyId, now, reason, rung);
+    const state = this._flakeState(roomId, lane);
+    const event = this._event(roomId, "flake.recorded",
+      { bountyId, actor: RULE_ACTOR,
+        data: { lane, reason, strikes: state.strikes, rung: state.rung,
+          bondMultiplier: state.bondMultiplier,
+          cooldownUntil: state.cooldownUntilMs === null ? null : new Date(state.cooldownUntilMs).toISOString() } });
+    return { ...state, event };
+  }
+
+  // Journal decay and cooldown-end transitions. Decay is derived on read
+  // (expired strikes stop counting immediately), but the transition itself
+  // is journaled lazily the first time a write path observes it — there is
+  // no keeper for the ladder, so claim time is the deterministic point of
+  // observation. Each transition journals exactly once per strike row.
+  _journalDecay(roomId, lane) {
+    const now = this.nowMs();
+    const ended = this.db.prepare(`SELECT rowid, struck_at_ms FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND rung >= ? AND struck_at_ms + ? <= ? AND cooldown_end_journaled=0`)
+      .all(roomId, lane, FLAKE_COOLDOWN_RUNG, FLAKE_COOLDOWN_MS, now);
+    for (const row of ended) {
+      this.db.prepare(`UPDATE bounty_flakes SET cooldown_end_journaled=1 WHERE rowid=?`).run(row.rowid);
+      this._event(roomId, "flake.cooldown-ended",
+        { actor: RULE_ACTOR,
+          data: { lane, cooldownUntil: new Date(row.struck_at_ms + FLAKE_COOLDOWN_MS).toISOString() } });
+    }
+    const decayed = this.db.prepare(`SELECT rowid FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND struck_at_ms <= ? AND decayed_journaled=0`)
+      .all(roomId, lane, now - FLAKE_DECAY_MS);
+    if (decayed.length > 0) {
+      const ids = decayed.map(r => r.rowid);
+      this.db.prepare(`UPDATE bounty_flakes SET decayed_journaled=1 WHERE rowid IN (${ids.map(() => "?").join(",")})`).run(...ids);
+      this._event(roomId, "flake.decayed",
+        { actor: RULE_ACTOR, data: { lane, strikesDecayed: ids.length } });
+    }
+  }
+
   // --- claim / submit / accept --------------------------------------------------------
   claimBounty(roomId, bountyId, { claimant, actor } = {}) {
     return this.store.transaction(() => {
@@ -1120,18 +1218,29 @@ export class BountyEscrow {
       const eligibility = claimEligibility(this, roomId, lane, bounty.amountMillis);
       if (!eligibility.allowed)
         fail("reputation_probation", `probation reputation band: may only claim bounties up to ${PROBATION_MAX_CLAIM_CREDITS} credits`);
-      this._requirePayable(roomId, lane, CLAIM_BOND_MILLIS, "claim bond");
+      // Slice 8: graduated anti-flake ladder. Rung 3+ lanes sit out a
+      // cooldown; rung 2+ lanes post a double bond. The bond is forfeited
+      // (not returned) on the next flake — see _timeoutRefund.
+      // Decay/cooldown-end transitions journal lazily here (the
+      // deterministic observation point — there is no ladder keeper).
+      this._journalDecay(roomId, lane);
+      const flake = this._flakeState(roomId, lane);
+      if (flake.cooldownUntilMs !== null)
+        fail("claim_cooldown", `anti-flake cooldown: no new claims until ${new Date(flake.cooldownUntilMs).toISOString()}`);
+      const bondMillis = CLAIM_BOND_MILLIS * flake.bondMultiplier;
+      this._requirePayable(roomId, lane, bondMillis, "claim bond");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
-        amountMillis: CLAIM_BOND_MILLIS, kind: "bond-lock", bountyId, lotId,
-        memo: `anti-flake claim bond for ${bountyId}`, actor: act,
+        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId,
+        memo: `anti-flake claim bond for ${bountyId}${flake.bondMultiplier > 1 ? ` (${flake.bondMultiplier}x ladder)` : ""}`, actor: act,
         receipt: { type: "bond-locked", payload: { bondKind: "claim", fromAccount: lane } } });
       bounty.claimant = lane;
       this._transition(bounty, "claimed");
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.claimed",
-        { bountyId, actor: act, before: "funded", after: "claimed", data: { bond: toCredits(CLAIM_BOND_MILLIS) } });
+        { bountyId, actor: act, before: "funded", after: "claimed",
+          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
@@ -1436,6 +1545,9 @@ export class BountyEscrow {
           this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
             amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
         this._settleClaimBond(bounty, at, { forfeit: true, actor });
+        // Slice 8: work judged bad is a flake strike — the bond forfeit
+        // above is the rung-1 consequence, journaled alongside.
+        if (worker) this._recordFlake(roomId, worker, bountyId, "dispute-upheld");
       } else if (settleKind === "split") {
         // SPLIT: half the award vests with the worker (fee at sweep), half
         // refunds to the poster, bond returned.
@@ -1507,24 +1619,24 @@ export class BountyEscrow {
   // auto-approve, stale disputes default to RELEASE, approved lots sweep,
   // proposed bounties past deadline expire unfunded. Mechanical transitions
   // are attributed to the rule actor (the human/agent caller who triggered
-  // the keeper run is recorded as triggeredBy).
-  //
-  // The claim bond is an anti-flake lock, not a fee: it returns to the
-  // claimant on payout AND on timeout (spec: "bond returned"). It is
-  // forfeited to the room pool only when the work was judged bad (dispute
-  // upheld). Defensive: a no-op when the bond is not actually locked for
-  // this bounty.
+  // The claim bond is an anti-flake lock, not a fee. Slice 8: the ladder
+  // forfeits the bond to the pool on a flake (timeout without submitting)
+  // and returns it when the submission went through review and the award
+  // refunded through no fault of the claimant. The settlement moves the
+  // ACTUAL locked amount — rung 2+ claims locked a double bond, and that
+  // doubled amount is what returns or forfeits. Defensive: a no-op when
+  // the bond is not actually locked for this bounty.
   _settleClaimBond(bounty, at, { forfeit, actor }) {
     if (!bounty.claimant) return;
     const locked = this.db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM bounty_journal
       WHERE room_id=? AND bounty_id=? AND account_id=? AND lot_state='locked'`)
       .get(bounty.roomId, bounty.bountyId, bounty.claimant).t;
-    if (locked < CLAIM_BOND_MILLIS) return;
+    if (locked <= 0) return;
     this._move({ roomId: bounty.roomId, at, from: { account: bounty.claimant, state: "locked" },
       to: forfeit ? { account: POOL_ACCOUNT, state: "payable" } : { account: bounty.claimant, state: "payable" },
-      amountMillis: CLAIM_BOND_MILLIS, kind: forfeit ? "bond-forfeit" : "bond-return",
+      amountMillis: locked, kind: forfeit ? "bond-forfeit" : "bond-return",
       bountyId: bounty.bountyId, lotId: newId("lot_"), actor,
-      memo: forfeit ? "claim bond forfeited to pool (work judged bad)" : "claim bond returned" });
+      memo: forfeit ? "claim bond forfeited to pool (anti-flake ladder)" : "claim bond returned" });
   }
 
   _timeoutRefund(bounty, at, actor) {
@@ -1537,15 +1649,20 @@ export class BountyEscrow {
       amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
       memo: "timeout: award refunded in full, no fee", actor,
       receipt: { type: "refund-issued", payload: { reason: "timeout", refundTo: bounty.poster } } });
-    // No submission by the deadline: the award refunds and the claim bond
-    // returns to the claimant (spec: "bond returned").
-    this._settleClaimBond(bounty, at, { forfeit: false, actor });
+    // Slice 8: no submission by the deadline is a flake. The strike is
+    // journaled, the rung escalates (forfeit -> 2x bond -> cooldown), and
+    // the bond is forfeited to the pool (ladder rung 1 consequence).
+    const flake = bounty.claimant
+      ? this._recordFlake(roomId, bounty.claimant, bountyId, "timeout-no-submit") : null;
+    this._settleClaimBond(bounty, at, { forfeit: flake !== null, actor });
     this._transition(bounty, "refunded");
-    bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at });
+    bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at,
+      flake: flake === null ? null : { strikes: flake.strikes, rung: flake.rung } });
     this._saveBounty(bounty);
     this._event(roomId, "bounty.refunded",
       { bountyId, actor, before: "claimed", after: "refunded",
-        data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant } });
+        data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant,
+          flake: flake === null ? null : { strikes: flake.strikes, rung: flake.rung, bondMultiplier: flake.bondMultiplier } } });
     return movement.receipt ? [movement.receipt] : [];
   }
 
@@ -1786,8 +1903,15 @@ export class BountyEscrow {
       const cutoff = isoNow(this.nowMs() - 30 * 24 * 3600 * 1000);
       const rep30 = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS earned
         FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='payout' AND at >= ?`).get(roomId, lane, cutoff).earned;
+      // Slice 8: the graduated anti-flake ladder, derived from strikes
+      // inside the decay window — the cooldown (rung 3+) is visible on the
+      // identity card so lanes know when they may claim again.
+      const flake = this._flakeState(roomId, lane);
       return Object.freeze({ identity: lane, ...byState,
         total: byState.payable + byState.locked + byState.attributed + byState.approved,
+        flake: Object.freeze({ strikes: flake.strikes, rung: flake.rung,
+          bondMultiplier: flake.bondMultiplier,
+          cooldownUntil: flake.cooldownUntilMs === null ? null : new Date(flake.cooldownUntilMs).toISOString() }),
         // Reputation derives ONLY from paid completions (accepted, paid
         // receipts) — never claims, activity, or self-attestation. Derived,
         // non-transferable, room-scoped; the 30d window is slice 1's decay.
