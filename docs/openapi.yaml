@@ -5702,7 +5702,6 @@ paths:
               required: [outcome]
               properties:
                 outcome: { type: string, maxLength: 1000 }
-                resolvedBy: { type: object, description: "{ kind: agent|human, id } resolver (default: caller)" }
       responses:
         '200': { description: "{ record: { routingId, status: resolved, outcome, resolvedBy, resolvedAt } }" }
         '404': { description: routing_not_found }

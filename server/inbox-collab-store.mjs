@@ -628,9 +628,19 @@ export class InboxCollabStore {
     if (typeof authAccountId === "string" && authAccountId) return authAccountId;
     const direct = this.store.accountForMember(roomId, callerId);
     if (direct) return direct.id;
-    const ownerId = this.store.roomAuthority(roomId).ownerId;
-    const ownerAccount = ownerId === callerId ? null : this.store.accountForMember(roomId, ownerId);
-    if (ownerAccount) return ownerAccount.id;
+    // A caller with no account of their own used to fall back to the ROOM
+    // OWNER's account. That is not a scope they hold, and inbox_handoffs is
+    // keyed on account_id with no room column at all (server/inbox-handoff.mjs),
+    // so the journal an account addresses spans every room that account owns.
+    // Together those two facts let an agent that is a member of one room read
+    // the full packets of the owner's handoffs in their OTHER rooms, and move
+    // them through their lifecycle. Refusing is the honest answer: the caller
+    // genuinely has no account scope here, and this is the same 409 the route
+    // already returns for a room with no human account bound at all.
+    //
+    // Proper room-scoping of the journal would let these callers back in
+    // safely, but that is a schema change to a shipped table and a decision
+    // for whoever owns this lane, not something to infer from a leak.
     const error = new Error("No account scope is bound for this handoff; bind a human account to the room first.");
     error.code = "handoff_no_account_scope";
     throw error;

@@ -282,6 +282,18 @@ test("routing: mentions, list, resolve, policy", async t => {
   const listed = await (await get(f, `${base}/routing`, f.humanKey)).json();
   assert.equal(listed.records.length, 1);
   assert.equal(listed.records[0].routingId, routingId);
+  // The resolver is whoever authenticated, and nothing in the body may say
+  // otherwise. Every other actor on these routes comes from the credential;
+  // this one used to take the body's word for it, so any member could record
+  // the owner, or anyone else, as having resolved a routed mention, in the
+  // durable journal as well as the response.
+  const forged = await post(f, `${base}/routing/${routingId}/resolve`, f.humanKey,
+    { outcome: "not mine to claim", resolvedBy: { kind: "human", id: "guest", label: "Guest" } });
+  assert.equal(forged.status, 422, "there is no field that chooses who resolved this");
+  assert.equal(await codeOf(forged), "invalid_input");
+  const untouched = await (await get(f, `${base}/routing`, f.humanKey)).json();
+  assert.equal(untouched.records[0].status, "routed", "the refusal recorded nothing");
+
   // Resolve hoists the outcome onto the record view.
   const resolved = await post(f, `${base}/routing/${routingId}/resolve`, f.humanKey,
     { outcome: "claude picked it up" });
@@ -345,6 +357,21 @@ test("handoffs: room-scoped journal writes with account resolution", async t => 
   const scopedList = await get(f, `${denBase}/handoffs`, f.denIdentity.secret);
   assert.equal(scopedList.status, 409);
   assert.equal(await codeOf(scopedList), "handoff_no_account_scope");
+
+  // An agent member of a room that DOES have a human owner is the case that
+  // used to fall through to the owner's account. inbox_handoffs is keyed on
+  // account_id with no room column, so borrowing that scope meant reading the
+  // owner's handoff packets from their other rooms, and transitioning them.
+  // The caller holds no account scope here either, and now says so.
+  const agentInHumanRoom = await get(f, `${base}/handoffs`, f.agent.secret);
+  assert.equal(agentInHumanRoom.status, 409, "an agent does not inherit the room owner's account");
+  assert.equal(await codeOf(agentInHumanRoom), "handoff_no_account_scope");
+  const writeAttempt = await post(f, `${base}/handoffs`, f.agent.secret,
+    { threadId: "thread-borrowed", to: { kind: "agent", id: "claude" } });
+  assert.equal(writeAttempt.status, 409, "and cannot write into it either");
+  const ownerView = await (await get(f, `${base}/handoffs`, f.humanKey)).json();
+  assert.ok(ownerView.handoffs.every(entry => entry.threadId !== "thread-borrowed"),
+    "the refusal wrote nothing into the owner's journal");
 });
 
 test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async t => {

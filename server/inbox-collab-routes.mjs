@@ -219,11 +219,16 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       case "routing-resolve": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
         const fields = await body(req);
-        if (!shape(fields, { required: ["outcome"], optional: ["resolvedBy"] })) {
-          invalidInput(reject, "{outcome, resolvedBy?}");
-        }
+        // The resolver is whoever authenticated, like every other actor on
+        // these routes. This one used to accept a resolvedBy from the body and
+        // only shape-check it, so any member could record the owner, or anyone
+        // else, as having resolved a routed mention - in the durable
+        // collab_routing_events row and its history, not just the response. An
+        // attribution nobody can vouch for is worse than none, so the field is
+        // refused rather than quietly ignored.
+        if (!shape(fields, { required: ["outcome"] })) invalidInput(reject, "{outcome}");
         const record = collab.resolveRouting(roomId, collabId, {
-          by: fields.resolvedBy ?? caller,
+          by: caller,
           outcome: fields.outcome,
         });
         return json(res, 200, { record });
