@@ -50,7 +50,7 @@ function runToAccepted(escrow, { amount = 10, verifier = null } = {}) {
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
-  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
@@ -259,7 +259,7 @@ test("accept is a gated approval event: attribution is its explicit consequence"
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "done" } });
   const { bounty: accepted, approval, attribution, receipt } =
-    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { note: "lgtm" } });
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   assert.equal(accepted.state, "accepted");
   assert.equal(accepted.group, "in-review");
   // The approval is explicit and attributed.
@@ -279,7 +279,7 @@ test("accept is a gated approval event: attribution is its explicit consequence"
   escrow.fundBounty(ROOM, b2.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, b2.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, b2.bountyId, { claimant: GROK, evidence: { evidenceUrl: "https://example.com/pr/2", summary: "x" } });
-  expectCode(() => escrow.acceptWork(ROOM, b2.bountyId, { acceptor: GROK, verifierAttestation: { note: "self" } }), "not_authorized");
+  expectCode(() => escrow.acceptWork(ROOM, b2.bountyId, { acceptor: GROK, verifierAttestation: { note: "self", citations: [{ criterionId: "c1", verdict: "pass" }] } }), "not_authorized");
   expectConserved(escrow);
 });
 

@@ -2285,6 +2285,19 @@ paths:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
                 deadline: { type: string, format: date-time }
                 verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                rubric:
+                  type: array
+                  description: |
+                    Optional pinned acceptance rubric (slice 6): 1..50 {criterionId, description}
+                    criteria, pinned at v1. Omit to derive the default single-criterion
+                    pin from the criteria text. Acceptance verdicts must cite every
+                    pinned criterion with a pass|fail verdict.
+                  items:
+                    type: object
+                    required: [criterionId, description]
+                    properties:
+                      criterionId: { type: string, minLength: 1, maxLength: 64 }
+                      description: { type: string, minLength: 1, maxLength: 500 }
                 idempotencyKey: { type: string }
       responses:
         '201':
@@ -2320,6 +2333,52 @@ paths:
       responses:
         '200':
           description: The funded bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/rubric:
+    post:
+      summary: Re-pin the bounty rubric (slice 6)
+      description: |
+        Poster-only: re-pins the acceptance rubric at v+1 while the bounty
+        is still PROPOSED. Funding pins the rubric for the rest of the
+        lifecycle; every version is preserved and arbiters can re-check a
+        verdict against any past version. Emits `bounty.rubric-updated`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rubric]
+              properties:
+                rubric:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [criterionId, description]
+                    properties:
+                      criterionId: { type: string, minLength: 1, maxLength: 64 }
+                      description: { type: string, minLength: 1, maxLength: 500 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The bounty with its re-pinned rubric
           content:
             application/json:
               schema:
@@ -2550,9 +2609,12 @@ paths:
       description: |
         Explicit gated approval by the poster (or a distinct member under
         the distinct_member review policy — the claimant cannot accept
-        their own work). The approval is recorded as an explicit event and
-        only the approval converts the locked escrow into claimant
-        attribution. Emits `bounty.accepted`. API keys need `rooms:write`.
+        their own work). Slice 6: `verifierAttestation.citations` is required
+        — one {criterionId, verdict: pass|fail} per pinned rubric criterion,
+        citing the rubric version pinned at accept time. The approval is
+        recorded as an explicit event and only the approval converts the
+        locked escrow into claimant attribution. Emits `bounty.accepted`.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -2646,6 +2708,19 @@ paths:
               properties:
                 outcome: { type: string, enum: [upheld, rejected, split, frivolous] }
                 reasonCodes: { type: array, items: { type: string } }
+                rubricCheck:
+                  type: array
+                  description: |
+                    Optional arbiter re-check against the pinned rubric (slice 6):
+                    one {criterionId, verdict: pass|fail} per pinned criterion.
+                    Validated against the pin before the ruling lands and
+                    recorded on the resolution.
+                  items:
+                    type: object
+                    required: [criterionId, verdict]
+                    properties:
+                      criterionId: { type: string }
+                      verdict: { type: string, enum: [pass, fail] }
                 idempotencyKey: { type: string }
       responses:
         '200':
@@ -7077,6 +7152,19 @@ components:
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
         resolution: { type: object, nullable: true }
+        rubric:
+          type: object
+          description: The currently pinned rubric (slice 6): version, sha256 hash, and canonical criteria. Acceptance citations and arbiter re-checks validate against this pin.
+          properties:
+            version: { type: integer }
+            hash: { type: string }
+            criteria:
+              type: array
+              items:
+                type: object
+                properties:
+                  criterionId: { type: string }
+                  description: { type: string }
     BountyReceipt:
       type: object
       description: A bounty transition receipt: actor-attributed with before/after states and the lifecycle event.

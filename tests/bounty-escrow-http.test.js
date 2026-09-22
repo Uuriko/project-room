@@ -99,7 +99,7 @@ test("post → fund → claim → submit → accept → epoch-close → balances
 
   // Jill accepts: explicit gated approval before attribution.
   const acceptRes = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/accept`, {
-    verifierAttestation: { reviewerId: "owner", checks: ["breaking-changes"], outcome: "pass" },
+    verifierAttestation: { reviewerId: "owner", checks: ["breaking-changes"], outcome: "pass", citations: [{ criterionId: "c1", verdict: "pass" }] },
   }, keys.owner);
   assert.equal(acceptRes.status, 200);
   const accepted = await acceptRes.json();
@@ -203,7 +203,7 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
     producerId: "producer",
   }, keys.producer);
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/accept`, {
-    verifierAttestation: { reviewerId: "owner", outcome: "pass" },
+    verifierAttestation: { reviewerId: "owner", outcome: "pass", citations: [{ criterionId: "c1", verdict: "pass" }] },
   }, keys.owner);
 
   // Wrong bond size is a 422.
@@ -226,4 +226,36 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   assert.ok(receipts.every(r => r.after && r.hash), "every receipt carries after and a hash link");
   assert.ok(receipts.every(r => r.kind === "genesis" || r.before),
     "every non-genesis movement receipt carries before");
+});
+
+test("rubric route: post with rubric, re-pin pre-funding, frozen after fund", async t => {
+  const { origin, keys } = await startServer(t);
+  const rubric = [
+    { criterionId: "correctness", description: "resolves the bug" },
+    { criterionId: "tests", description: "regression tests included" },
+  ];
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ rubric }), keys.owner);
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  const bountyId = created.bounty.bountyId;
+  const pinned = created.bounty.rubric;
+  assert.equal(pinned.version, 1);
+  assert.equal(pinned.criteria.length, 2);
+
+  // Re-pin before funding: v2.
+  const repin = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/rubric`, {
+    rubric: [{ criterionId: "correctness", description: "resolves the bug, clearer" },
+      { criterionId: "tests", description: "regression tests included" }],
+  }, keys.owner);
+  assert.equal(repin.status, 200);
+  assert.equal((await repin.json()).bounty.rubric.version, 2);
+
+  // Non-poster cannot re-pin.
+  const foreign = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/rubric`, { rubric }, keys.producer);
+  assert.equal(foreign.status, 403);
+
+  // Funding pins the rubric: re-pin is now a 422.
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
+  const frozen = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/rubric`, { rubric }, keys.owner);
+  assert.equal(frozen.status, 422);
 });

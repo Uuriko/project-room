@@ -59,7 +59,7 @@ const eventTracks = (escrow, bountyId) => Object.fromEntries(
 const post = (escrow, overrides = {}) => escrow.postBounty(ROOM,
   { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(3_600_000), ...overrides }).bounty;
 const ev = { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" };
-const att = () => ({ at: new Date(nowMs).toISOString(), note: "lgtm" });
+const att = () => ({ at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] });
 
 // Post -> fund -> claim -> submit -> accept.
 function runToAccepted(escrow, { verifier = INSTINCT } = {}) {

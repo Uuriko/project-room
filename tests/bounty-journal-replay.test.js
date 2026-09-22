@@ -42,7 +42,7 @@ let nowMs = 1_787_000_000_000;
 const tick = ms => { nowMs += ms; };
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
 const EVIDENCE = { evidenceUrl: "https://example.com/work/1", summary: "did the thing" };
-const attest = () => ({ at: new Date(nowMs).toISOString(), note: "lgtm" });
+const attest = () => ({ at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] });
 
 // Minimal in-memory store double (same SAVEPOINT pattern as
 // tests/bounty-escrow.test.js; RoomStore.transaction behaves the same).

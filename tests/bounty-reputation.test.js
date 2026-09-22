@@ -49,7 +49,7 @@ function runToPaid(escrow, { amount = 0.5, verifier = null, worker = GROK } = {}
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: worker,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
-    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   tick((amount < 1 ? 24 : 3 * 24) * 3_600_000 + 1); // challenge window passes
   escrow.finalizeBounty(ROOM, bounty.bountyId, { caller: worker });
   escrow.closeEpoch(ROOM, { caller: JILL });
@@ -145,7 +145,7 @@ test("dispute upheld: claimant drops to probation and is gated off large claims"
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/2", summary: "shoddy" } });
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
-    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
   escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
@@ -160,7 +160,7 @@ test("dispute upheld: claimant drops to probation and is gated off large claims"
   escrow.submitWork(ROOM, b2.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/3", summary: "shoddy again" } });
   escrow.acceptWork(ROOM, b2.bountyId, { acceptor: JILL,
-    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   escrow.disputeBounty(ROOM, b2.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work again" });
   escrow.decideDispute(ROOM, b2.bountyId,
     { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
@@ -185,7 +185,7 @@ test("dispute rejected: challenger penalized, claimant vindicated", () => {
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/4", summary: "solid" } });
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
-    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "nitpick" });
   escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
@@ -202,7 +202,7 @@ test("dispute split: both sides share a small loss", () => {
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/5", summary: "meh" } });
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
-    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial" });
   escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });

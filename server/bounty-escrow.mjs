@@ -214,6 +214,9 @@ export const bountyEscrowSchema = `
     evidence_json TEXT,
     attestation_json TEXT,
     resolution_json TEXT,
+    rubric_json TEXT,
+    rubric_hash TEXT,
+    rubric_version INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -258,6 +261,25 @@ export const bountyEscrowSchema = `
     room_id TEXT PRIMARY KEY,
     next_n INTEGER NOT NULL
   );
+`
+// Slice 6 (integration map #6): pinned versioned rubrics. bounty_records
+// carries the CURRENT pin (rubric_json / rubric_hash / rubric_version);
+// every past version is preserved in bounty_rubric_versions so arbiters can
+// re-check a verdict against the exact version pinned when the work was
+// judged. (Kept as a concatenated literal: SQL comments inside the schema
+// text would break the strict DDL-text verifySchema, since SQLite strips
+// comments from the stored DDL.)
++ `
+  CREATE TABLE IF NOT EXISTS bounty_rubric_versions (
+    room_id TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    rubric_hash TEXT NOT NULL,
+    rubric_json TEXT NOT NULL CHECK(json_valid(rubric_json)),
+    pinned_at TEXT NOT NULL,
+    pinned_by TEXT NOT NULL,
+    PRIMARY KEY(bounty_id, version)
+  );
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -272,24 +294,67 @@ export const bountyEscrowSchema = `
 // installed (the bounty tables are unfenced).
 export function convergeBountyDeployedSchema(db) {
   const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-  const expected = new Map();
-  for (const sql of bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
-    const m = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
-    if (m) expected.set(m[1], { ddl: sql, norm: normalize(sql) });
+  const chunks = bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+  const expectedTables = new Map(); // table -> { ddl, norm }
+  const tableIndexes = new Map();   // table -> [index ddl, ...]
+  for (const sql of chunks) {
+    const tableMatch = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
+    if (tableMatch) { expectedTables.set(tableMatch[1], { ddl: sql, norm: normalize(sql) }); continue; }
+    const indexMatch = /^CREATE INDEX ([a-z_]+) ON ([a-z_]+)/.exec(normalize(sql));
+    if (indexMatch) {
+      if (!tableIndexes.has(indexMatch[2])) tableIndexes.set(indexMatch[2], []);
+      tableIndexes.get(indexMatch[2]).push(sql);
+    }
   }
-  for (const table of ["bounty_journal", "bounty_events"]) {
-    const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
-    if (!actual) continue; // Fresh database: the schema exec below creates it.
-    if (normalize(actual) === expected.get(table).norm) continue; // Already converged.
+  const tableExists = name =>
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  // 1. Additive tables from later slices that a deployed database never had.
+  for (const [table, { ddl }] of expectedTables)
+    if (!tableExists(table)) db.exec(ddl);
+  // 2. Rebuild tables whose stored DDL drifted (row-preserving), then
+  // recreate that table's indexes (ALTER TABLE ... RENAME drops them — the
+  // slice-1-era rebuild lost them).
+  for (const table of ["bounty_journal", "bounty_records", "bounty_events"]) {
+    const actual = tableExists(table)?.sql;
+    if (!actual) continue; // Fresh database: created above.
+    if (normalize(actual) === expectedTables.get(table).norm) continue; // Already converged.
     const legacy = `${table}_legacy_v762`;
     const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map(r => r.name);
-    if (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(legacy))
+    if (tableExists(legacy))
       throw new Error(`Bounty schema convergence blocked: ${legacy} already exists`);
     db.exec(`ALTER TABLE ${table} RENAME TO ${legacy}`);
-    db.exec(expected.get(table).ddl);
+    db.exec(expectedTables.get(table).ddl);
     const colList = cols.join(", ");
     db.exec(`INSERT INTO ${table} (${colList}) SELECT ${colList} FROM ${legacy}`);
     db.exec(`DROP TABLE ${legacy}`);
+    for (const indexDdl of tableIndexes.get(table) ?? []) db.exec(indexDdl);
+  }
+  // 3. Indexes the slice-1-era rebuild may have dropped: purely additive.
+  for (const indexDdls of tableIndexes.values())
+    for (const indexDdl of indexDdls) db.exec(indexDdl);
+  // 4. Slice 6: pin a v1 rubric (derived from the acceptance criteria) onto
+  // every legacy bounty row that predates rubrics, so acceptance citations
+  // keep a pinned version to cite against. Deterministic: the same criteria
+  // text always yields the same v1 pin.
+  _backfillRubricPins(db);
+}
+
+// Pin the default derived rubric (v1) onto bounty_records rows that predate
+// slice 6, and record each pin in bounty_rubric_versions. Exported for the
+// _migrateColumns fallback path (older test doubles); the boot convergence
+// above is the production path.
+export function _backfillRubricPins(db) {
+  const rows = db.prepare(
+    "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
+  const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
+    (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by) VALUES (?,?,?,?,?,?,?)`);
+  const update = db.prepare(
+    "UPDATE bounty_records SET rubric_json=?, rubric_hash=?, rubric_version=1 WHERE bounty_id=?");
+  for (const row of rows) {
+    const criteria = defaultRubricFor(row.criteria);
+    const json = JSON.stringify(criteria), hash = rubricHashOf(criteria);
+    update.run(json, hash, row.bounty_id);
+    insert.run(row.room_id, row.bounty_id, 1, hash, json, row.created_at, row.poster ?? "unknown");
   }
 }
 
@@ -340,6 +405,65 @@ export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
 const newId = prefix => `${prefix}${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 const isoNow = ms => new Date(ms).toISOString();
+
+// --- slice 6: pinned versioned rubrics -------------------------------------------
+// A rubric is a fixed list of acceptance criteria pinned to the bounty at
+// post time (v1) and re-pinnable by the poster only while the bounty is
+// still PROPOSED (funding pins it). Acceptance verdicts cite {criterionId,
+// verdict} against the pinned version; arbiters re-check against the exact
+// pinned version from bounty_rubric_versions. Canonical form is sorted by
+// criterionId so the hash is stable.
+export const RUBRIC_MAX_CRITERIA = 50;
+export const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
+
+export function canonicalRubric(rubric) {
+  check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
+    "invalid_input", `rubric must be an array of 1..${RUBRIC_MAX_CRITERIA} criteria`);
+  const seen = new Set();
+  const criteria = rubric.map(criterion => {
+    check(criterion !== null && typeof criterion === "object" && !Array.isArray(criterion),
+      "invalid_input", "rubric criteria must be objects");
+    const { criterionId, description } = criterion;
+    check(typeof criterionId === "string" && criterionId.length >= 1 && criterionId.length <= 64,
+      "invalid_input", "rubric criterionId must be 1..64 characters");
+    check(typeof description === "string" && description.length >= 1 && description.length <= 500,
+      "invalid_input", "rubric criterion description must be 1..500 characters");
+    check(!seen.has(criterionId), "invalid_input", `duplicate rubric criterionId "${criterionId}"`);
+    seen.add(criterionId);
+    return { criterionId, description };
+  });
+  criteria.sort((a, b) => a.criterionId < b.criterionId ? -1 : a.criterionId > b.criterionId ? 1 : 0);
+  return Object.freeze(criteria);
+}
+
+export const rubricHashOf = criteria => sha256(JSON.stringify(criteria));
+
+// Bounties posted without an explicit rubric still get a pinned v1: the
+// whole acceptance criteria text as a single criterion.
+export function defaultRubricFor(criteriaText) {
+  return Object.freeze([{ criterionId: "c1", description: String(criteriaText ?? "").slice(0, 500) || "c1" }]);
+}
+
+// Normalize a {criterionId, verdict} citation list against a pinned rubric:
+// every cited id must exist, every pinned criterion must be cited, verdicts
+// are pass|fail. Returns the frozen citation list.
+export function citationsAgainstRubric(citations, rubric) {
+  check(Array.isArray(citations) && citations.length >= 1, "missing_citations",
+    "acceptance requires citations: one {criterionId, verdict} per pinned rubric criterion");
+  const ids = new Set(rubric.criteria.map(c => c.criterionId));
+  for (const citation of citations) {
+    check(citation !== null && typeof citation === "object" && !Array.isArray(citation),
+      "invalid_input", "citations must be {criterionId, verdict} objects");
+    check(ids.has(citation.criterionId), "unknown_criterion",
+      `criterionId "${citation.criterionId}" is not in the pinned rubric v${rubric.version} (${rubric.hash.slice(0, 12)}…)`);
+    check(CITATION_VERDICTS.includes(citation.verdict), "invalid_input",
+      `verdict must be one of ${CITATION_VERDICTS.join("|")}`);
+  }
+  for (const id of ids)
+    check(citations.some(c => c.criterionId === id), "missing_citations",
+      `pinned rubric criterion "${id}" has no citation`);
+  return Object.freeze(citations.map(c => Object.freeze({ criterionId: c.criterionId, verdict: c.verdict })));
+}
 // Quotable sequential bounty ids per room (e.g. ROOM-12). The bracketed form
 // [ROOM-12] is link-only in slice 1: no code path scans text for references,
 // so bare or bracketed mentions can never trigger a side effect.
@@ -357,6 +481,7 @@ export class BountyEscrow {
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
+    this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
     // server/bounty-receipts.mjs. When null (the default — production key
     // provisioning is a later slice), transitions return `signed: []` and
@@ -388,7 +513,7 @@ export class BountyEscrow {
       } else {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-          "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         else this._migrateColumns();
         this._ready = true;
@@ -411,14 +536,15 @@ export class BountyEscrow {
   _checkSchemaReadOnly() {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-      "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
     const required = {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
-      bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label"],
+      bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
+        "rubric_json", "rubric_hash", "rubric_version"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -457,6 +583,23 @@ export class BountyEscrow {
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
     addCol("bounty_records", "label TEXT");
+    // Slice 6: rubric pinning. Capture whether the rubric columns are new:
+    // the pin backfill below is a write and must run only when migration
+    // just added the columns (the only NULL source), mirroring the
+    // state_changed_ms discipline.
+    const hadRubricCols = colsOf("bounty_records").has("rubric_json");
+    addCol("bounty_records", "rubric_json TEXT");
+    addCol("bounty_records", "rubric_hash TEXT");
+    addCol("bounty_records", "rubric_version INTEGER");
+    // Reuse the exact schema-text chunk: the strict DDL-text verifySchema
+    // compares stored DDL verbatim, so a reformatted copy would fail it.
+    // IF NOT EXISTS makes this a safe no-op when the table is already there.
+    const rubricVersionsDdl = bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .find(sql => sql.includes("bounty_rubric_versions"));
+    if (rubricVersionsDdl) this.db.exec(rubricVersionsDdl);
+    // Legacy rows (NULL rubric): pin the default derived v1, same as the
+    // boot convergence backfill.
+    if (!hadRubricCols) _backfillRubricPins(this.db);
     // The backfill is a write: run it only when migration actually added a
     // column (first migration). New rows always set state_changed_ms at
     // INSERT, so a converged database can never accumulate new NULLs; the
@@ -652,6 +795,19 @@ export class BountyEscrow {
     return this._viewBounty(row, roomId);
   }
 
+  // The pinned rubric for a bounty row: { version, hash, criteria }. Legacy
+  // rows that predate slice 6 (NULL columns — e.g. a test double that never
+  // ran convergence) fall back to the default derived v1, so citation checks
+  // always have a pinned version to validate against.
+  _rubricOfRow(row) {
+    if (row.rubric_json) {
+      return Object.freeze({ version: row.rubric_version ?? 1, hash: row.rubric_hash,
+        criteria: Object.freeze(JSON.parse(row.rubric_json).map(c => Object.freeze({ ...c }))) });
+    }
+    const criteria = defaultRubricFor(row.criteria);
+    return Object.freeze({ version: 1, hash: rubricHashOf(criteria), criteria });
+  }
+
   _viewBounty(row, roomId) {
     const now = this.nowMs();
     return Object.freeze({
@@ -669,6 +825,7 @@ export class BountyEscrow {
       evidence: row.evidence_json ? JSON.parse(row.evidence_json) : null,
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
+      rubric: this._rubricOfRow(row),
       watchers: this._watchersOf(roomId ?? row.room_id, row.bounty_id),
       createdAt: row.created_at, updatedAt: row.updated_at,
       stateChangedAt: new Date(row.state_changed_ms).toISOString(),
@@ -682,14 +839,18 @@ export class BountyEscrow {
     this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
-      evidence_json=?, attestation_json=?, resolution_json=?, updated_at=? WHERE bounty_id=?`)
+      evidence_json=?, attestation_json=?, resolution_json=?,
+      rubric_json=?, rubric_hash=?, rubric_version=?, updated_at=? WHERE bounty_id=?`)
       .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
         bounty.snoozedUntilMs ?? null, bounty.declineReason ?? null, bounty.duplicateOf ?? null, bounty.label ?? null,
         bounty.evidence ? JSON.stringify(bounty.evidence) : null,
         bounty.attestation ? JSON.stringify(bounty.attestation) : null,
-        bounty.resolution ? JSON.stringify(bounty.resolution) : null, at, bounty.bountyId);
+        bounty.resolution ? JSON.stringify(bounty.resolution) : null,
+        bounty.rubric ? JSON.stringify(bounty.rubric.criteria) : null,
+        bounty.rubric ? bounty.rubric.hash : null,
+        bounty.rubric ? bounty.rubric.version : null, at, bounty.bountyId);
   }
 
   _mutable(row) {
@@ -703,6 +864,7 @@ export class BountyEscrow {
       evidence: row.evidence_json ? JSON.parse(row.evidence_json) : null,
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
+      rubric: this._rubricOfRow(row),
     };
   }
 
@@ -751,7 +913,7 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
-  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, actor } = {}) {
+  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
@@ -769,22 +931,76 @@ export class BountyEscrow {
         check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
       }
+      // Slice 6: pin the rubric at v1. No explicit rubric -> derive the
+      // default single-criterion pin from the acceptance criteria text.
+      const pinned = rubric === null || rubric === undefined ? defaultRubricFor(criteria) : canonicalRubric(rubric);
+      const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
       const at = isoNow(this.nowMs());
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
         (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, claimant, state, state_changed_ms,
          deadline_ms, challenge_ends_ms, dispute_id, dispute_opened_ms, snoozed_until_ms, decline_reason,
-         duplicate_of, label, evidence_json, attestation_json, resolution_json, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         duplicate_of, label, evidence_json, attestation_json, resolution_json,
+         rubric_json, rubric_hash, rubric_version, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, null, "proposed", this.nowMs(),
-          deadlineMs, null, null, null, null, null, null, null, null, null, null, at, at);
+          deadlineMs, null, null, null, null, null, null, null, null, null, null,
+          rubricJson, rubricHash, 1, at, at);
+      this.db.prepare(`INSERT INTO bounty_rubric_versions
+        (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by)
+        VALUES (?,?,?,?,?,?,?)`).run(roomId, bountyId, 1, rubricHash, rubricJson, at, lane);
       // The poster watches their own bounty from proposal time; fan-out to
       // watchers is suppressed until funded (published).
       this._addWatcher(roomId, bountyId, lane, at);
       const event = this._event(roomId, "bounty.proposed",
-        { bountyId, actor: act, before: null, after: "proposed", data: { amount, title } });
+        { bountyId, actor: act, before: null, after: "proposed",
+          data: { amount, title, rubricVersion: 1, rubricHash } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "propose", bountyId, at, actor: act, event } };
+    });
+  }
+
+  // Slice 6: re-pin the rubric (v+1). Poster-only, and only while PROPOSED —
+  // funding pins the rubric for the rest of the lifecycle, so every
+  // acceptance citation and every arbiter re-check names the version that
+  // governed the work. Every version is preserved in
+  // bounty_rubric_versions.
+  updateRubric(roomId, bountyId, { poster, rubric, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      const { bounty, lane } = this._triageBounty(roomId, bountyId, poster);
+      const act = normalizeActor(actor, lane);
+      const pinned = canonicalRubric(rubric);
+      const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
+      const version = (bounty.rubric?.version ?? 0) + 1;
+      check(rubricHash !== bounty.rubric?.hash, "invalid_input", "the rubric is unchanged");
+      bounty.rubric = Object.freeze({ version, hash: rubricHash, criteria: pinned });
+      this._saveBounty(bounty);
+      const at = isoNow(this.nowMs());
+      this.db.prepare(`INSERT INTO bounty_rubric_versions
+        (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by)
+        VALUES (?,?,?,?,?,?,?)`).run(roomId, bountyId, version, rubricHash, rubricJson, at, lane);
+      const event = this._event(roomId, "bounty.rubric-updated",
+        { bountyId, actor: act, before: "proposed", after: "proposed", data: { rubricVersion: version, rubricHash } });
+      return { bounty: this._getBounty(roomId, bountyId),
+        receipt: { kind: "rubric-update", bountyId, rubricVersion: version, rubricHash, at, actor: act, event } };
+    });
+  }
+
+  // Read one pinned rubric version (for arbiter re-checks). Defaults to the
+  // current pin.
+  getRubricVersion(roomId, bountyId, version = null) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const row = version === null || version === undefined
+        ? this.db.prepare(`SELECT version, rubric_hash, rubric_json FROM bounty_rubric_versions
+            WHERE room_id=? AND bounty_id=? ORDER BY version DESC LIMIT 1`).get(roomId, bountyId)
+        : this.db.prepare(`SELECT version, rubric_hash, rubric_json FROM bounty_rubric_versions
+            WHERE room_id=? AND bounty_id=? AND version=?`).get(roomId, bountyId, version);
+      if (!row) fail(version === null || version === undefined ? "unknown_bounty" : "unknown_rubric_version",
+        version === null || version === undefined ? `unknown bounty "${bountyId}"` : `bounty ${bountyId} has no rubric v${version}`);
+      return Object.freeze({ bountyId, version: row.version, hash: row.rubric_hash,
+        criteria: Object.freeze(JSON.parse(row.rubric_json)) });
     });
   }
 
@@ -988,6 +1204,10 @@ export class BountyEscrow {
       if (verifierAttestation.at !== undefined)
         check(typeof verifierAttestation.at === "string" && Number.isFinite(Date.parse(verifierAttestation.at)),
           "invalid_input", "verifierAttestation.at must be an ISO timestamp");
+      // Slice 6: the acceptance verdict must cite every pinned rubric
+      // criterion with a pass|fail verdict. The citations name the rubric
+      // version that governed the work, so arbiters can re-check against it.
+      const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
       const at = isoNow(this.nowMs());
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
@@ -1007,7 +1227,9 @@ export class BountyEscrow {
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
         memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
         receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
-      bounty.attestation = Object.freeze({ ...verifierAttestation, recordedBy: lane, recordedAt: at });
+      bounty.attestation = Object.freeze({ ...verifierAttestation, citations,
+        rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
+        recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);
@@ -1105,7 +1327,7 @@ export class BountyEscrow {
     });
   }
 
-  decideDispute(roomId, bountyId, { decider, outcome, reasonCodes, actor } = {}) {
+  decideDispute(roomId, bountyId, { decider, outcome, reasonCodes, rubricCheck = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = canonicalLane(decider);
@@ -1116,9 +1338,19 @@ export class BountyEscrow {
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
       check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      // Slice 6: the arbiter may re-check the work against the pinned
+      // rubric version. When supplied, the citations are validated against
+      // the pin before the ruling lands, and recorded on the resolution.
+      let checkedRubric = null;
+      if (rubricCheck !== null && rubricCheck !== undefined) {
+        const citations = citationsAgainstRubric(rubricCheck.citations ?? rubricCheck, bounty.rubric);
+        checkedRubric = Object.freeze({ citations, rubricVersion: bounty.rubric.version,
+          rubricHash: bounty.rubric.hash, by: lane });
+      }
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
       this._settlementSigned = [];
+      this._rubricCheckTransient = checkedRubric;
       try {
         const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
         this._persistDispute(roomId, decided);
@@ -1129,6 +1361,7 @@ export class BountyEscrow {
         throw error;
       } finally {
         this._settlementActor = null;
+        this._rubricCheckTransient = null;
       }
       const signed = this._settlementSigned ?? [];
       this._settlementSigned = null;
@@ -1251,7 +1484,8 @@ export class BountyEscrow {
     }
     this._transition(bounty, verdictTo);
     bounty.resolution = Object.freeze({ kind: settleKind, outcome, terminal,
-      decidedAt: at, bondForfeited: forfeited });
+      decidedAt: at, bondForfeited: forfeited,
+      ...(this._rubricCheckTransient ? { rubricCheck: this._rubricCheckTransient } : {}) });
     this._saveBounty(bounty);
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });

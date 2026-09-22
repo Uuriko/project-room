@@ -119,12 +119,24 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "idempotencyKey"] }))
-      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, idempotencyKey?}");
+    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "rubric", "idempotencyKey"] }))
+      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null, actor });
+          deadline: payload.deadline, verifierId: payload.verifierId ?? null, rubric: payload.rubric ?? null, actor });
+      return { roomId, bounty, receipt };
+    });
+  }
+  // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
+  // funding pins the rubric for the rest of the lifecycle.
+  if (escrowRoute === "rubric" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["rubric"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{rubric: [{criterionId, description}], idempotencyKey?}");
+    return idem(payload, "bounty.rubric", 200, () => {
+      const { bounty, receipt } = escrow.updateRubric(roomId, bountyId,
+        { poster: caller, rubric: payload.rubric, actor });
       return { roomId, bounty, receipt };
     });
   }
@@ -215,11 +227,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "dispute-decide" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["outcome", "reasonCodes"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{outcome, reasonCodes, idempotencyKey?}");
+    if (!shape(payload, { required: ["outcome", "reasonCodes"], optional: ["rubricCheck", "idempotencyKey"] }))
+      invalidInput(reject, "{outcome, reasonCodes, rubricCheck?, idempotencyKey?}");
     return idem(payload, "bounty.dispute-decide", 200, () => {
       const { bounty, resolution, receipt } = escrow.decideDispute(roomId, bountyId,
-        { decider: caller, outcome: payload.outcome, reasonCodes: payload.reasonCodes, actor });
+        { decider: caller, outcome: payload.outcome, reasonCodes: payload.reasonCodes,
+          rubricCheck: payload.rubricCheck ?? null, actor });
       return { roomId, bounty, resolution, receipt };
     });
   }
