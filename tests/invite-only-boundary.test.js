@@ -47,6 +47,9 @@ const PROBES = {
   // Plug-in manifest: public discovery document, no room data.
   "GET /api/agent-manifest": [undefined, 200],
   "GET /api/guest-agent-links": [undefined, 200],
+  // Agent public-key registry (integration map slice 9): public key rows are
+  // public; an unknown identity id is a bare 404 without revealing anything.
+  "GET /api/agent-identities/{}/keys": [undefined, 404],
   // Anonymous browser slot: authenticated:false and a CSRF token, nothing else.
   "GET /api/account-session": [undefined, 200],
   "POST /api/agent-identities": [{ displayName: "Boundary probe" }, 201],

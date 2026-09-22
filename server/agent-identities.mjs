@@ -10,6 +10,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -107,11 +108,21 @@ export class AgentIdentities {
       }
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const now = this.store.now();
       const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
-        .run(identityId, hash(secret), name, this.store.now());
-      return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }), next: SIGNUP_NEXT };
+        .run(identityId, hash(secret), name, now);
+      // Bind the identity's Ed25519 claim-signing key at issuance: the
+      // public key is registered in the agent-key registry (the
+      // operator-attested binding — see server/agent-key-registry.mjs) and
+      // the private seed is shown once, like the secret. The agent signs
+      // public-key claims (signed-claims.mjs ed25519 mode) with it, so
+      // cross-room claim verification needs no shared secret.
+      const keyPair = generateEd25519KeyPair();
+      this.store.keyRegistry.registerKey(identityId, keyPair.publicKey, { validFrom: now });
+      return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }),
+        publicKey: keyPair.publicKey, privateKey: keyPair.privateKey, next: SIGNUP_NEXT };
     });
   }
 

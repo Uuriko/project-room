@@ -529,6 +529,48 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, store.identities.revoke(identityId, bearer(req)));
   });
 
+  // ---- Agent public-key registry (integration map slice 9) ----
+  //
+  // The registry is a room-local, operator-attested Ed25519 key directory:
+  // identity -> { publicKey, validFrom, validUntil, revokedAt }. A key is
+  // bound at identity issuance; the identity rotates or revokes its own
+  // keys with the same ownership proof as identity-secret rotation (the
+  // identity's own pri_ secret, path identity must match). The read surface
+  // is public — public keys are public — and append-only, so past claims
+  // stay checkable. Nothing here is trustless or decentralized: verifiers
+  // trust the room operator's attestation.
+  const KEY_LIST_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/keys$/;
+  const KEY_ROTATE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/keys\/rotate$/;
+  const KEY_REVOKE_ROUTE = /^\/api\/agent-identities\/([A-Za-z0-9_-]{1,64})\/keys\/revoke$/;
+
+  const listIdentityKeys = translate(async (req, res, { identityId }) => {
+    if (!store.identities.get(identityId)) reject(404, "identity_not_found", "No such agent identity");
+    return json(res, 200, { identityId, keys: store.keyRegistry.keysFor(identityId) });
+  });
+
+  const rotateIdentityKey = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-key-rotate:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own keys");
+    const data = await body(req);
+    const shape = data && (exact(data, ["newPublicKey"]) || exact(data, ["newPublicKey", "overlapMs"]));
+    if (!shape) reject(422, "invalid_key", "newPublicKey is required; overlapMs is optional");
+    return json(res, 200, store.keyRegistry.rotateKey(identityId, {
+      identitySecret: bearer(req), newPublicKey: data.newPublicKey, overlapMs: data.overlapMs }));
+  });
+
+  const revokeIdentityKey = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-key-revoke:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only revoke its own keys");
+    const data = await body(req);
+    if (!(data && exact(data, ["publicKey"]) && typeof data.publicKey === "string")) {
+      reject(422, "invalid_key", "publicKey is required");
+    }
+    return json(res, 200, store.keyRegistry.revokeKey(identityId, {
+      identitySecret: bearer(req), publicKey: data.publicKey }));
+  });
+
   // ---- Wakeable agent presence (RC-2026-09-18-051) ----
   //
   // POST /api/agent-heartbeats — an agent host reports liveness. The
@@ -606,6 +648,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (secretRotateMatch) { await rotateIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRotateMatch[1]) }); return true; }
     const secretRevokeMatch = method === "POST" ? SECRET_REVOKE_ROUTE.exec(pathname) : null;
     if (secretRevokeMatch) { await revokeIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRevokeMatch[1]) }); return true; }
+    const keyListMatch = method === "GET" ? KEY_LIST_ROUTE.exec(pathname) : null;
+    if (keyListMatch) { await listIdentityKeys(req, res, { identityId: pathId(keyListMatch[1]) }); return true; }
+    const keyRotateMatch = method === "POST" ? KEY_ROTATE_ROUTE.exec(pathname) : null;
+    if (keyRotateMatch) { await rotateIdentityKey(req, res, { remoteAddress, identityId: pathId(keyRotateMatch[1]) }); return true; }
+    const keyRevokeMatch = method === "POST" ? KEY_REVOKE_ROUTE.exec(pathname) : null;
+    if (keyRevokeMatch) { await revokeIdentityKey(req, res, { remoteAddress, identityId: pathId(keyRevokeMatch[1]) }); return true; }
 
     // RC-2026-09-18-051: wakeable agent presence.
     if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }

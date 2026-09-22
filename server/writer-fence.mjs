@@ -154,7 +154,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // purely additive and intentionally NOT fenced: older writers have no code
   // path to them, and the lifecycle module owns its schema.
   "mention_states",
-  "room_mention_settings"
+  "room_mention_settings",
+  // agent_key_registry (integration map slice 9): Ed25519 public-key
+  // directory with validity windows and rotation overlap. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // every row is scoped to an agent identity, and the table is append-only.
+  "agent_key_registry"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
