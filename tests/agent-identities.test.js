@@ -447,9 +447,9 @@ test("identity secret is shown once: no read path returns it afterwards (RC-2026
   })).json();
   assert.ok(!JSON.stringify(list).includes(secret), "secret must not appear in the owner link audit");
   assert.ok(!/"secret"/.test(JSON.stringify(list)), "no secret field anywhere in the audit list");
-  // The database holds only the SHA-256 hash: the plaintext secret is unrecoverable server-side.
+  // The database holds only the v2 scrypt hash: the plaintext secret is unrecoverable server-side.
   const row = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
-  assert.ok(row && /^[a-f0-9]{64}$/.test(row.secret_hash), "only the hash is stored");
+  assert.ok(row && /^v2:[a-f0-9]{64}$/.test(row.secret_hash), "only the v2 hash is stored");
   assert.ok(!row.secret_hash.includes(secret.slice(4, 12)), "no plaintext fragment in the stored hash");
 });
 
@@ -602,4 +602,32 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
         { status: 200, headers: { "Content-Type": "application/json" } }) });
     await assert.rejects(() => unmarked.checkConnection(), /not linked to this room/);
   }
+});
+
+test("legacy sha256 identity hashes upgrade to v2 scrypt on successful verification (RC-2026-09-23)", async t => {
+  const { store, origin } = await serve(t);
+  const { createHash } = await import("node:crypto");
+  const { identityId, secret } = await createAgentIdentity(origin, "Legacy Bot");
+  // Simulate a pre-v2 row: downgrade the stored hash to bare sha256.
+  const legacy = createHash("sha256").update(secret).digest("hex");
+  store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identityId);
+  const before = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
+  assert.equal(before.secret_hash, legacy);
+
+  // Verification still succeeds against the legacy hash...
+  const resolved = store.identities.resolveGlobalIdentitySecret(secret);
+  assert.equal(resolved?.identityId, identityId);
+
+  // ...and the row is now v2.
+  const after = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
+  assert.match(after.secret_hash, /^v2:[a-f0-9]{64}$/);
+  assert.notEqual(after.secret_hash, legacy);
+
+  // The secret keeps working after the upgrade (authenticate + resolve paths).
+  const authed = store.identities.authenticateIdentitySecret(identityId, secret);
+  assert.equal(authed.identityId, identityId);
+  const resolvedAgain = store.identities.resolveGlobalIdentitySecret(secret);
+  assert.equal(resolvedAgain?.identityId, identityId);
+  // A wrong secret still fails and does not trigger an upgrade.
+  assert.equal(store.identities.resolveGlobalIdentitySecret(secret.slice(0, -1) + (secret.endsWith("A") ? "B" : "A")), null);
 });
