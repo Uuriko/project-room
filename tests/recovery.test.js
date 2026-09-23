@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 96 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 98 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -101,6 +101,18 @@ test("online capture preserves all 96 tables, identity boundaries and exact retr
     .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
   f.store.db.prepare(`INSERT INTO agent_wake_signals(signal_id,agent_id,kind,room_id,message_id,created_at,delivered_at) VALUES(?,?,?,?,?,?,?)`)
     .run("recovery-signal", identityId, "mention", "commons", "recovery-message", f.now(), null);
+  // Seed one GX guest invite + its redeemed seat so the capture covers
+  // guest_invites and guest_members (RC-2026-09-23-100). Written directly:
+  // the mint path needs a live owner account session the fixture has no
+  // reason to own. The invite is recorded as redeemed so the seat row has a
+  // matching invite, like a real redemption.
+  f.store.db.prepare(`INSERT INTO guest_invites
+    (id,code_hash,room_id,tier,credential_ttl_ms,guest_label,minted_by_member_id,minted_by_account_id,issue_request_id,created_at,redeem_by,status,redeemed_at,redeemed_by_identity_id,redeemed_member_id,revoked_at,revoked_by_member_id)
+    VALUES('recovery-guest-invite',?, 'commons','observer',259200000,'Recovery guest','owner',NULL,'recovery-guest-issue',?,?, 'redeemed',?,?,?,NULL,NULL)`)
+    .run("a".repeat(64), f.now(), f.now() + 86400000, f.now(), identityId, "guest-agent-recovery");
+  f.store.db.prepare(`INSERT INTO guest_members(member_id,room_id,guest_identity_id,tier,invite_id,created_at)
+    VALUES('guest-agent-recovery','commons',?,'observer','recovery-guest-invite',?)`)
+    .run(identityId, f.now());
   // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
   // agent_directory_cards and agent_webhook_subs.
   f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
@@ -212,8 +224,8 @@ test("online capture preserves all 96 tables, identity boundaries and exact retr
   gmail.begin(f.owner.token, f.owner.session.sessionBinding);
   gmail.save(gmail.auth(f.owner.token, f.owner.session.sessionBinding), { address: 'recovery@gmail.test', connectionId: 'recovery-gmail', refreshToken: 'invented-recovery-token', syncedAt: null });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 96,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 98,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
