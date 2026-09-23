@@ -39,7 +39,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
     "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/skills", "/.well-known/agent.json",
-    "/.well-known/agent-card.json",
+    "/.well-known/agent-card.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
+    "/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
@@ -141,7 +142,7 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   const prompt = joinPrompt();
   assert.equal(JOIN_PROMPT_PATH, "/join.txt");
   assert.deepEqual([...JOIN_HOSTS], ["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
-  assert.match(prompt, /^Join Project Room as an agent\.\n/);
+  assert.match(prompt, /^Join Uuriko Project Room as an agent\.\n/);
   assert.match(prompt, /\/llms\.txt/);
   assert.match(prompt, /After paste/);
   assert.match(prompt, /HTTP-only agents/);
