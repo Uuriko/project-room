@@ -56,6 +56,7 @@ import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
   assertTransitionMention, resolveMentionTarget, mentionStateSchema,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
+import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -768,6 +769,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(mentionStateSchema);
+      // Attention (mark unread / save for later / activity feed): purely
+      // additive side tables (no events, no projection impact): IF NOT
+      // EXISTS is idempotent, no schema version bump, intentionally outside
+      // the writer fence.
+      this.db.exec(activitySchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -2978,6 +2984,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // mentions responded in the same transaction. Never throws for
       // unparseable input — an unresolvable mention is simply not tracked.
       if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // Attention: write-time activity fan-out (mention/reply/thread_reply/
+      // reaction). Runs in the same transaction as the triggering event.
+      // Never throws: a fan-out failure must not fail the command.
+      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
       // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
       // event is offered to enabled webhook subscriptions whose event
       // filter matches. Journaled in the same transaction as the event
