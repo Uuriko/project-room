@@ -21,6 +21,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/
 import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
+import { scheduledRetentionTick } from '../server/retention-run.mjs';
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -122,6 +123,16 @@ export class ProjectRoom {
     if (this.paused) throw new Error('Room paused');
     return this.store.agentPlugin.drainWebhookDeliveries();
   }
+  // Records an analytics/audit retention plan. The tick passes no live rows
+  // and no deleter, so a config flag cannot delete production room data.
+  planRetention() {
+    if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
+    return scheduledRetentionTick({
+      env: this.env,
+      now: new Date().toISOString(),
+      record: plan => { this.lastRetentionPlan = plan; }
+    });
+  }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
   // the owner's next sync imports it. Returns { accepted, duplicate }.
@@ -211,5 +222,7 @@ export default {
       .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
     ctx.waitUntil(room.drainWebhookDeliveries()
       .catch(error => console.warn(`[webhook-dispatch] cron tick failed: ${error?.message ?? error}`)));
+    ctx.waitUntil(Promise.resolve().then(() => room.planRetention())
+      .catch(error => console.warn(`[retention] plan failed: ${error?.message ?? error}`)));
   }
 };
