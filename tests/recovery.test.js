@@ -42,6 +42,7 @@ test("online capture preserves all 103 tables, identity boundaries and exact ret
   f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "recovery-pause", reason: "inspecting" });
   f.store.command(f.keys.agent, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "recovery-reported", body: "synthetic message the owner reports" } });
   f.store.moderation.report(f.keys.owner, "commons", { messageId: "recovery-reported", reason: "recovery fixture report" });
+  f.store.threadMutes.set(f.keys.owner, "commons", { threadId: "recovery-reported", muted: true });
   // The v34 convergence fences room_attachments: seed one staged row so the
   // capture comparison covers the table (no store API stages attachments yet).
   f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
@@ -270,6 +271,8 @@ test("online capture preserves all 103 tables, identity boundaries and exact ret
     assert.equal(recovered.issueInvitation(f.owner.token, "commons", f.pending).duplicate, true);
     assert.equal(recovered.command(f.keys.owner, "commons", f.command).duplicate, true);
     assert.equal(recovered.room("commons").sequence, captureSequence);
+    assert.deepEqual(recovered.threadMutes.list(f.keys.owner, "commons").threadIds, ["recovery-reported"]);
+    assert.deepEqual(recovered.threadMutes.list(f.keys.agent, "commons").threadIds, [], "thread mute stays private after restore");
     for (const reminder of f.reminders.filter(row => ![f.keys.commonsShared, f.keys.secondShared].includes(row.token))) {
       const retry = recovered.reminders.mutate(reminder.token, reminder.room, reminder.request);
       assert.equal(retry.duplicate, true); assert.deepEqual(retry.receipt, reminder.receipt);
