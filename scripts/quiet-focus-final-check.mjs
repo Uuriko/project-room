@@ -38,9 +38,11 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   const status = page.locator("#connection-status");
   // 1. observe the exact Connected label first
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent === "Connected", null, { timeout: 10000 });
+  await page.locator('#session-menu-button').click();
   await page.locator("#connection-details > summary").click();
   assert.match(await page.locator("#connection-explanation").textContent(), /no peer read or processing receipt/);
   await page.locator("#connection-details > summary").click();
+  await page.keyboard.press('Escape');
   await page.evaluate(() => {
     window.connectionTransitions = [];
     new MutationObserver(() => window.connectionTransitions.push(document.querySelector("#connection-status").textContent))

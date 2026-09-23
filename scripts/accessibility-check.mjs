@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
 import test from "node:test";
@@ -178,7 +179,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator("#catchup-dialog").waitFor({ state: "hidden" });
   // From here the next session's brief requests must pass through unheld.
   holdOwnerBrief = false;
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Synthetic recovery regressions in disposable loopback rooms, not human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,7 +48,7 @@ async function ownerPage(page, origin, fixture) {
   await fillAccessKey(page, fixture.keys.owner);
   await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
-  await page.locator('#invite-people-button').click();
+  await clickChrome(page, "#invite-people-button");
 }
 
 async function createLink(page) {

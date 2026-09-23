@@ -1206,3 +1206,147 @@ summary { overflow-wrap: anywhere; }
 .gmail-html blockquote { border-left: 3px solid var(--line); margin: 12px 0; padding-left: 12px; }
 .gmail-compose [data-files-list] { padding-left: 20px; overflow-wrap: anywhere; }
 .gmail-toolbar [data-mailbox] { max-width: min(320px, 75vw); }
+
+/* Conversation layout: a quiet navigation column and one content header. */
+.app-shell:has(#main:not([hidden])) > .topbar { display: none; }
+#sidebar-workspace:empty, #sidebar-invite:empty { display: none; }
+#sidebar-workspace .workspace-nav { margin: 0; padding: 0 0 .75rem; border: 0; border-bottom: 1px solid var(--line-soft); flex-direction: column; align-items: stretch; gap: .2rem; }
+#sidebar-workspace .workspace-nav button { text-align: left; justify-content: flex-start; border-radius: .45rem; }
+#sidebar-workspace .workspace-nav button[aria-current="page"] { background: #37374e; }
+#room-sidebar { gap: .75rem; padding: 1rem .8rem; }
+.sidebar-head { padding-inline: .3rem; }
+#room-title { white-space: normal; overflow-wrap: anywhere; font-weight: 650; }
+#sidebar-invite .button { width: 100%; background: transparent; border-color: var(--line); color: var(--text); text-align: left; }
+.sidebar-tools { margin-top: auto; padding-top: .75rem; border-top: 1px solid var(--line-soft); }
+.sidebar-tools .topbar-button { width: 100%; justify-content: space-between; color: var(--muted); }
+.conversation-heading { min-width: 0; flex: 1; }
+.conversation-heading h2 { margin: 0; overflow-wrap: anywhere; }
+#mobile-room-name { display: none; }
+.room-topbar { gap: .5rem; }
+.room-topbar .topbar-actions { flex-wrap: nowrap; flex: none; }
+.session-menu { display: block; position: relative; }
+#session-menu.empty { display: none; }
+#session-menu-button { display: inline-grid; }
+.session-menu-panel { display: none; position: absolute; right: 0; top: calc(100% + .4rem); z-index: 50; width: min(16rem, calc(100vw - 2rem)); padding: .5rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); box-shadow: var(--shadow); }
+.session-menu.open .session-menu-panel { display: flex; flex-direction: column; gap: .25rem; }
+.session-menu-panel .button { width: 100%; text-align: left; justify-content: flex-start; border-color: transparent; }
+.session-menu-panel #identity-label { max-width: none; padding: .5rem; white-space: normal; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
+.connection-bar:has(#connection-status[data-state="connected"]):not(:focus-within) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.count-chip:empty { display: none; }
+.field { display: grid; gap: .4rem; margin-bottom: 1rem; }
+.field > span, #verifier-label { color: var(--muted); font-size: .85rem; font-weight: 600; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+#work-title-input { min-height: 0; }
+#work-options-summary { display: flex; }
+.button:not(.primary):not(.secondary):not(.ghost) { background: var(--panel-raised); border-color: var(--line); }
+.mention { min-height: 0; line-height: inherit; }
+.mention.agent { font-weight: 650; }
+.presence-member { align-items: start; }
+.presence-member > .member-avatar { align-self: start; margin-top: .1rem; }
+.return-brief-panel > summary::after { content: none; }
+.return-brief-panel .summary-grid { grid-template-columns: minmax(0, 1fr); }
+.composer-add { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; width: auto; padding: .4rem .65rem; }
+.composer-add-label { font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.message-links .thread-link { order: -1; }
+.thread-link { font-weight: 600; }
+@media (hover: hover) and (pointer: fine) {
+  .message { position: relative; }
+  .message-links:not(:has(> :not([data-message-action="reply"], .reaction-picker, .message-more))) {
+    position: absolute; top: .15rem; right: .25rem; z-index: 6; gap: .15rem; min-height: 0;
+    padding: .15rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--panel-raised); box-shadow: 0 4px 14px rgb(0 0 0 / 25%); opacity: 0;
+  }
+  .message:is(:hover, :focus-within) .message-links, .message-links:has(details[open]) { opacity: 1; }
+  .message:has(.message-more[open], .reaction-picker[open]) { z-index: 40; }
+  .message-links .message-to-work, .message-links .message-more > summary { min-height: 32px; }
+  .message-links .message-to-work { padding: .25rem .5rem; }
+  .message-links .message-to-work[data-message-action="reply"] { opacity: 0; }
+  .message:is(:hover, :focus-within) .message-links .message-to-work[data-message-action="reply"] { opacity: 1; }
+}
+@media (max-width: 940px) {
+  #mobile-room-name { display: block; font-size: .7rem; line-height: 1.3; color: var(--muted); overflow-wrap: anywhere; }
+  .room-topbar { align-items: center; padding: .5rem .75rem; }
+  .conversation-heading h2 { font-size: 1rem; }
+}
+@media (max-width: 520px) {
+  .room-topbar { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: .25rem .5rem; }
+  .room-topbar .topbar-actions { grid-column: 1 / -1; justify-content: flex-end; width: 100%; gap: .35rem; }
+  .room-topbar .topbar-button { white-space: normal; }
+  .room-topbar .count-chip { min-width: 0; font-size: .7rem; }
+  .composer-row { flex-wrap: nowrap; }
+  .composer-add { flex: none; width: 36px; padding: .3rem; }
+  .composer-add-label { display: none; }
+  .composer-row textarea { min-width: 0; }
+}
+/* Popovers anchor to the action row, not to a trigger shifted by a thread link. */
+.message-links { position: relative; }
+.reaction-picker { position: static; }
+.reaction-options { max-width: calc(100vw - 4rem); flex-wrap: wrap; }
+@media (hover: hover) and (pointer: fine) {
+  .message-links:not(:has(> :not([data-message-action="reply"], .reaction-picker, .message-more))) .reaction-options { left: auto; right: 0; }
+}
+.composer-row { grid-template-columns: auto minmax(0, 1fr) 40px; }
+@media (max-width: 520px) {
+  .room-topbar .topbar-actions { justify-content: space-between; }
+  #topbar-catchup { white-space: nowrap; }
+  #catchup-count { max-width: 7rem; white-space: normal; text-align: left; border: 0; }
+}
+.sidebar-head { margin: 0; padding: 0; }
+.sidebar-head .room-overview-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-width: 0; padding: .35rem; border: 0; border-radius: .4rem; background: transparent; color: var(--text); text-align: left; }
+.sidebar-head .room-overview-open:hover { background: var(--panel-raised); }
+.invite-navigation { border-top: 1px solid var(--line-soft); padding-top: .25rem; }
+.invite-navigation > summary { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding-inline: .5rem; cursor: pointer; font-size: .85rem; color: var(--muted); list-style: none; }
+.invite-navigation > summary::-webkit-details-marker { display: none; }
+.invite-navigation[open] > summary { color: var(--text); }
+.invite-navigation .button { width: 100%; min-height: 40px; border: 0; background: transparent; color: var(--text); text-align: left; justify-content: flex-start; padding: .5rem; }
+.invite-navigation .button:hover { background: var(--panel-raised); }
+.invite-navigation .people-actions { display: grid; gap: .15rem; }
+.composer-row textarea { grid-column: 1 / -1; grid-row: 1; }
+.composer-row .composer-add { grid-column: 1 / 3; grid-row: 2; justify-self: start; }
+.composer-row > button[type="submit"] { grid-row: 2; }
+.sidebar-head .room-overview-open > span:last-child { flex: none; font-size: 1rem; font-weight: 400; color: var(--muted); }
+@media (max-width: 520px) {
+  .room-topbar .topbar-actions { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 36px; }
+  #topbar-catchup { display: flex; flex-wrap: wrap; gap: .1rem .4rem; min-width: 0; justify-content: center; }
+  #catchup-count { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+}
+@media (max-width: 520px) {
+  .composer-add { width: auto; padding-inline: .4rem; }
+  .composer-add-label { display: inline; }
+}
+@media (max-width: 940px) {
+  .app-shell:has(#main:not([hidden])) > #workspace-nav {
+    order: 2; display: flex; justify-content: center; gap: .5rem; margin: 0;
+    padding: .25rem .75rem max(.25rem, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line-soft); border-bottom: 0; background: var(--panel);
+  }
+  .app-shell:has(#main:not([hidden])) > #workspace-nav button { flex: 1; min-height: 44px; }
+}
+/* Account destinations keep the same one-tap position on every phone screen. */
+@media (max-width: 940px) {
+  .app-shell:has(#workspace-nav:not([hidden])) { padding-bottom: var(--workspace-nav-height, 3.5rem); }
+  .app-shell > #workspace-nav, .app-shell:has(#inbox-panel:not([hidden])) > #workspace-nav {
+    position: fixed; inset: auto 0 0; z-index: 30; display: flex; justify-content: center; gap: .5rem;
+    margin: 0; padding: .25rem .75rem max(.25rem, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line-soft); border-bottom: 0; background: var(--panel);
+  }
+  .app-shell > #workspace-nav button { flex: 1; min-height: 44px; }
+}
+
+/* Keep contextual controls within the conversation rather than above its header. */
+.reaction-options { top: calc(100% + .25rem); bottom: auto; z-index: 45; }
+#session-menu-panel #connection-details { margin: 0; padding: .4rem .6rem; }
+#session-menu-panel #connection-details > summary { min-height: 32px; font-size: .875rem; }
+
+/* Large text must reflow on the signed-out screen with platform font metrics. */
+.app-shell > .topbar { flex-wrap: wrap; }
+.app-shell > .topbar .topbar-actions { min-width: 0; max-width: 100%; }
+#refresh-button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.connection-bar { flex-wrap: wrap; }
+.auth-panel { min-width: 0; overflow-wrap: anywhere; }
+.auth-panel > * { min-width: 0; max-width: 100%; }
+
+/* A direct result visit omits unrelated administration without duplicating state. */
+#settings-dialog.results-only > :not(.dialog-head):not(#results-panel) { display: none; }
+
+#settings-dialog.results-only #results-panel > summary { display: none; }
+#settings-dialog.results-only #results-panel { border: 0; padding: 0; }

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human return journeys, not retention evidence or real user feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -179,10 +180,18 @@ for (const mobile of [false, true]) {
     await capture("large-text-controls"); await page.evaluate(() => document.documentElement.style.fontSize = "");
     page.once("dialog", dialog => dialog.accept()); // Explicit synthetic consent to discard our draft.
     await closeCatchUp(page);
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");
     assert.equal(await page.locator("#reminder-count").textContent(), "");
+    // The sign-out reset restores index.html's own authoring. Both of the
+    // disclosures the markup opens must come back open: a reset that closes
+    // one is how People was left collapsed, and About went the same way when
+    // it moved into the Settings dialog.
+    for (const id of ["#people-panel", "#room-about"]) {
+      assert.equal(await page.locator(id).evaluate(node => node.open), true,
+        `${id} is authored open and the reset must leave it open`);
+    }
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
   });
 }

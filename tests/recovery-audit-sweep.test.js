@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -152,6 +152,29 @@ function sweep() {
   if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.ACCESS_REQUESTED))
     broke.push(`${T.ACCESS_REQUESTED}: the sweep never got this event into the log, so nothing was audited`);
 
+  // member.joined_via_invitation is appended by share-link and invitation
+  // acceptance, never by store.command, so step() cannot produce it either.
+  // The fixture's bootstrap writes one, which means every audit above already
+  // replayed it - but only BEFORE everything else, and nothing counted it.
+  // Join again through the real path now, after the whole work lifecycle, so
+  // the auditors meet it late in a busy log too, and read it back from the log
+  // rather than assume it landed.
+  try {
+    const joinsBefore = fixture.store.db.prepare("SELECT count(*) n FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=?").get(T.MEMBER_JOINED_VIA_INVITATION).n;
+    const linkToken = randomBytes(32).toString("base64url");
+    fixture.store.shareLinks.create(fixture.keys.owner, "commons", { requestId: randomUUID(), linkToken,
+      expiresAt: Date.now() + 3600000, maxJoins: 1, expectedMemberRevision: state().members.owner.revision }, null);
+    const slot = fixture.store.createAccountSessionSlot(), current = fixture.store.accountSessionSlot(slot.token);
+    fixture.store.shareLinks.join(slot.token, linkToken, { displayName: "Sweep late joiner", redemptionId: randomUUID(),
+      expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding });
+    const joinsAfter = fixture.store.db.prepare("SELECT count(*) n FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=?").get(T.MEMBER_JOINED_VIA_INVITATION).n;
+    if (joinsAfter > joinsBefore) {
+      exercised.add(T.MEMBER_JOINED_VIA_INVITATION);
+      try { auditRecovery(fixture.store); }
+      catch (error) { broke.push(`${T.MEMBER_JOINED_VIA_INVITATION}: ${error.message}`); }
+    } else broke.push(`${T.MEMBER_JOINED_VIA_INVITATION}: the late join never reached the log, so nothing was audited`);
+  } catch (error) { broke.push(`${T.MEMBER_JOINED_VIA_INVITATION}: the late join was refused (${error.message}), so nothing was audited`); }
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -175,7 +198,7 @@ test("the sweep covers enough of the event surface to be worth trusting", () => 
   // refused - which would make the test above pass for the wrong reason.
   const all = Object.values(T);
   const missing = all.filter(type => !result.exercised.has(type));
-  assert.ok(result.exercised.size >= 33,
+  assert.ok(result.exercised.size >= 34,
     `only ${result.exercised.size} of ${all.length} event types were exercised; not covered: ${missing.join(", ")}`);
 });
 

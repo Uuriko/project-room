@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Disposable synthetic journeys. These are not retention or human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +37,7 @@ async function setup(t, touch = false) {
   await page.goto(origin); await fillAccessKey(page, fixture.keys.owner);
   await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
-  await page.locator('#invite-people-button').click();
+  await clickChrome(page, "#invite-people-button");
   return { fixture, origin, page, errors, requests };
 }
 async function create(page) {

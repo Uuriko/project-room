@@ -131,3 +131,9 @@ mobile; wired into `npm run test:browser`).
 - **Announcements**: no event type produces them; the channel is reserved.
 - **Cross-room feed** for account sessions: the feed is per room by design;
   the account inbox (`docs/UNIFIED-INBOX.md`) is the place a roll-up would go.
+
+## Bounded older-history paging (2026-09-22)
+
+GET accepts an exclusive `before` event sequence. Use response `nextBefore` until null; it accounts for both the 500-event scan window and the response item limit. Each page rechecks membership, current preferences, edits/deletions, mute state, private-message scope and the live read cursor. Counts and grouped work changes describe the current page, not all unread history. No unbounded scan or new polling loop is introduced.
+
+The browser offers Older notifications and Newest. Empty truncated windows never claim Nothing new. Mark read is available only on a complete newest page; it cannot acknowledge unseen older pages. Existing Updates/explicit caught-up controls retain their independent semantics. Older page browsing does not move the cursor. New room activity refreshes the selected page rather than silently returning it to the newest page. A durable cross-room attention projection remains future work.

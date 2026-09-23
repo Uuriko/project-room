@@ -64,6 +64,16 @@ test("a human with decide records a source-backed decision from a message", { ti
   assert.equal(recorded[0].event.data.sourceMessageId, "test-welcome");
   assert.equal(recorded[0].event.data.statement, "Weekly agenda ships every Friday.");
   assert.equal(recorded[0].event.actorId, "owner");
+
+  // A decision recorded elsewhere re-renders the list. A reader tabbed onto a
+  // source link keeps their place: the rows carry the focus keys the event
+  // log rows next to them always had.
+  await source.focus();
+  store.command(keys.owner, "commons", { id: "decision-while-reading", type: T.DECISION_RECORDED,
+    data: { sourceMessageId: "test-request", statement: "Agendas name their owner.", note: "From the room" } });
+  await page.locator("#decision-list li").nth(1).waitFor({ state: "visible" });
+  assert.equal(await list.locator('[data-open-message="test-welcome"]').evaluate(node => node === document.activeElement), true,
+    "focus stays on the source link through the re-render");
 });
 
 test("members without decide see no record-decision affordance", { timeout: 30000 }, async t => {

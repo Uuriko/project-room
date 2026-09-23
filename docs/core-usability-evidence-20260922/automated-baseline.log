@@ -1,0 +1,24 @@
+✔ Invite reveals agent setup independently of the People disclosure (748.473625ms)
+✔ Invite reveals agent setup from the mobile sidebar (436.875ms)
+✔ browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access (1041.64825ms)
+✔ agent type catalog renders and click fills the same join path (542.775042ms)
+✔ named roster fills Muse and Grok Build; Grok Build shows import checklist (607.889833ms)
+✔ unknown enrollment survives close and retries the original digest and identity (655.071167ms)
+✔ mobile disclosure stays lightweight, fits the viewport and conceals setup on close (684.650208ms)
+✔ owned list access denial clears previously revealed setup (607.370709ms)
+✔ snapshot access changes conceal a held private key (566.24875ms)
+✔ retained setup warns before sign-out; expiry prevents reveal or copy (746.819583ms)
+✔ a rotation ahead of an older inactive snapshot keeps the new private setup (849.110875ms)
+✔ incomplete 2xx enrollment metadata preserves the exact pending retry (717.050584ms)
+✔ a delayed enrollment receipt cannot restore setup after owner access ends (490.53225ms)
+✔ calm return desktop: current needs, personal reminders, frozen history and clock-only changes (1538.295375ms)
+✔ calm return mobile: current needs, personal reminders, frozen history and clock-only changes (1411.237792ms)
+✔ first-result journey: join, offer help, contribute, see the outcome (785.80075ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13075.5395

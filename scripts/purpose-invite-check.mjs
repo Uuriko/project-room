@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // W4-51 L3: invite for a purpose. An inviter can point an invitation link at the
 // question or result the guest is invited to help with; after joining, the room
 // opens on that item. The purpose travels only in the URL fragment (never sent to
@@ -31,7 +32,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await fillAccessKey(inviter, f.keys.owner);
   await inviter.getByRole("button", { name: "Enter room", exact: true }).click();
   await inviter.locator("#main").waitFor({ state: "visible" });
-  await inviter.locator("#invite-people-button").click();
+  await clickChrome(inviter, "#invite-people-button");
   const purpose = inviter.locator("#share-link-purpose");
   await purpose.waitFor();
   const options = await purpose.locator("option").allTextContents();

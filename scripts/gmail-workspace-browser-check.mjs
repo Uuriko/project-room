@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -92,7 +93,7 @@ for (const width of [390, 1440]) test(`Gmail compose, save, reply, send, triage 
   assert.equal(provider.calls.filter(c => c.url.endsWith('/messages/send')).length, 2);
   await root.getByRole('button', { name: 'New email' }).click(); await dialog.getByLabel('Message', { exact: true }).fill('Private unsaved text');
   const other = await page.context().newPage(); await other.goto(origin + '/?account=1'); await other.locator('#nav-inbox').waitFor();
-  if (await other.locator('#session-menu-button').isVisible()) await other.locator('#session-menu-button').click(); await other.locator('#signout-button').click();
+  if (await other.locator('#session-menu-button').isVisible()) await other.locator('#session-menu-button').click(); await clickChrome(other, "#signout-button");
   await dialog.waitFor({ state: 'hidden' }); assert.equal(await dialog.getByLabel('Message', { exact: true }).inputValue(), '');
   assert.equal(await root.locator('[data-reader]').textContent(), ''); assert.deepEqual(errors, []);
 });

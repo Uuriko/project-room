@@ -282,6 +282,18 @@ test("routing: mentions, list, resolve, policy", async t => {
   const listed = await (await get(f, `${base}/routing`, f.humanKey)).json();
   assert.equal(listed.records.length, 1);
   assert.equal(listed.records[0].routingId, routingId);
+  // The resolver is whoever authenticated, and nothing in the body may say
+  // otherwise. Every other actor on these routes comes from the credential;
+  // this one used to take the body's word for it, so any member could record
+  // the owner, or anyone else, as having resolved a routed mention, in the
+  // durable journal as well as the response.
+  const forged = await post(f, `${base}/routing/${routingId}/resolve`, f.humanKey,
+    { outcome: "not mine to claim", resolvedBy: { kind: "human", id: "guest", label: "Guest" } });
+  assert.equal(forged.status, 422, "there is no field that chooses who resolved this");
+  assert.equal(await codeOf(forged), "invalid_input");
+  const untouched = await (await get(f, `${base}/routing`, f.humanKey)).json();
+  assert.equal(untouched.records[0].status, "routed", "the refusal recorded nothing");
+
   // Resolve hoists the outcome onto the record view.
   const resolved = await post(f, `${base}/routing/${routingId}/resolve`, f.humanKey,
     { outcome: "claude picked it up" });
@@ -345,6 +357,37 @@ test("handoffs: room-scoped journal writes with account resolution", async t => 
   const scopedList = await get(f, `${denBase}/handoffs`, f.denIdentity.secret);
   assert.equal(scopedList.status, 409);
   assert.equal(await codeOf(scopedList), "handoff_no_account_scope");
+
+  // An agent member of a room with a human owner works under the owner's
+  // account, but only inside this room. inbox_handoffs is keyed on account
+  // alone, so before the room scope that account opened the owner's handoffs
+  // in EVERY room they own. Here the owner has a second handoff in another
+  // room of the same account, recorded straight into the journal the way the
+  // account inbox path writes it, and the agent must never see or move it.
+  const ownerAccount = f.store.accountForMember("commons", "owner").id;
+  const elsewhere = f.store.handoffs.create(ownerAccount,
+    { threadId: "other-room-thread", channel: "room", sourceIds: ["other-room-thread"], sender: { id: "owner", label: "owner" },
+      subject: "OTHER-ROOM-PRIVATE", occurredAt: new Date().toISOString(), sla: null,
+      triage: { action: "needs_human", reasons: ["elsewhere"] }, summary: "OTHER-ROOM-SUMMARY" },
+    { from: "owner", to: "claude", recordRoom: "some-other-room" }).receipt;
+
+  const agentView = await get(f, `${base}/handoffs`, f.agent.secret);
+  assert.equal(agentView.status, 200, "an agent still gets handoffs in its own room");
+  const agentText = await agentView.text();
+  assert.ok(agentText.includes(handoff.handoffId), "including the one the owner made in this room");
+  assert.equal(agentText.includes("OTHER-ROOM-SUMMARY"), false, "and never another room's packet");
+  assert.equal(agentText.includes(elsewhere.handoffId), false);
+
+  const moved = await post(f, `${base}/handoffs/${elsewhere.handoffId}/transition`, f.agent.secret, { status: "released" });
+  assert.equal(moved.status, 404, "another room's handoff answers exactly like one that does not exist");
+  assert.equal(f.store.handoffs.list(ownerAccount).find(entry => entry.handoffId === elsewhere.handoffId).status, "open");
+
+  // What an agent creates lands in this room, and the owner sees it.
+  const agentMade = await post(f, `${base}/handoffs`, f.agent.secret,
+    { threadId: "thread-agent", to: { kind: "human", id: "owner" }, summary: "Needs the owner." });
+  assert.equal(agentMade.status, 201);
+  const ownerView = await (await get(f, `${base}/handoffs`, f.humanKey)).json();
+  assert.ok(ownerView.handoffs.some(entry => entry.threadId === "thread-agent"));
 });
 
 test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async t => {

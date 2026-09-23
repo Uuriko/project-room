@@ -2278,6 +2278,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {
+        // The only open route with no per-address bound. It is not an
+        // enumeration vector (a wrong identity and a missing request answer
+        // the same 404, and identity ids are 96 random bits), but an open read
+        // with no limit at all is still unbounded work for anyone who asks.
+        rate(`access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
@@ -2615,8 +2620,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.agentPlugin.roomVerificationPolicy(roomId));
       }
       if (route === "verification-policy" && req.method === "POST") {
-        // RC-2026-09-18-049: room owners toggle whether the room only admits
-        // verified agents. Enforcement happens in AgentIdentities.link.
+        // RC-2026-09-18-049: whether the room only admits verified agents.
+        // Deciding who may join is membership administration, so this takes
+        // manage_members like the rest of it: the owner, or an admin the owner
+        // appointed (#643). Enforcement happens in AgentIdentities.link.
         const data = await body(req);
         if (!exact(data, ["requireVerified"]) || typeof data.requireVerified !== "boolean") {
           reject(422, "invalid_policy", "requireVerified (boolean) is the only accepted field");
@@ -2807,9 +2814,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // B4: per-member feed derived from the event tail after the member's cursor. Read model only; the
         // store method re-authenticates membership, and the read rate limit above already covers it.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit only");
+        if ([...params.keys()].some(key => !["limit", "before", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit and before sequence");
         if (params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_notification_limit", "Choose a positive limit");
-        return json(res, 200, store.notifications.list(selected.token, roomId, fence, params.has("limit") ? { limit: Number(params.get("limit")) } : {}));
+        if (params.has("before") && !/^[1-9]\d*$/.test(params.get("before"))) reject(422, "invalid_notification_selection", "Choose a positive before sequence");
+        return json(res, 200, store.notifications.list(selected.token, roomId, fence, {
+          ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
+          ...(params.has("before") ? { before: Number(params.get("before")) } : {})
+        }));
       }
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
       if (route === "diagnostics" && req.method === "GET") {

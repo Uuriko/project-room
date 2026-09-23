@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -158,7 +159,7 @@ test("closed unknown save warns on leave and sign-out without deleting a decline
   assert.equal(await page.evaluate(() => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; }), true);
   let warning;
   page.once("dialog", async dialog => { warning = dialog.message(); await dialog.dismiss(); });
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); assert.match(warning, /pending retry.*may already be saved/);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); assert.match(warning, /pending retry.*may already be saved/);
   assert.equal(await page.locator("#main").isVisible(), true); await page.locator("#resume-action").click(); await f.unknown();
 });
 
@@ -202,7 +203,7 @@ test("a valid action receipt remains saved when its follow-up snapshot fails", {
   await f.open(); await f.fill(); await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   await page.getByText("Record saved.", { exact: true }).waitFor(); assert.equal(f.item().state, "completed");
   assert.equal(await page.locator("#resume-action").isVisible(), false);
-  failSnapshot = false; await page.locator("#refresh-button").click(); await f.card.getByText("Awaiting verification", { exact: true }).waitFor();
+  failSnapshot = false; await clickChrome(page, "#refresh-button"); await f.card.getByText("Awaiting verification", { exact: true }).waitFor();
 });
 
 test("stale refusal with no live updates provides an owned refresh before rebasing", { timeout: 30000 }, async t => {

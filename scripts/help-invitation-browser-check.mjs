@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human UI, actual scripted MCP. Disposable rooms; no model or external work.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -167,7 +168,7 @@ test("human help expiry retires its label without new events and guest cannot pu
   await f.card.getByText("Help ended", { exact: true }).waitFor();
   assert.equal(f.store.room("commons").sequence, sequence); assert.equal((await f.list()).length, 0);
   f.page.on("dialog", dialog => dialog.accept());
-  await f.page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await clickChrome(f.page, "#signout-button");
   await fillAccessKey(f.page, f.keys.guest);
   await f.page.getByRole("button", { name: "Enter room", exact: true }).click();
   await f.page.locator("#main").waitFor({ state: "visible" });

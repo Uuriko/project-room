@@ -167,6 +167,23 @@ export const inboxHandoffSchema = `
   );
   CREATE INDEX IF NOT EXISTS inbox_handoffs_account_status ON inbox_handoffs(account_id,status,created_at);
 `;
+// Which room a handoff was created in, for handoffs made through the room's
+// collab routes. A side table rather than a column on inbox_handoffs, so that
+// table's exact-schema check and every file already written stay as they are.
+//
+// inbox_handoffs is keyed on account alone, which is right for a caller who
+// holds that account: it is their journal, across their rooms. It is wrong for
+// an agent member with no account of its own acting in one room under the
+// room owner's account scope. Such a caller may only see and move handoffs
+// recorded in THIS room; a handoff with no room row (the account-session
+// inbox path, or anything written before this table) is never theirs.
+export const inboxHandoffRoomSchema = `
+  CREATE TABLE IF NOT EXISTS inbox_handoff_rooms (
+    handoff_id TEXT NOT NULL PRIMARY KEY,
+    room_id TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS inbox_handoff_rooms_room ON inbox_handoff_rooms(room_id);
+`;
 const receiptOf = row => ({ handoffId: row.handoff_id, accountId: row.account_id, threadId: row.thread_id,
   channel: row.channel, status: row.status, fromAgent: row.from_agent, toAgent: row.to_agent,
   createdAt: row.created_at, updatedAt: row.updated_at,
@@ -209,14 +226,22 @@ export class InboxHandoffJournal {
   // Journal a handoff: one open handoff per thread. A second create for the
   // same thread returns the existing receipt (duplicate: true) instead of a
   // second row — the thread stays owned by exactly one open handoff.
-  create(accountId, fields, { from = "owner", to } = {}) {
+  // roomId scopes the caller to one room (see inboxHandoffRoomSchema);
+  // recordRoom only notes where the handoff was made, for a caller who holds
+  // the account and so keeps the account-wide view.
+  create(accountId, fields, { from = "owner", to, roomId = null, recordRoom = null } = {}) {
     scope(accountId);
     check(fields !== null && typeof fields === "object" && !Array.isArray(fields), CODE, "a handoff packet must be an object");
     const threadId = text(fields.threadId, 1024, "threadId");
     return this.store.transaction(() => {
       const now = this.store.now();
-      const open = this.db.prepare("SELECT * FROM inbox_handoffs WHERE account_id=? AND thread_id=? AND status='open' ORDER BY created_at DESC LIMIT 1")
-        .get(accountId, threadId);
+      // A room-scoped caller only ever matches an open handoff in its own
+      // room, so an existing open handoff for the same thread elsewhere in the
+      // account is neither returned to it nor treated as its duplicate.
+      const open = roomId === null
+        ? this.db.prepare("SELECT * FROM inbox_handoffs WHERE account_id=? AND thread_id=? AND status='open' ORDER BY created_at DESC LIMIT 1").get(accountId, threadId)
+        : this.db.prepare(`SELECT h.* FROM inbox_handoffs h JOIN inbox_handoff_rooms r ON r.handoff_id=h.handoff_id
+            WHERE h.account_id=? AND h.thread_id=? AND h.status='open' AND r.room_id=? ORDER BY h.created_at DESC LIMIT 1`).get(accountId, threadId, roomId);
       if (open) return { receipt: receiptOf(open), duplicate: true };
       const packet = buildHandoffPacket({ ...fields, threadId, from, to, handoffId: randomUUID(), createdAt: new Date(now).toISOString() });
       const history = JSON.stringify([{ status: "open", at: packet.createdAt }]);
@@ -225,15 +250,23 @@ export class InboxHandoffJournal {
         VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
         .run(packet.handoffId, accountId, packet.threadId, packet.channel, JSON.stringify(packet),
           packet.from, packet.to, "open", now, now, history);
+      const room = roomId ?? recordRoom;
+      if (room !== null) this.db.prepare("INSERT INTO inbox_handoff_rooms(handoff_id,room_id) VALUES(?,?)").run(packet.handoffId, room);
       return { receipt: receiptOf(this.db.prepare("SELECT * FROM inbox_handoffs WHERE handoff_id=?").get(packet.handoffId)),
         duplicate: false };
     });
   }
   // The "nothing closes unowned" sweep: every open handoff and its history.
-  list(accountId, { status = null } = {}) {
+  list(accountId, { status = null, roomId = null } = {}) {
     scope(accountId);
     if (status !== null && status !== undefined) {
       check(inboxHandoffStatuses.includes(status), "invalid_handoff_status", `status must be one of ${inboxHandoffStatuses.join(",")}`);
+    }
+    if (roomId !== null) {
+      const filtered = status !== null && status !== undefined;
+      return this.store.readTransaction(() => this.db.prepare(`SELECT h.* FROM inbox_handoffs h JOIN inbox_handoff_rooms r ON r.handoff_id=h.handoff_id
+          WHERE h.account_id=? AND r.room_id=?${filtered ? " AND h.status=?" : ""} ORDER BY h.created_at DESC LIMIT 500`)
+        .all(...(filtered ? [accountId, roomId, status] : [accountId, roomId])).map(receiptOf));
     }
     return this.store.readTransaction(() => (status === null || status === undefined
       ? this.db.prepare("SELECT * FROM inbox_handoffs WHERE account_id=? ORDER BY created_at DESC LIMIT 500").all(accountId)
@@ -242,13 +275,17 @@ export class InboxHandoffJournal {
   }
   // Move a handoff along its lifecycle. Terminal handoffs are immutable;
   // illegal edges are refused, never silently rewritten.
-  transition(accountId, handoffId, status, { note = null } = {}) {
+  transition(accountId, handoffId, status, { note = null, roomId = null } = {}) {
     scope(accountId);
     agentId(handoffId, "handoffId");
     check(inboxHandoffStatuses.includes(status), "invalid_handoff_status", `status must be one of ${inboxHandoffStatuses.join(",")}`);
     const trimmed = note === undefined || note === null ? null : text(note, 500, "note");
     return this.store.transaction(() => {
-      const row = this.db.prepare("SELECT * FROM inbox_handoffs WHERE account_id=? AND handoff_id=?").get(accountId, handoffId);
+      const row = roomId === null
+        ? this.db.prepare("SELECT * FROM inbox_handoffs WHERE account_id=? AND handoff_id=?").get(accountId, handoffId)
+        : this.db.prepare(`SELECT h.* FROM inbox_handoffs h JOIN inbox_handoff_rooms r ON r.handoff_id=h.handoff_id
+            WHERE h.account_id=? AND h.handoff_id=? AND r.room_id=?`).get(accountId, handoffId, roomId);
+      // Another room's handoff answers exactly like one that does not exist.
       if (!row) fail(404, "handoff_not_found", "No such handoff for this account.");
       if (!handoffTransitions[row.status].includes(status))
         fail(409, "invalid_handoff_transition", `A ${row.status} handoff cannot move to ${status}.`);

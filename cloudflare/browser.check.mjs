@@ -1,3 +1,4 @@
+import { clickChrome } from '../scripts/room-chrome.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
@@ -46,7 +47,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     await fillAccessKey(owner, ownerKey);
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
-    await owner.locator('#invite-people-button').click();
+    await clickChrome(owner, '#invite-people-button');
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();

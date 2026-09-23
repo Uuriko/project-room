@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys against the real local service and disposable data.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -62,7 +63,7 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   // control exactly then, whether or not any connection exists), or a step-back probe can pass an
   // instant before the reader appears, and a late connection render re-lists the rows mid-click.
   const inbox = async () => {
-    await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+    await clickChrome(page, "#nav-inbox"); await page.locator("#inbox-reader").waitFor({ state: "visible" });
     await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
   };
   const pick = async id => {
@@ -173,7 +174,7 @@ test("reply comparison clears already visible original and unsaved text when ano
   await p.locator("#inbox-reply-original summary").click();
   assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button"); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   for (const id of ["inbox-reply-local-body", "inbox-reply-original-body", "inbox-reply-body"])
     assert.equal(await p.locator("#" + id).textContent(), "");
@@ -409,7 +410,7 @@ test("provider preview cannot repopulate private content after another tab chang
   await p.route("**/reply-review?view=reply-review-v4", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button"); await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest");
   await fillAccessKey(other, f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
@@ -497,7 +498,7 @@ for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile
   const work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding, { sourceId: id, shareReceipt: shared, ready: false });
   await f.inbox(); await f.pick(id); await p.getByText("Work in progress", { exact: true }).waitFor();
   work.complete(); work.review(); work.decide();
-  await p.locator("#nav-rooms").click(); await f.inbox();
+  await clickChrome(p, "#nav-rooms"); await f.inbox();
   await p.locator("[data-inbox-result]").click(); await p.locator("#inbox-result-use:not([disabled])").waitFor();
   assert.equal(await p.locator("#inbox-replaced-draft").textContent(), "Keep my private draft");
   await p.locator("#inbox-result-use").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
@@ -610,7 +611,7 @@ for (const mobile of [false, true]) test(`sample reply ${mobile ? "mobile" : "de
   assert.equal(f.provider.count(), 1); assert.equal(f.provider.submits, 1);
   assert.deepEqual(f.store.room("commons"), before);
   assert.equal(f.saved().draft.body, "A private reply 🪷");
-  await p.locator("#nav-rooms").click(); assert.equal(await p.locator("#message-input").inputValue(), "Unsent room note");
+  await clickChrome(p, "#nav-rooms"); assert.equal(await p.locator("#message-input").inputValue(), "Unsent room note");
   await f.inbox(); await f.pick("note");
   await p.locator("#inbox-send-view").click(); assert.equal(await p.locator("#inbox-send-confirm").isVisible(), false);
   await p.locator("#inbox-send-close").click();
@@ -681,7 +682,7 @@ test("sample reply: queued cancellation has an exact retry after a lost acknowle
   const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note"); await previewReply(f);
   const preview = f.store.inbox.sendContext(f.slot.token, "note", f.session.sessionBinding).preview;
   f.apply({ action: "send.reserve", requestId: "queued-reply", sourceId: "note", sourceRevision: preview.sourceRevision, draftRevision: preview.draftRevision, previewVersion: preview.previewVersion });
-  await p.locator("#inbox-send-close").click(); await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.locator("#inbox-send-close").click(); await clickChrome(p, "#nav-rooms"); await f.inbox();
   await p.locator("#inbox-send-cancel").waitFor();
   let lost = true;
   await p.route("**/api/inbox/commands", async route => {
@@ -717,7 +718,7 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   await p.route("**/send-context", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-send-preview").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button");
   await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
   await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click();
@@ -776,7 +777,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   assert.equal(await b.locator("#inbox-draft").inputValue(), "");
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
-  if (await b.locator("#session-menu-button").isVisible()) await b.locator("#session-menu-button").click(); await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
+  if (await b.locator("#session-menu-button").isVisible()) await b.locator("#session-menu-button").click(); await clickChrome(b, "#signout-button"); await b.locator("#auth-panel").waitFor();
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
   const cookies = await context.cookies();
@@ -795,7 +796,7 @@ for (const mobile of [false, true]) test(`inbox arrival ${mobile ? "mobile" : "d
   await p.evaluate(() => { location.hash = "#pr-record/room/commons"; });
   await p.locator("#main").waitFor();
   assert.equal(await p.locator("#inbox-panel").isVisible(), false);
-  await f.inbox(); await p.locator("#nav-rooms").click();
+  await f.inbox(); await clickChrome(p, "#nav-rooms");
   assert.equal(new URL(p.url()).hash, "#pr-view/rooms");
   await p.reload(); await p.locator("#main").waitFor();
   assert.equal(await p.locator("#inbox-panel").isVisible(), false);
@@ -818,9 +819,9 @@ for (const mobile of [false, true]) test(`inbox continuity ${mobile ? "mobile" :
   assert.equal(JSON.parse(raw).sourceId, "note");
   assert.equal(raw.includes("longer private"), false); assert.equal(raw.includes("maya@example.test"), false);
   assert.equal(new URL(p.url()).hash, "#pr-view/inbox", "private source IDs are not shared in the URL");
-  await p.locator("#nav-rooms").click(); await f.inbox();
+  await clickChrome(p, "#nav-rooms"); await f.inbox();
   await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
-  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await clickChrome(p, "#signout-button"); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
 
@@ -829,7 +830,7 @@ test("inbox continuity: a changed source keeps selection but discards its old re
   const paragraphs = Array.from({ length: 15 }, (_, i) => `Earlier paragraph ${i}. ` + "Read this long message. ".repeat(15));
   f.apply(f.source("note", 1, paragraphs)); await f.inbox(); await f.pick("note");
   await p.locator("#inbox-reader").evaluate(node => { node.scrollTop = 500; });
-  await p.locator("#nav-rooms").click();
+  await clickChrome(p, "#nav-rooms");
   f.apply(f.source("note", 2, ["Updated first paragraph.", ...paragraphs.slice(1)]));
   await p.reload(); await p.locator("#main").waitFor(); await f.inbox();
   assert.equal(await p.locator("#inbox-list [aria-current=true]").getAttribute("data-source-id"), "note");
@@ -848,7 +849,7 @@ for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desk
   await p.locator("#inbox-draft").fill("A warm hello"); await p.locator("#inbox-draft").press("Enter"); await p.locator("#inbox-draft").press("x");
   assert.equal(f.saved().draft, null); assert.equal(await p.locator("#inbox-draft").inputValue(), "A warm hello\nx");
   await f.pick("second"); await f.pick("note"); assert.equal(await p.locator("#inbox-draft").inputValue(), "A warm hello\nx");
-  await p.locator("#nav-rooms").click(); assert.equal(await p.locator("#message-input").inputValue(), "Unsent room thought");
+  await clickChrome(p, "#nav-rooms"); assert.equal(await p.locator("#message-input").inputValue(), "Unsent room thought");
   await f.inbox(); await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
   assert.equal(f.saved().draft.body, "A warm hello\nx"); assert.equal(f.store.room("commons").sequence, before);
   await f.capture(mobile ? "mobile-draft" : "desktop-draft");
@@ -982,7 +983,7 @@ test("real inbox: another tab changing the browser account clears private conten
   await p.route("**/api/inbox/sources/held?view=email-excerpt-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   const read = p.locator('[data-source-id="held"]').click(); await started; await read;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button");
   await other.locator("#auth-panel").waitFor({ state: "visible" });
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
   await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
@@ -992,7 +993,7 @@ test("real inbox: another tab changing the browser account clears private conten
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#inbox-panel").isVisible(), false);
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
-  await other.locator("#nav-inbox").click(); await other.getByText("No messages yet.", { exact: true }).waitFor();
+  await clickChrome(other, "#nav-inbox"); await other.getByText("No messages yet.", { exact: true }).waitFor();
   assert.equal(await other.locator("#inbox-list button").count(), 0);
 });
 
@@ -1020,10 +1021,10 @@ for (const mobile of [false, true]) test(`reviewed reply ${mobile ? "mobile" : "
   await p.getByText("Work in progress", { exact: true }).waitFor();
   assert.equal(await p.locator("[data-inbox-result]").count(), 0);
   work.complete(); work.review();
-  await p.locator("#nav-rooms").click(); await f.inbox();
+  await clickChrome(p, "#nav-rooms"); await f.inbox();
   await p.getByText("Needs review and approval", { exact: true }).waitFor();
   work.decide();
-  await p.locator("#nav-rooms").click(); await f.inbox();
+  await clickChrome(p, "#nav-rooms"); await f.inbox();
   await p.locator("#inbox-draft").fill("Earlier private draft");
   await p.locator("[data-inbox-result]").click();
   await p.waitForFunction(body => document.querySelector("#inbox-result-body").textContent === body, work.body);
@@ -1098,9 +1099,9 @@ for (const mobile of [false, true]) test(`workspace history ${mobile ? 'mobile' 
   await f.inbox(); await f.pick('note');
   await p.locator('#inbox-draft').fill('Private draft across history');
   assert.equal(await p.evaluate(() => history.length), before + 1);
-  await p.locator('#nav-inbox').click();
+  await clickChrome(p, "#nav-inbox");
   assert.equal(await p.evaluate(() => history.length), before + 1, 'reselecting the current destination does not add history');
-  await p.locator('#nav-rooms').click();
+  await clickChrome(p, "#nav-rooms");
   assert.equal(await p.evaluate(() => history.length), before + 2);
   await p.goBack(); await p.locator('#inbox-panel').waitFor({ state: 'visible' });
   await p.waitForFunction(() => document.querySelector('#inbox-draft').value === 'Private draft across history');
@@ -1146,7 +1147,7 @@ test('workspace history across room contexts opens the chooser without clearing 
   assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
   assert.equal(new URL(p.url()).searchParams.get('room'), null);
   assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
-  await p.locator('#nav-rooms').click(); await p.locator('#main').waitFor({ state: 'visible' });
+  await clickChrome(p, "#nav-rooms"); await p.locator('#main').waitFor({ state: 'visible' });
   assert.equal(new URL(p.url()).searchParams.get('room'), 'commons');
   assert.equal(await p.locator('#message-input').inputValue(), 'Do not discard this room draft');
 });
@@ -1154,7 +1155,7 @@ test('workspace history across room contexts opens the chooser without clearing 
 for (const mobile of [false, true]) test(`room browser ${mobile ? 'mobile' : 'desktop'}: history distinguishes the chooser from the open room`, { timeout: 25000 }, async t => {
   const f = await setup(t, mobile), p = f.page;
   await p.locator('#message-input').fill('Keep this room draft');
-  await p.locator('#choose-room').click();
+  await clickChrome(p, "#choose-room");
   await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
   assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
   await f.inbox(); await f.pick('note');
@@ -1176,8 +1177,8 @@ for (const phase of ['list', 'read']) test(`late Inbox ${phase} response leaves 
   await p.route(phase === 'list' ? '**/api/inbox?view=email-excerpt-v1' : '**/api/inbox/sources/*?view=email-excerpt-v1', async route => {
     const response = await route.fetch(); reached(); await held; await route.fulfill({ response });
   }, { times: 1 });
-  await p.locator('#nav-inbox').click(); await started;
-  await p.locator('#nav-rooms').click();
+  await clickChrome(p, "#nav-inbox"); await started;
+  await clickChrome(p, "#nav-rooms");
   await p.locator('#message-input').fill('Writing while the Inbox request finishes');
   // Count viewport scroll requests: even a no-op at scrollY=0 is an unwanted
   // attempt to restore the hidden Inbox's position over the current room.
@@ -1194,7 +1195,7 @@ for (const phase of ['list', 'read']) test(`late Inbox ${phase} response leaves 
 
 for (const accountOnly of [false, true]) test(`room browser reload restores the chooser ${accountOnly ? 'without' : 'with'} an open room`, { timeout: 25000 }, async t => {
   const f = await setup(t, false, false, accountOnly), p = f.page;
-  if (!accountOnly) await p.locator('#choose-room').click();
+  if (!accountOnly) await clickChrome(p, "#choose-room");
   await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
   assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
   await p.reload(); await p.locator('#account-rooms-panel').waitFor({ state: 'visible' });
@@ -1214,7 +1215,7 @@ test('late Inbox disconnect completion does not reopen Inbox over current room w
   }, { times: 1 });
   const remove = p.locator(`[data-remove="${mail.raw.connection.id}"]`);
   await remove.click(); await remove.click(); await started;
-  await p.locator('#nav-rooms').click(); await p.locator('#message-input').fill('Still writing here');
+  await clickChrome(p, "#nav-rooms"); await p.locator('#message-input').fill('Still writing here');
   release(); await p.waitForLoadState('networkidle');
   assert.equal(await p.locator('#main').isVisible(), true);
   assert.equal(await p.locator('#inbox-panel').isVisible(), false);
@@ -1244,7 +1245,7 @@ for (const action of ['search', 'pagination']) test(`Inbox ${action} can restart
     else await p.locator('.inbox-show-more').click();
   };
   await run(); await started;
-  await p.locator('#nav-rooms').click(); await p.locator('#message-input').fill('Keep my room writing');
+  await clickChrome(p, "#nav-rooms"); await p.locator('#message-input').fill('Keep my room writing');
   await f.inbox(); release(); await p.waitForLoadState('networkidle');
   await run();
   if (action === 'search') await p.locator('#inbox-status').filter({ hasText: 'result' }).waitFor();
@@ -1261,7 +1262,7 @@ test('late share acknowledgment respects a newer room chooser destination', { ti
   t.after(() => release());
   await p.route('**/api/inbox/commands', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
   await p.locator('#inbox-share-confirm').click(); await started;
-  await p.locator('#inbox-share-close').click(); await p.locator('#nav-rooms').click(); await p.locator('#choose-room').click();
+  await p.locator('#inbox-share-close').click(); await clickChrome(p, "#nav-rooms"); await clickChrome(p, "#choose-room");
   release(); await p.waitForLoadState('networkidle');
   assert.equal(await p.locator('#account-rooms-panel').isVisible(), true);
   assert.equal(new URL(p.url()).hash, '#pr-view/room-list');
@@ -1283,7 +1284,7 @@ test('an abandoned search cannot unlock or overwrite a newer pending search', { 
   });
   const search = async q => { await p.locator('#inbox-search-input').fill(q); await p.locator('#inbox-search-form button[type=submit]').click(); };
   await search('launch'); await started[0];
-  await p.locator('#nav-rooms').click(); await f.inbox();
+  await clickChrome(p, "#nav-rooms"); await f.inbox();
   await search('Friday'); await started[1];
   releases[0](); await oldFinished;
   await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -1305,7 +1306,7 @@ for (const mobile of [false, true]) test(`late sample send ${mobile ? 'mobile' :
   t.after(() => release());
   await p.route('**/api/inbox/simulation', async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); }, { times: 1 });
   await p.locator('#inbox-send-confirm').click(); await started;
-  await p.locator('#inbox-send-close').click(); await p.locator('#nav-rooms').click();
+  await p.locator('#inbox-send-close').click(); await clickChrome(p, "#nav-rooms");
   await p.locator('#message-input').fill('Keep writing during send confirmation');
   release(); await p.waitForLoadState('networkidle');
   assert.equal(await p.locator('#main').isVisible(), true);

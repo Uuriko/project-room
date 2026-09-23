@@ -1,3 +1,4 @@
+import { clickChrome } from '../scripts/room-chrome.mjs';
 // Explicit operator-run acceptance for our staging app. Never runs in normal CI.
 // Credentials and browser sessions stay in the ignored, private .operator folder.
 import assert from 'node:assert/strict';
@@ -50,7 +51,7 @@ try {
     await fillAccessKey(owner, (await readFile(privatePath('owner-key.txt'), 'utf8')).trim());
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
-    await owner.locator('#invite-people-button').click();
+    await clickChrome(owner, '#invite-people-button');
     if (!inviting) {
       await owner.locator('#share-settings > summary').click();
       await owner.locator('#share-link-expiry').selectOption('1');

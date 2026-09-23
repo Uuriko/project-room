@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // A two-message email conversation with an attachment, rendered in the
 // real browser UI: the conversation lists both entries (depth-indented,
 // the open message marked, entries open their source), attachment
@@ -65,7 +66,7 @@ async function setup(t, mobile = false) {
   await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
   const inbox = async () => {
-    await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+    await clickChrome(page, "#nav-inbox"); await page.locator("#inbox-reader").waitFor({ state: "visible" });
     await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
   };
   const pick = async id => {

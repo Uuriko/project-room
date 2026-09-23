@@ -219,11 +219,16 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       case "routing-resolve": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
         const fields = await body(req);
-        if (!shape(fields, { required: ["outcome"], optional: ["resolvedBy"] })) {
-          invalidInput(reject, "{outcome, resolvedBy?}");
-        }
+        // The resolver is whoever authenticated, like every other actor on
+        // these routes. This one used to accept a resolvedBy from the body and
+        // only shape-check it, so any member could record the owner, or anyone
+        // else, as having resolved a routed mention - in the durable
+        // collab_routing_events row and its history, not just the response. An
+        // attribution nobody can vouch for is worse than none, so the field is
+        // refused rather than quietly ignored.
+        if (!shape(fields, { required: ["outcome"] })) invalidInput(reject, "{outcome}");
         const record = collab.resolveRouting(roomId, collabId, {
-          by: fields.resolvedBy ?? caller,
+          by: caller,
           outcome: fields.outcome,
         });
         return json(res, 200, { record });
@@ -248,8 +253,8 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
             || !["agent", "human"].includes(fields.to.kind) || typeof fields.to.id !== "string" || !fields.to.id) {
             return reject(422, "invalid_input", "to must be { kind: agent|human, id }.");
           }
-          const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
-          const { duplicate, receipt } = collab.createHandoff(roomId, accountId, {
+          const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+          const { duplicate, receipt } = collab.createHandoff(roomId, scope, {
             threadId: fields.threadId,
             to: fields.to,
             summary: fields.summary ?? null,
@@ -263,10 +268,10 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
           return json(res, duplicate ? 200 : 201, { duplicate, handoff: receipt });
         }
         if (req.method === "GET") {
-          const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+          const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
           const status = url.searchParams.get("status");
           return json(res, 200, {
-            handoffs: collab.listHandoffs(accountId, { status }),
+            handoffs: collab.listHandoffs(scope, { status }),
           });
         }
         return reject(405, "method_not_allowed", "Method not allowed");
@@ -277,8 +282,8 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
         if (!shape(fields, { required: ["status"], optional: ["note"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
         }
-        const accountId = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
-        const handoff = collab.transitionHandoff(accountId, collabId, fields.status, { note: fields.note ?? null });
+        const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
+        const handoff = collab.transitionHandoff(scope, collabId, fields.status, { note: fields.note ?? null });
         return json(res, 200, { handoff });
       }
       // Typed handoff envelopes (RC-2026-09-19-062): agent-to-agent delegation

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Browser check for the unified inbox UI (B27): one list across email, Telegram
 // and samples with channel badges and filters, a Telegram reply through the
 // fixture transport, connection add / reconnect / remove, the needs-you marker
@@ -48,7 +49,7 @@ async function setup(t, { mobile = false } = {}) {
   await page.goto(origin + "/?room=commons");
   await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#nav-inbox").click(); await page.locator("#inbox-panel").waitFor({ state: "visible" });
+  await clickChrome(page, "#nav-inbox"); await page.locator("#inbox-panel").waitFor({ state: "visible" });
   const deliver = updates => fetch(origin + "/api/inbox/webhooks/" + telegram.connection.id, { method: "POST", body: JSON.stringify({ updates }),
     headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET } });
   const card = id => page.locator(`.inbox-connection-card[data-connection-id="${id}"]`);
@@ -153,7 +154,7 @@ test("a Telegram reply goes through the fixture transport with sample labels; em
   await f.card(f.telegram.connection.id).getByText(/^Last send: accepted · fixture · /).waitFor();
   assert.equal(await p.locator("#inbox-send-preview").isVisible(), false);
   // Reload: the journal is the memory.
-  await p.reload(); await p.locator("#nav-inbox").waitFor(); await p.locator("#nav-inbox").click(); await f.pick(f.tgId("-1001000000001:41"));
+  await p.reload(); await p.locator("#nav-inbox").waitFor(); await clickChrome(p, "#nav-inbox"); await f.pick(f.tgId("-1001000000001:41"));
   await p.getByText("Sample accepted · nothing left this server", { exact: true }).waitFor();
   await f.capture("telegram-reply-accepted");
   // Email: sending stays unavailable until an outbound email slice exists.

@@ -1,3 +1,4 @@
+import { clickChrome, ensureSidebarClosed } from '../scripts/room-chrome.mjs';
 // Disposable workerd/browser release recovery proof; never provisions live data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -49,11 +50,12 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await page.goto(origin); await fillAccessKey(page, ownerKey);
     await page.getByRole('button', { name: 'Enter room', exact: true }).click();
     await page.locator('#main').waitFor({ state: 'visible' });
-    await page.locator('#invite-people-button').click();
+    await clickChrome(page, '#invite-people-button');
     await page.locator('#share-link-create').click();
     await page.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await page.locator('#share-link-url').inputValue();
     await page.locator('#share-link-close').click();
+    await ensureSidebarClosed(page);
     const guestContext = await browser.newContext({ ignoreHTTPSErrors: true, extraHTTPHeaders: { 'CF-Connecting-IP': '192.0.2.2' } });
     const guest = await guestContext.newPage();
     await guest.goto(invitation); await guest.locator('#join-link-name').fill('Recovery guest');

@@ -71,7 +71,7 @@ export function installAgentConnections({ client, getState }) {
     if ($("#agent-create")) $("#agent-create").hidden = packet;
     if ($("#agent-create-note")) {
       $("#agent-create-note").hidden = packet;
-      $("#agent-create-note").textContent = "The browser sends only a digest.";
+      $("#agent-create-note").textContent = "Next: connect the agent in its own app.";
     }
     if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet;
     if ($("#agent-host-snippets")) $("#agent-host-snippets").hidden = route !== "mcp";
@@ -120,7 +120,7 @@ export function installAgentConnections({ client, getState }) {
   }
   function reset() {
     flow++; listVersion++; owner = null; generation = null; ownerRevision = null; pending = null; forget(); busy = false;
-    conceal(); form.reset(); rosterId = null;
+    conceal(); form.reset(); rosterId = null; $("#agent-other-types").open = false;
     if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
     if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
     list.replaceChildren(); status(""); render(); dialog.close();

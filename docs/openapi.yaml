@@ -1718,8 +1718,12 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: before
+          in: query
+          description: Exclusive event sequence from nextBefore; every page rechecks current access and read cursor.
+          schema: { type: integer, minimum: 1 }
       responses:
-        '200': { description: Feed with unread count, cursor, sequence, basis and items; fetching never acknowledges }
+        '200': { description: Feed with page unread count, cursor, sequence, basis, pageBefore, nextBefore and items; fetching never acknowledges }
         '401': { description: Credential expired, revoked or access ended }
         '403': { description: Membership inactive }
         '422': { description: invalid_notification_selection (unknown or repeated query key) or invalid_notification_limit }
@@ -5702,7 +5706,6 @@ paths:
               required: [outcome]
               properties:
                 outcome: { type: string, maxLength: 1000 }
-                resolvedBy: { type: object, description: "{ kind: agent|human, id } resolver (default: caller)" }
       responses:
         '200': { description: "{ record: { routingId, status: resolved, outcome, resolvedBy, resolvedAt } }" }
         '404': { description: routing_not_found }

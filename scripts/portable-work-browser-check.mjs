@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -195,7 +196,7 @@ for (const mobile of [false, true]) {
     await page.locator("#packet-copy").click(); await page.locator("#portable-close").click();
     let confirmations = 0;
     page.on("dialog", dialog => { confirmations++; assert.match(dialog.message(), /clear unsent drafts/); return dialog.accept(); });
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(confirmations, 1, "a closed portable draft alone warns before sign-out");
     assert.equal(await page.locator("#packet-preview").inputValue(), "");
     assert.equal(await page.locator("#portable-status").textContent(), "");

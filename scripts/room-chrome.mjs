@@ -94,3 +94,23 @@ export async function openMemberProfile(page, memberId) {
   if (!(await profile.evaluate(node => node.open))) await profile.locator(":scope > summary").click();
   return profile;
 }
+
+// Secondary controls moved into their existing account/room contexts.
+export async function clickChrome(page, selector) {
+  const control = page.locator(selector);
+  if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
+    if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
+  }
+  if (['#invite-people-button', '#connect-agent-button', '#invite-agents-button', '#room-actions-open'].includes(selector)) {
+    if (await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
+    if (selector !== '#room-actions-open' && await page.locator('#invite-navigation').isVisible()
+      && !(await page.locator('#invite-navigation').evaluate(node => node.open))) {
+      await page.locator('#invite-navigation > summary').click();
+    }
+  }
+  if (['#nav-inbox', '#nav-rooms', '#choose-room'].includes(selector) && await page.locator('#main').isVisible()) {
+    if (await control.evaluate(node => Boolean(node.closest('#room-sidebar')))) await ensureSidebarOpen(page);
+    else await ensureSidebarClosed(page);
+  }
+  await control.click();
+}

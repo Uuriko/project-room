@@ -23,7 +23,7 @@
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
           <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
           <div class="session-menu" id="session-menu">
-            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions"><span aria-hidden="true">⋮</span></button>
+            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
             <div id="session-menu-panel" class="session-menu-panel">
               <button id="account-settings-button" class="button ghost" type="button" hidden>Sign-in &amp; security</button>
               <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
@@ -260,33 +260,37 @@
       </dialog>
       <main id="main" class="community-shell" hidden>
         <aside id="room-sidebar" aria-label="Channels and people">
-          <div class="sidebar-head">
-            <h1 id="room-title" tabindex="-1">Project Room</h1>
-          </div>
-          <button id="room-overview-open" class="button ghost room-overview-open" type="button" aria-haspopup="dialog" aria-controls="room-overview-dialog">Overview</button>
+          <div id="sidebar-workspace"></div>
+          <h1 class="sidebar-head">
+            <button id="room-overview-open" class="room-overview-open" type="button" aria-label="Room overview" aria-haspopup="dialog" aria-controls="room-overview-dialog"><span id="room-title" tabindex="-1">Project Room</span><span aria-hidden="true">⌄</span></button>
+          </h1>
           <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
           <nav aria-label="Channels">
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
             <ol id="channel-list" class="channel-list"></ol>
           </nav>
+          <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
+          <div id="sidebar-invite"></div>
           <div class="people-actions">
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
-            <button id="invite-agents-button" class="button secondary" type="button" hidden>Invite</button>
+            <button id="invite-agents-button" class="button secondary" type="button" hidden>Agent invites</button>
           </div>
+          </details>
           <details id="people-panel" class="sidebar-panel" open>
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
+          <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
         </aside>
 
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
             <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-            <h2 id="conversation-title" tabindex="-1"># general</h2>
+            <div class="conversation-heading"><span id="mobile-room-name"></span><h2 id="conversation-title" tabindex="-1"># general</h2></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
-              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Actions <kbd aria-hidden="true">&#8984;K</kbd></button>
+              <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Find an action <kbd aria-hidden="true">&#8984;K</kbd></button>
               <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--bg)"/><circle cx="15" cy="17" r="2.5" fill="var(--bg)"/></svg></button>
             </div>
           </header>
@@ -336,7 +340,7 @@
               <button id="request-exit" class="button ghost" type="button">Back to chat</button>
             </div>
             <div class="composer-row">
-              <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work">+</button>
+              <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
               <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
@@ -378,6 +382,8 @@
               <p class="form-hint">Mentions, replies, and work naming you.</p>
               <p id="notification-status" class="status form-status" role="status"></p>
               <ul id="notification-list" class="rb-list"></ul>
+              <button id="notification-newest" class="button ghost" type="button" hidden>Newest</button>
+              <button id="notification-older" class="button ghost" type="button" hidden>Older notifications</button>
               <button id="notification-read-button" class="button ghost" type="button" hidden>Mark read</button>
             </details>
             <details id="reminder-panel" class="rb-panel">
@@ -435,10 +441,11 @@
               <button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button>
               <button id="room-leave-button" class="button ghost" type="button" hidden>Leave room</button>
             </div>
+            <p id="room-about-status" class="status form-status" role="status"></p>
           </details>
           <details id="results-panel" class="panel">
             <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
-            <ol id="room-results-list" class="results-list" aria-label="Completed work results"></ol>
+            <ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol>
           </details>
           <details id="record-panel" class="panel record-panel">
             <summary class="panel-header section-summary"><span class="section-label"><strong id="record-title">History</strong></span><span id="event-count" class="count-chip"></span></summary>
@@ -491,13 +498,13 @@
             <div class="dialog-head"><h2 id="work-dialog-title">New work</h2></div>
             <p id="work-reuse-hint" class="form-hint" hidden></p>
             <p id="new-work-status" class="status form-status" role="status"></p>
-            <label id="work-title-label" class="field"><span>Title</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
+            <label id="work-title-label" class="field"><span>Request</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
             <input id="new-work-title" type="hidden" name="new-work-title">
             <input id="source-message-id" type="hidden" name="sourceMessageId">
             <p id="source-context" class="form-hint source-context"></p>
             <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
-            <label id="work-done-field" class="field"><span>Done looks like</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
-            <label id="assignee-field" class="field"><span>Owner</span><select id="assignee-select" name="assigneeId" required></select></label>
+            <label id="work-done-field" class="field"><span>Done when</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
+            <label id="assignee-field" class="field"><span>Assignee</span><select id="assignee-select" name="assigneeId" required></select></label>
             <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label"></select><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
               <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Think it through</option><option value="write">Allowed to change things outside the room</option></select></label>
@@ -695,20 +702,22 @@
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
         <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant"></label>
-        <p class="form-hint">Types for this Room only. Picking one fills the name and recommended access — same join path (packet, invite code, paste prompt, or MCP URL). It does not create a key or list the agent publicly.</p>
+        <p class="form-hint">Choose the agent you use. Then follow its connection steps.</p>
         <div id="agent-type-catalog" class="agent-type-catalog" role="list">
           <div id="agent-roster" class="agent-type-grid agent-roster">
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CX</span><span class="agent-type-copy"><strong>Codex</strong><span>Best for OpenAI coding</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">CR</span><span class="agent-type-copy"><strong>Cursor</strong><span>Best for your IDE, by pasting a prompt</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
+          </div>
+          <details id="agent-other-types"><summary>Other agents</summary><div class="agent-type-grid">
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">HM</span><span class="agent-type-copy"><strong>Hermes</strong><span>Best for research tasks</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">OC</span><span class="agent-type-copy"><strong>OpenCode</strong><span>Best for open-source coding</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-icon" aria-hidden="true">π</span><span class="agent-type-copy"><strong>Pi</strong><span>Best for a lightweight agent</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">GB</span><span class="agent-type-copy"><strong>Grok Bot</strong><span>Best for a hosted bot</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-icon" aria-hidden="true">IN</span><span class="agent-type-copy"><strong>Instinct</strong><span>Best for iMessage</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
-          </div>
+          </div></details>
         </div>
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
@@ -741,7 +750,7 @@
           </details>
           <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi can redeem an invite code; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
         </details>
-        <p id="agent-create-note" class="form-hint">Issues a private key. The browser sends only a digest.</p>
+        <p id="agent-create-note" class="form-hint">Next: connect the agent in its own app.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
       </form>
       <section id="agent-setup" hidden>

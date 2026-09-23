@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A2: an account that administers membership creates a room from Rooms,
 // opens it, archives it as its owner (read only afterwards; the switcher shows it
@@ -45,7 +46,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
   test(`room lifecycle ${label}: create from Rooms, archive as owner, archived rooms are read-only switcher entries`, { timeout: 60000 }, async t => {
     const f = await setup(t, viewport), { page } = f;
     await f.login("admin-account");
-    await page.locator("#nav-rooms").click();
+    await clickChrome(page, "#nav-rooms");
     const commons = page.locator('[data-account-room="commons"]');
     await commons.waitFor();
     assert.equal(await commons.getAttribute("data-room-archived"), "false");
@@ -75,6 +76,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await openSettings(page, "room-about");
     await page.locator("#room-archive-button").waitFor({ state: "visible" });
     assert.equal(await page.locator("#room-leave-button").isHidden(), true, "the owner cannot leave");
+    // A failed archive is reported inside the dialog the button lives in. A
+    // page notice is painted under a modal's backdrop, so it used to look as
+    // though the click had done nothing at all.
+    await page.route("**/commands", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "synthetic" } }) })
+      : route.continue());
+    await page.locator("#room-archive-button").click();
+    await page.locator("#room-about-status").waitFor({ state: "visible" });
+    assert.match(await page.locator("#room-about-status").textContent(), /Couldn’t archive the room/);
+    assert.equal(await page.locator("#settings-dialog").evaluate(node => node.open), true, "the dialog stays where the reader is");
+    assert.equal(await page.locator("#room-archive-button").isDisabled(), false, "and the control is ready to try again");
+    assert.equal(f.store.room(created).state.room.archivedAt ?? null, null, "nothing was archived");
+    await page.unroute("**/commands");
     await page.locator("#room-archive-button").click();
     // The note lives in the sidebar, which is behind the Menu button on a
     // phone, so on mobile the archived state is one tap away rather than on
@@ -93,7 +107,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const sequence = f.store.room(created).sequence;
     await page.locator("#message-list").getByText("First note before archiving.").first().waitFor();
     // Switcher: the archived room is listed read only, never as a working "Open" button.
-    await page.locator("#choose-room").click();
+    await clickChrome(page, "#choose-room");
     const row = page.locator(`[data-account-room="${created}"]`);
     await row.waitFor();
     assert.equal(await row.getAttribute("data-room-archived"), "true");
@@ -115,7 +129,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 test("room lifecycle: a member leaves from About, the room leaves the switcher, and a conversation-only account cannot create rooms", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 1440, height: 1000 }), { page } = f;
   await f.login(f.store.accountForMember("commons", "guest").id);
-  await page.locator("#nav-rooms").click();
+  await clickChrome(page, "#nav-rooms");
   const row = page.locator('[data-account-room="commons"]');
   await row.waitFor(); await row.click();
   await page.locator("#main").waitFor({ state: "visible" });

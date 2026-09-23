@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys. Clipboard outcomes are controlled; no user text or
 // system clipboard is read/written and no live service is involved.
 import test from "node:test";
@@ -181,10 +182,10 @@ test("result copy: unavailable clipboard, closed-draft sign-out warning and relo
   await page.keyboard.press("Escape");
   let warnings = 0;
   page.once("dialog", dialog => { warnings++; assert.match(dialog.message(), /clear unsent drafts/); return dialog.dismiss(); });
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); assert.equal(warnings, 1);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); assert.equal(warnings, 1);
   await f.open(); assert.equal(await f.input.inputValue(), "Keep this temporary edit");
   await page.keyboard.press("Escape");
-  page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+  page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
   await f.login(); await f.open(); assert.equal((await f.input.inputValue()).includes("temporary edit"), false);
   await f.input.fill("Reload clears this edit"); await page.keyboard.press("Escape");
   await page.reload(); await page.locator("#main").waitFor({ state: "visible" }); await f.open();
