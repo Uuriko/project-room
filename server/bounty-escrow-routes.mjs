@@ -41,6 +41,15 @@ const shape = (fields, { required = [], optional = [] } = {}) => {
 
 const invalidInput = (reject, expected) => reject(422, "invalid_bounty_input", `Expected ${expected}.`);
 
+// Owner-only gate for the sybil resolver routes. Fails closed: no store
+// authority, no member, or any mismatch is "not the owner".
+export const isRoomOwner = (store, roomId, auth) => {
+  const memberId = auth?.member?.id;
+  if (typeof memberId !== "string" || !memberId || typeof store?.roomAuthority !== "function") return false;
+  const { ownerId } = store.roomAuthority(roomId);
+  return typeof ownerId === "string" && ownerId === memberId;
+};
+
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
@@ -140,10 +149,17 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const flags = runPure(reject, () => escrow.getSybilFlags(roomId, { status }));
     return json(res, 200, { roomId, flags });
   }
-  // Slice 10: arbiter resolution of a sybil flag — dismissed (honest
-  // coincidence) or confirmed. REVIEW-ONLY: records the verdict; never
-  // moves bounty state, balances, bonds, or reputation.
+  // Slice 10: resolution of a sybil flag — dismissed (honest coincidence)
+  // or confirmed. Never moves bounty state, balances or bonds, but since
+  // #800 a confirmed flag feeds the reputation projector (sybil_confirmed
+  // per member lane, which can mean probation). Resolver policy is
+  // OWNER-ONLY (project-room#266 decision 5801196661): any caller other than
+  // the room owner — agent lanes, guests, members with rooms:write, and the
+  // flagged lanes themselves — gets 403 before the body is read or anything
+  // is written. roomAuthority() is a fresh storage read, not a cache.
   if ((escrowRoute === "sybil-dismiss" || escrowRoute === "sybil-confirm") && req.method === "POST") {
+    if (!isRoomOwner(store, roomId, auth))
+      reject(403, "owner_required", "Only the room owner can confirm or dismiss a sybil flag.");
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
       invalidInput(reject, "{reason, idempotencyKey?}");

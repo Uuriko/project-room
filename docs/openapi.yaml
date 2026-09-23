@@ -2568,9 +2568,11 @@ paths:
       summary: Dismiss a sybil flag (slice 10)
       description: |
         Arbiter dismisses an open sybil flag as honest coincidence (same
-        template, same trivial task) with a recorded reason. REVIEW-ONLY:
-        dismissal records the verdict; it never moves bounty state,
-        balances, bonds, or reputation. API keys need `rooms:write`.
+        template, same trivial task) with a recorded reason. Dismissal
+        records the verdict; it never moves bounty state, balances, bonds,
+        or reputation. OWNER-ONLY: every caller except the room owner,
+        including the flagged lanes, gets 403 `owner_required`. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: flagId
@@ -2598,6 +2600,7 @@ paths:
                   roomId: { type: string }
                   flag: { $ref: '#/components/schemas/SybilFlag' }
         '401': { description: unauthenticated }
+        '403': { description: owner_required - caller is not the room owner }
         '404': { description: unknown sybil flag }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/confirm:
@@ -2606,10 +2609,11 @@ paths:
       description: |
         Arbiter confirms an open sybil flag — agreeing the cluster is
         correlated — with a recorded reason. REVIEW-ONLY: confirmation
-        records the verdict; follow-up enforcement (if any) is a separate
-        human decision. Nothing here auto-bans, auto-slashes, or moves
-        bounty state, balances, bonds, or reputation. API keys need
-        `rooms:write`.
+        records the verdict. It never auto-bans, auto-slashes, or moves
+        bounty state, balances or bonds; the reputation projector records
+        `sybil_confirmed` for each member lane. OWNER-ONLY: every caller
+        except the room owner, including the flagged lanes, gets 403
+        `owner_required`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: flagId
@@ -2637,6 +2641,7 @@ paths:
                   roomId: { type: string }
                   flag: { $ref: '#/components/schemas/SybilFlag' }
         '401': { description: unauthenticated }
+        '403': { description: owner_required - caller is not the room owner }
         '404': { description: unknown sybil flag }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/decline:

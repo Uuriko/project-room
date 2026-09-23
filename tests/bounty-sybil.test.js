@@ -399,3 +399,61 @@ test("HTTP: identical submissions flag a cluster; the queue lists and dismisses 
     `/api/rooms/${HTTPROOM}/bounties/sybil-flags/${flagId}/dismiss`, {}, keys.owner);
   assert.equal(noReason.status, 422);
 });
+
+// --- Owner-only resolver (project-room#266 decision 5801196661) ------------
+// Since #800 a confirmed flag feeds reputation, so confirm/dismiss accept
+// only the room owner. Everyone else — including the flagged cluster's own
+// lanes and a human member with no special role — gets 403 and the flag
+// stays untouched.
+
+test("HTTP: only the room owner can confirm or dismiss a sybil flag", async t => {
+  const { origin, keys } = await startServer(t);
+  const mkSubmitted = async memberKey => {
+    const created = await (await httpPost(origin, `/api/rooms/${HTTPROOM}/bounties`, bountyBody(), keys.owner)).json();
+    const bountyId = created.bounty.bountyId;
+    await httpPost(origin, `/api/rooms/${HTTPROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
+    await httpPost(origin, `/api/rooms/${HTTPROOM}/bounties/${bountyId}/claim`, {}, memberKey);
+    const submitted = await httpPost(origin, `/api/rooms/${HTTPROOM}/bounties/${bountyId}/submit`,
+      EVIDENCE_HTTP, memberKey);
+    assert.equal(submitted.status, 200);
+  };
+  const openFlags = async () => (await (await httpGet(
+    origin, `/api/rooms/${HTTPROOM}/bounties/sybil-flags?status=open`, keys.owner)).json()).flags;
+  const resolve = (flagId, verb, key, body = { reason: "attempt" }) =>
+    httpPost(origin, `/api/rooms/${HTTPROOM}/bounties/sybil-flags/${flagId}/${verb}`, body, key);
+
+  // producer + reviewer submit identical work -> one copy-paste flag naming both.
+  await mkSubmitted(keys.producer);
+  await mkSubmitted(keys.reviewer);
+  let flags = await openFlags();
+  assert.equal(flags.length, 1);
+  const flagId = flags[0].flagId;
+
+  // Non-owners: the flagged lanes themselves and an unflagged human guest.
+  for (const [who, key] of [["producer (flagged)", keys.producer], ["reviewer (flagged)", keys.reviewer], ["guest", keys.guest]]) {
+    for (const verb of ["dismiss", "confirm"]) {
+      const res = await resolve(flagId, verb, key);
+      assert.equal(res.status, 403, `${who} ${verb} must be 403`);
+      assert.equal((await res.json()).error.code, "owner_required", `${who} ${verb} code`);
+    }
+    // Gate runs before body validation and before the flag lookup.
+    assert.equal((await resolve(flagId, "dismiss", key, {})).status, 403, `${who} empty body still 403`);
+    assert.equal((await resolve("sybf_nope", "confirm", key)).status, 403, `${who} unknown flag still 403`);
+  }
+  // An idempotency key replayed by a non-owner never turns into a write.
+  const idemBody = { reason: "self-clear", idempotencyKey: "sybil-owner-gate-idem" };
+  assert.equal((await resolve(flagId, "dismiss", keys.producer, idemBody)).status, 403);
+  assert.equal((await resolve(flagId, "dismiss", keys.producer, idemBody)).status, 403);
+
+  flags = await openFlags();
+  assert.equal(flags.length, 1, "flag is still open after every non-owner attempt");
+  assert.equal(flags[0].flagId, flagId);
+
+  // The owner succeeds.
+  const confirmed = await resolve(flagId, "confirm", keys.owner, { reason: "correlated cluster" });
+  assert.equal(confirmed.status, 200);
+  const { flag } = await confirmed.json();
+  assert.equal(flag.status, "confirmed");
+  assert.equal(flag.resolutionReason, "correlated cluster");
+  assert.equal((await openFlags()).length, 0);
+});
