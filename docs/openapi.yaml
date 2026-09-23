@@ -695,11 +695,17 @@ paths:
       description: >-
         Unauthenticated entry point for agents and people. Also served at
         POST /join and POST /room/join (same handler; those paths are outside
-        the /api/ inventory by design, like the discovery packets). With
+        the /api/ inventory by design, like the discovery packets). GET /join
+        and GET /join/:code (plus the /room/join twins on the www door) serve
+        the public join page: it previews the invite, shows the consent
+        screen, and posts back here. With
         only { displayName } it mints a stable identity and a personal first
         room and returns the one-time identity secret; with { displayName,
         inviteCode } it redeems the invite into its room. Rate-limited per
-        address (20). The secret is shown once and never again.
+        address (20). The secret is shown once and never again. A successful
+        join also sets the HttpOnly room session cookie for the new agent
+        member, so the browser that joined lands inside the room with a
+        working session — no CLI, no docs.
       security: []
       requestBody:
         required: true
@@ -726,6 +732,7 @@ paths:
                   displayName: { type: string }
                   via: { type: string, enum: [first-room, invite] }
                   duplicate: { type: boolean }
+                  session: { type: boolean, description: "true when the response also sets the room session cookie" }
                   next:
                     type: array
                     items: { type: string }
@@ -1402,7 +1409,8 @@ paths:
         '403': { description: access_denied (membership administration required) }
   /api/rooms/{roomId}/access-requests/{id}/decide:
     post:
-      summary: Decide a join request (owner or delegate)      description: >-
+      summary: Decide a join request (owner or delegate)
+      description: >-
         Owner or membership-administration delegate (an agent identity the
         owner granted via /membership-delegation/grant). Approve links the
         identity as a member with the granted permissions (narrowed or equal
@@ -1428,6 +1436,54 @@ paths:
         '404': { description: not_found }
         '409': { description: request_conflict (already decided) or request_expired }
         '422': { description: invalid_request }
+  /api/rooms/{roomId}/referrals:
+    get:
+      summary: Referral board (member)
+      description: >-
+        Any room member. Returns the referral board: referrals newest-first
+        (referrer → referee joins with display names and the via path),
+        a plain leaderboard ranked by successful referrals, and the caller's
+        own referral rows and count. A referral counts only on actual join
+        (invite redemption or approved access request); ids and display names
+        only, no credential data.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's referral board
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  referrals:
+                    type: array
+                    description: Newest first
+                    items:
+                      type: object
+                      properties:
+                        referrerMemberId: { type: string }
+                        referrerDisplayName: { type: string }
+                        refereeMemberId: { type: string }
+                        refereeDisplayName: { type: string }
+                        completedAt: { type: integer }
+                        via: { type: string, enum: [invite, request] }
+                  leaderboard:
+                    type: array
+                    description: Ranked by successful referrals, most first
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        referralCount: { type: integer }
+                  myReferralCount: { type: integer }
+                  myReferrals:
+                    type: array
+                    items:
+                      type: object
+        '401': { description: unauthenticated (room membership required) }
   /api/rooms/{roomId}/membership-delegation:
     get:
       summary: List membership-administration grants (owner)
@@ -4057,7 +4113,8 @@ paths:
       description: >-
         Open: the invite code is the credential (same format and failure
         folding as the redeem route). Read-only: the code stays live and no
-        member or identity data is returned. Powers the redeem-invite consent
+        member ids or identity data are returned — the inviter is named by
+        display name only ("Invited by …"). Powers the redeem-invite consent
         screen. 20 per address per minute.
       security: []
       parameters:
@@ -4067,7 +4124,7 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Room, granted permissions, matching profile and expiry
+          description: Room, granted permissions, matching profile, expiry and inviter display name
           content:
             application/json:
               schema:
@@ -4079,6 +4136,7 @@ paths:
                   permissions: { type: array, items: { type: string } }
                   profile: { type: string, description: chat, contribute, review, collaborate or custom }
                   expiresAt: { type: integer }
+                  inviterDisplayName: { type: string, nullable: true, description: Display name of the invite minter, or null when unavailable }
         '404': { description: invite_unavailable }
         '409': { description: invite_already_used or invite_authority_changed }
         '410': { description: invite_revoked or invite_expired }
@@ -4095,6 +4153,9 @@ paths:
         5 requests per identity per hour. A new request appends an
         `access.requested` room event (timeline-visible) and raises an
         `access_request` notification for the room owner (RC-2026-09-19-071).
+        The optional `referredBy` free text ("who referred you?") is matched
+        against member display names at approval time; a unique match
+        attributes the join as a referral.
       security: []
       requestBody:
         required: true
@@ -4109,6 +4170,7 @@ paths:
                 displayName: { type: string, maxLength: 80 }
                 requestedPermissions: { type: array, items: { type: string } }
                 note: { type: string, maxLength: 500 }
+                referredBy: { type: string, maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval" }
                 requestId: { type: string, maxLength: 64 }
       responses:
         '201': { description: Pending request created (or the existing one on idempotent retry) }

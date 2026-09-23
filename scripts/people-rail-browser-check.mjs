@@ -95,13 +95,13 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#agent-invite-mint").click();
   const code = page.locator("#agent-invite-code");
   await code.waitFor({ state: "visible" });
-  assert.match(await code.inputValue(), /#agent-invite\/RM-/);
+  assert.match(await code.inputValue(), /\/join\/RM-/);
   assert.match(await page.locator("#agent-invite-share").textContent(), /agent-inbox.mjs join/);
   await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { configurable: true,
     value: { writeText: async text => { globalThis.copiedAgentInvite = text; } } }); });
   await page.locator("#agent-invite-copy").click();
-  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /#agent-invite\/RM-/);
-  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /--accept/);
+  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /\/join\/RM-/);
+  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /^https?:\/\/[^/]+\/join\/RM-/);
   await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection.png" });
   await page.locator("#agent-invite-close").click();
   await page.evaluate(() => { location.hash = "#room/commons"; });
