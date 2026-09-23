@@ -209,8 +209,14 @@ export class GuestInvites {
   guestTierOf(memberId) {
     // Per-request scope lookup for the RoomStore#command gate. Legacy ga1.
     // members (owner-minted before GX invites) have no row and default to
-    // the most restrictive tier: observer.
-    return this.db.prepare("SELECT tier FROM guest_members WHERE member_id=?").get(memberId)?.tier ?? null;
+    // the most restrictive tier: observer. Deactivated members resolve to
+    // null — authenticate() already refuses their tokens, and this keeps
+    // the predicate honest for audits.
+    const row = this.db.prepare("SELECT room_id,tier FROM guest_members WHERE member_id=?").get(memberId);
+    if (!row) return null;
+    const member = this.store.room(row.room_id).state.members[memberId];
+    if (!member || member.active === false) return null;
+    return row.tier;
   }
 
   mint(token, roomId, details, binding) {
@@ -316,23 +322,23 @@ export class GuestInvites {
       const roomId = row.room_id;
       const room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
-      const name = this.checkedGuestName(room.state, card.name);
-      // Deactivation of already-expired guests rides the existing owner-mint
-      // sweep (GuestAgentLinks#sweepExpired covers every guest-agent-*
-      // member); redeem issues nothing with the owner's live token.
+      // One seat per identity per room: faces are cheap, seats are not.
+      // The seat check comes before the name check — a returning guest
+      // re-redeeming with its own card name must reuse its seat, not
+      // collide with itself.
       const seat = this.seatOf(roomId, identity.identityId);
       const existingMember = seat && room.state.members[seat.member_id];
       let memberId;
       let tier = row.tier;
       let duplicate = false;
       if (existingMember && existingMember.active !== false && isGuestAgentMemberId(existingMember.id)) {
-        // One seat per identity per room: the same face reuses its member.
-        // A new invite upgrades nothing by itself; tier changes stay an
-        // explicit owner decision.
+        // The same face reuses its member. A new invite upgrades nothing
+        // by itself; tier changes stay an explicit owner decision.
         memberId = existingMember.id;
         tier = seat.tier;
         duplicate = true;
       } else {
+        const name = this.checkedGuestName(room.state, card.name);
         if (this.activeGuestCount(roomId) >= GUEST_INVITE_MAX_ACTIVE_PER_ROOM) {
           fail(429, "rate_limited", "This room is at its concurrent external-guest limit; ask the owner to disconnect a guest");
         }
@@ -415,9 +421,26 @@ export class GuestInvites {
       const now = this.store.now();
       return this.db.prepare("SELECT * FROM guest_invites WHERE room_id=? ORDER BY created_at DESC").all(roomId)
         .map(row => {
-          const status = row.status === "active" && row.redeem_by <= now ? "expired" : row.status;
-          const { code_hash, ...rest } = row; // hashes never leave the server
-          return { ...rest, status };
+          // Public shape is camelCase; code hashes and the minter's account
+          // id never leave the server.
+          const { code_hash, minted_by_account_id, ...rest } = row;
+          void code_hash; void minted_by_account_id;
+          return {
+            inviteId: row.id,
+            tier: row.tier,
+            credentialTtlMs: row.credential_ttl_ms,
+            guestLabel: row.guest_label,
+            mintedByMemberId: row.minted_by_member_id,
+            issueRequestId: row.issue_request_id,
+            createdAt: row.created_at,
+            redeemBy: row.redeem_by,
+            status: row.status === "active" && row.redeem_by <= now ? "expired" : row.status,
+            redeemedAt: row.redeemed_at,
+            redeemedByIdentityId: row.redeemed_by_identity_id,
+            redeemedMemberId: row.redeemed_member_id,
+            revokedAt: row.revoked_at,
+            revokedByMemberId: row.revoked_by_member_id,
+          };
         });
     });
   }
