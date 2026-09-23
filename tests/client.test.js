@@ -86,6 +86,31 @@ test("a browser session without canonical account ownership fails closed", async
   assert.equal(ended, 1);
   assert.equal(client.session, null);
 });
+test("a room-cookie session without an account owns its own snapshot (join-flow restore)", async () => {
+  // Regression: #720's ownsResponse required session.account, so refresh()
+  // endAccess()ed every join-flow / access-key browser session and
+  // restore() returned null — stranding fresh joiners at the account gate
+  // despite a valid __Host-room_session cookie.
+  const binding = "session-agent-1";
+  const roomSession = { authMode: "room", account: null, member: { id: "agent-1" }, roomId: "commons", csrf: null, sessionBinding: binding };
+  const roomSnapshot = { sequence: 8, roomId: "commons", state: {}, cursor: 0, viewerId: "agent-1", viewerAccountId: null, viewerAuthEpoch: null, viewerSessionBinding: binding };
+  const client = new RoomClient({ fetcher: async () => response(roomSnapshot) });
+  assert.equal(client.ownsResponse(roomSnapshot, roomSession), true);
+  let ended = false, shown = false;
+  const live = new RoomClient({ fetcher: async () => response(roomSnapshot), onAccessEnded: () => ended = true, onSnapshot: () => shown = true });
+  live.session = roomSession;
+  await live.refresh();
+  assert.equal(ended, false, "a valid room session must survive refresh");
+  assert.equal(shown, true);
+  assert.equal(live.session, roomSession);
+  for (const wrong of [
+    { ...roomSnapshot, roomId: "elsewhere" },
+    { ...roomSnapshot, viewerId: "intruder" },
+    { ...roomSnapshot, viewerSessionBinding: "replacement-session" },
+  ]) {
+    assert.equal(client.ownsResponse(wrong, roomSession), false, "mismatched room/viewer/binding still rejected");
+  }
+});
 test("an obsolete snapshot failure is suppressed before a new session's error handler", async () => {
   let reject;
   const client = new RoomClient({ fetcher: () => new Promise((resolve, fail) => reject = fail) });

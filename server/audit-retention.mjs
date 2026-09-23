@@ -4,8 +4,9 @@
 // routine events age out first. dryRun mode reports what would happen
 // without deciding anything destructive. The runner returns a decision per
 // event plus totals; it performs no store writes — the caller executes the
-// decisions. Pure, dependency-free, deterministic; frozen outputs. Retention
-// scheduler wiring is a later slice.
+// decisions. Pure, dependency-free, deterministic; frozen outputs. The
+// scheduled caller is server/retention-run.mjs. It records the plan and
+// does not delete.
 const SEVERITY_KEEP_DAYS = Object.freeze({
   critical: 2555, // ~7 years: auth, keys, payments, admin actions
   high: 730,      // 2 years: approvals, membership changes

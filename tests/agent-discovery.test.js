@@ -11,7 +11,7 @@ import {
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
-  ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
+  ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
 
@@ -32,7 +32,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.base_url, ROOM_ORIGIN);
   assert.equal(card.door, ROOM_DOOR);
   assert.equal(card.public_doors.www, ROOM_PUBLIC_WWW);
-  assert.equal(card.public_doors.lobby, ROOM_PUBLIC_LOBBY);
+  assert.equal("lobby" in card.public_doors, false); // dead door, never advertised
   assert.equal(card.product.kind, "ledger");
   assert.equal(card.product.not, "run factory");
   assert.equal(card.product.compute, COMPUTE_DOOR);
@@ -70,7 +70,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(DISCOVERY_PATHS.includes("/mcp"), false);
   assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
   assert.match(text, /Humans: open this invite link/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
   assert.match(text, /#room\/\{roomId\} is not an invite/);
