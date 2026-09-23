@@ -588,6 +588,74 @@ export class RoomClient {
       throw error;
     }
   }
+  async roomRead(path) {
+    // Attention: guarded GET for room-scoped reads (activity feed, read
+    // horizons, saved messages). Session and ownership guards mirror the
+    // notifications/needs-attention readers above.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path(path));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async roomWrite(path, data, method = "POST") {
+    // Attention: guarded write for room-scoped attention endpoints.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path(path), { method, data });
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  activity({ before = null, limit = 50, type = null } = {}) {
+    const query = new URLSearchParams();
+    if (before !== null && before !== undefined) query.set("before", String(before));
+    if (limit !== 50) query.set("limit", String(limit));
+    if (type) query.set("type", type);
+    const suffix = query.size ? `/activity?${query}` : "/activity";
+    return this.roomRead(suffix);
+  }
+  activityUnreadCount() {
+    return this.roomRead("/activity-unread-count");
+  }
+  markActivityRead(ids) {
+    return this.roomWrite("/activity-read", { ids });
+  }
+  markActivityReadAll(type = null) {
+    return this.roomWrite("/activity-read-all", type ? { type } : {});
+  }
+  readHorizon(threadId = "") {
+    return this.roomRead(threadId ? `/read-horizon?threadId=${encodeURIComponent(threadId)}` : "/read-horizon");
+  }
+  setReadHorizon(threadId, lastReadMessageId) {
+    return this.roomWrite("/read-horizon", { threadId: threadId ?? "", lastReadMessageId });
+  }
+  savedList() {
+    return this.roomRead("/saved");
+  }
+  setSaved(messageId, saved) {
+    return this.roomWrite("/saved", { messageId, saved });
+  }
+  unsaveMessage(messageId) {
+    return this.roomWrite(`/saved/${encodeURIComponent(messageId)}`, {}, "DELETE");
+  }
   async charter(revision) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }

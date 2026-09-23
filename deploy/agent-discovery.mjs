@@ -118,6 +118,7 @@ export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
 
 // Kits / tools catalog — a distinct packet, not the llms short index.
 // Agents guess /room/kit, /room/kits, /room/apps, /room/tools on www.
+// On the service origin they also guess bare /kits (same bytes as /kits.txt).
 export const KITS_CATALOG_PATH = "/kits.txt";
 // Machine-readable skills catalog: the HTTP twin of the A2A card's skills
 // array, simplified for plain fetchers (id, name, description, tags, via).
@@ -733,6 +734,8 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),
   ...Object.fromEntries(withSlash("/agent-card.json").map(alias => [alias, AGENT_CARD_A2A_PATH])),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).
+  // Bare /kits is the service-origin guess; www already has /room/kits.
+  ...Object.fromEntries(withSlash("/kits").map(alias => [alias, KITS_CATALOG_PATH])),
   ...Object.fromEntries(KITS_CATALOG_FILES.flatMap(name => [
     [`/${name}`, KITS_CATALOG_PATH],
     [`/room/${name}`, KITS_CATALOG_PATH]
