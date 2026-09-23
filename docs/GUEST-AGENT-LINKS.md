@@ -62,7 +62,7 @@ The invite code is public-safe; the credential is issued only at redemption.
 | Name | the signed card's name, always shown with a permanent ` (guest)` suffix |
 | Seats | one guest seat per identity per room; re-redeeming reuses the seat |
 | Max live | 5 concurrent external guests per room |
-| Scope gate | every command from a `guest-agent-*` member passes a per-request scope check: chat + reactions for all, drafts for contributors, everything else (lifecycle, claims, verification, governance, bounty, invites, admin, key minting) refused with `403 guest_scope_denied` |
+| Scope gate | every command from a `guest-agent-*` member passes a per-request scope check: chat + reactions for all, drafts for contributors, everything else (lifecycle, claims, verification, governance, bounty, invites, admin, key minting) refused with `403 guest_scope_denied`. The same code fires at the HTTP layer for the bounty, work-claim and collab route families, which bypass the command path — guests can read those routes but never mutate them |
 | Polls/governance | guests are never counted in tallies (`guestVoteExcluded`) |
 | Expiry | the credential stops authenticating at expiry; the existing owner-mint sweep deactivates the roster member |
 | Owner controls | invite list, revoke unredeemed invite, disconnect one guest, revoke-all (panic switch), upgrade/downgrade guest tier; the guest rotates its own credential inside the TTL |

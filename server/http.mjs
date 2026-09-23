@@ -25,7 +25,7 @@ import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
-import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX } from "./guest-agent-links.mjs";
+import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -2484,6 +2484,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const dmEventVisible = event =>
         event?.type !== "message.posted" || !event?.data?.toMemberId
         || event.actorId === viewerId || event.data.toMemberId === viewerId;
+      // RC-2026-09-23-101: guest-agent scope gate, HTTP-layer half. The
+      // store.command() gate (RC-2026-09-23-100) covers the event-sourced
+      // command path, but the bounty-escrow, work-claim and inbox-collab
+      // HTTP families bypass store.command() entirely. A redeemed GX guest
+      // credential authenticates as a room-scope bearer, so without this
+      // check a guest could post/fund/claim bounties, move credits, acquire
+      // work claims, and hold collab draft locks. Guests hold guest:* scopes
+      // only (read + chat; chat posts and reactions ride store.command(),
+      // which keeps its own finer gate), so every non-read call on these
+      // three families is refused outright. Reads stay open — guests keep
+      // their approved history access. Same code and copy as the store
+      // gate, so clients see one stable denial either way.
+      if (auth.member && isGuestAgentMemberId(auth.member.id)
+        && (collabMatch || workClaimMatch || bountyMatch || creditsMatch)
+        && !["GET", "HEAD"].includes(req.method)) {
+        reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+      }
       // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
