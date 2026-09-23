@@ -219,7 +219,10 @@ paths:
           Owner-only. `general` cannot be archived. Archived channels reject
           new messages (409 channel_archived).
         Messages carry `channelId`; omitted defaults to `general`. Replies
-        are pinned to the thread root's channel. Events: `channel.created`,
+        are pinned to the thread root's channel. A public thread reply may set
+        `alsoSendToChannel: true` to also land as a top-level message in the
+        thread's channel (same event; ignored for DMs and work proposals).
+        Events: `channel.created`,
         `channel.renamed`, `channel.archived`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6949,6 +6952,42 @@ paths:
       responses:
         '200': { description: "{ roomId, timeoutMs }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/thread-mutes:
+    get:
+      summary: List the caller's muted threads
+      description: >-
+        Member-readable list of the caller's muted thread-root ids. Muting is
+        private to the muter: a muted thread's activity is skipped in the
+        member's notification/unread feed (read-time filter, so unmuting
+        restores the items on the next read). threadId may be any message in
+        the thread; it resolves to the thread root.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, threadIds: [thread-root ids] } plus the viewer ownership envelope" }
+    post:
+      summary: Mute or unmute a thread
+      description: >-
+        Body: `{ threadId, muted }`. `threadId` may be any message in the
+        thread and resolves to the thread root; 404 message_not_found when it
+        names no message in this room. Idempotent both ways; 422
+        invalid_thread_mute on a malformed body.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, muted]
+              properties:
+                threadId: { type: string }
+                muted: { type: boolean }
+      responses:
+        '200': { description: "{ roomId, memberId, threadId (resolved root), muted } plus the viewer ownership envelope" }
+        '404': { description: message_not_found }
+        '422': { description: invalid_thread_mute }
   /api/rooms/{roomId}/guest-agent-links:
     post:
       summary: Mint a guest invite

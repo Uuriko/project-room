@@ -188,6 +188,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // code path to them, and the module verifies its own schema on open.
   "web_fetch_cache",
   "web_fetch_log",
+  // thread_mutes (per-thread mutes): one row per (room, member, thread
+  // root). Purely additive and intentionally NOT fenced — older writers have
+  // no code path to it, and muting is a private read-time filter, never a
+  // room-visible state change.
+  "thread_mutes",
   // referrals (referral attribution): one row per joined referee, the
   // queryable source of truth behind the referral board. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,

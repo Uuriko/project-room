@@ -513,6 +513,47 @@ test("open-room failure after a join recovers the credential and navigates", asy
 });
 
 
+for (const code of ["csrf_denied", "session_binding_changed", "stale_session_revision", "account_session_required"]) {
+  test(`changed guest session (${code}) requires review and explicit identity confirmation`, async () => {
+    const dom = guestJoinDom(); let joins = 0, restores = 0, opened = 0;
+    const accountClient = {
+      session: {},
+      async prepareShareLink() { return { session: this.session, preview: previewFor() }; },
+      async restore() { restores++; return this.session = { authenticated: true, account: { id: "other-tab-identity" } }; },
+      async joinShareLink() {
+        if (++joins === 1) throw Object.assign(new Error("Session confirmation required; sign in again"), { code });
+        return { roomId: "commons", session: { member: { id: "same-guest" } } };
+      }
+    };
+    dom.install();
+    try {
+      const ui = installShareLinks({ client: { generation: 0 }, accountClient,
+        getState: () => null, getSession: () => null, async openRoom() { opened++; } });
+      await ui.open({ token: "t".repeat(43) });
+      const submit = () => dom.node("#join-link-form").handlers.submit({ preventDefault() {} });
+      await submit();
+      assert.equal(restores, 0, "no silent session replacement");
+      assert.equal(dom.node("#join-link-form").hidden, true);
+      assert.equal(dom.focused(), "#join-link-retry");
+      assert.match(dom.node("#join-link-status").textContent, /another tab/);
+      await submit();
+      assert.equal(joins, 1, "stale form cannot bypass review");
+      await dom.node("#join-link-retry").handlers.click();
+      assert.equal(restores, 1);
+      assert.equal(joins, 1, "review never redeems an invitation");
+      assert.equal(opened, 0);
+      assert.match(dom.node("#join-link-status").textContent, /other-tab-identity/);
+      accountClient.session = { ...accountClient.session };
+      await submit();
+      assert.equal(joins, 1, "a second identity change requires another review");
+      await dom.node("#join-link-retry").handlers.click();
+      await submit();
+      assert.equal(joins, 2);
+      assert.equal(opened, 1);
+    } finally { dom.uninstall(); }
+  });
+}
+
 test("lost guest cookie keeps the original join request and shows recovery instead of blind retry", async () => {
   const dom = guestJoinDom(), calls = [];
   const accountClient = {
