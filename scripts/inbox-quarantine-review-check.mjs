@@ -64,11 +64,21 @@ const card = (page, n) => page.locator(".inbox-quarantine-item").nth(n);
 
 // refresh() swaps the card list only after the quarantine fetch lands, so a
 // waitFor on the old card is a race: it resolves on the stale card while the
-// new filter's fetch is still in flight. The status line flips Loading… -> ""
-// around the swap, so wait for the full transition at every filter switch.
-async function waitForRefresh(page) {
-  await page.waitForFunction(() => document.querySelector("#inbox-quarantine-status-line")?.textContent === "Loading…");
-  await page.waitForFunction(() => document.querySelector("#inbox-quarantine-status-line")?.textContent === "");
+// new filter's fetch is still in flight. Waiting on the transient "Loading…"
+// status text is the same race in reverse — on a fast loopback the fetch can
+// land before Playwright's first poll, and the wait then burns the full
+// 10s timeout (seen once on CI). Wait on the network response instead: every
+// filter switch fires GET /api/inbox/quarantine?status=…, which always
+// happens. The wait must be armed before the switch that triggers it.
+function waitForQuarantineList(page, status) {
+  return page.waitForResponse(
+    response => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/quarantine")
+        && url.searchParams.get("status") === status;
+    },
+    { timeout: 10000 });
 }
 
 test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dismisses", { timeout: 60000 }, async t => {
@@ -115,8 +125,9 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
     "focus moves to the card that took the decided one's place");
   await card(page, 0).getByRole("textbox").fill("");
   assert.equal(await page.locator("#inbox-quarantine-count").textContent(), "1 held");
+  const released = waitForQuarantineList(page, "released");
   await page.locator("#inbox-quarantine-status").selectOption("released");
-  await waitForRefresh(page);
+  await released;
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
   assert.ok((await card(page, 0).textContent()).includes("Score 80/100"));
@@ -130,8 +141,9 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
 
   // Back to held: Dismiss arms on the first click (nothing changes), then
   // dismisses on the second click.
+  const held = waitForQuarantineList(page, "held");
   await page.locator("#inbox-quarantine-status").selectOption("held");
-  await waitForRefresh(page);
+  await held;
   await card(page, 0).waitFor();
   const dismiss = card(page, 0).getByRole("button", { name: "Dismiss", exact: true });
   await dismiss.click();
@@ -143,8 +155,9 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   await card(page, 0).getByRole("button", { name: /Dismiss\?/ }).click();
   await page.waitForFunction(() => document.querySelectorAll(".inbox-quarantine-item").length === 0);
   assert.equal(await page.locator("#inbox-quarantine-count").textContent(), "0 held");
+  const dismissed = waitForQuarantineList(page, "dismissed");
   await page.locator("#inbox-quarantine-status").selectOption("dismissed");
-  await waitForRefresh(page);
+  await dismissed;
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
 });

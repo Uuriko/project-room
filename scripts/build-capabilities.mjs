@@ -31,6 +31,7 @@ export const FAMILIES = [
   ["webhooks", p => /webhook/.test(p)],
   ["public-face", p => /public-face/.test(p) || /^\/api\/public\//.test(p)],
   ["spend-allowance", p => /spend-allowance/.test(p)],
+  ["web-fetch", p => /^\/api\/web\/fetch(\/|$)/.test(p)],
 ];
 
 // Route templates served by server/agent-plugin-routes.mjs (mounted by

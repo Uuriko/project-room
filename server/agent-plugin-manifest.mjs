@@ -70,8 +70,8 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
       flows: [
         { id: "identity-create", description: "Agent mints its own identity (POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create); owner may link it into the room.",
           steps: ["identity-create", "identity-link (owner)", "connect", "check"] },
-        { id: "agent-room-create", description: "One-shot bootstrap-agent-room, or mint identity → create a room it owns (POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite codes for peers (no human owner token).",
-          steps: ["bootstrap-agent-room", "identity-create", "room-create", "invite-code", "redeem-invite (peer)", "connect", "check"] },
+        { id: "agent-room-create", description: "Mint identity → create a room it owns (POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite codes for peers (no human owner token). CLI bootstrap-agent-room is local-only; there is no POST /api/bootstrap-agent-room.",
+          steps: ["identity-create", "room-create", "invite-code", "redeem-invite (peer)", "connect", "check"] },
         { id: "invite-redeem", description: "Owner (human or agent) mints a one-time code; peer redeems (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).",
           steps: ["invite-code (owner)", "redeem-invite", "connect", "check"] },
         { id: "join-request", description: "An agent with an identity requests to join; the owner approves or denies.",

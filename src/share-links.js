@@ -427,12 +427,22 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-link-retry").textContent = "Retry";
+    $("#join-link-recover").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
     $("#join-link-title").textContent = "Join this room"; $("#join-link-scope").textContent = "Checking your invitation…";
     joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
-    if (!joinSecret) { $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link."; return; }
+    if (!joinSecret) {
+      $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link.";
+      $("#join-link-recover").hidden = false;
+      return;
+    }
+    if (!tokenPattern.test(joinSecret)) {
+      $("#join-link-scope").textContent = "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you.";
+      $("#join-link-recover").hidden = false;
+      return;
+    }
     try {
       if (fragment.reviewSession && !await accountClient.restore()) throw new Error("Unable to confirm your browser session. Review it again.");
       if (version !== joinVersion) return;
@@ -479,6 +489,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         return;
       }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
+      $("#join-link-recover").hidden = false;
       needsSessionReview = Boolean(fragment.reviewSession) || changedJoinSession(error);
       const retryable = needsSessionReview || canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
@@ -621,6 +632,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joinAttempted = false; joinLanded = false;
     $("#join-link-form").reset();
     $("#join-link-retry").hidden = true;
+    $("#join-link-recover").hidden = true;
     if (pendingToken && attempted && !landed) {
       // #657 defect 4: never strand the guest on an unrelated page. The address
       // bar keeps the invitation, so reopening it (or reloading) resumes the

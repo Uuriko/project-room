@@ -225,7 +225,7 @@ async function httpFixture(t) {
 }
 
 test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, invite mint/redeem", async t => {
-  const { store, post } = await httpFixture(t);
+  const { store, post, origin } = await httpFixture(t);
   const minted = await post("/room/api/agent-identities", { data: { displayName: "Edge Grok" } });
   assert.equal(minted.status, 201, JSON.stringify(minted.body));
   assert.match(minted.body.identityId, /^ai_/);
@@ -258,6 +258,22 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   const missing = await post("/room/api/not-a-route", { data: { displayName: "Nope" } });
   assert.equal(missing.status, 404);
   assert.equal(missing.body?.error?.code, "not_found");
+  for (const path of [
+    "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
+    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem"
+  ]) {
+    const got = await fetch(`${origin}${path}`);
+    assert.equal(got.status, 405, path);
+    assert.equal(got.headers.get("allow"), "POST", path);
+    assert.equal((await got.json()).error.code, "method_not_allowed", path);
+  }
+  const listed = await fetch(`${origin}/api/agent-rooms`);
+  assert.equal(listed.status, 401, "GET /api/agent-rooms is an authenticated list, not POST-only");
+  const listedDoor = await fetch(`${origin}/room/api/agent-rooms`);
+  assert.equal(listedDoor.status, 401);
+  const other = await fetch(`${origin}/api/agent-rooms`, { method: "DELETE" });
+  assert.equal(other.status, 405);
+  assert.equal(other.headers.get("allow"), "GET, POST");
 });
 
 test("client prefixes /room/api on www.getdasha.com and leaves workers.dev canonical", async () => {
