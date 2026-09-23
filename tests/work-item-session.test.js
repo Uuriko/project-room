@@ -12,7 +12,7 @@ import { seedEvents } from "../src/seed.js";
 import { validAgentNext } from "../src/agent-error.mjs";
 import {
   SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType,
-  listWorkItemSessions, workItemSessionContract, applySessionFields
+  listWorkItemSessions, workItemSessionContract, applySessionFields, sessionStripHtml
 } from "../src/work-item-session.js";
 
 const PEOPLE = /@gmail|John |Potter |acct-|accountId|people-data/i;
@@ -79,6 +79,17 @@ test("legacy work items read as queued; started/status/stop/stopped are exact tr
   assert.equal(sessionCommandType({ status: "queued" }, "set_status", "processing"), SESSION_EVENT_TYPES.STARTED);
   assert.equal(sessionCommandType({ status: "active" }, "request_stop"), SESSION_EVENT_TYPES.STOP_REQUESTED);
   assert.equal(sessionCommandType({ status: "active" }, "set_status", "failed"), SESSION_EVENT_TYPES.STOPPED);
+});
+
+test("session strip visualizes sessionCard status without Slack chrome or people-data", () => {
+  const item = { id: "strip", title: "Draft", state: "accepted", revision: 1, accountableMemberId: "agent", status: "active", stop_requested_at: "2026-09-11T08:00:00.000Z" };
+  const html = sessionStripHtml(item);
+  assert.match(html, /data-session-status="active"/);
+  assert.match(html, />active</);
+  assert.match(html, /stop requested/);
+  assert.doesNotMatch(html, PEOPLE);
+  assert.doesNotMatch(html, /slack|bot pane|marketplace/i);
+  assert.equal(sessionStripHtml({ id: "q", title: "Q" }).includes("queued"), true);
   assert.deepEqual(listWorkItemSessions({ a: { id: "a", title: "A", state: "proposed", revision: 0, accountableMemberId: "x", status: "active" },
     b: { id: "b", title: "B", state: "superseded", revision: 1, accountableMemberId: "x", status: "active" } }, "active").map(card => card.workItemId), ["a"]);
 });

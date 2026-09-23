@@ -44,6 +44,7 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "server/guest-agent-links.mjs");
+optional.push("client/mcp-public.mjs", "server/open-contract.mjs", "src/agent-join-notice.js");
 optional.push("src/work-item-session.js");
 optional.push("scripts/release-evidence.mjs");
 const allowed = new Set([...required, ...optional]);

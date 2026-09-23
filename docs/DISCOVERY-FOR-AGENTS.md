@@ -14,8 +14,8 @@ Fetch these first:
 
 | Where | Path |
 | --- | --- |
-| Room Worker | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json` |
-| Room Worker (prefix-preserving proxy) | `/room/llms.txt`, `/room/llms-full.txt`, `/room/.well-known/agent.json` |
+| Room Worker | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json`, `/.well-known/agent-card.json` (A2A v1.0; same bytes as agent.json) |
+| Room Worker (prefix-preserving proxy) | `/room/llms.txt`, `/room/llms-full.txt`, `/room/.well-known/agent.json`, `/room/.well-known/agent-card.json` |
 | Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json` |
 
 Same bytes. No account required to read them. Health is `GET /api/health`

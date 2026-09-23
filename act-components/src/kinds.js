@@ -1,5 +1,5 @@
 /** Typed Act-component kinds. Chat reactions are never in this set. */
-export const COMPONENT_KINDS = Object.freeze(["approve", "reject", "open_compute", "ack"]);
+export const COMPONENT_KINDS = Object.freeze(["approve", "reject", "open_compute", "open_matching_desk", "ack"]);
 
 /** Kinds that record an Act. Open-in-Compute is a deep-link only. */
 export const RECORDING_KINDS = Object.freeze(["approve", "reject", "ack"]);
@@ -8,6 +8,7 @@ export const RECORDING_KINDS = Object.freeze(["approve", "reject", "ack"]);
 export const PROPOSED_CLASS_TYPES = Object.freeze(["work.proposed"]);
 
 export const COMPUTE_ORIGIN = "https://getdasha.com/compute";
+export const MATCHING_DESK_ORIGIN = "https://www.trydemigod.com";
 
 export const EVENT_TYPES = Object.freeze({
   MESSAGE_POSTED: "message.posted",
@@ -28,5 +29,6 @@ export const LABELS = Object.freeze({
   approve: "Approve",
   reject: "Reject",
   open_compute: "Open in Compute",
+  open_matching_desk: "Open matching desk",
   ack: "Acknowledge"
 });

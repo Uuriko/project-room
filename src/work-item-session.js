@@ -73,6 +73,13 @@ export function sessionCard(item) {
   };
 }
 
+export function sessionStripHtml(item) {
+  const card = sessionCard(item);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+  const stop = card.stop_requested_at ? " · stop requested" : "";
+  return `<p class="session-strip" data-session-status="${esc(card.status)}"><span class="session-status">${esc(card.status)}</span>${stop}</p>`;
+}
+
 export function listWorkItemSessions(workItems, status = null) {
   if (status != null && !isSessionStatus(status)) throw new RangeError("Choose one session status");
   return Object.values(workItems ?? {})

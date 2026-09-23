@@ -41,9 +41,11 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
+  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A v1.0 well-known; same bytes as agent.json" }),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
-  Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" })
+  Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A v1.0 alias; same bytes" })
 ]);
 
 export function agentCard() {
@@ -223,7 +225,8 @@ export function agentCardJson() {
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
-  "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
+  "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  "/.well-known/agent-card.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
 });
 
 const ALIASES = Object.freeze({
@@ -233,9 +236,11 @@ const ALIASES = Object.freeze({
   "/room/llms.txt": "/llms.txt",
   "/room/llms-full.txt": "/llms-full.txt",
   "/room/.well-known/agent.json": "/.well-known/agent.json",
+  "/room/.well-known/agent-card.json": "/.well-known/agent-card.json",
   "/project-room/llms.txt": "/llms.txt",
   "/project-room/llms-full.txt": "/llms-full.txt",
-  "/project-room/.well-known/agent.json": "/.well-known/agent.json"
+  "/project-room/.well-known/agent.json": "/.well-known/agent.json",
+  "/project-room/.well-known/agent-card.json": "/.well-known/agent-card.json"
 });
 
 export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Object.keys(ALIASES)]);

@@ -36,7 +36,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
     "/api/health", "/llms.txt", "/llms-full.txt", "/.well-known/agent.json",
-    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json"
+    "/.well-known/agent-card.json",
+    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    "/room/.well-known/agent-card.json"
   ]);
   assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
@@ -87,6 +89,8 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
   assert.equal(discoveryDoc("/room/llms.txt").body, discoveryDoc("/llms.txt").body);
   assert.equal(discoveryDoc("/room/llms-full.txt").body, discoveryDoc("/llms-full.txt").body);
   assert.equal(discoveryDoc("/room/.well-known/agent.json").body, discoveryDoc("/.well-known/agent.json").body);
+  assert.equal(discoveryDoc("/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
+  assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
 });
 
 test("door serves the same discovery bytes and points at origin", async () => {
@@ -97,7 +101,9 @@ test("door serves the same discovery bytes and points at origin", async () => {
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const doorPath of [
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
-    "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/.well-known/agent.json"
+    "/room/.well-known/agent-card.json",
+    "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/.well-known/agent.json",
+    "/project-room/.well-known/agent-card.json"
   ]) {
     const expected = discoveryDoc(doorPath);
     const get = roomEntry(new Request(`https://www.trydemigod.com${doorPath}`));

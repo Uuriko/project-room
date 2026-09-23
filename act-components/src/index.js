@@ -1,6 +1,7 @@
 export {
   COMPONENT_KINDS,
   COMPUTE_ORIGIN,
+  MATCHING_DESK_ORIGIN,
   EVENT_TYPES,
   INTENDED_RECORDS,
   LABELS,
@@ -14,5 +15,7 @@ export {
   componentsForEvent,
   computeDeepLink,
   computePointer,
+  matchingDeskDeepLink,
+  matchingDeskPointer,
   isProposedClass
 } from "./components.js";

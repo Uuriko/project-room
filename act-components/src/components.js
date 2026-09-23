@@ -1,5 +1,6 @@
 import {
   COMPUTE_ORIGIN,
+  MATCHING_DESK_ORIGIN,
   EVENT_TYPES,
   INTENDED_RECORDS,
   LABELS,
@@ -71,6 +72,28 @@ export function computePointer(event, receipt) {
   };
 }
 
+export function matchingDeskPointer(event, receipt) {
+  const data = eventData(event);
+  const rec = receiptData(receipt);
+  for (const surface of [data, rec]) {
+    if (surface.bridge === "demigod" || surface.product === "matching_desk" || surface.matchingDesk === true) {
+      return {
+        workItemId: firstDefined(data.workItemId, rec.workItemId),
+        roomId: firstDefined(data.roomId, rec.roomId, event?.roomId)
+      };
+    }
+  }
+  return null;
+}
+
+export function matchingDeskDeepLink({ workItemId, roomId } = {}) {
+  const url = new URL(MATCHING_DESK_ORIGIN);
+  url.hash = "fee";
+  if (workItemId) url.searchParams.set("work_item", workItemId);
+  if (roomId) url.searchParams.set("room", roomId);
+  return url.toString();
+}
+
 /** Deep-link to the Compute door. Never /compute/api and never a run start. */
 export function computeDeepLink({ workItemId, receiptId } = {}) {
   const url = new URL(COMPUTE_ORIGIN);
@@ -129,6 +152,16 @@ export function availableComponents(input = {}) {
     if (ackNeeded(event)) {
       components.push(recordingComponent("ack", event));
     }
+  }
+
+  const desk = matchingDeskPointer(event, receipt);
+  if (desk) {
+    components.push({
+      kind: "open_matching_desk",
+      label: LABELS.open_matching_desk,
+      href: matchingDeskDeepLink(desk),
+      target: targetFrom(event, desk)
+    });
   }
 
   const pointer = computePointer(event, receipt);

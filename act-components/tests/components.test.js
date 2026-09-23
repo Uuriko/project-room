@@ -66,6 +66,25 @@ test("open_compute: Receipt/Compute bridge pointer deep-links and never starts a
   assert.equal(computeDeepLink({ workItemId: "wi-job" }), `${COMPUTE_ORIGIN}?work_item=wi-job`);
 });
 
+test("open_matching_desk: hiring brief deep-links to Demigod and never sends identity", () => {
+  const source = event({
+    id: "evt-hire",
+    type: "work.proposed",
+    roomId: "commons",
+    data: { workItemId: "wi-hire", title: "Founding engineer", bridge: "demigod" }
+  });
+  const { components } = availableComponents({ event: source, viewer: guest });
+  const desk = components.find((row) => row.kind === "open_matching_desk");
+  assert.ok(desk);
+  assert.equal(desk.label, "Open matching desk");
+  assert.equal(desk.label.includes("DIE"), false);
+  assert.equal(desk.href.startsWith("https://www.trydemigod.com"), true);
+  assert.match(desk.href, /work_item=wi-hire/);
+  assert.equal(desk.href.includes("/api"), false);
+  assert.equal(desk.href.includes("getdasha.com/compute"), false);
+  assert.equal(Object.hasOwn(desk, "run"), false);
+});
+
 test("plain chatter: message.posted and reactions mint no components", () => {
   const chatter = event({
     id: "chat-1",

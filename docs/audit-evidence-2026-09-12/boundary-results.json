@@ -1,0 +1,1242 @@
+{
+  "runtime": "v24.19.0",
+  "sourceHashes": {
+    "server/http.mjs": "c316daf45f55902d9e14d640703e47c3e1c3aa1d907f682edd34657b3ff632e6",
+    "server/store.mjs": "4902a53efd5011a151e7815d8e07a04d8dfc8e868bb8d7cf41019032faaf4751",
+    "src/events.js": "e8b9b798f59bde9dbbf931c9b337f2b9ad5cf037ab8cf7b57fb15e87da0f3e86",
+    "src/work-item-session.js": "1cc97e2368dab50e1149b01df36bc62a53c80eb113c78ed061b8a83391affc63"
+  },
+  "routeMatrix": [
+    {
+      "route": "(snapshot)",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "events",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "cursor",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 405,
+          "code": "method_not_allowed"
+        },
+        "worker": {
+          "status": 405,
+          "code": "method_not_allowed"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 405,
+          "code": "method_not_allowed"
+        },
+        "roomCookie": {
+          "status": 405,
+          "code": "method_not_allowed"
+        },
+        "accountCookie": {
+          "status": 405,
+          "code": "method_not_allowed"
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "return-brief",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "work-context?workItemId=missing",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "worker": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "roomCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "work-discussion?workItemId=missing",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "worker": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "roomCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "work-result?workItemId=missing",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "worker": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "roomCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountCookie": {
+          "status": 404,
+          "code": "work_not_found"
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "work-sessions",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "presence",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "capabilities",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "onboarding-funnel",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "export",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "charter",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "reply-requests",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "reply-context?requestMessageId=missing",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 404,
+          "code": "reply_request_not_found"
+        },
+        "worker": {
+          "status": 404,
+          "code": "reply_request_not_found"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 404,
+          "code": "reply_request_not_found"
+        },
+        "roomCookie": {
+          "status": 404,
+          "code": "reply_request_not_found"
+        },
+        "accountCookie": {
+          "status": 404,
+          "code": "reply_request_not_found"
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "reply-history",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "reminders",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "agent-connections",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "worker": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "diagnostics",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "worker": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "diagnostics-export",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 403,
+          "code": "owner_required"
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "search?q=Synthetic",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "provider-heartbeats",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "identity-links",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "agent-invites",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "share-links",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      }
+    },
+    {
+      "route": "messages/root/thread",
+      "credentials": {
+        "anonymous": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "malformed": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "owner": {
+          "status": 200,
+          "code": null
+        },
+        "worker": {
+          "status": 200,
+          "code": null
+        },
+        "revoked": {
+          "status": 401,
+          "code": "unauthenticated"
+        },
+        "wrongRoom": {
+          "status": 403,
+          "code": "access_denied"
+        },
+        "identity": {
+          "status": 200,
+          "code": null
+        },
+        "roomCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountCookie": {
+          "status": 200,
+          "code": null
+        },
+        "accountAsBearer": {
+          "status": 200,
+          "code": null
+        }
+      }
+    }
+  ],
+  "concurrency": {
+    "first": 201,
+    "sessionRoute": 409,
+    "sessionCode": "budget_exceeded",
+    "genericRoute": 201,
+    "secondStatus": "processing"
+  },
+  "workerOwnership": {
+    "sessionRoute": 409,
+    "sessionCode": "session_claimed",
+    "genericRoute": 201,
+    "worker": "steerer"
+  },
+  "expiredBudget": {
+    "genericStatus": 201,
+    "state": "processing",
+    "reportedSpend": 150
+  },
+  "claimedEnforcement": {
+    "status": 201,
+    "acceptedMarker": true,
+    "budget": null
+  },
+  "diagnosticPath": [
+    {
+      "route": "/api/rooms/:roomId/messages/private-customer-project/thread",
+      "status": 404
+    }
+  ],
+  "storageTables": [
+    "account_access_events",
+    "account_credentials",
+    "account_session_slots",
+    "accounts",
+    "agent_connection_operations",
+    "agent_connections",
+    "agent_identities",
+    "agent_invite_codes",
+    "commands",
+    "credentials",
+    "cursors",
+    "events",
+    "identity_links",
+    "member_accounts",
+    "membership_invitation_events",
+    "membership_invitation_journal",
+    "membership_invitations",
+    "private_email_commands",
+    "private_email_connections",
+    "private_email_folders",
+    "private_inbox_commands",
+    "private_inbox_drafts",
+    "private_inbox_sources",
+    "private_inbox_versions",
+    "private_reminder_commands",
+    "private_reminders",
+    "projection_checkpoints",
+    "rooms",
+    "share_link_joins",
+    "share_links"
+  ]
+}

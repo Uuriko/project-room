@@ -26,6 +26,8 @@ Steal only this from Discord / Slack components:
 - Approve / Reject as named actions on a proposal-class Event.
 - Open-in-Compute as a **deep-link only** to
   [getdasha.com/compute](https://getdasha.com/compute).
+- Open matching desk as a **deep-link only** to
+  [trydemigod.com](https://www.trydemigod.com) when `bridge: "demigod"`.
 - Optional Acknowledge when the Event still needs an ack.
 
 Do not steal Slack-with-bots chrome, an agent-OS pane, Workflow Builder BPM, or
@@ -41,9 +43,10 @@ are the buttons on those Events. Activity is not the Act store.
 | `approve` | Accept this proposal / result. | Members with `act`, or the Room owner. |
 | `reject` | Refuse this proposal / result. | Same as `approve`. |
 | `open_compute` | Open Compute in the browser. Never starts a run in Room. | Wider: any viewer who can see the Event. |
+| `open_matching_desk` | Open Demigod matching desk. Never sends names or starts a search. Public label is not DIE. | Wider: when Event has `bridge: "demigod"` / `product: "matching_desk"`. |
 | `ack` | Optional. Mark the Event acknowledged. | Same as `approve`. |
 
-No other kind appears. Chat reactions (`message.reaction_set`, 👍 / ❤️) are
+Chat reactions (`message.reaction_set`, 👍 / ❤️) are
 not Acts and never become the Act store.
 
 ### When a kind is offered
@@ -52,6 +55,7 @@ not Acts and never become the Act store.
 | --- | --- |
 | `approve`, `reject` | **Proposed-class** Events. v0 that set is `work.proposed`. Later proposal Events can join the set without a schema bump. |
 | `open_compute` | An Event or Receipt that already carries a Compute bridge pointer (`computeJobId`, nested `compute`, or `bridge: "compute"`). See [BRIDGE-COMPUTE](./BRIDGE-COMPUTE.md). |
+| `open_matching_desk` | An Event with `bridge: "demigod"`, `product: "matching_desk"`, or `matchingDesk: true`. Deep-link to `https://www.trydemigod.com`. See matching-desk-tool. |
 | `ack` | An Event marked `ackNeeded` (or a reply request that still needs an ack). |
 
 Plain `message.posted` chatter offers nothing. A reaction Event offers
@@ -65,7 +69,7 @@ nothing. A Receipt without a Compute pointer does not mint Open-in-Compute.
 | `label` | Button copy: Approve, Reject, Open in Compute, Acknowledge. |
 | `target` | Pointers the later view needs: `eventId`, optional `workItemId`, optional `receiptId`, optional `computeJobId`. |
 | `records` | Intended command / Event payload if this Act writes. Omitted on `open_compute`. |
-| `href` | Only on `open_compute`. A `https://getdasha.com/compute` URL, with optional `work_item` / `receipt` query when known. |
+| `href` | On `open_compute` (`https://getdasha.com/compute?…`) or `open_matching_desk` (`https://www.trydemigod.com/?work_item=…#fee`). Never `/api`. |
 
 No `run`, `start`, `prompt`, or inference payload. Open-in-Compute does not
 POST `compute/api` and does not embed a Compute UI in Room.
