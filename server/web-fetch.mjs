@@ -14,9 +14,9 @@
 // design center. Every hop (initial URL + each redirect) is validated:
 // http/https only, no userinfo, ports 80/443 only, the host is DNS-resolved
 // and every resolved IP is checked against private/loopback/link-local/
-// multicast/reserved/CGNAT ranges. On Cloudflare Workers there is no private
-// network: the node:dns pre-check is gated behind a try/catch import and the
-// module never crashes when it is absent.
+// multicast/reserved/CGNAT ranges. The node:dns pre-check is statically
+// imported (same as server/outbound-webhooks.mjs; the Worker build uses
+// nodejs_compat, so DNS resolution is available there too).
 //
 // Auth is owner + full members only; the HTTP layer applies the #798 guest
 // gate (403 guest_scope_denied) right after authentication. There is no
@@ -31,6 +31,7 @@
 // journaled. Rate limits (100/day/member, 1000/day/room) count journaled
 // attempts, so cache hits still cost quota, exactly like a credit model.
 import { createHash, randomUUID } from "node:crypto";
+import { promises as dns } from "node:dns";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 export class WebFetchError extends Error {
@@ -214,22 +215,14 @@ export function ipLiteralBlocked(host) {
   return false;
 }
 
-let dnsPromises = null; // lazy; stays null when node:dns is unavailable (Workers)
-async function dnsModule() {
-  if (dnsPromises !== null) return dnsPromises;
-  try { dnsPromises = await import("node:dns/promises"); }
-  catch { dnsPromises = false; }
-  return dnsPromises;
-}
-
 // Resolve the host and reject when every path leads somewhere private.
-// Returns the resolved address list (empty when resolution is skipped).
+// Returns the resolved address list (empty when the name was a literal IP).
+// node:dns is statically imported like server/outbound-webhooks.mjs — the
+// Worker build runs with nodejs_compat, so DNS is available there too.
 export async function assertPublicHost(hostname) {
   const host = hostname.replace(/^\[|\]$/g, "");
   if (ipLiteralBlocked(host))
     fail(403, "blocked_host", "Refusing to fetch a private, loopback, or otherwise reserved address");
-  const dns = await dnsModule();
-  if (!dns) return []; // Workers: no private network exists, nothing to guard
   const addresses = new Set();
   for (const fn of ["resolve4", "resolve6"]) {
     try { for (const ip of await dns[fn](host)) addresses.add(ip); } catch { /* NXDOMAIN etc: fetch reports it */ }
