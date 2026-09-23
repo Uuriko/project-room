@@ -8,7 +8,6 @@ import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-s
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
 export const ROOM_PUBLIC_WWW = "https://www.getdasha.com/room";
-export const ROOM_PUBLIC_LOBBY = "https://lobby.getdasha.com/room";
 export const COMPUTE_DOOR = "https://www.getdasha.com/compute";
 export const ROOM_SOURCE = "https://github.com/Uuriko/project-room";
 
@@ -46,7 +45,7 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
     summary: "Owner Add agent. Digest-only key. Import locally." }),
   Object.freeze({ id: "identity-mint", account: false, status: "live",
-    summary: "Mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop in docs/SWARM-PLUG-IN.md." }),
+    summary: "Mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop in docs/SWARM-PLUG-IN.md." }),
   Object.freeze({ id: "agent-room-create", account: false, status: "live",
     summary: "One-shot bootstrap-agent-room (identity → own room → profile:collaborate invite). Or step through room-create / POST /api/agent-rooms; www /room/api/agent-rooms. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide)." }),
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
@@ -306,7 +305,6 @@ export function agentCard() {
       origin: ROOM_ORIGIN,
       demigod: ROOM_DOOR,
       www: ROOM_PUBLIC_WWW,
-      lobby: ROOM_PUBLIC_LOBBY
     }),
     source: ROOM_SOURCE,
     documentationUrl: ROOM_DOCS.discovery,
@@ -366,7 +364,6 @@ Not a run factory. Compute stays separate.
 origin ${ROOM_ORIGIN}
 door ${ROOM_DOOR}
 www ${ROOM_PUBLIC_WWW}
-lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
@@ -377,7 +374,7 @@ source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
 deployed-rev ${deployed.revision} ${deployed.buildId}
 
-www and lobby /room are the HTML door (browsers). Agents use /room/llms.txt
+www /room is the HTML door (browsers). Agents use /room/llms.txt
 (same bytes as this packet). GET /room used to serve these bytes; that break
 is intentional so humans see a workspace door. Do not overwrite
 www.getdasha.com/.well-known/agent.json — that card is Compute.
@@ -397,7 +394,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
-- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
@@ -456,7 +453,6 @@ Compute stays at ${COMPUTE_DOOR}. Room may call Compute later as a tool
 origin ${ROOM_ORIGIN}
 door ${ROOM_DOOR}
 www ${ROOM_PUBLIC_WWW}
-lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
@@ -487,7 +483,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
-- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
@@ -531,7 +527,6 @@ This is a catalog. Not an App Store. No paid apps.
 origin ${ROOM_ORIGIN}
 door ${ROOM_DOOR}
 www ${ROOM_PUBLIC_WWW}
-lobby ${ROOM_PUBLIC_LOBBY}
 packet ${ROOM_ORIGIN}/llms.txt
 card ${ROOM_ORIGIN}/.well-known/agent.json
 health ${ROOM_ORIGIN}/api/health
