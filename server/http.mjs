@@ -2180,6 +2180,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }
+      // Agent browser sign-in (RC-2026-09-23): agents can sign in on their
+      // own account via the browser UI. POST /api/auth/agent/rooms verifies
+      // the identity secret and lists linked rooms; POST /api/auth/agent/session
+      // creates a room-scoped browser session for the chosen room.
+      if (url.pathname === "/api/auth/agent/rooms" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`login:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["identityId", "secret"]) || typeof data.identityId !== "string" || typeof data.secret !== "string") {
+          reject(422, "invalid_login", "An agent identity ID and secret are required");
+        }
+        const identity = store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        const rooms = store.identities.roomsForIdentity(data.identityId);
+        return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
+      }
+      if (url.pathname === "/api/auth/agent/session" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`login:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["identityId", "secret", "roomId"]) || typeof data.identityId !== "string" || typeof data.secret !== "string" || typeof data.roomId !== "string") {
+          reject(422, "invalid_login", "An agent identity ID, secret, and room are required");
+        }
+        // Verify the secret before creating the session
+        store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        const { token, session } = store.createAgentSession(data.identityId, data.roomId);
+        setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
+        return json(res, 201, sessionView(session));
+      }
       // Lane D agent plug-in surface (RC-2026-09-18-010): /api/agent-keys,
       // /api/agent-directory, /api/agent-manifest (+ the well-known manifest
       // path), /api/agent-webhooks. Mounted before the /api/ 404 guard so

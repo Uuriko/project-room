@@ -2202,6 +2202,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { token, expiresAt };
     });
   }
+  // Creates a browser session for an agent identity linked to a room member.
+  // The identity secret must already be verified by the caller via
+  // identities.authenticateIdentitySecret. The session is scoped to
+  // the room and member, with the same 8-hour expiry as human sessions.
+  createAgentSession(identityId, roomId) {
+    return this.transaction(() => {
+      const link = this.identities.resolveIdentityLink(identityId, roomId);
+      if (!link) fail(403, "access_denied", "This agent identity is not linked to that room");
+      if (link.member.kind !== "agent") fail(403, "access_denied", "Browser sessions require an agent room member");
+      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000);
+      return { token, session: this.authenticate(token) };
+    });
+  }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
