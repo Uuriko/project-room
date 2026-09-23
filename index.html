@@ -325,6 +325,11 @@
           </details>
           <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
+          <dialog id="reaction-sheet" aria-labelledby="reaction-sheet-label">
+            <p id="reaction-sheet-label" class="reaction-sheet-label"></p>
+            <div id="reaction-sheet-options" class="reaction-sheet-options" role="group" aria-label="Choose a reaction"></div>
+            <button id="reaction-sheet-close" class="button ghost" type="button">Close</button>
+          </dialog>
           <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
           <form id="message-form" class="composer">
             <label id="composer-label" class="sr-only" for="message-input">Message the room</label>

@@ -165,8 +165,13 @@ export function memberDoneChip(member, { workItems } = {}) {
   return { label: "Done", title, workItemId: done.id };
 }
 
+// Mentions are text only: inserting "@DisplayName" never changes a message's
+// audience. A message becomes a direct message only when the sender
+// explicitly picks a recipient in the composer ("Everyone" -> a member).
+// Replying to or @-mentioning someone in the room stays public, room-visible
+// chat; the @mention is just a highlight/notification for that member.
 export function addressMember(text, caret, member) {
-  if (!member?.displayName) return { body: String(text ?? ""), caret: Number.isInteger(caret) ? caret : String(text ?? "").length, toMemberId: member?.id ?? "" };
+  if (!member?.displayName) return { body: String(text ?? ""), caret: Number.isInteger(caret) ? caret : String(text ?? "").length, toMemberId: "" };
   const found = mentionQuery(text, caret);
   if (found) return insertMention(text, caret, found.start, member);
   const value = String(text ?? "");
@@ -175,7 +180,7 @@ export function addressMember(text, caret, member) {
   const padBefore = before && !/[\s]$/.test(before) ? " " : "";
   const label = `@${member.displayName}`;
   const padAfter = after.startsWith(" ") ? "" : " ";
-  return { body: `${before}${padBefore}${label}${padAfter}${after}`, caret: before.length + padBefore.length + label.length + (padAfter ? 1 : 0), toMemberId: member.id };
+  return { body: `${before}${padBefore}${label}${padAfter}${after}`, caret: before.length + padBefore.length + label.length + (padAfter ? 1 : 0), toMemberId: "" };
 }
 
 export function insertMention(text, caret, start, member) {
@@ -185,7 +190,7 @@ export function insertMention(text, caret, start, member) {
   const label = `@${member.displayName}`;
   const after = value.slice(pos);
   const body = `${value.slice(0, at)}${label}${after.startsWith(" ") ? after : ` ${after}`}`;
-  return { body, caret: at + label.length + (after.startsWith(" ") ? 0 : 1), toMemberId: member.id };
+  return { body, caret: at + label.length + (after.startsWith(" ") ? 0 : 1), toMemberId: "" };
 }
 
 const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
