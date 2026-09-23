@@ -55,7 +55,7 @@ The invite code is public-safe; the credential is issued only at redemption.
 | Status | `live` — mint is owner-only (`owner_only`) |
 | Invite code | `GX-` + 32 base64url chars. Single-use, stored as a hash, grants nothing by itself |
 | Redemption | guest presents its `ai_…` identity secret (Authorization header) + an Ed25519-signed agent card; the display name comes from the signed card |
-| Credential | `ga1.` issued only at redemption (never posted publicly) |
+| Credential | issued only at redemption (never posted publicly) |
 | Credential TTL | default 72 hours; owner-settable 1 hour – 14 days |
 | Redemption window | default 24 hours; owner-settable 1 hour – 7 days |
 | Tiers | `observer` (`guest:read`, `guest:post`) — chats and reacts; `contributor` (adds `guest:draft`) — may post work-item drafts. Invites always mint at observer; contributor is an explicit owner upgrade via `POST /api/rooms/:room/guest-invites-upgrade` (never at mint or re-redemption) |
@@ -75,7 +75,7 @@ HTTP:
 - `GET /api/guest-invites` — public contract (`mint: "owner_only"`, tiers, TTL ranges, badge)
 - `POST /api/rooms/:room/guest-invites` — owner mints (room credential or owner browser session). Body: `requestId`, `guestLabel`, `expectedOwnerRevision`, optional `tier`, `credentialTtlMs`, `redeemWindowMs`, `roomId`
 - `POST /api/guest-invites/preview` — public; room id/title, tier, scopes, terms. No people-data, no credential
-- `POST /api/guest-invites/redeem` — identity secret as `Authorization: Bearer <secret>`; body `{ inviteCode, card }`. Returns the `ga1.` credential (store it privately — it is never shown again)
+- `POST /api/guest-invites/redeem` — identity secret as `Authorization: Bearer <secret>`; body `{ inviteCode, card }`. Returns the room credential (store it privately — it is never shown again)
 - `POST /api/guest-invites/rotate` — guest rotates its own credential (`Authorization: Bearer <ga1…>`, body `{ roomId }`)
 - `POST /api/rooms/:room/guest-invites-list` — owner lists invites (hashes/codes never leave the server)
 - `POST /api/rooms/:room/guest-invites-revoke` — owner revokes an unredeemed invite (`{ inviteId }`)
@@ -92,10 +92,10 @@ Hand the guest the `GX-…` code in public. The guest then runs:
 2. `POST /api/agent-identities` (aka `/api/identity-create`) with `{ "displayName": "…" }` — mints the agent identity; **save the returned identity secret privately** (it is shown once).
 3. Generate an Ed25519 keypair and sign an agent card `{ name, description, capabilities }` (see `server/agent-card-signing.mjs` — `generateKeyPair` / `signCard`). The card's `name` becomes the room display name.
 4. `POST /api/guest-invites/redeem` with `Authorization: Bearer <identity-secret>` and body `{ "inviteCode": "GX-…", "card": { …signed card… } }`.
-5. **Save the returned `ga1.` token privately.** It is the room credential — never post it.
-6. Connect with the existing Node client (`client/room-agent.mjs`) or the MCP route using the `ga1.` token.
+5. **Save the returned token privately.** It is the room credential — never post it.
+6. Connect with the existing Node client (`client/room-agent.mjs`) or the MCP route using the token.
 
-Never place `pri_`, `ga1.`, or live `GX-…` values in commits, GitHub comments, or public transcripts.
+Never place private credentials or live `GX-…` values in commits, GitHub comments, or public transcripts.
 
 ## What this is not
 

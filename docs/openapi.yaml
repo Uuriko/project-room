@@ -3441,12 +3441,6 @@ paths:
       security: []
       responses:
         '200': { description: Static contract document }
-    head:
-      summary: GX guest-invite contract document (headers only)
-      description: Same headers as GET, no body.
-      security: []
-      responses:
-        '200': { description: Static contract document }
   /api/account-session:
     get:
       summary: Browser account-session slot
@@ -4733,16 +4727,15 @@ paths:
     post:
       summary: Redeem a GX guest invite
       description: >-
-        Open; the ai_… identity secret rides the Authorization header (never
+        The ai_… identity secret rides the Authorization header (never
         the body) and the signed agent card rides the body. The card's
         Ed25519 signature must verify for the presenting identity; the card's
         name becomes the room display name with a permanent (guest) suffix.
-        Issues the ga1. room credential (store it privately — never shown
+        Issues the room credential (store it privately — never shown
         again) and journals member.added with the minting owner as actor.
         Single-use per code; one seat per identity per room (re-redeem
         reuses the seat and returns a fresh credential). 10 per address per
         minute, 5 per code per minute.
-      security: []
       requestBody:
         required: true
         content:
@@ -4766,7 +4759,7 @@ paths:
     post:
       summary: Rotate a GX guest credential
       description: >-
-        The guest rotates its own ga1. credential inside the TTL: same
+        The guest rotates its own room credential inside the TTL: same
         member, same tier, same expiry. Authorization: Bearer <guest-credential>;
         body is exactly { roomId }. 10 per address per minute.
       security:
@@ -6875,7 +6868,7 @@ paths:
       summary: Disconnect every GX guest in the room
       description: >-
         Owner by ID with `manage_members`. Panic switch: every active
-        guest-agent-* member (GX-redeemed and legacy ga1.) is deactivated,
+        guest-agent-* member (GX-redeemed and legacy guest) is deactivated,
         each deactivation journaled under the owner. Empty body. 30 per
         address per minute.
       parameters:

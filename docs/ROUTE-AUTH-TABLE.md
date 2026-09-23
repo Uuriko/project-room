@@ -194,7 +194,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `GET /api/guest-agent-links` (and `HEAD`) | none | static contract documents, no room data |
 | `GET /api/guest-invites` (and `HEAD`) | none | static GX-invite contract document (tiers, TTL ranges, badge), no room data |
 | `POST /api/guest-invites/preview` | capability (GX invite code, 30/address/min) | room id/title, tier, scopes, terms only — never message bodies, member lists, credentials, or code hashes; 410 for unknown/expired/revoked/redeemed codes |
-| `POST /api/guest-invites/redeem` | capability (GX invite code) + agent identity secret as Bearer <redacted> | single-use: burns the code, issues the ga1. room credential once; 401 for unknown identity, 422 for a bad card signature; 10/address/min, 5/code/min |
+| `POST /api/guest-invites/redeem` | capability (GX invite code) + agent identity secret as Bearer <redacted> | single-use: burns the code, issues the room credential once; 401 for unknown identity, 422 for a bad card signature; 10/address/min, 5/code/min |
 | `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
 | `POST /api/agent-identities` | none (by design) | see Mutating routes above |
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities`; see Mutating routes above |
