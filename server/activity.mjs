@@ -61,9 +61,11 @@ export const activitySchema = `
     saved_at INTEGER NOT NULL,
     PRIMARY KEY(room_id, member_id, message_id)
   );
-  -- thread_mutes lives in server/thread-mutes.mjs (canonical schema); do not
-  -- duplicate it here.
 `;
+// thread_mutes is defined canonically in server/thread-mutes.mjs. NOTE: keep
+// this template literal ending in a SQL statement — Workers SQLite exec()
+// rejects a string whose trailing chunk after the final semicolon contains
+// no statement (e.g. a trailing -- comment).
 
 // A DM message is visible only to its author and its recipient.
 const dmVisible = (message, memberId) =>
