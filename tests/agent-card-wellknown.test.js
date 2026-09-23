@@ -1,5 +1,5 @@
-// Signed A2A v1.0 Agent Card served at /.well-known/agent-card.json
-// (RC-2026-09-23-105).
+// Signed discovery agent card (A2A v1.0 field conventions) served at
+// /.well-known/agent-card.json (RC-2026-09-23-105).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import {
-  agentCard, agentCardJson, discoveryDoc, AGENT_CARD_A2A_PATH, A2A_PROTOCOL_VERSION,
+  agentCard, agentCardJson, discoveryDoc, AGENT_CARD_A2A_PATH, DISCOVERY_PROTOCOL_VERSION,
 } from "../deploy/agent-discovery.mjs";
 import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID } from "../deploy/agent-card-key.mjs";
 import {
@@ -26,7 +26,7 @@ async function serve(t) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test("card carries the A2A v1.0 required field set", () => {
+test("card carries the discovery card (A2A v1.0 field conventions) required field set", () => {
   const card = agentCard();
   for (const field of ["name", "description", "version", "supportedInterfaces", "capabilities", "defaultInputModes", "defaultOutputModes", "skills"]) {
     assert.ok(card[field] !== undefined && card[field] !== null, `missing required field: ${field}`);
@@ -47,7 +47,7 @@ test("supportedInterfaces declares versioned bindings", () => {
   }
   const primary = card.supportedInterfaces[0];
   assert.equal(primary.protocolVersion, "1.0");
-  assert.equal(primary.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
 });
 
 test("skills are non-empty with id/name/description/tags", () => {
@@ -64,7 +64,7 @@ test("skills are non-empty with id/name/description/tags", () => {
   assert.ok(ids.includes("claims-board"), "card advertises the claims board");
 });
 
-test("capabilities carry the A2A protocol flags and security is declared", () => {
+test("capabilities carry the discovery capability flags and security is declared", () => {
   const card = agentCard();
   assert.equal(typeof card.capabilities.streaming, "boolean");
   assert.equal(typeof card.capabilities.pushNotifications, "boolean");

@@ -85,7 +85,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(a2aCard.headers.get('content-type'), /application\/json/);
     const a2aCardJson = await a2aCard.json();
     assert.deepEqual(a2aCardJson, await (await call('/.well-known/agent.json')).json());
-    // RC-2026-09-23-105: A2A v1.0 shape on the production card.
+    // RC-2026-09-23-105: discovery card shape (A2A v1.0 field conventions) on the production card.
     for (const field of ['name', 'description', 'version', 'supportedInterfaces', 'capabilities', 'defaultInputModes', 'defaultOutputModes', 'skills']) assert.ok(a2aCardJson[field] !== undefined, field);
     assert.ok(Array.isArray(a2aCardJson.supportedInterfaces) && a2aCardJson.supportedInterfaces.length > 0);
     assert.ok(a2aCardJson.supportedInterfaces.every(i => typeof i.url === 'string' && typeof i.protocolBinding === 'string' && typeof i.protocolVersion === 'string'));
