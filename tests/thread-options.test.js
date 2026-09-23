@@ -149,7 +149,7 @@ test("thread mutes: validation", async t => {
 });
 
 test("muted threads are skipped in the notification feed and unread count", async t => {
-  const { send, ownerKey, mayaKey, agentKey, store } = await serve(t);
+  const { send, mayaKey, agentKey, store } = await serve(t);
   send(agentKey, T.MESSAGE_POSTED, { messageId: "feed-root", body: "Thread root" });
   send(mayaKey, T.MESSAGE_POSTED, { messageId: "feed-reply", body: "Reply for @Test agent", replyToId: "feed-root" });
   send(mayaKey, T.MESSAGE_POSTED, { messageId: "feed-other", body: "Unrelated @Test agent note" });

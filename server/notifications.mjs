@@ -43,7 +43,8 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
   // A message's thread root: itself when top-level. Walk the reply chain so
   // a mute on the thread hides every reply in it, not just the root.
   const threadRootOf = messageId => {
-    let node = messages.get(messageId), seen = new Set();
+    let node = messages.get(messageId);
+    const seen = new Set();
     while (node?.replyToId && !seen.has(node.id)) {
       seen.add(node.id);
       const parent = messages.get(node.replyToId);
