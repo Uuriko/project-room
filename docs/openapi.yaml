@@ -2285,6 +2285,19 @@ paths:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
                 deadline: { type: string, format: date-time }
                 verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                rubric:
+                  type: array
+                  description: |
+                    Optional pinned acceptance rubric (slice 6): 1..50 {criterionId, description}
+                    criteria, pinned at v1. Omit to derive the default single-criterion
+                    pin from the criteria text. Acceptance verdicts must cite every
+                    pinned criterion with a pass|fail verdict.
+                  items:
+                    type: object
+                    required: [criterionId, description]
+                    properties:
+                      criterionId: { type: string, minLength: 1, maxLength: 64 }
+                      description: { type: string, minLength: 1, maxLength: 500 }
                 idempotencyKey: { type: string }
       responses:
         '201':
@@ -2331,6 +2344,196 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/rubric:
+    post:
+      summary: Re-pin the bounty rubric (slice 6)
+      description: |
+        Poster-only: re-pins the acceptance rubric at v+1 while the bounty
+        is still PROPOSED. Funding pins the rubric for the rest of the
+        lifecycle; every version is preserved and arbiters can re-check a
+        verdict against any past version. Emits `bounty.rubric-updated`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rubric]
+              properties:
+                rubric:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [criterionId, description]
+                    properties:
+                      criterionId: { type: string, minLength: 1, maxLength: 64 }
+                      description: { type: string, minLength: 1, maxLength: 500 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The bounty with its re-pinned rubric
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/reviews:
+    get:
+      summary: Inspect correlation review packets (slice 10)
+      description: |
+        Arbiter inspection of claim-graph correlation review packets.
+        Read-only; packets are immutable once created. Every submission is
+        fingerprinted (normalized SHA-256 over canonicalized evidence);
+        above-threshold correlation — duplicate fingerprints or repeat
+        claimant<->poster pairings — creates a packet with the matched
+        bounties, the claim graph (lanes as nodes, claim/post/verify as
+        edges), and the evidence attached. REVIEW-ONLY: packets never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — a
+        human decides. Filter to one bounty with `?bountyId=`. API keys
+        need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: bountyId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The room's review packets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  packets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReviewPacket' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags:
+    get:
+      summary: List sybil-cluster flags (slice 10)
+      description: |
+        Arbiter review queue for correlated-submission (Sybil) clusters. A
+        flag is raised when above-threshold correlation is detected between
+        submissions: >= 2 distinct lanes submitting the byte-identical
+        normalized fingerprint (copy-paste), or one lane's submissions
+        sharing submitters/evidence fingerprints with another lane across
+        >= 3 distinct bounties (claim-graph). REVIEW-ONLY: flags never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — an
+        arbiter dismisses (honest coincidence: same template, same trivial
+        task) or confirms each flag with a recorded reason. Filter by
+        lifecycle with `?status=`. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, dismissed, confirmed] }
+      responses:
+        '200':
+          description: The room's sybil flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flags:
+                    type: array
+                    items: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/dismiss:
+    post:
+      summary: Dismiss a sybil flag (slice 10)
+      description: |
+        Arbiter dismisses an open sybil flag as honest coincidence (same
+        template, same trivial task) with a recorded reason. REVIEW-ONLY:
+        dismissal records the verdict; it never moves bounty state,
+        balances, bonds, or reputation. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: flagId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: 1..500 characters }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The dismissed flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flag: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown sybil flag }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/confirm:
+    post:
+      summary: Confirm a sybil flag (slice 10)
+      description: |
+        Arbiter confirms an open sybil flag — agreeing the cluster is
+        correlated — with a recorded reason. REVIEW-ONLY: confirmation
+        records the verdict; follow-up enforcement (if any) is a separate
+        human decision. Nothing here auto-bans, auto-slashes, or moves
+        bounty state, balances, bonds, or reputation. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: flagId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: 1..500 characters }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The confirmed flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  flag: { $ref: '#/components/schemas/SybilFlag' }
+        '401': { description: unauthenticated }
+        '404': { description: unknown sybil flag }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/decline:
     post:
@@ -2441,9 +2644,15 @@ paths:
     post:
       summary: Claim a funded bounty
       description: |
-        Locks the 1-credit anti-flake claim bond and moves the bounty
-        FUNDED → CLAIMED. Only funded bounties are claimable; double claims
-        get 409. Emits `bounty.claimed`. API keys need `rooms:write`.
+        Locks the anti-flake claim bond and moves the bounty FUNDED → CLAIMED.
+        Slice 8 — graduated anti-flake ladder: rung 1 flakes forfeit the bond
+        to the room pool (timeout without submitting, or work judged bad on
+        an upheld dispute); rung 2 posts a double (2-credit) bond; rung 3+
+        sits out a 7-day cooldown (`claim_cooldown` 422 while active).
+        Strikes decay after 30 days — decay always offers a way back. The
+        ladder gates claims only: it never bans and never touches payouts.
+        Only funded bounties are claimable; double claims get 409. Emits
+        `bounty.claimed`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -2550,9 +2759,12 @@ paths:
       description: |
         Explicit gated approval by the poster (or a distinct member under
         the distinct_member review policy — the claimant cannot accept
-        their own work). The approval is recorded as an explicit event and
-        only the approval converts the locked escrow into claimant
-        attribution. Emits `bounty.accepted`. API keys need `rooms:write`.
+        their own work). Slice 6: `verifierAttestation.citations` is required
+        — one {criterionId, verdict: pass|fail} per pinned rubric criterion,
+        citing the rubric version pinned at accept time. The approval is
+        recorded as an explicit event and only the approval converts the
+        locked escrow into claimant attribution. Emits `bounty.accepted`.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -2646,6 +2858,19 @@ paths:
               properties:
                 outcome: { type: string, enum: [upheld, rejected, split, frivolous] }
                 reasonCodes: { type: array, items: { type: string } }
+                rubricCheck:
+                  type: array
+                  description: |
+                    Optional arbiter re-check against the pinned rubric (slice 6):
+                    one {criterionId, verdict: pass|fail} per pinned criterion.
+                    Validated against the pin before the ruling lands and
+                    recorded on the resolution.
+                  items:
+                    type: object
+                    required: [criterionId, verdict]
+                    properties:
+                      criterionId: { type: string }
+                      verdict: { type: string, enum: [pass, fail] }
                 idempotencyKey: { type: string }
       responses:
         '200':
@@ -2669,10 +2894,11 @@ paths:
       description: |
         Permissionless keeper pass: auto-approves accepted bounties whose
         challenge window elapsed, refunds timed-out claims (award refunded
-        in full with no fee, claim bond returned), expires unfunded
-        proposals past deadline, and defaults unresolved disputes older
-        than 14 days to RELEASE. Mechanical transitions are attributed to
-        the rule actor. API keys need `rooms:write`.
+        in full with no fee; slice 8: the timeout records an anti-flake
+        strike and the claim bond is forfeited to the room pool), expires
+        unfunded proposals past deadline, and defaults unresolved disputes
+        older than 14 days to RELEASE. Mechanical transitions are attributed
+        to the rule actor. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -7077,6 +7303,83 @@ components:
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
         resolution: { type: object, nullable: true }
+        submissionHash:
+          type: string
+          nullable: true
+          description: |
+            Slice 10 — normalized SHA-256 fingerprint of the canonicalized
+            submission evidence (null until submitted). Above-threshold
+            claim-graph correlation (duplicate fingerprints, repeat
+            claimant<->poster pairs) creates an arbiter review packet —
+            review-only, never an auto-ban or auto-slash.
+        rubric:
+          type: object
+          description: The currently pinned rubric (slice 6): version, sha256 hash, and canonical criteria. Acceptance citations and arbiter re-checks validate against this pin.
+          properties:
+            version: { type: integer }
+            hash: { type: string }
+            criteria:
+              type: array
+              items:
+                type: object
+                properties:
+                  criterionId: { type: string }
+                  description: { type: string }
+    ReviewPacket:
+      type: object
+      description: |
+        Slice 10 — frozen claim-graph correlation evidence packet attached to
+        a submission: the signals that fired, the matched bounties, the lane
+        graph (poster/claimant/verifier nodes, claim/post/verify edges), and
+        the submitted evidence. Review-only; packets are immutable once
+        created.
+      properties:
+        packetId: { type: string }
+        roomId: { type: string }
+        createdAt: { type: string, format: date-time }
+        bountyId: { type: string }
+        submissionHash: { type: string, description: Normalized SHA-256 fingerprint of the canonicalized evidence }
+        signals:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [duplicate-submission, repeat-claimant-poster, copy-paste, claim-graph] }
+              detail: { type: string }
+              matchedBountyIds: { type: array, items: { type: string } }
+        matchedBounties: { type: array, items: { type: object } }
+        graph: { type: object }
+        evidence: { type: object }
+    SybilFlag:
+      type: object
+      description: |
+        Slice 10 — one above-threshold correlated cluster awaiting arbiter
+        review. status is open until an arbiter dismisses (honest
+        coincidence) or confirms it with a recorded reason. REVIEW-ONLY:
+        flags never auto-ban, auto-slash, or move bounty state, balances,
+        bonds, or reputation.
+      properties:
+        flagId: { type: string }
+        clusterId: { type: string }
+        roomId: { type: string }
+        signal: { type: string, enum: [copy-paste, claim-graph] }
+        status: { type: string, enum: [open, dismissed, confirmed] }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        resolvedBy: { type: string, nullable: true }
+        resolutionReason: { type: string, nullable: true }
+        submissionHash: { type: string, description: Normalized SHA-256 fingerprint shared by the cluster members }
+        memberLanes: { type: array, items: { type: string }, description: Distinct lanes in the cluster }
+        memberBounties:
+          type: array
+          description: Member submissions (bounty + lane refs) of the cluster
+          items:
+            type: object
+            properties:
+              bountyId: { type: string }
+              lane: { type: string }
+              submittedAt: { type: string, format: date-time }
+        evidencePacket: { $ref: '#/components/schemas/ReviewPacket' }
     BountyReceipt:
       type: object
       description: A bounty transition receipt: actor-attributed with before/after states and the lifecycle event.
@@ -7108,6 +7411,17 @@ components:
         attributed: { type: number }
         approved: { type: number }
         total: { type: number }
+        flake:
+          type: object
+          description: |
+            Slice 8 — the graduated anti-flake ladder position, derived from
+            strikes inside the 30-day decay window. cooldownUntil is the ISO
+            timestamp until which new claims are gated (null when clear).
+          properties:
+            strikes: { type: integer }
+            rung: { type: integer }
+            bondMultiplier: { type: integer }
+            cooldownUntil: { type: string, format: date-time, nullable: true }
         reputation:
           type: object
           properties:

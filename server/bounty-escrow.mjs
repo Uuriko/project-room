@@ -68,6 +68,14 @@ export const GENESIS_LANES = Object.freeze([
 export const GENESIS_CREDITS = 100;
 export const MILLIS_PER_CREDIT = 1000;
 export const CLAIM_BOND_MILLIS = 1000; // 1 credit anti-flake bond, fixed per room (slice 1)
+// Slice 8 (integration map #8): graduated anti-flake ladder. Flake strikes
+// decay (always a way back); the rung escalates forfeit -> 2x bond ->
+// cooldown. Credits-only: the ladder moves ledger units and gates claims,
+// never touches payouts and never bans.
+export const FLAKE_DECAY_MS = 30 * 24 * 3600 * 1000; // strikes older than 30d stop counting
+export const FLAKE_COOLDOWN_MS = 7 * 24 * 3600 * 1000; // rung 3+: no new claims for 7d
+export const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
+export const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
@@ -214,6 +222,10 @@ export const bountyEscrowSchema = `
     evidence_json TEXT,
     attestation_json TEXT,
     resolution_json TEXT,
+    rubric_json TEXT,
+    rubric_hash TEXT,
+    rubric_version INTEGER,
+    submission_hash TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -258,6 +270,90 @@ export const bountyEscrowSchema = `
     room_id TEXT PRIMARY KEY,
     next_n INTEGER NOT NULL
   );
+`
+// Slice 6 (integration map #6): pinned versioned rubrics. bounty_records
+// carries the CURRENT pin (rubric_json / rubric_hash / rubric_version);
+// every past version is preserved in bounty_rubric_versions so arbiters can
+// re-check a verdict against the exact version pinned when the work was
+// judged. (Kept as a concatenated literal: SQL comments inside the schema
+// text would break the strict DDL-text verifySchema, since SQLite strips
+// comments from the stored DDL.)
++ `
+  CREATE TABLE IF NOT EXISTS bounty_rubric_versions (
+    room_id TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    rubric_hash TEXT NOT NULL,
+    rubric_json TEXT NOT NULL CHECK(json_valid(rubric_json)),
+    pinned_at TEXT NOT NULL,
+    pinned_by TEXT NOT NULL,
+    PRIMARY KEY(bounty_id, version)
+  );
+`
+// Slice 8 (integration map #8): graduated anti-flake ladder. One row per
+// recorded flake (timeout without submitting, or work judged bad on an
+// upheld dispute). The rung is derived from strikes inside the decay window;
+// decay always offers a way back, so the table is append-only and never
+// pruned by the ladder itself.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_flakes (
+    flake_id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    struck_at_ms INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    rung INTEGER NOT NULL CHECK(rung >= 1),
+    decayed_journaled INTEGER NOT NULL DEFAULT 0,
+    cooldown_end_journaled INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS bounty_flakes_lane ON bounty_flakes(room_id, lane, struck_at_ms);
+`
+// Slice 10 (integration map #10): submission fingerprinting + claim-graph
+// correlation -> arbiter review packets. The fingerprint is a normalized
+// SHA-256 over the canonicalized submission evidence; above-threshold
+// correlation (duplicate fingerprints, repeat claimant<->poster pairs)
+// creates a packet for HUMAN review. Review-only: packets never auto-ban,
+// auto-slash, or touch balances, bonds, or reputation.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_review_packets (
+    room_id TEXT NOT NULL,
+    packet_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    bounty_id TEXT NOT NULL,
+    submission_hash TEXT NOT NULL,
+    signals_json TEXT NOT NULL CHECK(json_valid(signals_json)),
+    matched_bounties_json TEXT NOT NULL CHECK(json_valid(matched_bounties_json)),
+    graph_json TEXT NOT NULL CHECK(json_valid(graph_json)),
+    evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json))
+  );
+  CREATE INDEX IF NOT EXISTS bounty_review_packets_bounty ON bounty_review_packets(room_id, bounty_id);
+`
+// Slice 10 (integration map #10): the sybil-cluster flag table. One row per
+// above-threshold correlated cluster: the correlation signal, the member
+// submissions (bounty + lane refs), the frozen evidence packet, and the
+// review lifecycle — open -> dismissed (honest coincidence, e.g. the same
+// template on a trivial task) or confirmed (an arbiter agrees). REVIEW-ONLY:
+// rows here never drive bans, slashes, or balance/bond/reputation movement;
+// resolution is a human/arbiter record, not an enforcement action.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_sybil_flags (
+    room_id TEXT NOT NULL,
+    flag_id TEXT PRIMARY KEY,
+    cluster_id TEXT NOT NULL,
+    signal TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','dismissed','confirmed')),
+    created_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT,
+    resolution_reason TEXT,
+    submission_hash TEXT NOT NULL,
+    member_lanes_json TEXT NOT NULL CHECK(json_valid(member_lanes_json)),
+    member_bounties_json TEXT NOT NULL CHECK(json_valid(member_bounties_json)),
+    evidence_packet_json TEXT NOT NULL CHECK(json_valid(evidence_packet_json))
+  );
+  CREATE INDEX IF NOT EXISTS bounty_sybil_flags_room ON bounty_sybil_flags(room_id, status);
+  CREATE INDEX IF NOT EXISTS bounty_sybil_flags_cluster ON bounty_sybil_flags(room_id, cluster_id);
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -272,24 +368,67 @@ export const bountyEscrowSchema = `
 // installed (the bounty tables are unfenced).
 export function convergeBountyDeployedSchema(db) {
   const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-  const expected = new Map();
-  for (const sql of bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
-    const m = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
-    if (m) expected.set(m[1], { ddl: sql, norm: normalize(sql) });
+  const chunks = bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+  const expectedTables = new Map(); // table -> { ddl, norm }
+  const tableIndexes = new Map();   // table -> [index ddl, ...]
+  for (const sql of chunks) {
+    const tableMatch = /^CREATE TABLE ([a-z_]+)/.exec(normalize(sql));
+    if (tableMatch) { expectedTables.set(tableMatch[1], { ddl: sql, norm: normalize(sql) }); continue; }
+    const indexMatch = /^CREATE INDEX ([a-z_]+) ON ([a-z_]+)/.exec(normalize(sql));
+    if (indexMatch) {
+      if (!tableIndexes.has(indexMatch[2])) tableIndexes.set(indexMatch[2], []);
+      tableIndexes.get(indexMatch[2]).push(sql);
+    }
   }
-  for (const table of ["bounty_journal", "bounty_events"]) {
-    const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql;
-    if (!actual) continue; // Fresh database: the schema exec below creates it.
-    if (normalize(actual) === expected.get(table).norm) continue; // Already converged.
+  const tableExists = name =>
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  // 1. Additive tables from later slices that a deployed database never had.
+  for (const [table, { ddl }] of expectedTables)
+    if (!tableExists(table)) db.exec(ddl);
+  // 2. Rebuild tables whose stored DDL drifted (row-preserving), then
+  // recreate that table's indexes (ALTER TABLE ... RENAME drops them — the
+  // slice-1-era rebuild lost them).
+  for (const table of ["bounty_journal", "bounty_records", "bounty_events"]) {
+    const actual = tableExists(table)?.sql;
+    if (!actual) continue; // Fresh database: created above.
+    if (normalize(actual) === expectedTables.get(table).norm) continue; // Already converged.
     const legacy = `${table}_legacy_v762`;
     const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map(r => r.name);
-    if (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(legacy))
+    if (tableExists(legacy))
       throw new Error(`Bounty schema convergence blocked: ${legacy} already exists`);
     db.exec(`ALTER TABLE ${table} RENAME TO ${legacy}`);
-    db.exec(expected.get(table).ddl);
+    db.exec(expectedTables.get(table).ddl);
     const colList = cols.join(", ");
     db.exec(`INSERT INTO ${table} (${colList}) SELECT ${colList} FROM ${legacy}`);
     db.exec(`DROP TABLE ${legacy}`);
+    for (const indexDdl of tableIndexes.get(table) ?? []) db.exec(indexDdl);
+  }
+  // 3. Indexes the slice-1-era rebuild may have dropped: purely additive.
+  for (const indexDdls of tableIndexes.values())
+    for (const indexDdl of indexDdls) db.exec(indexDdl);
+  // 4. Slice 6: pin a v1 rubric (derived from the acceptance criteria) onto
+  // every legacy bounty row that predates rubrics, so acceptance citations
+  // keep a pinned version to cite against. Deterministic: the same criteria
+  // text always yields the same v1 pin.
+  _backfillRubricPins(db);
+}
+
+// Pin the default derived rubric (v1) onto bounty_records rows that predate
+// slice 6, and record each pin in bounty_rubric_versions. Exported for the
+// _migrateColumns fallback path (older test doubles); the boot convergence
+// above is the production path.
+export function _backfillRubricPins(db) {
+  const rows = db.prepare(
+    "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
+  const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
+    (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by) VALUES (?,?,?,?,?,?,?)`);
+  const update = db.prepare(
+    "UPDATE bounty_records SET rubric_json=?, rubric_hash=?, rubric_version=1 WHERE bounty_id=?");
+  for (const row of rows) {
+    const criteria = defaultRubricFor(row.criteria);
+    const json = JSON.stringify(criteria), hash = rubricHashOf(criteria);
+    update.run(json, hash, row.bounty_id);
+    insert.run(row.room_id, row.bounty_id, 1, hash, json, row.created_at, row.poster ?? "unknown");
   }
 }
 
@@ -338,8 +477,109 @@ export function toMillis(amount) {
 export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
+
+// Slice 10: sybil-cluster detection thresholds (integration map #10).
+// Review-only: crossing a threshold creates an arbiter-review flag — it
+// never auto-bans, auto-slashes, or moves balances, bonds, or reputation.
+export const SYBIL_COPY_PASTE_MIN_LANES = 2;         // distinct lanes, byte-identical normalized fingerprint
+export const SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES = 3;  // one lane's shared fingerprint spans N distinct bounties with another lane
+
+// Slice 10: normalized text for the submission fingerprint. Deterministic:
+// line endings -> \n, horizontal whitespace runs collapse to one space,
+// blank-line runs collapse to one newline, ends trimmed. Case is NOT
+// folded — case changes are meaningful in code — so "Fix" and "fix" hash
+// differently while "did   the thing\n" and "did the thing" hash alike.
+const canonText = value => String(value)
+  .replace(/\r\n?/g, "\n")
+  .replace(/[ \t]+/g, " ")
+  .replace(/\n[ \t]*\n+/g, "\n")
+  .trim();
+
+// Slice 10: the normalized submission fingerprint. Canonicalization is
+// deterministic — fixed field order, sorted checksClaimed, normalized
+// text, no timestamps, no reporter identity — so the same work always
+// hashes to the same 64-hex fingerprint regardless of who submits it or
+// when.
+export function canonicalSubmissionOf(evidence) {
+  const pick = {};
+  for (const key of ["evidenceKind", "evidenceUrl", "producerId", "summary"])
+    if (evidence[key] !== undefined && evidence[key] !== null) pick[key] = canonText(evidence[key]);
+  if (Array.isArray(evidence.checksClaimed))
+    pick.checksClaimed = [...evidence.checksClaimed].map(canonText).sort();
+  return JSON.stringify(pick);
+}
+export const submissionHashOf = evidence => sha256(canonicalSubmissionOf(evidence));
+
+// Deep-freeze a JSON-shaped value (packets carry nested graph/signal
+// structures that a top-level freeze would leave mutable).
+function deepFreeze(value) {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
 const newId = prefix => `${prefix}${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 const isoNow = ms => new Date(ms).toISOString();
+
+// --- slice 6: pinned versioned rubrics -------------------------------------------
+// A rubric is a fixed list of acceptance criteria pinned to the bounty at
+// post time (v1) and re-pinnable by the poster only while the bounty is
+// still PROPOSED (funding pins it). Acceptance verdicts cite {criterionId,
+// verdict} against the pinned version; arbiters re-check against the exact
+// pinned version from bounty_rubric_versions. Canonical form is sorted by
+// criterionId so the hash is stable.
+export const RUBRIC_MAX_CRITERIA = 50;
+export const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
+
+export function canonicalRubric(rubric) {
+  check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
+    "invalid_input", `rubric must be an array of 1..${RUBRIC_MAX_CRITERIA} criteria`);
+  const seen = new Set();
+  const criteria = rubric.map(criterion => {
+    check(criterion !== null && typeof criterion === "object" && !Array.isArray(criterion),
+      "invalid_input", "rubric criteria must be objects");
+    const { criterionId, description } = criterion;
+    check(typeof criterionId === "string" && criterionId.length >= 1 && criterionId.length <= 64,
+      "invalid_input", "rubric criterionId must be 1..64 characters");
+    check(typeof description === "string" && description.length >= 1 && description.length <= 500,
+      "invalid_input", "rubric criterion description must be 1..500 characters");
+    check(!seen.has(criterionId), "invalid_input", `duplicate rubric criterionId "${criterionId}"`);
+    seen.add(criterionId);
+    return { criterionId, description };
+  });
+  criteria.sort((a, b) => a.criterionId < b.criterionId ? -1 : a.criterionId > b.criterionId ? 1 : 0);
+  return Object.freeze(criteria);
+}
+
+export const rubricHashOf = criteria => sha256(JSON.stringify(criteria));
+
+// Bounties posted without an explicit rubric still get a pinned v1: the
+// whole acceptance criteria text as a single criterion.
+export function defaultRubricFor(criteriaText) {
+  return Object.freeze([{ criterionId: "c1", description: String(criteriaText ?? "").slice(0, 500) || "c1" }]);
+}
+
+// Normalize a {criterionId, verdict} citation list against a pinned rubric:
+// every cited id must exist, every pinned criterion must be cited, verdicts
+// are pass|fail. Returns the frozen citation list.
+export function citationsAgainstRubric(citations, rubric) {
+  check(Array.isArray(citations) && citations.length >= 1, "missing_citations",
+    "acceptance requires citations: one {criterionId, verdict} per pinned rubric criterion");
+  const ids = new Set(rubric.criteria.map(c => c.criterionId));
+  for (const citation of citations) {
+    check(citation !== null && typeof citation === "object" && !Array.isArray(citation),
+      "invalid_input", "citations must be {criterionId, verdict} objects");
+    check(ids.has(citation.criterionId), "unknown_criterion",
+      `criterionId "${citation.criterionId}" is not in the pinned rubric v${rubric.version} (${rubric.hash.slice(0, 12)}…)`);
+    check(CITATION_VERDICTS.includes(citation.verdict), "invalid_input",
+      `verdict must be one of ${CITATION_VERDICTS.join("|")}`);
+  }
+  for (const id of ids)
+    check(citations.some(c => c.criterionId === id), "missing_citations",
+      `pinned rubric criterion "${id}" has no citation`);
+  return Object.freeze(citations.map(c => Object.freeze({ criterionId: c.criterionId, verdict: c.verdict })));
+}
 // Quotable sequential bounty ids per room (e.g. ROOM-12). The bracketed form
 // [ROOM-12] is link-only in slice 1: no code path scans text for references,
 // so bare or bracketed mentions can never trigger a side effect.
@@ -357,6 +597,7 @@ export class BountyEscrow {
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
+    this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
     // server/bounty-receipts.mjs. When null (the default — production key
     // provisioning is a later slice), transitions return `signed: []` and
@@ -388,7 +629,8 @@ export class BountyEscrow {
       } else {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-          "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+          "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
+          "bounty_review_packets", "bounty_sybil_flags"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         else this._migrateColumns();
         this._ready = true;
@@ -411,14 +653,16 @@ export class BountyEscrow {
   _checkSchemaReadOnly() {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
-      "bounty_idempotency", "bounty_watchers", "bounty_sequences"];
+      "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
+      "bounty_review_packets", "bounty_sybil_flags"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
     const required = {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
-      bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label"],
+      bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
+        "rubric_json", "rubric_hash", "rubric_version"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -457,6 +701,26 @@ export class BountyEscrow {
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
     addCol("bounty_records", "label TEXT");
+    // Slice 6: rubric pinning. Capture whether the rubric columns are new:
+    // the pin backfill below is a write and must run only when migration
+    // just added the columns (the only NULL source), mirroring the
+    // state_changed_ms discipline.
+    const hadRubricCols = colsOf("bounty_records").has("rubric_json");
+    addCol("bounty_records", "rubric_json TEXT");
+    addCol("bounty_records", "rubric_hash TEXT");
+    addCol("bounty_records", "rubric_version INTEGER");
+    addCol("bounty_records", "submission_hash TEXT");
+    // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
+    // compares stored DDL verbatim, so a reformatted copy would fail it.
+    // A name may own several chunks (table + its indexes), so collect all.
+    // All chunks are IF NOT EXISTS: safe no-ops when already present.
+    const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .filter(sql => sql.includes(name));
+    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags"])
+      for (const ddl of schemaChunks(name)) this.db.exec(ddl);
+    // Legacy rows (NULL rubric): pin the default derived v1, same as the
+    // boot convergence backfill.
+    if (!hadRubricCols) _backfillRubricPins(this.db);
     // The backfill is a write: run it only when migration actually added a
     // column (first migration). New rows always set state_changed_ms at
     // INSERT, so a converged database can never accumulate new NULLs; the
@@ -652,6 +916,19 @@ export class BountyEscrow {
     return this._viewBounty(row, roomId);
   }
 
+  // The pinned rubric for a bounty row: { version, hash, criteria }. Legacy
+  // rows that predate slice 6 (NULL columns — e.g. a test double that never
+  // ran convergence) fall back to the default derived v1, so citation checks
+  // always have a pinned version to validate against.
+  _rubricOfRow(row) {
+    if (row.rubric_json) {
+      return Object.freeze({ version: row.rubric_version ?? 1, hash: row.rubric_hash,
+        criteria: Object.freeze(JSON.parse(row.rubric_json).map(c => Object.freeze({ ...c }))) });
+    }
+    const criteria = defaultRubricFor(row.criteria);
+    return Object.freeze({ version: 1, hash: rubricHashOf(criteria), criteria });
+  }
+
   _viewBounty(row, roomId) {
     const now = this.nowMs();
     return Object.freeze({
@@ -669,6 +946,8 @@ export class BountyEscrow {
       evidence: row.evidence_json ? JSON.parse(row.evidence_json) : null,
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
+      rubric: this._rubricOfRow(row),
+      submissionHash: row.submission_hash ?? null,
       watchers: this._watchersOf(roomId ?? row.room_id, row.bounty_id),
       createdAt: row.created_at, updatedAt: row.updated_at,
       stateChangedAt: new Date(row.state_changed_ms).toISOString(),
@@ -682,14 +961,19 @@ export class BountyEscrow {
     this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
-      evidence_json=?, attestation_json=?, resolution_json=?, updated_at=? WHERE bounty_id=?`)
+      evidence_json=?, attestation_json=?, resolution_json=?,
+      rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
       .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
         bounty.snoozedUntilMs ?? null, bounty.declineReason ?? null, bounty.duplicateOf ?? null, bounty.label ?? null,
         bounty.evidence ? JSON.stringify(bounty.evidence) : null,
         bounty.attestation ? JSON.stringify(bounty.attestation) : null,
-        bounty.resolution ? JSON.stringify(bounty.resolution) : null, at, bounty.bountyId);
+        bounty.resolution ? JSON.stringify(bounty.resolution) : null,
+        bounty.rubric ? JSON.stringify(bounty.rubric.criteria) : null,
+        bounty.rubric ? bounty.rubric.hash : null,
+        bounty.rubric ? bounty.rubric.version : null,
+        bounty.submissionHash ?? null, at, bounty.bountyId);
   }
 
   _mutable(row) {
@@ -703,6 +987,8 @@ export class BountyEscrow {
       evidence: row.evidence_json ? JSON.parse(row.evidence_json) : null,
       attestation: row.attestation_json ? JSON.parse(row.attestation_json) : null,
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
+      rubric: this._rubricOfRow(row),
+      submissionHash: row.submission_hash ?? null,
     };
   }
 
@@ -751,7 +1037,7 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
-  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, actor } = {}) {
+  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
@@ -769,22 +1055,76 @@ export class BountyEscrow {
         check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
       }
+      // Slice 6: pin the rubric at v1. No explicit rubric -> derive the
+      // default single-criterion pin from the acceptance criteria text.
+      const pinned = rubric === null || rubric === undefined ? defaultRubricFor(criteria) : canonicalRubric(rubric);
+      const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
       const at = isoNow(this.nowMs());
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
         (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, claimant, state, state_changed_ms,
          deadline_ms, challenge_ends_ms, dispute_id, dispute_opened_ms, snoozed_until_ms, decline_reason,
-         duplicate_of, label, evidence_json, attestation_json, resolution_json, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         duplicate_of, label, evidence_json, attestation_json, resolution_json,
+         rubric_json, rubric_hash, rubric_version, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, null, "proposed", this.nowMs(),
-          deadlineMs, null, null, null, null, null, null, null, null, null, null, at, at);
+          deadlineMs, null, null, null, null, null, null, null, null, null, null,
+          rubricJson, rubricHash, 1, at, at);
+      this.db.prepare(`INSERT INTO bounty_rubric_versions
+        (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by)
+        VALUES (?,?,?,?,?,?,?)`).run(roomId, bountyId, 1, rubricHash, rubricJson, at, lane);
       // The poster watches their own bounty from proposal time; fan-out to
       // watchers is suppressed until funded (published).
       this._addWatcher(roomId, bountyId, lane, at);
       const event = this._event(roomId, "bounty.proposed",
-        { bountyId, actor: act, before: null, after: "proposed", data: { amount, title } });
+        { bountyId, actor: act, before: null, after: "proposed",
+          data: { amount, title, rubricVersion: 1, rubricHash } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "propose", bountyId, at, actor: act, event } };
+    });
+  }
+
+  // Slice 6: re-pin the rubric (v+1). Poster-only, and only while PROPOSED —
+  // funding pins the rubric for the rest of the lifecycle, so every
+  // acceptance citation and every arbiter re-check names the version that
+  // governed the work. Every version is preserved in
+  // bounty_rubric_versions.
+  updateRubric(roomId, bountyId, { poster, rubric, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      const { bounty, lane } = this._triageBounty(roomId, bountyId, poster);
+      const act = normalizeActor(actor, lane);
+      const pinned = canonicalRubric(rubric);
+      const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
+      const version = (bounty.rubric?.version ?? 0) + 1;
+      check(rubricHash !== bounty.rubric?.hash, "invalid_input", "the rubric is unchanged");
+      bounty.rubric = Object.freeze({ version, hash: rubricHash, criteria: pinned });
+      this._saveBounty(bounty);
+      const at = isoNow(this.nowMs());
+      this.db.prepare(`INSERT INTO bounty_rubric_versions
+        (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by)
+        VALUES (?,?,?,?,?,?,?)`).run(roomId, bountyId, version, rubricHash, rubricJson, at, lane);
+      const event = this._event(roomId, "bounty.rubric-updated",
+        { bountyId, actor: act, before: "proposed", after: "proposed", data: { rubricVersion: version, rubricHash } });
+      return { bounty: this._getBounty(roomId, bountyId),
+        receipt: { kind: "rubric-update", bountyId, rubricVersion: version, rubricHash, at, actor: act, event } };
+    });
+  }
+
+  // Read one pinned rubric version (for arbiter re-checks). Defaults to the
+  // current pin.
+  getRubricVersion(roomId, bountyId, version = null) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const row = version === null || version === undefined
+        ? this.db.prepare(`SELECT version, rubric_hash, rubric_json FROM bounty_rubric_versions
+            WHERE room_id=? AND bounty_id=? ORDER BY version DESC LIMIT 1`).get(roomId, bountyId)
+        : this.db.prepare(`SELECT version, rubric_hash, rubric_json FROM bounty_rubric_versions
+            WHERE room_id=? AND bounty_id=? AND version=?`).get(roomId, bountyId, version);
+      if (!row) fail(version === null || version === undefined ? "unknown_bounty" : "unknown_rubric_version",
+        version === null || version === undefined ? `unknown bounty "${bountyId}"` : `bounty ${bountyId} has no rubric v${version}`);
+      return Object.freeze({ bountyId, version: row.version, hash: row.rubric_hash,
+        criteria: Object.freeze(JSON.parse(row.rubric_json)) });
     });
   }
 
@@ -885,6 +1225,77 @@ export class BountyEscrow {
     });
   }
 
+  // --- slice 8: graduated anti-flake ladder -------------------------------------
+  // Flake strikes decay (always a way back); the rung escalates
+  // forfeit -> 2x bond -> cooldown. Derived on read from the append-only
+  // bounty_flakes table; every step is journaled as a bounty_events row.
+  _flakeStrikes(roomId, lane, now) {
+    return this.db.prepare(`SELECT struck_at_ms FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND struck_at_ms > ? ORDER BY struck_at_ms DESC`)
+      .all(roomId, lane, now - FLAKE_DECAY_MS).map(r => r.struck_at_ms);
+  }
+
+  // The lane's ladder position: { strikes, rung, bondMultiplier,
+  // cooldownUntilMs }. rung 0 = clean, 1 = forfeit-on-flake, 2 = double
+  // bond, 3+ = cooldown. Pure read — the escalation is deterministic.
+  _flakeState(roomId, lane) {
+    const now = this.nowMs();
+    const strikes = this._flakeStrikes(roomId, lane, now);
+    const rung = Math.min(strikes.length, FLAKE_COOLDOWN_RUNG);
+    const rawCooldown = rung >= FLAKE_COOLDOWN_RUNG && strikes.length > 0
+      ? strikes[0] + FLAKE_COOLDOWN_MS : null;
+    return {
+      strikes: strikes.length, rung,
+      bondMultiplier: rung >= 2 ? FLAKE_BOND_MULTIPLIER : 1,
+      cooldownUntilMs: rawCooldown !== null && now < rawCooldown ? rawCooldown : null,
+    };
+  }
+
+  // Record one flake strike (timeout without submitting, or work judged bad
+  // on an upheld dispute) and journal the ladder step. Returns the lane's
+  // new ladder position.
+  _recordFlake(roomId, lane, bountyId, reason) {
+    const now = this.nowMs();
+    const rung = Math.min(this._flakeStrikes(roomId, lane, now).length + 1, FLAKE_COOLDOWN_RUNG);
+    const flakeId = newId("flk_");
+    this.db.prepare(`INSERT INTO bounty_flakes (flake_id, room_id, lane, bounty_id, struck_at_ms, reason, rung)
+      VALUES (?,?,?,?,?,?,?)`).run(flakeId, roomId, lane, bountyId, now, reason, rung);
+    const state = this._flakeState(roomId, lane);
+    const event = this._event(roomId, "flake.recorded",
+      { bountyId, actor: RULE_ACTOR,
+        data: { lane, reason, strikes: state.strikes, rung: state.rung,
+          bondMultiplier: state.bondMultiplier,
+          cooldownUntil: state.cooldownUntilMs === null ? null : new Date(state.cooldownUntilMs).toISOString() } });
+    return { ...state, event };
+  }
+
+  // Journal decay and cooldown-end transitions. Decay is derived on read
+  // (expired strikes stop counting immediately), but the transition itself
+  // is journaled lazily the first time a write path observes it — there is
+  // no keeper for the ladder, so claim time is the deterministic point of
+  // observation. Each transition journals exactly once per strike row.
+  _journalDecay(roomId, lane) {
+    const now = this.nowMs();
+    const ended = this.db.prepare(`SELECT rowid, struck_at_ms FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND rung >= ? AND struck_at_ms + ? <= ? AND cooldown_end_journaled=0`)
+      .all(roomId, lane, FLAKE_COOLDOWN_RUNG, FLAKE_COOLDOWN_MS, now);
+    for (const row of ended) {
+      this.db.prepare(`UPDATE bounty_flakes SET cooldown_end_journaled=1 WHERE rowid=?`).run(row.rowid);
+      this._event(roomId, "flake.cooldown-ended",
+        { actor: RULE_ACTOR,
+          data: { lane, cooldownUntil: new Date(row.struck_at_ms + FLAKE_COOLDOWN_MS).toISOString() } });
+    }
+    const decayed = this.db.prepare(`SELECT rowid FROM bounty_flakes
+      WHERE room_id=? AND lane=? AND struck_at_ms <= ? AND decayed_journaled=0`)
+      .all(roomId, lane, now - FLAKE_DECAY_MS);
+    if (decayed.length > 0) {
+      const ids = decayed.map(r => r.rowid);
+      this.db.prepare(`UPDATE bounty_flakes SET decayed_journaled=1 WHERE rowid IN (${ids.map(() => "?").join(",")})`).run(...ids);
+      this._event(roomId, "flake.decayed",
+        { actor: RULE_ACTOR, data: { lane, strikesDecayed: ids.length } });
+    }
+  }
+
   // --- claim / submit / accept --------------------------------------------------------
   claimBounty(roomId, bountyId, { claimant, actor } = {}) {
     return this.store.transaction(() => {
@@ -904,18 +1315,29 @@ export class BountyEscrow {
       const eligibility = claimEligibility(this, roomId, lane, bounty.amountMillis);
       if (!eligibility.allowed)
         fail("reputation_probation", `probation reputation band: may only claim bounties up to ${PROBATION_MAX_CLAIM_CREDITS} credits`);
-      this._requirePayable(roomId, lane, CLAIM_BOND_MILLIS, "claim bond");
+      // Slice 8: graduated anti-flake ladder. Rung 3+ lanes sit out a
+      // cooldown; rung 2+ lanes post a double bond. The bond is forfeited
+      // (not returned) on the next flake — see _timeoutRefund.
+      // Decay/cooldown-end transitions journal lazily here (the
+      // deterministic observation point — there is no ladder keeper).
+      this._journalDecay(roomId, lane);
+      const flake = this._flakeState(roomId, lane);
+      if (flake.cooldownUntilMs !== null)
+        fail("claim_cooldown", `anti-flake cooldown: no new claims until ${new Date(flake.cooldownUntilMs).toISOString()}`);
+      const bondMillis = CLAIM_BOND_MILLIS * flake.bondMultiplier;
+      this._requirePayable(roomId, lane, bondMillis, "claim bond");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
-        amountMillis: CLAIM_BOND_MILLIS, kind: "bond-lock", bountyId, lotId,
-        memo: `anti-flake claim bond for ${bountyId}`, actor: act,
+        amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId,
+        memo: `anti-flake claim bond for ${bountyId}${flake.bondMultiplier > 1 ? ` (${flake.bondMultiplier}x ladder)` : ""}`, actor: act,
         receipt: { type: "bond-locked", payload: { bondKind: "claim", fromAccount: lane } } });
       bounty.claimant = lane;
       this._transition(bounty, "claimed");
       this._saveBounty(bounty);
       const event = this._event(roomId, "bounty.claimed",
-        { bountyId, actor: act, before: "funded", after: "claimed", data: { bond: toCredits(CLAIM_BOND_MILLIS) } });
+        { bountyId, actor: act, before: "funded", after: "claimed",
+          data: { bond: toCredits(bondMillis), bondMultiplier: flake.bondMultiplier, flakeRung: flake.rung } });
       return { bounty: this._getBounty(roomId, bountyId),
         receipt: { kind: "bond-lock", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
@@ -937,13 +1359,249 @@ export class BountyEscrow {
       // Acceptance track: the work enters review, evidence-cited.
       this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
       bounty.evidence = receipt;
+      // Slice 10: the normalized submission fingerprint, pinned before the
+      // save so correlation reads the stored value.
+      bounty.submissionHash = submissionHashOf(receipt);
       this._transition(bounty, "submitted");
       this._saveBounty(bounty);
       const at = isoNow(this.nowMs());
       const event = this._event(roomId, "bounty.submitted",
         { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
-      return { bounty: this._getBounty(roomId, bountyId),
+      // Slice 10: claim-graph correlation -> review packet; above-threshold
+      // clusters -> sybil flags for the arbiter review queue. Review-only:
+      // packets and flags never change bounty state, balances, bonds, or
+      // reputation — no auto-ban, no auto-slash.
+      const { packet, flags } = this._analyzeSubmissionCorrelation(roomId, bounty, bounty.submissionHash, receipt);
+      return { bounty: this._getBounty(roomId, bountyId), packet, flags,
         receipt: { kind: "submit", bountyId, evidence: receipt, at, actor: act, event } };
+    });
+  }
+
+  // --- slice 10: claim-graph correlation -> arbiter review packets -----------
+  // Deterministic, room-scoped signals:
+  //   - duplicate-submission: another bounty carries the same fingerprint
+  //     (identical canonicalized evidence).
+  //   - repeat-claimant-poster: this claimant already claimed from this
+  //     poster before (a repeat pairing — productive lane or collusion,
+  //     for a human to decide).
+  //   - copy-paste: >= SYBIL_COPY_PASTE_MIN_LANES distinct lanes submitted
+  //     the byte-identical normalized fingerprint (copy-paste / sockpuppet
+  //     ring). The room lifecycle admits one submission per bounty, so the
+  //     distinct-lane form is the operational reading of "supposedly
+  //     independent lanes, identical work".
+  //   - claim-graph: another lane's submissions carry this fingerprint on
+  //     >= SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES distinct bounties (a lane pair
+  //     sharing submitters/evidence fingerprints across bounties).
+  // Any signal stores one review packet; the copy-paste / claim-graph
+  // signals additionally raise a sybil flag — one per signal — for the
+  // arbiter review queue. REVIEW-ONLY: packets and flags are stored and
+  // journaled; nothing else moves — no auto-ban, no auto-slash, no
+  // balance/bond/reputation change.
+  _analyzeSubmissionCorrelation(roomId, bounty, fingerprint, evidence) {
+    const signals = [];
+    const matched = new Map(); // bountyId -> matched bounty summary
+    const noteMatch = row => {
+      if (row.bounty_id === bounty.bountyId || matched.has(row.bounty_id)) return;
+      matched.set(row.bounty_id, {
+        bountyId: row.bounty_id, claimant: row.claimant, poster: row.poster,
+        verifier: row.verifier, state: row.state, submissionHash: row.submission_hash,
+        submittedAt: new Date(row.state_changed_ms).toISOString(),
+      });
+    };
+    // Every submission carrying this fingerprint (the current one included):
+    // the spec thresholds read off this set.
+    const shared = this.db.prepare(`SELECT bounty_id, claimant, poster, verifier, state,
+        submission_hash, state_changed_ms FROM bounty_records
+      WHERE room_id=? AND submission_hash=?`).all(roomId, fingerprint);
+    const other = shared.filter(r => r.bounty_id !== bounty.bountyId);
+    const toMember = r => ({ bountyId: r.bounty_id, lane: r.claimant,
+      submittedAt: new Date(r.state_changed_ms).toISOString() });
+    for (const row of other) noteMatch(row);
+    if (other.length > 0)
+      signals.push({ type: "duplicate-submission",
+        detail: `${other.length} other submission(s) carry the identical fingerprint`,
+        matchedBountyIds: other.map(r => r.bounty_id) });
+    const repeats = this.db.prepare(`SELECT * FROM bounty_records
+      WHERE room_id=? AND claimant=? AND poster=? AND bounty_id<>? AND claimant IS NOT NULL`)
+      .all(roomId, bounty.claimant, bounty.poster, bounty.bountyId);
+    for (const row of repeats) noteMatch(row);
+    if (repeats.length > 0)
+      signals.push({ type: "repeat-claimant-poster",
+        detail: `claimant ${bounty.claimant} previously claimed ${repeats.length} bounty/bounties from poster ${bounty.poster}`,
+        matchedBountyIds: repeats.map(r => r.bounty_id) });
+    // Spec thresholds (integration map #10): named constants, deterministic.
+    const specSignals = [];
+    const lanes = new Set(shared.map(r => r.claimant).filter(Boolean));
+    if (lanes.size >= SYBIL_COPY_PASTE_MIN_LANES)
+      specSignals.push({ type: "copy-paste",
+        detail: `${lanes.size} distinct lanes submitted the byte-identical normalized fingerprint`,
+        matchedBountyIds: shared.map(r => r.bounty_id),
+        lanes: [...lanes].sort(), members: shared.map(toMember) });
+    const byLane = new Map(); // other lane -> its rows with this fingerprint
+    for (const row of other) {
+      if (!row.claimant || row.claimant === bounty.claimant) continue;
+      const list = byLane.get(row.claimant) ?? [];
+      if (!list.some(r => r.bounty_id === row.bounty_id)) list.push(row);
+      byLane.set(row.claimant, list);
+    }
+    for (const [lane, rows] of byLane)
+      if (rows.length >= SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES)
+        specSignals.push({ type: "claim-graph",
+          detail: `lane ${lane} shares the identical fingerprint on ${rows.length} distinct bounties with ${bounty.claimant}`,
+          matchedBountyIds: [bounty.bountyId, ...rows.map(r => r.bounty_id)],
+          lanes: [bounty.claimant, lane].sort(),
+          members: [toMember(shared.find(r => r.bounty_id === bounty.bountyId)), ...rows.map(toMember)] });
+    for (const s of specSignals) signals.push(s);
+    if (signals.length === 0) return { packet: null, flags: [] };
+    // Claim graph: lanes as nodes (poster/claimant/verifier roles), the
+    // claim/post/verify relationships as edges, over this submission and
+    // every matched one.
+    const nodes = new Map(), edges = [];
+    const touch = (lane, roles) => {
+      if (lane === null || lane === undefined) return;
+      const n = nodes.get(lane) ?? { lane, roles: [] };
+      for (const role of roles) if (!n.roles.includes(role)) n.roles.push(role);
+      nodes.set(lane, n);
+    };
+    const link = b => {
+      touch(b.poster, ["poster"]); touch(b.claimant, ["claimant"]); touch(b.verifier, ["verifier"]);
+      edges.push({ from: b.claimant, to: b.poster, kind: "claimed-from", bountyId: b.bountyId });
+      edges.push({ from: b.poster, to: b.claimant, kind: "posted-for", bountyId: b.bountyId });
+      if (b.verifier) edges.push({ from: b.verifier, to: b.claimant, kind: "verifies", bountyId: b.bountyId });
+    };
+    link(bounty);
+    for (const m of matched.values()) link(m);
+    const frozen = value => deepFreeze(JSON.parse(JSON.stringify(value)));
+    const packet = {
+      packetId: newId("rpkt_"), roomId, createdAt: isoNow(this.nowMs()),
+      bountyId: bounty.bountyId, submissionHash: fingerprint,
+      signals: frozen(signals),
+      matchedBounties: frozen([...matched.values()]),
+      graph: frozen({ nodes: [...nodes.values()], edges }),
+      evidence: frozen({ ...evidence }),
+    };
+    this.db.prepare(`INSERT INTO bounty_review_packets
+      (room_id, packet_id, created_at, bounty_id, submission_hash,
+       signals_json, matched_bounties_json, graph_json, evidence_json)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(roomId, packet.packetId, packet.createdAt, packet.bountyId, fingerprint,
+        JSON.stringify(packet.signals), JSON.stringify(packet.matchedBounties),
+        JSON.stringify(packet.graph), JSON.stringify(packet.evidence));
+    this._event(roomId, "review.packet-created",
+      { bountyId: bounty.bountyId, actor: RULE_ACTOR,
+        data: { packetId: packet.packetId, submissionHash: fingerprint,
+          signalTypes: signals.map(s => s.type), matchedBountyIds: [...matched.keys()] } });
+    // Above-threshold clusters -> one sybil flag per spec signal, for the
+    // arbiter review queue. Review-only: the flag is stored and journaled;
+    // bounty state, balances, bonds, and reputation are untouched.
+    const flags = specSignals.map(s => this._flagSybilCluster(roomId, bounty, fingerprint, s, packet));
+    return { packet: deepFreeze(packet), flags };
+  }
+
+  // Slice 10: raise one sybil flag per above-threshold cluster signal. The
+  // flag is a review-queue record — open until an arbiter dismisses (honest
+  // coincidence) or confirms it. It never touches bounty state, balances,
+  // bonds, or reputation.
+  _flagSybilCluster(roomId, bounty, fingerprint, signal, packet) {
+    const flagId = newId("sybf_"), clusterId = newId("sycl_");
+    const createdAt = isoNow(this.nowMs());
+    const memberLanes = [...(signal.lanes ?? [])];
+    const memberBounties = [...(signal.members ?? [])];
+    this.db.prepare(`INSERT INTO bounty_sybil_flags
+      (room_id, flag_id, cluster_id, signal, status, created_at, submission_hash,
+       member_lanes_json, member_bounties_json, evidence_packet_json)
+      VALUES (?,?,?,?, 'open',?,?,?,?,?)`)
+      .run(roomId, flagId, clusterId, signal.type, createdAt, fingerprint,
+        JSON.stringify(memberLanes), JSON.stringify(memberBounties), JSON.stringify(packet));
+    this._event(roomId, "sybil.flag-created",
+      { bountyId: bounty.bountyId, actor: RULE_ACTOR,
+        data: { flagId, clusterId, signal: signal.type, submissionHash: fingerprint,
+          memberLanes, memberBountyIds: memberBounties.map(m => m.bountyId), packetId: packet.packetId } });
+    return Object.freeze({
+      flagId, clusterId, roomId, signal: signal.type, status: "open",
+      createdAt, resolvedAt: null, resolvedBy: null, resolutionReason: null,
+      submissionHash: fingerprint,
+      memberLanes: Object.freeze(memberLanes),
+      memberBounties: Object.freeze(memberBounties.map(m => Object.freeze({ ...m }))),
+      evidencePacket: packet,
+    });
+  }
+
+  _flagOf(row) {
+    return Object.freeze({
+      flagId: row.flag_id, clusterId: row.cluster_id, roomId: row.room_id,
+      signal: row.signal, status: row.status,
+      createdAt: row.created_at, resolvedAt: row.resolved_at,
+      resolvedBy: row.resolved_by, resolutionReason: row.resolution_reason,
+      submissionHash: row.submission_hash,
+      memberLanes: Object.freeze(JSON.parse(row.member_lanes_json)),
+      memberBounties: Object.freeze(JSON.parse(row.member_bounties_json).map(m => Object.freeze({ ...m }))),
+      evidencePacket: deepFreeze(JSON.parse(row.evidence_packet_json)),
+    });
+  }
+
+  // Slice 10: arbiter inspection of sybil flags — the review queue.
+  // Room-scoped read; ?status= filters to open / dismissed / confirmed.
+  getSybilFlags(roomId, { status = null } = {}) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      if (status !== null) check(["open", "dismissed", "confirmed"].includes(status),
+        "invalid_input", "status must be one of open, dismissed, confirmed");
+      const rows = status === null
+        ? this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? ORDER BY created_at`).all(roomId)
+        : this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? AND status=? ORDER BY created_at`)
+          .all(roomId, status);
+      return rows.map(row => this._flagOf(row));
+    });
+  }
+
+  // Slice 10: arbiter resolution of a sybil flag — dismissed (honest
+  // coincidence: the same template, the same trivial task) or confirmed
+  // (the arbiter agrees the cluster is correlated). A reason is required
+  // either way. REVIEW-ONLY: resolution records the verdict; it never
+  // moves bounty state, balances, bonds, or reputation — no auto-ban,
+  // no auto-slash.
+  resolveSybilFlag(roomId, flagId, { resolution, reason, resolver } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      check(resolution === "dismissed" || resolution === "confirmed", "invalid_input",
+        `resolution must be "dismissed" or "confirmed"`);
+      check(typeof reason === "string" && reason.trim().length >= 1 && reason.length <= 500, "invalid_input",
+        "resolution reason is required (1..500 characters)");
+      const row = this.db.prepare(`SELECT * FROM bounty_sybil_flags WHERE room_id=? AND flag_id=?`)
+        .get(roomId, flagId);
+      if (!row) fail("unknown_flag", `unknown sybil flag "${flagId}"`);
+      check(row.status === "open", "invalid_state", `flag is ${row.status}, not open`);
+      const by = canonicalLane(resolver);
+      const resolvedAt = isoNow(this.nowMs());
+      const trimmed = reason.trim();
+      this.db.prepare(`UPDATE bounty_sybil_flags SET status=?, resolved_at=?, resolved_by=?, resolution_reason=?
+        WHERE room_id=? AND flag_id=?`).run(resolution, resolvedAt, by, trimmed, roomId, flagId);
+      this._event(roomId, "sybil.flag-resolved",
+        { actor: normalizeActor(null, by),
+          data: { flagId, clusterId: row.cluster_id, signal: row.signal, resolution, reason: trimmed } });
+      return this._flagOf({ ...row, status: resolution, resolved_at: resolvedAt,
+        resolved_by: by, resolution_reason: trimmed });
+    });
+  }
+
+  // Slice 10: arbiter inspection of review packets. Room-scoped read;
+  // packets are immutable once created.
+  getReviewPackets(roomId, { bountyId = null } = {}) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      const rows = bountyId === null
+        ? this.db.prepare(`SELECT * FROM bounty_review_packets WHERE room_id=? ORDER BY created_at`).all(roomId)
+        : this.db.prepare(`SELECT * FROM bounty_review_packets WHERE room_id=? AND bounty_id=? ORDER BY created_at`)
+          .all(roomId, bountyId);
+      return rows.map(row => Object.freeze({
+        packetId: row.packet_id, roomId: row.room_id, createdAt: row.created_at,
+        bountyId: row.bounty_id, submissionHash: row.submission_hash,
+        signals: Object.freeze(JSON.parse(row.signals_json)),
+        matchedBounties: Object.freeze(JSON.parse(row.matched_bounties_json)),
+        graph: Object.freeze(JSON.parse(row.graph_json)),
+        evidence: Object.freeze(JSON.parse(row.evidence_json)),
+      }));
     });
   }
 
@@ -988,6 +1646,10 @@ export class BountyEscrow {
       if (verifierAttestation.at !== undefined)
         check(typeof verifierAttestation.at === "string" && Number.isFinite(Date.parse(verifierAttestation.at)),
           "invalid_input", "verifierAttestation.at must be an ISO timestamp");
+      // Slice 6: the acceptance verdict must cite every pinned rubric
+      // criterion with a pass|fail verdict. The citations name the rubric
+      // version that governed the work, so arbiters can re-check against it.
+      const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
       const at = isoNow(this.nowMs());
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
@@ -1007,7 +1669,9 @@ export class BountyEscrow {
         amountMillis: bounty.amountMillis, kind: "attribute", bountyId, lotId,
         memo: `attributed to ${bounty.claimant} (approval ${event.seq})`, actor: act,
         receipt: { type: "attributed", payload: { claimant: bounty.claimant, eventSeq: String(event.seq) } } });
-      bounty.attestation = Object.freeze({ ...verifierAttestation, recordedBy: lane, recordedAt: at });
+      bounty.attestation = Object.freeze({ ...verifierAttestation, citations,
+        rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
+        recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);
@@ -1105,7 +1769,7 @@ export class BountyEscrow {
     });
   }
 
-  decideDispute(roomId, bountyId, { decider, outcome, reasonCodes, actor } = {}) {
+  decideDispute(roomId, bountyId, { decider, outcome, reasonCodes, rubricCheck = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       const lane = canonicalLane(decider);
@@ -1116,9 +1780,19 @@ export class BountyEscrow {
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
       check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      // Slice 6: the arbiter may re-check the work against the pinned
+      // rubric version. When supplied, the citations are validated against
+      // the pin before the ruling lands, and recorded on the resolution.
+      let checkedRubric = null;
+      if (rubricCheck !== null && rubricCheck !== undefined) {
+        const citations = citationsAgainstRubric(rubricCheck.citations ?? rubricCheck, bounty.rubric);
+        checkedRubric = Object.freeze({ citations, rubricVersion: bounty.rubric.version,
+          rubricHash: bounty.rubric.hash, by: lane });
+      }
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
       this._settlementSigned = [];
+      this._rubricCheckTransient = checkedRubric;
       try {
         const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
         this._persistDispute(roomId, decided);
@@ -1129,6 +1803,7 @@ export class BountyEscrow {
         throw error;
       } finally {
         this._settlementActor = null;
+        this._rubricCheckTransient = null;
       }
       const signed = this._settlementSigned ?? [];
       this._settlementSigned = null;
@@ -1203,6 +1878,9 @@ export class BountyEscrow {
           this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
             amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
         this._settleClaimBond(bounty, at, { forfeit: true, actor });
+        // Slice 8: work judged bad is a flake strike — the bond forfeit
+        // above is the rung-1 consequence, journaled alongside.
+        if (worker) this._recordFlake(roomId, worker, bountyId, "dispute-upheld");
       } else if (settleKind === "split") {
         // SPLIT: half the award vests with the worker (fee at sweep), half
         // refunds to the poster, bond returned.
@@ -1251,7 +1929,8 @@ export class BountyEscrow {
     }
     this._transition(bounty, verdictTo);
     bounty.resolution = Object.freeze({ kind: settleKind, outcome, terminal,
-      decidedAt: at, bondForfeited: forfeited });
+      decidedAt: at, bondForfeited: forfeited,
+      ...(this._rubricCheckTransient ? { rubricCheck: this._rubricCheckTransient } : {}) });
     this._saveBounty(bounty);
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });
@@ -1273,24 +1952,24 @@ export class BountyEscrow {
   // auto-approve, stale disputes default to RELEASE, approved lots sweep,
   // proposed bounties past deadline expire unfunded. Mechanical transitions
   // are attributed to the rule actor (the human/agent caller who triggered
-  // the keeper run is recorded as triggeredBy).
-  //
-  // The claim bond is an anti-flake lock, not a fee: it returns to the
-  // claimant on payout AND on timeout (spec: "bond returned"). It is
-  // forfeited to the room pool only when the work was judged bad (dispute
-  // upheld). Defensive: a no-op when the bond is not actually locked for
-  // this bounty.
+  // The claim bond is an anti-flake lock, not a fee. Slice 8: the ladder
+  // forfeits the bond to the pool on a flake (timeout without submitting)
+  // and returns it when the submission went through review and the award
+  // refunded through no fault of the claimant. The settlement moves the
+  // ACTUAL locked amount — rung 2+ claims locked a double bond, and that
+  // doubled amount is what returns or forfeits. Defensive: a no-op when
+  // the bond is not actually locked for this bounty.
   _settleClaimBond(bounty, at, { forfeit, actor }) {
     if (!bounty.claimant) return;
     const locked = this.db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM bounty_journal
       WHERE room_id=? AND bounty_id=? AND account_id=? AND lot_state='locked'`)
       .get(bounty.roomId, bounty.bountyId, bounty.claimant).t;
-    if (locked < CLAIM_BOND_MILLIS) return;
+    if (locked <= 0) return;
     this._move({ roomId: bounty.roomId, at, from: { account: bounty.claimant, state: "locked" },
       to: forfeit ? { account: POOL_ACCOUNT, state: "payable" } : { account: bounty.claimant, state: "payable" },
-      amountMillis: CLAIM_BOND_MILLIS, kind: forfeit ? "bond-forfeit" : "bond-return",
+      amountMillis: locked, kind: forfeit ? "bond-forfeit" : "bond-return",
       bountyId: bounty.bountyId, lotId: newId("lot_"), actor,
-      memo: forfeit ? "claim bond forfeited to pool (work judged bad)" : "claim bond returned" });
+      memo: forfeit ? "claim bond forfeited to pool (anti-flake ladder)" : "claim bond returned" });
   }
 
   _timeoutRefund(bounty, at, actor) {
@@ -1303,15 +1982,20 @@ export class BountyEscrow {
       amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
       memo: "timeout: award refunded in full, no fee", actor,
       receipt: { type: "refund-issued", payload: { reason: "timeout", refundTo: bounty.poster } } });
-    // No submission by the deadline: the award refunds and the claim bond
-    // returns to the claimant (spec: "bond returned").
-    this._settleClaimBond(bounty, at, { forfeit: false, actor });
+    // Slice 8: no submission by the deadline is a flake. The strike is
+    // journaled, the rung escalates (forfeit -> 2x bond -> cooldown), and
+    // the bond is forfeited to the pool (ladder rung 1 consequence).
+    const flake = bounty.claimant
+      ? this._recordFlake(roomId, bounty.claimant, bountyId, "timeout-no-submit") : null;
+    this._settleClaimBond(bounty, at, { forfeit: flake !== null, actor });
     this._transition(bounty, "refunded");
-    bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at });
+    bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at,
+      flake: flake === null ? null : { strikes: flake.strikes, rung: flake.rung } });
     this._saveBounty(bounty);
     this._event(roomId, "bounty.refunded",
       { bountyId, actor, before: "claimed", after: "refunded",
-        data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant } });
+        data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant,
+          flake: flake === null ? null : { strikes: flake.strikes, rung: flake.rung, bondMultiplier: flake.bondMultiplier } } });
     return movement.receipt ? [movement.receipt] : [];
   }
 
@@ -1552,8 +2236,15 @@ export class BountyEscrow {
       const cutoff = isoNow(this.nowMs() - 30 * 24 * 3600 * 1000);
       const rep30 = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS earned
         FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='payout' AND at >= ?`).get(roomId, lane, cutoff).earned;
+      // Slice 8: the graduated anti-flake ladder, derived from strikes
+      // inside the decay window — the cooldown (rung 3+) is visible on the
+      // identity card so lanes know when they may claim again.
+      const flake = this._flakeState(roomId, lane);
       return Object.freeze({ identity: lane, ...byState,
         total: byState.payable + byState.locked + byState.attributed + byState.approved,
+        flake: Object.freeze({ strikes: flake.strikes, rung: flake.rung,
+          bondMultiplier: flake.bondMultiplier,
+          cooldownUntil: flake.cooldownUntilMs === null ? null : new Date(flake.cooldownUntilMs).toISOString() }),
         // Reputation derives ONLY from paid completions (accepted, paid
         // receipts) — never claims, activity, or self-attestation. Derived,
         // non-transferable, room-scoped; the 30d window is slice 1's decay.

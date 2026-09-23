@@ -2373,9 +2373,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const bountyDisputeDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute\/decide$/.exec(url.pathname);
       const bountyDisputeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute$/.exec(url.pathname);
       const bountyFinalizeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/finalize$/.exec(url.pathname);
+      const bountyRubricMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/rubric$/.exec(url.pathname);
+      // Slice 10: literal segment — arbiter review-packet inspection; must
+      // never be mistaken for a bounty id.
+      const bountyReviewsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/reviews$/.exec(url.pathname);
+      // Slice 10: sybil-flag arbiter queue + resolution. Literal segments;
+      // must never be mistaken for a bounty id.
+      const bountySybilFlagsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags$/.exec(url.pathname);
+      const bountySybilDismissMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/dismiss$/.exec(url.pathname);
+      const bountySybilConfirmMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/confirm$/.exec(url.pathname);
       const bountyMatch = bountyListMatch ?? bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch
         ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
-        ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch;
+        ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
+        ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch;
       const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
       const creditsHistoryMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/history\/([^/]{1,256})$/.exec(url.pathname);
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
@@ -2487,15 +2497,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : bountyDuplicateMatch ? "duplicate" : bountyWatchMatch ? "watch"
           : bountyClaimMatch ? "claim" : bountySubmitMatch ? "submit" : bountyAcceptMatch ? "accept"
           : bountyDisputeDecideMatch ? "dispute-decide" : bountyDisputeMatch ? "dispute"
-          : bountyFinalizeMatch ? "finalize"
+          : bountyFinalizeMatch ? "finalize" : bountyRubricMatch ? "rubric"
+          : bountyReviewsMatch ? "reviews"
+          : bountySybilFlagsMatch ? "sybil-flags" : bountySybilDismissMatch ? "sybil-dismiss"
+          : bountySybilConfirmMatch ? "sybil-confirm"
           : creditsBalancesMatch ? "balances" : creditsHistoryMatch ? "history"
           : creditsTransferMatch ? "transfer" : "epoch-close";
         const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch
           ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
-          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch;
+          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch;
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
+        const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
+          sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
           identity: identityMatch ? identityMatch[2] : null, helpers: { json, reject, body } });
       }
       if (route === "thread" && req.method === "GET") {

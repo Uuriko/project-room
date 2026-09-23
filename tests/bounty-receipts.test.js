@@ -318,7 +318,7 @@ function runToAccepted(escrow, { amount = 5, verifier = null } = {}) {
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
-  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
@@ -390,7 +390,7 @@ test("accept issues a signed attributed receipt linked to the approval event", (
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
   const { receipt } = escrow.acceptWork(ROOM, bounty.bountyId,
-    { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+    { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   assert.equal(receipt.signed.length, 1);
   const [r] = receipt.signed;
   assert.equal(r.type, "attributed");

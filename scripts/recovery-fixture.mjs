@@ -195,7 +195,8 @@ export function createRecoveryFixture(filename) {
     escrow.submitWork("commons", first.bountyId, { claimant,
       evidence: { evidenceUrl: "https://example.com/pr/1", summary: "Drafted the release note in the fixture." } });
     escrow.acceptWork("commons", first.bountyId, { acceptor: poster,
-      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation." } });
+      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation.",
+        citations: [{ criterionId: "c1", verdict: "pass" }] } });
     escrow.watchBounty("commons", first.bountyId, { watcher });
     const second = escrow.postBounty("commons", { poster, title: "Recovery: disputed bounty",
       criteria: "Fixture row for the dispute path.", amount: 8, deadline }).bounty;
@@ -204,6 +205,29 @@ export function createRecoveryFixture(filename) {
     escrow.submitWork("commons", second.bountyId, { claimant,
       evidence: { evidenceUrl: "https://example.com/pr/2", summary: "Fixture submission under dispute." } });
     escrow.disputeBounty("commons", second.bountyId, { challenger: watcher, bond: 2, grounds: "Recovery fixture dispute." });
+    // Slice 8: a claimed bounty that times out without a submission records a flake.
+    // Short deadline so the keeper can time it out without expiring the fixture's invitation.
+    const flakyDeadline = new Date(now + 60000).toISOString();
+    const flaky = escrow.postBounty("commons", { poster, title: "Recovery: flaked bounty",
+      criteria: "Fixture row for the anti-flake ladder.", amount: 5, deadline: flakyDeadline }).bounty;
+    escrow.fundBounty("commons", flaky.bountyId, { funder: poster });
+    escrow.claimBounty("commons", flaky.bountyId, { claimant });
+    // Slice 10: two lanes submitting byte-identical evidence raise a review-only sybil flag.
+    const secondWorker = "id:agent/codex";
+    const sybilEvidence = { evidenceUrl: "https://example.com/pr/sybil", summary: "Identical fixture submission." };
+    const sybilA = escrow.postBounty("commons", { poster, title: "Recovery: sybil cluster A",
+      criteria: "Fixture row for the sybil detector.", amount: 5, deadline }).bounty;
+    escrow.fundBounty("commons", sybilA.bountyId, { funder: poster });
+    escrow.claimBounty("commons", sybilA.bountyId, { claimant });
+    escrow.submitWork("commons", sybilA.bountyId, { claimant, evidence: sybilEvidence });
+    const sybilB = escrow.postBounty("commons", { poster, title: "Recovery: sybil cluster B",
+      criteria: "Fixture row for the sybil detector.", amount: 5, deadline }).bounty;
+    escrow.fundBounty("commons", sybilB.bountyId, { funder: poster });
+    escrow.claimBounty("commons", sybilB.bountyId, { claimant: secondWorker });
+    escrow.submitWork("commons", sybilB.bountyId, { claimant: secondWorker, evidence: { ...sybilEvidence } });
+    // Advance just past the flaky bounty's short deadline; the keeper refunds it and records the flake.
+    now += 2 * 60000;
+    escrow.finalizeBounty("commons", flaky.bountyId, { caller: poster });
     escrow.idemExecute("commons", "recovery-fixture-bounty", "post", 200, () => ({ ok: true }));
   }
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,

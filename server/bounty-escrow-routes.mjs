@@ -45,7 +45,7 @@ const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
     if (error instanceof EscrowError) {
-      if (error.code === "unknown_bounty") reject(404, error.code, error.message);
+      if (error.code === "unknown_bounty" || error.code === "unknown_flag") reject(404, error.code, error.message);
       if (error.code === "not_authorized") reject(403, error.code, error.message);
       if (error.code === "already_claimed" || error.code === "dispute_exists") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
@@ -85,7 +85,7 @@ const readPayload = async (reject, readBody, req) => {
   return payload;
 };
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, helpers }) {
   const { json, reject, body } = helpers;
   const escrow = store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store);
   const caller = canonicalLane(auth.member.id);
@@ -117,14 +117,55 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const bounties = runPure(reject, () => escrow.listBounties(roomId, { group }));
     return json(res, 200, { roomId, bounties });
   }
+  // Slice 10: arbiter inspection of correlation review packets. Read-only
+  // (rooms:read); packets are immutable once created. ?bountyId= filters
+  // to one bounty's packets.
+  if (escrowRoute === "reviews" && req.method === "GET") {
+    const bountyId = url.searchParams.get("bountyId");
+    const packets = runPure(reject, () => escrow.getReviewPackets(roomId, { bountyId }));
+    return json(res, 200, { roomId, packets });
+  }
+  // Slice 10: the sybil-flag arbiter review queue. Read-only (rooms:read);
+  // ?status= filters to open / dismissed / confirmed.
+  if (escrowRoute === "sybil-flags" && req.method === "GET") {
+    const status = url.searchParams.get("status");
+    if (status !== null && !["open", "dismissed", "confirmed"].includes(status))
+      invalidInput(reject, "status one of open, dismissed, confirmed");
+    const flags = runPure(reject, () => escrow.getSybilFlags(roomId, { status }));
+    return json(res, 200, { roomId, flags });
+  }
+  // Slice 10: arbiter resolution of a sybil flag — dismissed (honest
+  // coincidence) or confirmed. REVIEW-ONLY: records the verdict; never
+  // moves bounty state, balances, bonds, or reputation.
+  if ((escrowRoute === "sybil-dismiss" || escrowRoute === "sybil-confirm") && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{reason, idempotencyKey?}");
+    const resolution = escrowRoute === "sybil-dismiss" ? "dismissed" : "confirmed";
+    return idem(payload, `bounty.sybil-${resolution}`, 200, () =>
+      runPure(reject, () => ({ roomId,
+        flag: escrow.resolveSybilFlag(roomId, sybilFlagId, { resolution, reason: payload.reason, resolver: caller }) })));
+  }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "idempotencyKey"] }))
-      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, idempotencyKey?}");
+    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "rubric", "idempotencyKey"] }))
+      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null, actor });
+          deadline: payload.deadline, verifierId: payload.verifierId ?? null, rubric: payload.rubric ?? null, actor });
+      return { roomId, bounty, receipt };
+    });
+  }
+  // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
+  // funding pins the rubric for the rest of the lifecycle.
+  if (escrowRoute === "rubric" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["rubric"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{rubric: [{criterionId, description}], idempotencyKey?}");
+    return idem(payload, "bounty.rubric", 200, () => {
+      const { bounty, receipt } = escrow.updateRubric(roomId, bountyId,
+        { poster: caller, rubric: payload.rubric, actor });
       return { roomId, bounty, receipt };
     });
   }
@@ -215,11 +256,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   }
   if (escrowRoute === "dispute-decide" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["outcome", "reasonCodes"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{outcome, reasonCodes, idempotencyKey?}");
+    if (!shape(payload, { required: ["outcome", "reasonCodes"], optional: ["rubricCheck", "idempotencyKey"] }))
+      invalidInput(reject, "{outcome, reasonCodes, rubricCheck?, idempotencyKey?}");
     return idem(payload, "bounty.dispute-decide", 200, () => {
       const { bounty, resolution, receipt } = escrow.decideDispute(roomId, bountyId,
-        { decider: caller, outcome: payload.outcome, reasonCodes: payload.reasonCodes, actor });
+        { decider: caller, outcome: payload.outcome, reasonCodes: payload.reasonCodes,
+          rubricCheck: payload.rubricCheck ?? null, actor });
       return { roomId, bounty, resolution, receipt };
     });
   }

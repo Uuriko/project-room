@@ -50,7 +50,7 @@ function runToAccepted(escrow, { amount = 10, verifier = null } = {}) {
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
-  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
@@ -259,7 +259,7 @@ test("accept is a gated approval event: attribution is its explicit consequence"
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "done" } });
   const { bounty: accepted, approval, attribution, receipt } =
-    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { note: "lgtm" } });
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   assert.equal(accepted.state, "accepted");
   assert.equal(accepted.group, "in-review");
   // The approval is explicit and attributed.
@@ -279,7 +279,7 @@ test("accept is a gated approval event: attribution is its explicit consequence"
   escrow.fundBounty(ROOM, b2.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, b2.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, b2.bountyId, { claimant: GROK, evidence: { evidenceUrl: "https://example.com/pr/2", summary: "x" } });
-  expectCode(() => escrow.acceptWork(ROOM, b2.bountyId, { acceptor: GROK, verifierAttestation: { note: "self" } }), "not_authorized");
+  expectCode(() => escrow.acceptWork(ROOM, b2.bountyId, { acceptor: GROK, verifierAttestation: { note: "self", citations: [{ criterionId: "c1", verdict: "pass" }] } }), "not_authorized");
   expectConserved(escrow);
 });
 
@@ -366,7 +366,7 @@ test("dispute CANCEL path: upheld challenge refunds the poster in full, no fee",
   expectConserved(escrow);
 });
 
-test("timeout refunds the award in full with no fee and returns the claim bond", () => {
+test("timeout refunds the award in full with no fee and forfeits the claim bond (anti-flake ladder rung 1)", () => {
   const { escrow } = makeEscrow();
   const bounty = post(escrow, { amount: 8 });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
@@ -379,8 +379,12 @@ test("timeout refunds the award in full with no fee and returns the claim bond",
   assert.equal(settled.state, "refunded");
   assert.equal(settled.group, "cancelled");
   assert.equal(bal(escrow, JILL).payable, 100); // full refund, no fee
-  assert.equal(bal(escrow, GROK).payable, 100); // claim bond returned (spec: "bond returned")
-  assert.equal(bal(escrow, "pool").payable, 0);
+  assert.equal(bal(escrow, GROK).payable, 99); // rung 1: claim bond forfeited to the pool, not returned
+  assert.equal(bal(escrow, "pool").payable, 1); // forfeited bond lands in the pool
+  const flake = escrow.balances(ROOM, GROK).flake;
+  assert.equal(flake.strikes, 1);
+  assert.equal(flake.rung, 1);
+  assert.equal(flake.bondMultiplier, 1);
   expectConserved(escrow);
 });
 
