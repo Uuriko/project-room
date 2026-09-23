@@ -10,7 +10,7 @@ import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
-  isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
+  isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -100,8 +100,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
+  assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
+  assert.deepEqual(card.skills.map(row => row.id), ["muse-room", "orient", "claims-board", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
   assert.equal(card.capabilities["agent-identities"], true);
   assert.equal(card.capabilities["webhooks"], true);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -441,7 +441,7 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
     assert.ok(Array.isArray(skill.tags) && skill.tags.length > 0, "skill.tags");
     assert.ok((skill.inputModes ?? []).every(mime) && (skill.outputModes ?? []).every(mime), "skill modes");
   }
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
 });
 
 // ============================================================================
