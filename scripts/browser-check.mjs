@@ -115,8 +115,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await page.locator("#thread-back").click();
     const heart = p => p.locator('[data-message-record-id="book-club"] [data-reaction="heart"]');
-    await page.locator('[data-message-record-id="book-club"]').getByLabel("Add reaction", { exact: true }).click();
-    await heart(page).click();
+    // Add Reaction lives in the ⋯ overflow menu and opens the reaction sheet.
+    await page.locator('[data-message-record-id="book-club"] summary[aria-label="More actions for this message"]').click();
+    await page.locator('[data-message-record-id="book-club"] button[data-message-action="add-reaction"]').click();
+    await page.locator('#reaction-sheet [data-reaction="heart"]').click();
+    await page.locator('#reaction-sheet').waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
     const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
       const range = document.createRange(); range.selectNodeContents(e);

@@ -43,9 +43,11 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/redesign-${touch ? 'touch' : 'desktop'}-conversation.png` });
   const message = page.locator('[data-message-record-id="test-welcome"]');
-  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), false, 'unused reactions stay inside the picker');
-  await message.getByLabel('Add reaction', { exact: true }).click();
-  await message.locator('[data-reaction="heart"]').click();
+  assert.equal(await message.locator('[data-reaction="heart"]').count(), 0, 'unused reactions stay out of sight until added');
+  await message.locator('summary[aria-label="More actions for this message"]').click();
+  await message.locator('button[data-message-action="add-reaction"]').click();
+  await page.locator('#reaction-sheet [data-reaction="heart"]').click();
+  await page.locator('#reaction-sheet').waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.querySelector('[data-message-record-id="test-welcome"] [data-reaction="heart"]').getAttribute('aria-pressed') === 'true');
   assert.equal(await page.locator('#thread-bar').isVisible(), false, 'reacting does not switch the conversation');
   assert.match(await message.locator('[data-reaction="heart"]').getAttribute('aria-label'), /, 1$/);

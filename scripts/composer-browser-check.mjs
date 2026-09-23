@@ -80,34 +80,36 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await mentionList.locator("[data-mention-id='maya']").click();
     await mentionList.waitFor({ state: "hidden" });
     assert.match(await input.inputValue(), /@Maya/);
-    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    assert.equal(await page.locator("#message-to-select").inputValue(), "", "an inserted @mention is text-only and never selects a DM recipient");
     assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
     await input.fill("");
     const topic = page.locator('[data-message-record-id="topic"]');
     assert.equal(await topic.locator('.reactions button').count(), 0, "no unused reaction pills beneath messages");
-    assert.equal(await topic.locator('.reaction-options').isVisible(), false);
-    const addReaction = topic.getByLabel("Add reaction", { exact: true });
-    await addReaction.focus();
+    assert.equal(await topic.locator('.reaction-options').count(), 0, "no always-visible reaction picker");
+    // Add Reaction lives in the ⋯ menu and opens a reaction sheet (long-press /
+    // right-click open it too). Tapping a reaction toggles it and closes the sheet.
+    const moreActions = topic.locator('summary[aria-label="More actions for this message"]');
+    await moreActions.focus();
     await page.keyboard.press("Enter");
-    assert.equal(await topic.locator('.reaction-options').isVisible(), true);
+    await topic.locator('button[data-message-action="add-reaction"]').click();
+    const sheet = page.locator("#reaction-sheet");
+    await sheet.waitFor({ state: "visible" });
     send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: true });
     await topic.locator('.reactions [data-reaction="thinking"]').waitFor();
-    assert.equal(await topic.locator('.reaction-options').isVisible(), true, "live changes preserve the open picker");
-    assert.equal(await addReaction.evaluate(el => el === document.activeElement), true, "live changes preserve picker focus");
+    assert.equal(await sheet.isVisible(), true, "live changes keep the open sheet");
     send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: false });
     await topic.locator('.reactions [data-reaction="thinking"]').waitFor({ state: "detached" });
-    await page.keyboard.press("Escape");
-    assert.equal(await topic.locator('.reaction-options').isVisible(), false);
-    await addReaction.click();
-    const optionsBounds = await topic.locator('.reaction-options').boundingBox();
-    assert.ok(optionsBounds.x >= 0 && optionsBounds.x + optionsBounds.width <= viewport.width, "picker fits narrow and desktop screens");
-    const like = page.locator('[data-message-record-id="topic"] button[data-reaction="like"]');
-    assert.equal(await like.isVisible(), true);
-    await like.click();
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="true"]'));
+    const sheetLike = sheet.locator('[data-reaction="like"]');
+    assert.equal(await sheetLike.isVisible(), true);
+    const sheetBounds = await sheet.boundingBox();
+    assert.ok(sheetBounds.x >= 0 && sheetBounds.x + sheetBounds.width <= viewport.width, "sheet fits narrow and desktop screens");
+    await sheetLike.click();
+    await sheet.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] [data-reaction="like"]').getAttribute("aria-pressed") === "true");
 
     assert.equal(await topic.locator('.reactions button').count(), 1, "only the used reaction remains visible");
-    assert.equal(await topic.locator('.reaction-options').isVisible(), false, "choosing a reaction closes the picker");
+    assert.equal(await page.evaluate(() => document.activeElement.closest("li.message")?.dataset.messageRecordId), "topic", "closing the sheet returns focus to the message");
+    const like = topic.locator('[data-reaction="like"]');
 
     // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
     await page.route("**/api/rooms/commons/commands", route => route.fulfill({
