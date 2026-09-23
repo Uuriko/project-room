@@ -632,7 +632,14 @@ export class BountyEscrow {
           "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
           "bounty_review_packets", "bounty_sybil_flags"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
-        else this._migrateColumns();
+        // Always converge columns after creating missing tables (not
+        // either/or): a shard can be missing tables AND carry older columns
+        // on the tables it has (e.g. a pre-slice-6 bounty_records without
+        // rubric_json). Skipping _migrateColumns() here left exactly that
+        // shard state behind, and every propose then 500'd with "table
+        // bounty_records has no column named rubric_json" while reads kept
+        // working — the 2026-09-22 post-#792 regression.
+        this._migrateColumns();
         this._ready = true;
       }
     }
