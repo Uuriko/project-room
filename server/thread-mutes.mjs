@@ -12,7 +12,7 @@
 //
 // The DDL intentionally matches the attention slice's thread_mutes table
 // (server/activity.mjs on jill/attention-activity-2026-09-23) so the two
-// converge instead of colliding: CREATE TABLE IF NOT EXISTS is idempotent.
+// converge instead of colliding: the conditional DDL is idempotent.
 //
 // The module is storage-shaped like DmConsents/Moderation: it takes the
 // RoomStore (db handle, transactions, room state) and exports its schema
