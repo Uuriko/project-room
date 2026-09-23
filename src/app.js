@@ -147,6 +147,7 @@ let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
+let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
@@ -213,6 +214,7 @@ const client = new RoomClient({
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
       void refreshDmConsents();
+      void refreshMutedThreads();
       startPresencePoll();
     }
     instructionsUI?.sync();
@@ -251,6 +253,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    mutedThreads = new Set(); threadMuteBusy = false;
     dmConsents = []; dmConsentSeq++;
     stopPresencePoll();
     accessPreviews.clear();
@@ -938,6 +941,7 @@ function syncComposerChrome() {
   }
   const work = $("#composer-work-button");
   if (work) work.hidden = true;
+  syncAlsoSend();
 }
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
@@ -1622,6 +1626,8 @@ function renderMessages() {
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
   $("#thread-bar").hidden = !currentThreadId;
+  syncThreadMuteButton();
+  syncAlsoSend();
   $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
@@ -2018,6 +2024,8 @@ function switchThread(threadId, focusComposer = false) {
       select.options[select.options.length - 1].disabled = true;
     }
     select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+    // "Also send to channel" is per-send, off by default in every thread.
+    $("#also-send-to-channel").checked = false;
   }
   updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   if (leavingResultQuestion) renderReturnBrief();
@@ -2852,8 +2860,14 @@ $("#message-form").addEventListener("submit", e => {
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
+  // "Also send to channel": a public thread reply also lands as a top-level
+  // message in the channel (server-side, same event). Only offered for
+  // public thread replies — never for DMs or top-level messages.
+  if (currentThreadId && !content.toMemberId && content.replyToId && $("#also-send-to-channel").checked) {
+    content.alsoSendToChannel = true;
+  }
   const previous = pendingMessage?.command?.data;
-  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId;
+  const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId && Boolean(previous.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
@@ -2872,6 +2886,7 @@ $("#message-form").addEventListener("submit", e => {
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
+    $("#also-send-to-channel").checked = false;
     persistDrafts();
     dismissRoomGuide();
   }, { failureHint: "Draft kept. Send again to retry." });
@@ -3058,6 +3073,61 @@ $("#reply-mention").addEventListener("click", () => {
   updateReply();
 });
 $("#thread-back").addEventListener("click", () => switchThread(null));
+// Per-thread mutes: a private per-member row on the server (thread_mutes).
+// Muting suppresses the thread's activity from the notification/unread feed;
+// unmuting restores it on the next read. The server resolves any message id
+// to the thread root, so the local set holds root ids.
+async function refreshMutedThreads() {
+  mutedThreads = new Set();
+  if (!session || !client.session) return;
+  const generation = client.generation;
+  try {
+    const result = await client.threadMutes();
+    if (generation !== client.generation || !state) return;
+    if (result && Array.isArray(result.threadIds)) mutedThreads = new Set(result.threadIds);
+  } catch {
+    // The button still works; the list just starts empty until the next load.
+    if (generation !== client.generation || !state) return;
+  }
+  renderMessages();
+}
+function syncThreadMuteButton() {
+  const button = $("#thread-mute");
+  const muted = Boolean(currentThreadId && mutedThreads.has(currentThreadId));
+  button.setAttribute("aria-pressed", String(muted));
+  button.textContent = muted ? "Unmute thread" : "Mute thread";
+}
+$("#thread-mute").addEventListener("click", async () => {
+  if (!state || !currentThreadId || threadMuteBusy) return;
+  threadMuteBusy = true;
+  const button = $("#thread-mute");
+  button.disabled = true;
+  try {
+    const result = await client.setThreadMute(currentThreadId, !mutedThreads.has(currentThreadId));
+    if (result) {
+      if (result.muted) mutedThreads.add(result.threadId);
+      else mutedThreads.delete(result.threadId);
+      notice(result.muted
+        ? "Thread muted. Its activity won't count toward your unread feed."
+        : "Thread unmuted. Its activity is back in your unread feed.");
+    }
+  } catch (error) {
+    notice(`Couldn't update the thread mute: ${error.message}`, true);
+  } finally {
+    threadMuteBusy = false;
+    button.disabled = false;
+  }
+  renderMessages();
+});
+// "Also send to channel" is a thread-composer affordance only: it shows for
+// public thread replies and stays off by default. A DM recipient hides it —
+// a channel copy of a private message would leak the body.
+function syncAlsoSend() {
+  const label = $("#also-send-label"), box = $("#also-send-to-channel");
+  const visible = Boolean(currentThreadId && !requestMode && state && !$("#message-to-select")?.value);
+  label.hidden = !visible;
+  if (!visible) box.checked = false;
+}
  $("#remember-drafts").addEventListener("change", () => {
   if ($("#remember-drafts").checked) saveComposer();
   else { recovery.clear(); $("#draft-recovery-status").textContent = "Draft recovery off. Drafts stay only while this page is open."; }

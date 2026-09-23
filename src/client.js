@@ -521,6 +521,42 @@ export class RoomClient {
       throw error;
     }
   }
+  async threadMutes() {
+    // Per-thread mutes for the current member. Read-only list; 401/403 ends
+    // access like the sibling reads.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/thread-mutes"));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async setThreadMute(threadId, muted) {
+    // Mute or unmute a thread for the current member. Returns the resolved
+    // { threadId, muted } (threadId is the thread root).
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/thread-mutes"), { method: "POST", data: { threadId, muted } });
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
   async needsAttention() {
     // #662: owner-only rollup of everything awaiting an owner decision.
     // 403 owner_required means the viewer is not the owner — not a failure.

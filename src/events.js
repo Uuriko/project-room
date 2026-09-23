@@ -739,6 +739,26 @@ function postMessage(state, incoming) {
     createdAt: incoming.at,
     ...(proposal ? { proposal } : {})
   });
+  // "Also send to channel": a public thread reply also lands as a top-level
+  // message in the thread's channel, in the same event. The derived id is
+  // deterministic (validId-safe suffix) so replay and retried commands stay
+  // idempotent. DMs and work proposals never copy — a DM copy would leak the
+  // private body, and a proposal's work context doesn't survive as a plain
+  // message.
+  if (incoming.data.alsoSendToChannel && incoming.data.replyToId && !incoming.data.toMemberId && !incoming.data.workItemId) {
+    const copyId = `${incoming.data.messageId || incoming.id}:channel`;
+    if (state.messages.some(m => m.id === copyId)) throw new Error("Message already exists");
+    state.messages.push({
+      id: copyId,
+      authorId: actor.id,
+      body: incoming.data.body,
+      channelId,
+      workItemId: null,
+      replyToId: null,
+      toMemberId: null,
+      createdAt: incoming.at
+    });
+  }
   recordReplyPost(state, incoming, requestMode);
 }
 

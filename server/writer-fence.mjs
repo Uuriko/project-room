@@ -181,7 +181,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // seats. Purely additive and intentionally NOT fenced — older writers have
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
-  "guest_members"
+  "guest_members",
+  // thread_mutes (per-thread mutes): one row per (room, member, thread
+  // root). Purely additive and intentionally NOT fenced — older writers have
+  // no code path to it, and muting is a private read-time filter, never a
+  // room-visible state change.
+  "thread_mutes"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

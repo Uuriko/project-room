@@ -57,6 +57,7 @@ import {
   assertTransitionMention, resolveMentionTarget, mentionStateSchema,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
+import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
@@ -371,7 +372,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -418,7 +419,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -571,6 +572,7 @@ export class RoomStore {
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
+    this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
     this.publicFace = new PublicFace(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
@@ -768,6 +770,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(mentionStateSchema);
+      // Per-thread mutes. Purely additive side table (no events, no
+      // projection impact): IF NOT EXISTS is idempotent, no schema version
+      // bump, intentionally outside the writer fence. DDL matches the
+      // attention slice's table so the two converge on merge.
+      this.db.exec(threadMutesSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
