@@ -2271,7 +2271,8 @@ paths:
         locks nothing and the bounty is excluded from work metrics until
         funded. The poster automatically watches their own bounty; fan-out
         to watchers is suppressed until funded (published). The bounty id
-        is sequential per room (e.g. ROOM-12). Every mutating bounty route
+        is sequential per room slug (e.g. ROOM-12): rooms whose 12-character
+        name prefixes collide share one counter. Every mutating bounty route
         accepts an idempotency key via the `Idempotency-Key` header or the
         `idempotencyKey` body field. API keys need `rooms:write`.
       parameters:
@@ -7503,7 +7504,7 @@ components:
       name: bountyId
       in: path
       required: true
-      schema: { type: string, description: Sequential per-room bounty id (e.g. ROOM-12) }
+      schema: { type: string, description: Sequential per-room-slug bounty id (e.g. ROOM-12) }
     SourceId:
       name: sourceId
       in: path
@@ -7514,7 +7515,7 @@ components:
       type: object
       description: An escrowed bounty with its semantic group, actor-attributed state, and computed time-in-state.
       properties:
-        bountyId: { type: string, description: Sequential per-room id (e.g. ROOM-12) }
+        bountyId: { type: string, description: Sequential per-room-slug id (e.g. ROOM-12) }
         roomId: { type: string }
         title: { type: string }
         criteria: { type: string }
