@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys: disposable rooms, no real users or outside requests.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -117,7 +118,7 @@ test("confirmed draft with failed snapshot remains saved, then becomes findable 
   await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).waitFor();
   assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1);
   assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 0);
-  failSnapshot = false; await page.locator("#refresh-button").click();
+  failSnapshot = false; await clickChrome(page, "#refresh-button");
   await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId);
   await f.open(); assert.equal(await f.input.inputValue(), "");
@@ -172,12 +173,12 @@ test("posted draft returns to its exact conversation record and work link preser
 
 test("mobile guest draft is discoverable by the returning accountable member without implying work completion", { timeout: 30000 }, async t => {
   const f = await setup(t, { humanWork: true, mobile: true }), { page } = f, before = f.snapshot();
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await f.login(f.keys.guest);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await f.login(f.keys.guest);
   await f.open(); await f.input.fill(f.answer("Guest contribution: start the agenda with an owner and one decision."));
   await f.submit.click(); await f.dialog.waitFor({ state: "hidden" });
   const posted = f.snapshot().state.messages.findLast(message => message.proposal);
   assert.equal(posted.authorId, "guest"); assert.equal(posted.proposal.attribution, "manual-unverified");
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await f.login(f.keys.owner);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await f.login(f.keys.owner);
   assert.equal(await f.card.locator(".work-details").evaluate(node => node.open), false);
   await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, posted.id);

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -106,7 +107,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search');
   await search.fill('Orbit');
   await page.locator('#message-input').fill('');
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await search.inputValue(), ''); assert.equal(await hits.textContent(), '');
   assert.equal(f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', 'owner')?.sequence ?? 0, 0);
   assert.deepEqual(errors, []);

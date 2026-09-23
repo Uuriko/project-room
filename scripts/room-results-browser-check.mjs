@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -65,7 +66,7 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   await f.row("native-result").locator("[data-result-work]").click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), true);
-  await p.locator("#room-actions-open").click(); await p.locator('[data-room-action="results"]').click();
+  await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   assert.equal(await p.locator("#settings-dialog").isVisible(), true);
   assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
 });

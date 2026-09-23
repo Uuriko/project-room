@@ -1,6 +1,6 @@
 // Automated usability checks with synthetic identities, not human participant research.
 // C1: the mobile header stays one short row; infrequent session actions live in an
-// accessible menu; identity and connection state are never hidden (no access loss).
+// accessible menu; identity and connection recovery are available in the account menu.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -40,12 +40,14 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   await signIn(fixture, page, origin);
   assert.equal(await page.locator("#session-menu-button").isVisible(), true, "menu affordance present on mobile");
   assert.equal(await page.locator("#signout-button").isVisible(), false, "sign out folded into the closed menu");
-  assert.equal(await page.locator("#identity-label").isVisible(), true, "identity stays visible - no hidden access state");
-  assert.equal(await page.locator("#refresh-button").isVisible(), true, "refresh stays one tap away");
+  assert.equal(await page.locator("#identity-label").isVisible(), false, "identity is in the account menu");
+  assert.equal(await page.locator("#refresh-button").isVisible(), false, "healthy connection recovery is secondary");
   const titleBox = await page.locator("#conversation-title").boundingBox();
   assert.ok(titleBox && titleBox.y < 844, `conversation is reachable in the first viewport (y=${titleBox && titleBox.y})`);
   await page.locator("#session-menu-button").click();
   assert.equal(await page.locator("#signout-button").isVisible(), true, "menu opens to reveal session actions");
+  assert.equal(await page.locator("#identity-label").isVisible(), true);
+  assert.equal(await page.locator("#refresh-button").isVisible(), true);
   assert.equal(await page.locator("#session-menu-button").getAttribute("aria-expanded"), "true");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#signout-button").isVisible(), false, "Escape closes the menu");
@@ -56,11 +58,13 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   assert.deepEqual(errors, []);
 });
 
-test("desktop header: session actions stay inline, menu affordance hidden", { timeout: 60000 }, async t => {
+test("desktop header: account actions use the same discoverable menu", { timeout: 60000 }, async t => {
   const { fixture, page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await signIn(fixture, page, origin);
-  assert.equal(await page.locator("#session-menu-button").isVisible(), false, "no menu chrome on desktop");
-  assert.equal(await page.locator("#signout-button").isVisible(), true, "sign out stays inline on desktop");
+  assert.equal(await page.locator("#session-menu-button").isVisible(), true);
+  assert.equal(await page.locator("#signout-button").isVisible(), false);
+  await page.locator("#session-menu-button").click();
+  assert.equal(await page.locator("#signout-button").isVisible(), true, "sign out is reachable in the account menu");
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.deepEqual(errors, []);

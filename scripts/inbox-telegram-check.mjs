@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Browser check: the Telegram connection card shows live status (not configured,
 // webhook, last delivery, last send) and the Reconnect trigger imports verified
 // webhook updates from the browser without a loopback client. Fixture data only.
@@ -36,7 +37,7 @@ async function setup(t, { configured = false, storedSecret = WEBHOOK_SECRET } = 
   await page.goto(origin + "/?room=commons");
   await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#nav-inbox").click(); await page.locator("#inbox-panel").waitFor({ state: "visible" });
+  await clickChrome(page, "#nav-inbox"); await page.locator("#inbox-panel").waitFor({ state: "visible" });
   const deliver = updates => fetch(origin + "/api/inbox/webhooks/" + telegram.connection.id, { method: "POST", body: JSON.stringify({ updates }),
     headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET } });
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-telegram-" + name + ".png", fullPage: true }); };

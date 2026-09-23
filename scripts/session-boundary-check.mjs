@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Browser regressions for session ownership, stale writes, live announcements,
 // and user-controlled record identities. All state and credentials are disposable.
 import test from "node:test";
@@ -164,7 +165,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await successCaptured.promise;
   assert.equal(store.snapshot(owner, "commons").cursor, ownerHorizon, "the old account's committed marker remains its own");
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await enterRoom(page, maya, "Maya");
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya return item"));
   releaseSuccess.resolve();
@@ -184,7 +185,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.locator("#rb-ack-button").click();
   await errorCaptured.promise;
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await enterRoom(page, owner, "Room owner");
   releaseError.resolve();
   await errorDelivered.promise;
@@ -560,7 +561,7 @@ test("a committed self-send is not re-announced as incoming after a delayed snap
   await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === body).length, 1);
   allowSnapshot = true;
-  await page.locator("#refresh-button").click();
+  await clickChrome(page, "#refresh-button");
   await page.locator('[data-message-record-id] p').filter({ hasText: body }).waitFor();
   assert.equal(await page.evaluate(() => window.delayedSelfAnnouncements.some(text => /new message/.test(text))), false);
   assert.equal(await page.locator("#conversation-announcement").textContent(), "");
@@ -830,7 +831,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   // Reply addressing (#57) leaves an @-mention draft; accept the draft-guard confirm so sign-out proceeds.
   page.once("dialog", dialog => dialog.accept());
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · Person");

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Synthetic UI regressions; no human-participant findings are inferred.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,7 +51,7 @@ for (const touch of [false, true]) {
         await route.fulfill({ response }); listDelivered.resolve();
       } else await route.continue();
     });
-    await page.locator('#invite-people-button').click(); await oldList.promise;
+    await clickChrome(page, "#invite-people-button"); await oldList.promise;
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-settings-summary').textContent(), '24 hours · 10 guests');
@@ -102,7 +103,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator('#share-link-result').isVisible(), false);
     assert.equal(await page.locator('#share-link-url').inputValue(), '');
     await page.locator('#share-link-close').click();
-    await page.locator('#invite-people-button').click();
+    await clickChrome(page, "#invite-people-button");
     assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 guests', 'retained choices have an accurate summary');
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);

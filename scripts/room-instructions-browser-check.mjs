@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Synthetic human journeys, not a human usability or retention study.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -60,7 +61,7 @@ test("unknown committed charter retains exact retry through close, later update 
   // Instructions is opened from inside Settings, which stays up over the
   // session menu and the Sign out button behind it.
   await closeSettings(f.page);
-  let warning; f.page.once("dialog", async d => { warning = d.message(); await d.dismiss(); }); if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /may already be saved/);
+  let warning; f.page.once("dialog", async d => { warning = d.message(); await d.dismiss(); }); if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await clickChrome(f.page, "#signout-button"); assert.match(warning, /may already be saved/);
   await f.open(); assert.equal(await f.field("purpose").isDisabled(), true);
   for (let i = 0; i < 3; i++) { await f.save.click(); if (i < 2) await f.ready(); }
   await f.dialog.waitFor({ state: "hidden" }); assert.equal(attempts.length, 4); for (const attempt of attempts) assert.deepEqual(attempt, attempts[0]);

@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // B4 notification feed: badge, compact list, and "Mark read" moving the cursor.
 // Simulated human tasks against isolated synthetic data; no real user research.
 import test from "node:test";
@@ -88,7 +89,7 @@ for (const mobile of [false, true]) {
     f.store.db.prepare("DELETE FROM cursors WHERE room_id='commons' AND member_id='owner'").run();
     writes.length = 0;
     await closeCatchUp(page);
-    await page.locator("#refresh-button").click();
+    await clickChrome(page, "#refresh-button");
     await openCatchUpPanel(page, "notification-panel");
     await badge.waitFor({ state: "visible" });
     assert.equal(await badge.textContent(), "2 for you");
@@ -107,7 +108,7 @@ for (const mobile of [false, true]) {
     // A new mention after the marker is unread again; refresh picks it up without a reload.
     send("guest", T.MESSAGE_POSTED, { messageId: "mention-later", body: "@Room owner one more thing." });
     await closeCatchUp(page);
-    await page.locator("#refresh-button").click();
+    await clickChrome(page, "#refresh-button");
     await openCatchUpPanel(page, "notification-panel");
     await badge.waitFor({ state: "visible" });
     assert.equal(await badge.textContent(), "1 for you");
@@ -124,7 +125,7 @@ for (const mobile of [false, true]) {
     // Sign-out clears the feed and badge.
     await closeCatchUp(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click();
-    await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#notification-list").textContent(), "");
     assert.equal(await badge.textContent(), "");
     assert.deepEqual(errors, []); assert.deepEqual(external, []);

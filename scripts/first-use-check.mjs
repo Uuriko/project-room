@@ -1,3 +1,5 @@
+import { ensureSidebarClosed } from "./room-chrome.mjs";
+import { clickChrome } from "./room-chrome.mjs";
 // Agent-operated usability regression, not evidence from human participants.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,11 +49,12 @@ for (const touch of [false, true]) {
     await fillAccessKey(owner, ownerKey);
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
-    await owner.locator('#invite-people-button').click();
+    await clickChrome(owner, "#invite-people-button");
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();
     await owner.locator('#share-link-close').click();
+    await ensureSidebarClosed(owner);
     await guest.goto(invitation);
     await guest.locator('#join-link-name').fill('Maya');
     await guest.locator('#join-link-submit').click();
@@ -149,7 +152,7 @@ for (const touch of [false, true]) {
       data: { memberId: 'second-maya', displayName: 'Maya', kind: 'human', permissions: [] } });
     await owner.waitForFunction(() => document.querySelector('.message-meta strong')?.textContent.includes('guest-'));
     await guest.waitForFunction(() => document.querySelector('#identity-label')?.textContent.includes('guest-'));
-    if (await guest.locator("#session-menu-button").isVisible()) await guest.locator("#session-menu-button").click(); await guest.locator('#signout-button').click();
+    if (await guest.locator("#session-menu-button").isVisible()) await guest.locator("#session-menu-button").click(); await clickChrome(guest, "#signout-button");
     await guest.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').getAttribute('title'), null, 'sign-out clears private attribution');
     assert.deepEqual(errors, []);

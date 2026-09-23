@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human return journeys, not retention evidence or real user feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -179,7 +180,7 @@ for (const mobile of [false, true]) {
     await capture("large-text-controls"); await page.evaluate(() => document.documentElement.style.fontSize = "");
     page.once("dialog", dialog => dialog.accept()); // Explicit synthetic consent to discard our draft.
     await closeCatchUp(page);
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");
     assert.equal(await page.locator("#reminder-count").textContent(), "");

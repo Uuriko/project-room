@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human tasks against isolated synthetic data; no real user research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -79,7 +80,7 @@ for (const mobile of [false, true]) {
     const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type, data });
     send(T.WORK_PROPOSED, { workItemId: "replacement", title: "Replacement plan", definitionOfDone: "A revised agenda", accountableMemberId: "owner", mode: "read" });
     send(T.WORK_SUPERSEDED, { workItemId: "test-handoff", expectedRevision: 0, supersededByWorkItemId: "replacement", reason: "Replanned" });
-    await page.locator("#refresh-button").click();
+    await clickChrome(page, "#refresh-button");
     await openCatchUpPanel(page, "reminder-panel");
     await page.locator("#reminder-pending button").click();
     await page.locator('#reminder-form[aria-busy="false"]').waitFor();
@@ -104,7 +105,7 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#return-brief-panel > summary").evaluate(node => node === document.activeElement), true);
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
     await closeCatchUp(page);
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button"); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reminder-due").textContent(), ""); assert.equal(await page.locator("#reminder-upcoming").textContent(), "");
     assert.equal(await page.locator("#reminder-work-title").textContent(), ""); assert.deepEqual(errors, []); assert.deepEqual(external, []);
   });

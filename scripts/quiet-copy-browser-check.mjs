@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Automated usability checks with synthetic identities, not human participant research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -51,7 +52,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.locator("#key-signin > summary").click();
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
-    await page.locator("#refresh-button").click();
+    await clickChrome(page, "#refresh-button");
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
@@ -82,12 +83,12 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "connection-status");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
-    await page.locator("#invite-people-button").click();
+    await clickChrome(page, "#invite-people-button");
     assert.equal(await page.locator("#share-local-note").isVisible(), true);
     assert.match(await page.locator("#share-link-dialog").innerText(), /Share one link with people or AI agents/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

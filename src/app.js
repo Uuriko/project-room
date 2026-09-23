@@ -1,3 +1,4 @@
+import { installRoomLayout } from "./room-layout.js";
 import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
@@ -32,6 +33,7 @@ const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
+    : !$("#main").hidden ? "#conversation-title"
     : $("#auth-panel").hidden ? "#connection-status"
     : "#auth-title";
   $(target).focus();
@@ -188,6 +190,7 @@ const client = new RoomClient({
     const roomId = state.room?.id ?? identity.roomId;
     if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
     $("#room-title").textContent = state.room?.title ?? roomId;
+    $("#mobile-room-name").textContent = state.room?.title ?? roomId;
     $(".room-purpose").textContent = state.room?.purpose ?? "";
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#account-rooms-panel").hidden = true;
@@ -1253,7 +1256,7 @@ function syncWorkForm() {
   syncWorkPolicy();
   const reviewing = $("#require-verification").checked;
   selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission))), "Choose owner");
+    .every(permission => member.permissions.includes(permission))), "Choose assignee");
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
   selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
@@ -2701,6 +2704,7 @@ $("#auth-form").addEventListener("submit", async e => {
   if (state) revealLocationHash();
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
+installRoomLayout();
 const sessionMenu = $("#session-menu");
 const sessionMenuButton = $("#session-menu-button");
 const setSessionMenuOpen = open => {
@@ -3334,6 +3338,7 @@ function chooseRoomAction(id) {
   }
   if (id === "how-agent") {
     revealPeopleChrome();
+    $("#invite-navigation").open = true;
     const button = $("#connect-agent-button");
     const target = button && !button.hidden ? button : $("#people-panel > summary");
     target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });

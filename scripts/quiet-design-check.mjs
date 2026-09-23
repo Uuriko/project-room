@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -126,7 +127,7 @@ for (const touch of [false, true]) {
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
-    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);

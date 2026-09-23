@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated-human navigation checks. Disposable data; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,7 +31,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
   await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(writes, []); });
-  const open = async () => { await page.locator("#room-actions-open").click(); await page.locator("#room-actions-query").waitFor(); };
+  const open = async () => { await clickChrome(page, "#room-actions-open"); await page.locator("#room-actions-query").waitFor(); };
   const action = id => page.locator(`[data-room-action="${id}"]`);
   const capture = async name => {
     mkdirSync("test-results/room-actions-20260908", { recursive: true });

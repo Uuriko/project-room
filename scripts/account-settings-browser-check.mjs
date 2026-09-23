@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Browser coverage for the account settings UI (slice 7, RC-2026-09-17-016):
 // the session menu opens Sign-in & security, the linked methods render with
 // honest provider-unconfigured states, disable/enable/remove work through
@@ -57,7 +58,7 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
 
   // Desktop topbar exposes Sign-in & security directly (the session-menu
   // fold is mobile-only).
-  await page.locator("#account-settings-button").click();
+  await clickChrome(page, "#account-settings-button");
   const body = page.locator("#account-settings-body");
   await body.getByText("Linked sign-in methods").waitFor();
 

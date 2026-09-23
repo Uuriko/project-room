@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -114,7 +115,7 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   assert.deepEqual(f.store.room("commons").state.workItems, before);
   assert.deepEqual(f.store.room("commons").state.members, beforeMembers);
   await page.locator("#thread-back").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
-  page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
+  page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor();
   assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v3")), null);
   assert.deepEqual(errors, []); assert.deepEqual(outside, []);

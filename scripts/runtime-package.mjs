@@ -14,8 +14,8 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [...inboxAssets, "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
-const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js")) : inboxAssets : v14Assets;
+export const publicAssets = [...inboxAssets.slice(0, 2), "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
+const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -30,6 +30,7 @@ optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
+optional.push("src/room-layout.js");
 optional.push("src/needs-attention.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
@@ -224,7 +225,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js"), files.has("src/account-setup-ui.js"), files.has("src/gmail-ui.js")),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js"), files.has("src/account-setup-ui.js"), files.has("src/gmail-ui.js"), files.has("src/room-layout.js")),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -262,7 +263,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     `runtime manifest sourceCommit ${manifest.sourceCommit} does not match expected ${expectedCommit}`);
   check(Array.isArray(manifest.files), "runtime manifest files is not an array");
   const expectedAssets = assetsFor(manifest.runtime?.schemaVersion,
-    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"), manifest.files.some(f => f.path === "src/account-setup-ui.js"), manifest.files.some(f => f.path === "src/gmail-ui.js"));
+    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"), manifest.files.some(f => f.path === "src/account-setup-ui.js"), manifest.files.some(f => f.path === "src/gmail-ui.js"), manifest.files.some(f => f.path === "src/room-layout.js"));
   const missingAssets = expectedAssets.filter(a => !manifest.publicAssets.includes(a));
   const extraAssets = manifest.publicAssets.filter(a => !expectedAssets.includes(a));
   check(missingAssets.length === 0 && extraAssets.length === 0,

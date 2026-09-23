@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -58,9 +59,9 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
   // instead of landing in an empty void.
   await p.getByText("My first room", { exact: true }).waitFor();
   assert.equal(await p.locator("#account-rooms-list button").count(), 1); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
-  await p.locator("#nav-inbox").click(); await p.reload(); await p.locator("#inbox-reader").waitFor();
+  await clickChrome(p, "#nav-inbox"); await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Let’s start with one small idea.");
-  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await clickChrome(p, "#signout-button"); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
@@ -68,20 +69,20 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
 test("account room discovery and room revocation preserve a private draft, account revocation clears it", { timeout: 35000 }, async t => {
   const f = await setup(t, { member: true }), p = f.page;
   await f.login(); await p.locator("#inbox-reader").waitFor(); await p.locator("#inbox-draft").fill("Unsent private thought");
-  await p.locator("#nav-rooms").click();
+  await clickChrome(p, "#nav-rooms");
   const roomRow = p.locator('[data-account-room="commons"]');
   await roomRow.waitFor();
   assert.match(await roomRow.locator("strong").textContent(), /Project Room/);
   assert.equal(await roomRow.locator("span").textContent(), "Open");
   await roomRow.click(); await p.locator("#main").waitFor();
-  await p.locator("#nav-inbox").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), "Unsent private thought");
+  await clickChrome(p, "#nav-inbox"); assert.equal(await p.locator("#inbox-draft").inputValue(), "Unsent private thought");
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.access_changed",
     data: { memberId: "guest", expectedMemberRevision: 0, permissions: [], active: false } });
   await p.waitForFunction(() => document.getElementById("choose-room").hidden);
   await p.locator("#inbox-reader").waitFor(); assert.equal(await p.locator("#inbox-draft").inputValue(), "Unsent private thought");
   await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
-  await p.locator("#nav-rooms").click(); await p.getByText("No rooms yet.", { exact: true }).waitFor();
-  await p.locator("#nav-inbox").click(); await f.capture("room-revoked");
+  await clickChrome(p, "#nav-rooms"); await p.getByText("No rooms yet.", { exact: true }).waitFor();
+  await clickChrome(p, "#nav-inbox"); await f.capture("room-revoked");
   f.store.changeAccountAccess(f.accountId, { expectedRevision: 0, active: false, reason: "Synthetic end" });
   await p.locator("#inbox-refresh").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
@@ -95,7 +96,7 @@ test("account-only other-tab replacement clears a held private read and navigati
   await p.locator("#inbox-refresh").click(); await reached;
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
-  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await clickChrome(other, "#signout-button"); await other.locator("#auth-panel").waitFor();
   await fillAccessKey(other, f.store.issueAccountAccessKey(account.id));
   await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
@@ -121,7 +122,7 @@ test("an account-home invitation joins explicitly and keeps the private draft", 
   await p.locator("#join-link-form").waitFor(); assert.equal(f.store.room("commons").sequence, before);
   await p.locator("#join-link-name").fill("Synthetic member"); await p.locator("#join-link-submit").click();
   await p.locator("#join-link-dialog").waitFor({ state: "hidden" }); await p.locator("#main").waitFor();
-  await p.locator("#nav-inbox").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), "Keep my private draft");
+  await clickChrome(p, "#nav-inbox"); assert.equal(await p.locator("#inbox-draft").inputValue(), "Keep my private draft");
   assert.equal(f.provider.count(), 0);
   assert.equal(JSON.stringify(f.store.room("commons")).includes("Keep my private draft"), false);
 });
@@ -132,7 +133,7 @@ test("a lost account-only sign-out response clears private text and leaves a usa
     if (route.request().method() === "DELETE") { await route.fetch(); return route.abort(); }
     return route.continue();
   });
-  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await clickChrome(p, "#signout-button"); await p.locator("#auth-panel").waitFor();
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#access-key").isEnabled(), true);

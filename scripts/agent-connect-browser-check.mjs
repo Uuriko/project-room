@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
@@ -33,17 +34,18 @@ async function setup(t, mobile = false) {
       await page.locator("#sidebar-toggle").click();
       await page.locator("#room-sidebar").waitFor({ state: "visible" });
     }
+    if (!(await page.locator("#invite-navigation").evaluate(node => node.open))) await page.locator("#invite-navigation > summary").click();
     await page.locator("#connect-agent-button").waitFor({ state: "visible" });
   };
   await reveal();
-  const open = async () => { await reveal(); await page.locator("#connect-agent-button").click(); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
+  const open = async () => { await reveal(); await clickChrome(page, "#connect-agent-button"); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
   const create = async () => { await page.locator("#agent-connect-name").fill("Synthetic Claude"); await page.locator("#agent-create").click(); };
   const config = async () => { await page.locator("#agent-private-details > summary").click(); await page.waitForFunction(() => document.querySelector("#agent-private-config").value.length > 0); return JSON.parse(await page.locator("#agent-private-config").inputValue()); };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/agent-connect-${name}.png` }); };
   return { ...f, page, origin, open, create, config, capture };
 }
 
-test("Add agent stays visible in the People rail when the disclosure is closed", { timeout: 20000 }, async t => {
+test("Invite reveals agent setup independently of the People disclosure", { timeout: 20000 }, async t => {
   const f = await setup(t);
   assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true);
   assert.equal(await f.page.locator("#people-panel").evaluate(node => node.contains(document.getElementById("connect-agent-button"))), false);
@@ -52,7 +54,7 @@ test("Add agent stays visible in the People rail when the disclosure is closed",
   await f.capture("add-agent-visible");
 });
 
-test("Add agent is visible on mobile after the sidebar menu opens", { timeout: 20000 }, async t => {
+test("Invite reveals agent setup from the mobile sidebar", { timeout: 20000 }, async t => {
   const f = await setup(t, true);
   assert.equal(await f.page.locator("#room-sidebar").isVisible(), true);
   assert.equal(await f.page.locator("#connect-agent-button").isVisible(), true);
@@ -197,7 +199,7 @@ test("owned list access denial clears previously revealed setup", { timeout: 300
   const f = await setup(t); await f.open(); await f.create(); await f.page.locator("#agent-setup").waitFor({ state: "visible" }); await f.config();
   await f.page.locator("#agent-connect-close").click();
   await f.page.route("**/agent-connections", route => route.fulfill({ status: 403, json: { error: { code: "owner_required", message: "Access changed" } } }));
-  await f.page.locator("#connect-agent-button").click(); await f.page.locator("#agent-connect-dialog").waitFor({ state: "hidden" });
+  await clickChrome(f.page, "#connect-agent-button"); await f.page.locator("#agent-connect-dialog").waitFor({ state: "hidden" });
   assert.equal(await f.page.locator("#agent-private-config").inputValue(), ""); assert.equal(await f.page.locator("#agent-setup").isVisible(), false);
 });
 
@@ -215,7 +217,7 @@ test("retained setup warns before sign-out; expiry prevents reveal or copy", { t
   await f.page.locator("#agent-connect-close").click();
   let warning;
   f.page.once("dialog", dialog => { warning = dialog.message(); return dialog.dismiss(); });
-  if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /private setup/);
+  if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await clickChrome(f.page, "#signout-button"); assert.match(warning, /private setup/);
   await f.open();
   await f.page.evaluate(() => { const now = Date.now(); Date.now = () => now + 31 * 86400000; });
   await f.page.locator("#agent-private-details > summary").click();

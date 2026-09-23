@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import { openMemberProfile } from "./room-chrome.mjs";
 // C6: owner-facing Pause, Resume and Remove for agent members in the People
 // panel. Pause/Resume act on the agent's wake-queue pause row through
@@ -65,7 +66,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   // The invitation explains where it lives and opens People on mobile too.
   for (const [target, mobile] of [[row, false], [guestRow, true]]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator("#invite-people-button").click();
+    await clickChrome(page, "#invite-people-button");
     assert.match(await page.locator("#share-link-dialog").textContent(), /After the person or agent joins/);
     await page.locator("#share-link-admins").click();
     await page.locator("#share-link-dialog").waitFor({ state: "hidden" });

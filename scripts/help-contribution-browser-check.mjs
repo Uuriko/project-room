@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated accountable human, actual scripted MCP helper and reviewer. No models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -249,7 +250,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const markers = Object.fromEntries(['owner', 'producer', 'reviewer'].map(member => [member,
     f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0]));
   assert.deepEqual(markers, { owner: 0, producer: 0, reviewer: 0 }); assert.deepEqual(errors, []);
-  await page.locator('#cancel-action').click(); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click();
+  await page.locator('#cancel-action').click(); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
