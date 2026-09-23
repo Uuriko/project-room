@@ -58,7 +58,15 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
-  if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "origin_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+  if (reasonCode === "origin_denied") {
+    return {
+      status: "action_required",
+      reason: "access_denied",
+      hint: "The request origin is not allowed. This is not a bad credential. Retry from the room origin in /llms.txt.",
+      next: [path("/llms.txt"), command("Retry from the room origin named in /llms.txt")]
+    };
+  }
+  if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
       reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",

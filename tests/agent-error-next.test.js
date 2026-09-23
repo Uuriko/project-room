@@ -52,6 +52,11 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.ok(key.next.some(step => step.path === "/api/session"));
   const denied = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the signed-in room owner can manage agent connections" });
   assertAx(denied, { reason: "owner_required" });
+  const origin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Request origin is not allowed" });
+  assertAx(origin, { reason: "access_denied" });
+  assert.match(origin.hint, /not a bad credential/);
+  assert.doesNotMatch(origin.hint, /credential cannot/);
+  assert.ok(origin.next.some(step => step.path === "/llms.txt"));
   const stale = agentErrorAx({ httpStatus: 409, code: "command_rejected", message: "Stale Work Item revision: expected 1", workItemId: "test-handoff", roomId: "commons" });
   assertAx(stale, { reason: "stale_revision" });
   assert.ok(stale.next.some(step => step.tool === "room_read_work"));
