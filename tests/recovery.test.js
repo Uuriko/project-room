@@ -189,6 +189,10 @@ test("online capture preserves all 100 tables, identity boundaries and exact ret
       summary: "SLA breached on email: thread recovery-thread waiting 25h (target 24h)" },
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
+  // Seed one referral so the capture covers referrals (referral attribution).
+  // The referee must be a member; the "Recovery agent" linked above works.
+  f.store.referrals.record({ roomId: "commons", referrerMemberId: "owner",
+    refereeMemberId: identityId, via: "invite", at: f.now() });
   // Seed one DM consent and one public-face setting so the capture
   // comparison covers dm_consents and room_public_settings.
   f.store.dmConsents.request("commons", "agent", "owner", "recovery fixture");
