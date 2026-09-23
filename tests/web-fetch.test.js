@@ -148,6 +148,11 @@ test("extractHighlights respects maxPassages and returns [] on no match", () => 
   assert.deepEqual(extractHighlights("", "apple"), []);
 });
 
+test("extractHighlights drops heading-only sections", () => {
+  const md = `# Quick Fox\n# Other\nSome body text without the terms.`;
+  assert.deepEqual(extractHighlights(md, "quick fox"), []);
+});
+
 test("cacheKeyFor is deterministic and URL-scoped", () => {
   const a = cacheKeyFor("http://example.com/a"), b = cacheKeyFor("http://example.com/a");
   assert.equal(a, b);
@@ -251,7 +256,7 @@ const fetchBody = (pageOrigin, extras = {}) => ({
 
 test("owner fetch returns markdown, highlights, metadata and a miss", async t => {
   const { request, ownerKey, pageOrigin, store } = await serve(t);
-  const res = await request("/api/rooms/commons/web/fetch", {
+  const res = await request("/api/web/fetch", {
     method: "POST", token: ownerKey,
     data: fetchBody(pageOrigin, { formats: { markdown: true, highlights: true },
       highlightsParams: { query: "quick brown fox", maxPassages: 3 }, tags: ["research"] }),
@@ -270,7 +275,7 @@ test("owner fetch returns markdown, highlights, metadata and a miss", async t =>
   assert.equal(body.metadata.language, "en");
   assert.deepEqual(body.metadata.headings, ["Section One", "Section Two"]);
   assert.equal(body.cache_metadata.status, "miss");
-  assert.equal(body.cache_metadata.age_ms, null);
+  assert.equal(body.cache_metadata.age_ms, 0);
   assert.match(body.request_id, /^wf_/);
   // Journaled per request: host, hit/miss, bytes, tags, request_id — and no
   // page content column exists on the journal table at all.
@@ -285,17 +290,17 @@ test("owner fetch returns markdown, highlights, metadata and a miss", async t =>
 
 test("second fetch is a cache hit with age_ms; maxAgeMs 0 forces fresh", async t => {
   const { request, ownerKey, pageOrigin } = await serve(t);
-  const first = await (await request("/api/rooms/commons/web/fetch", {
+  const first = await (await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin),
   })).json();
   assert.equal(first.cache_metadata.status, "miss");
-  const second = await (await request("/api/rooms/commons/web/fetch", {
+  const second = await (await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin),
   })).json();
   assert.equal(second.cache_metadata.status, "hit");
   assert.ok(typeof second.cache_metadata.age_ms === "number" && second.cache_metadata.age_ms >= 0);
   assert.equal(second.request_id === first.request_id, false, "each request gets its own id");
-  const fresh = await (await request("/api/rooms/commons/web/fetch", {
+  const fresh = await (await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin, { maxAgeMs: 0 }),
   })).json();
   assert.equal(fresh.cache_metadata.status, "miss");
@@ -303,7 +308,7 @@ test("second fetch is a cache hit with age_ms; maxAgeMs 0 forces fresh", async t
 
 test("highlights-only request returns null markdown but working highlights", async t => {
   const { request, ownerKey, pageOrigin } = await serve(t);
-  const body = await (await request("/api/rooms/commons/web/fetch", {
+  const body = await (await request("/api/web/fetch", {
     method: "POST", token: ownerKey,
     data: fetchBody(pageOrigin, { formats: { highlights: true }, highlightsParams: { query: "filler words" } }),
   })).json();
@@ -315,13 +320,13 @@ test("highlights-only request returns null markdown but working highlights", asy
 
 test("redirects are followed; redirect to private host is blocked_host", async t => {
   const { request, ownerKey, pageOrigin } = await serve(t);
-  const followed = await request("/api/rooms/commons/web/fetch", {
+  const followed = await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin, { url: `${pageOrigin}/redir` }),
   });
   assert.equal(followed.status, 200);
   assert.ok((await followed.json()).url.endsWith("/page"));
   // The redirect target is private: blocked even under the loopback allowance.
-  const blocked = await request("/api/rooms/commons/web/fetch", {
+  const blocked = await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin, { url: `${pageOrigin}/redir-private` }),
   });
   assert.equal(blocked.status, 403);
@@ -330,12 +335,12 @@ test("redirects are followed; redirect to private host is blocked_host", async t
 
 test("full members may fetch; guests get 403 guest_scope_denied", async t => {
   const { request, ownerKey, memberKey, pageOrigin, store } = await serve(t);
-  const member = await request("/api/rooms/commons/web/fetch", {
+  const member = await request("/api/web/fetch", {
     method: "POST", token: memberKey, data: fetchBody(pageOrigin),
   });
   assert.equal(member.status, 200);
   const guestToken = await redeemGuest(request, ownerKey, store);
-  const guest = await request("/api/rooms/commons/web/fetch", {
+  const guest = await request("/api/web/fetch", {
     method: "POST", token: guestToken, data: fetchBody(pageOrigin),
   });
   assert.equal(guest.status, 403);
@@ -344,7 +349,7 @@ test("full members may fetch; guests get 403 guest_scope_denied", async t => {
 
 test("unauthenticated fetch is 401", async t => {
   const { request, pageOrigin } = await serve(t);
-  const res = await request("/api/rooms/commons/web/fetch", { method: "POST", data: fetchBody(pageOrigin) });
+  const res = await request("/api/web/fetch", { method: "POST", data: fetchBody(pageOrigin) });
   assert.equal(res.status, 401);
 });
 
@@ -360,7 +365,7 @@ test("invalid inputs are typed 4xx, never 500", async t => {
     [{ url: `${pageOrigin}/page`, formats: { markdown: true }, tags: new Array(21).fill("x") }, 422, "invalid_fetch_input"],
   ];
   for (const [data, status, code] of cases) {
-    const res = await request("/api/rooms/commons/web/fetch", { method: "POST", token: ownerKey, data });
+    const res = await request("/api/web/fetch", { method: "POST", token: ownerKey, data });
     assert.equal(res.status, status, JSON.stringify(data));
     assert.equal((await res.json()).error.code, code, JSON.stringify(data));
   }
@@ -368,18 +373,44 @@ test("invalid inputs are typed 4xx, never 500", async t => {
 
 test("non-HTML is 415 unsupported_content; server errors are 502 fetch_failed", async t => {
   const { request, ownerKey, pageOrigin } = await serve(t);
-  const json = await request("/api/rooms/commons/web/fetch", {
+  const json = await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin, { url: `${pageOrigin}/json` }),
   });
   assert.equal(json.status, 415);
   assert.equal((await json.json()).error.code, "unsupported_content");
-  const err = await request("/api/rooms/commons/web/fetch", {
+  const err = await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin, { url: `${pageOrigin}/err` }),
   });
   assert.equal(err.status, 502);
   assert.equal((await err.json()).error.code, "fetch_failed");
 });
 
+test("failed fetches are journaled but never consume quota", async t => {
+  const { request, memberKey, pageOrigin, store } = await serve(t);
+  const now = Date.now();
+  const insert = store.db.prepare(`INSERT INTO web_fetch_log
+    (request_id, room_id, member_id, host, cache_status, bytes, tags_json, created_at)
+    VALUES(?,?,?,?,?,?,?,?)`);
+  store.transaction(() => {
+    for (let i = 0; i < 100; i++) {
+      insert.run(`wf_err_${i}`, "commons", "member", "example.com", "error", 0, "[]", now - 1000);
+    }
+  });
+  const res = await request("/api/web/fetch", {
+    method: "POST", token: memberKey, data: fetchBody(pageOrigin),
+  });
+  assert.equal(res.status, 200, "error rows must not count toward quota");
+  const rows = store.db.prepare("SELECT COUNT(*) AS n FROM web_fetch_log WHERE cache_status='error'").get().n;
+  assert.equal(rows, 100);
+});
+
+test("the old roomId web/fetch path is not served", async t => {
+  const { request, ownerKey, pageOrigin } = await serve(t);
+  const res = await request("/api/rooms/commons/web/fetch", {
+    method: "POST", token: ownerKey, data: fetchBody(pageOrigin),
+  });
+  assert.equal(res.status, 404);
+});
 test("quota exhaustion is 429 with Retry-After and retry info", async t => {
   const { request, ownerKey, memberKey, pageOrigin, store } = await serve(t);
   const now = Date.now();
@@ -392,7 +423,7 @@ test("quota exhaustion is 429 with Retry-After and retry info", async t => {
       insert.run(`wf_quota_${i}`, "commons", "member", "example.com", "hit", 10, "[]", now - 1000);
     }
   });
-  const res = await request("/api/rooms/commons/web/fetch", {
+  const res = await request("/api/web/fetch", {
     method: "POST", token: memberKey, data: fetchBody(pageOrigin),
   });
   assert.equal(res.status, 429);
@@ -402,7 +433,7 @@ test("quota exhaustion is 429 with Retry-After and retry info", async t => {
   assert.ok(typeof body.retryAfterMs === "number" && body.retryAfterMs >= 0);
   assert.ok(typeof body.resetAt === "number" && body.resetAt > now);
   // The owner quota is separate: the owner can still fetch.
-  const owner = await request("/api/rooms/commons/web/fetch", {
+  const owner = await request("/api/web/fetch", {
     method: "POST", token: ownerKey, data: fetchBody(pageOrigin),
   });
   assert.equal(owner.status, 200);

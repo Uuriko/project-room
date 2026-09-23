@@ -496,7 +496,11 @@ export function extractHighlights(markdown, query, maxPassages = WEB_FETCH_HIGHL
     let score = 0;
     for (const term of terms) score += countTerm(heading, term) * 3 + countTerm(body, term);
     return { index, section, score };
-  }).filter(entry => entry.score > 0);
+  })
+    // Sections whose only match is the heading but that carry no passage
+    // text contribute nothing readable; drop them so highlights stay
+    // non-empty or absent entirely.
+    .filter(entry => entry.score > 0 && entry.section.text.join(" ").trim().length > 0);
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
   const top = scored.slice(0, limit).sort((a, b) => a.index - b.index);
   return top.map(({ section }) => {
@@ -511,8 +515,17 @@ export function extractHighlights(markdown, query, maxPassages = WEB_FETCH_HIGHL
   });
 }
 
+// Cache key: SHA-256 over the canonical options plus the normalized URL.
+// The converter version and the main-content-only extraction flag are part
+// of the key so a future converter change invalidates old entries.
+// Highlights need no key component: they are derived deterministically from
+// the cached markdown, so the same network payload serves every query.
+const WEB_FETCH_CACHE_KEY_VERSION = "web-fetch-cache-v1";
+const WEB_FETCH_MD_CONVERTER_VERSION = "md-converter-v1";
 export function cacheKeyFor(normalizedUrl) {
-  return createHash("sha256").update(`web-fetch-v1\n${normalizedUrl}`).digest("hex");
+  return createHash("sha256")
+    .update([WEB_FETCH_CACHE_KEY_VERSION, WEB_FETCH_MD_CONVERTER_VERSION, "main-content-only", normalizedUrl].join("\n"))
+    .digest("hex");
 }
 
 // ---------------------------------------------------------------------------
@@ -578,18 +591,20 @@ export class WebFetch {
     const limited = (count, per, scope) => {
       if (count < per) return;
       const oldest = this.db.prepare(
-        `SELECT MIN(created_at) AS at FROM web_fetch_log WHERE room_id=? ${scope} AND created_at>?`)
+        `SELECT MIN(created_at) AS at FROM web_fetch_log WHERE room_id=? ${scope} AND created_at>? AND cache_status IN ('hit','miss')`)
         .get(roomId, ...(scope ? [memberId] : []), since).at ?? now;
       const resetAt = oldest + WEB_FETCH_RATE_WINDOW_MS;
       fail(429, "rate_limited",
         `Web fetch quota exceeded (${per} per day ${scope ? "for this member" : "for this room"})`,
         { retryAfterMs: Math.max(0, resetAt - now), resetAt });
     };
+    // Only successful fetches (hit/miss) consume quota; typed failures are
+    // journaled but never billed.
     limited(this.db.prepare(
-      "SELECT COUNT(*) AS n FROM web_fetch_log WHERE room_id=? AND member_id=? AND created_at>?")
+      "SELECT COUNT(*) AS n FROM web_fetch_log WHERE room_id=? AND member_id=? AND created_at>? AND cache_status IN ('hit','miss')")
       .get(roomId, memberId, since).n, WEB_FETCH_RATE_PER_MEMBER_PER_DAY, "AND member_id=?");
     limited(this.db.prepare(
-      "SELECT COUNT(*) AS n FROM web_fetch_log WHERE room_id=? AND created_at>?")
+      "SELECT COUNT(*) AS n FROM web_fetch_log WHERE room_id=? AND created_at>? AND cache_status IN ('hit','miss')")
       .get(roomId, since).n, WEB_FETCH_RATE_PER_ROOM_PER_DAY, "");
   }
 
@@ -650,7 +665,7 @@ export class WebFetch {
         this.putCache(key, normalized, finalUrl, markdown, metadata, bytes, this.store.now());
       });
       cacheStatus = "miss";
-      ageMs = null;
+      ageMs = 0; // freshly fetched: zero age
     }
     const highlights = req.highlights
       ? extractHighlights(markdown, req.query, req.maxPassages, metadata.title)
@@ -686,7 +701,7 @@ export function isWebFetchGuest(member) {
 export function webFetchContract() {
   return {
     status: "live",
-    route: "POST /api/rooms/{roomId}/web/fetch",
+    route: "POST /api/web/fetch",
     auth: "owner_and_full_members",
     formats: ["markdown", "highlights"],
     limits: {

@@ -2249,6 +2249,38 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
+      // Room-side web fetch (RC-2026-09-23-102): POST /api/web/fetch. The room
+      // comes from the credential itself — room bearer credentials (access
+      // keys and room sessions) carry their room_id, so no roomId appears in
+      // the path. Identity secrets and API keys cannot resolve a room without
+      // one and answer 401 here; use a room bearer credential instead.
+      // Documented in docs/openapi.yaml like every other route literal here.
+      if (url.pathname === "/api/web/fetch") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        const isBearer = Boolean(req.headers.authorization);
+        const token = bearer(req) ?? cookie(req, roomCookieName);
+        const webAuth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
+        // Owner + full members only. The guest gate uses the #798 code and
+        // copy (isWebFetchGuest covers ga1. guest-agents and human
+        // share-link guests with role === "guest"). There is no drafts-only
+        // member tier in the room data model, so every other active member
+        // qualifies; the choice is documented in the PR.
+        if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        protectWrite(req, webAuth, isBearer);
+        const data = await body(req);
+        try {
+          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data));
+        } catch (error) {
+          // Quota-exceeded is a typed 429 with retry info, never a 500.
+          if (error instanceof WebFetchError && error.code === "rate_limited") {
+            res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+            return json(res, 429, { error: { code: error.code, message: error.message },
+              retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+          }
+          throw error;
+        }
+      }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
@@ -2352,9 +2384,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionAckMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/([^/]{1,128})\/ack$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
-      // Room-side web fetch (RC-2026-09-23-102): POST-only scrape-style API,
-      // documented in docs/openapi.yaml like every other route literal here.
-      const webFetchMatch = /^\/api\/rooms\/([^/]{1,384})\/web\/fetch$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
       // route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file.
@@ -2443,11 +2472,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
-        && !mentionAckMatch && !mentionSettingsMatch && !webFetchMatch) reject(404, "not_found", "Not found");
+        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
-        ?? mentionAckMatch ?? mentionSettingsMatch ?? webFetchMatch)[1]);
+        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
@@ -2457,7 +2486,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings"
-        : webFetchMatch ? "web-fetch" : "ownership-transfer";      const selected = roomCredentials(req, url);
+        : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
         : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -2695,28 +2724,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.agentPlugin.setRoomVerificationPolicy({
           roomId, requireVerified: data.requireVerified, setBy: auth.member.id,
         }));
-      }
-      if (route === "web-fetch") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        // RC-2026-09-23-102: owner + full members only. The guest gate uses
-        // the #798 code and copy (isWebFetchGuest covers ga1. guest-agents
-        // and human share-link guests with role === "guest"). There is no
-        // drafts-only member tier in the room data model, so every other
-        // active member qualifies; the choice is documented in the PR.
-        if (!auth.member?.id) reject(401, "unauthenticated", "Member credential required");
-        if (isWebFetchGuest(auth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-        const data = await body(req);
-        try {
-          return json(res, 200, await store.webFetch.fetch(roomId, auth.member.id, data));
-        } catch (error) {
-          // Quota-exceeded is a typed 429 with retry info, never a 500.
-          if (error instanceof WebFetchError && error.code === "rate_limited") {
-            res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-            return json(res, 429, { error: { code: error.code, message: error.message },
-              retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
-          }
-          throw error;
-        }
       }
       if (route === "search" && req.method === "GET") {
         // Round-2 #113: full-text search over messages and work items.

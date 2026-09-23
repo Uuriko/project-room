@@ -586,12 +586,14 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
-  /api/rooms/{roomId}/web/fetch:
+  /api/web/fetch:
     post:
       summary: Fetch a public web page as markdown and/or deterministic highlights
       description: |
         Room-side web fetch (clean-room scrape-style API; no external service).
-        One fetch covers every requested format: `formats.markdown` returns
+        The room is taken from the caller's own credential — room bearer
+        credentials (access keys and room sessions) carry their room, so no
+        roomId appears in the path. One fetch covers every requested format: `formats.markdown` returns
         the page as hand-rolled markdown (scripts/styles/nav/footer/aside
         stripped, links resolved against the final URL), and
         `formats.highlights` returns deterministic query-relevant passages —
@@ -616,8 +618,8 @@ paths:
         `Retry-After` header. Every attempt is journaled per room (host, cache
         hit/miss, bytes, tags, request_id); page content is never journaled.
         Owner and full members only — guests get 403 `guest_scope_denied`.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
+        Room bearer credentials only: identity secrets and API keys cannot
+        resolve a room without one in the path and answer 401 here.
       requestBody:
         required: true
         content:
@@ -673,7 +675,7 @@ paths:
                     type: object
                     properties:
                       status: { type: string, enum: [hit, miss] }
-                      age_ms: { type: number, nullable: true }
+                      age_ms: { type: number, description: 0 on a fresh miss }
                   request_id: { type: string }
         '401':
           description: No room credential, or membership ended (unauthenticated)
