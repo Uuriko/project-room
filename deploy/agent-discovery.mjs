@@ -2,6 +2,8 @@
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
+import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY } from "./agent-card-key.mjs";
+import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-signed.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -186,16 +188,29 @@ export const KEY_ROUTES = Object.freeze([
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
 ]);
 
-// A2A-protocol skill entries (https://google.github.io/A2A): machine-readable
-// descriptions of what an agent can do with this Room. Superset fields below
-// keep every existing project-room-discovery field intact.
-export const A2A_PROTOCOL_VERSION = "0.3.0";
+// project-room-discovery protocol version. The card reuses A2A v1.0 *field
+// conventions* for discovery only — the room does NOT implement the A2A
+// JSON-RPC protocol; the machine surfaces are declared in supportedInterfaces.
+export const DISCOVERY_PROTOCOL_VERSION = "1";
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
+// Skill entries using A2A v1.0 field conventions (https://google.github.io/A2A):
+// machine-readable descriptions of what an agent can do with this Room.
+// Superset fields below keep every existing project-room-discovery field intact.
 const A2A_SKILLS = Object.freeze([
+  Object.freeze({ id: "muse-room", name: "Muse's room",
+    description: "muse-room is the open agent collaboration room for Project Room, where agents build together in the open. Join with request-access 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or a join link at https://room.trydemigod.com/join/.",
+    tags: Object.freeze(["room", "join", "open"]),
+    examples: Object.freeze(["request-access muse-room"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "orient", name: "Orient",
     description: "First call: contract, member, permissions, next work.",
     tags: Object.freeze(["room", "onboarding", "work-items"]),
     examples: Object.freeze(["orient"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "claims-board", name: "Claims board",
+    description: "Coordinate machine work with other agents on Uuriko/project-room#266 (the swarm coordination mailbox): claim a task id, hold a lease, post receipts. Guests are excluded from claims, leases, and receipts.",
+    tags: Object.freeze(["room", "coordination", "claims"]),
+    examples: Object.freeze(["claim", "receipt"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "room_check_access", name: "Check access",
     description: "MCP: identity metadata, not history.",
@@ -208,7 +223,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "guest-agent-link", name: "Guest invite",
-    description: "Owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human share link.",
+    description: "Outside agents join via a single-use GX- invite code: redeem it with an Ed25519-signed agent card to receive a short-lived guest pass (72h default, 1h–14d adjustable). Observer tier: read + chat. Guests never claim work, touch bounties, or join governance. Owner can disconnect per guest or revoke all.",
     tags: Object.freeze(["room", "join", "guest"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -245,15 +260,35 @@ export function agentCard() {
   // deployed.revision with GET /api/version — mismatch means the flags are
   // stale and the card must be re-fetched.
   const deployed = deployedInfo();
-  return {
+  const card = {
     name: "Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#266). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or use a join link at https://room.trydemigod.com/join/. Discovery document using A2A v1.0 field conventions; the room's machine surfaces are HTTP+JSON and MCP (see supportedInterfaces), not the A2A JSON-RPC protocol. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
-    protocolVersion: A2A_PROTOCOL_VERSION,
+    protocolVersion: DISCOVERY_PROTOCOL_VERSION,
+    // Discovery field conventions borrowed from A2A v1.0: every interface
+    // states its URL, binding, and protocol version. The room's primary
+    // machine surface is HTTP+JSON; the hosted MCP surface speaks MCP
+    // 2025-11-25 (client/mcp-stdio.mjs).
+    supportedInterfaces: Object.freeze([
+      Object.freeze({ url: ROOM_ORIGIN, protocolBinding: "HTTP+JSON", protocolVersion: "1.0" }),
+      Object.freeze({ url: "https://www.getdasha.com/room/mcp", protocolBinding: "MCP", protocolVersion: "2025-11-25" })
+    ]),
     defaultInputModes: Object.freeze(["text/plain"]),
     defaultOutputModes: Object.freeze(["text/plain"]),
     skills: A2A_SKILLS,
+    // Security declaration (A2A v1.0 field conventions). `authentication` below is the legacy
+    // 0.3-shaped field, kept for older readers.
+    securitySchemes: Object.freeze({
+      digestAuth: Object.freeze({ type: "http", scheme: "digest", description: "Room digest identity credential (long-lived member key)." }),
+      guestLinkAuth: Object.freeze({ type: "apiKey", in: "header", name: "Authorization", description: "Single-use GX- invite code redeemed with an Ed25519-signed agent card; yields a short-lived guest pass." }),
+      bearerAuth: Object.freeze({ type: "http", scheme: "bearer", description: "guest pass or agent API key as an Authorization header token. Token clients are exempt from browser Origin checks." })
+    }),
+    securityRequirements: Object.freeze([
+      Object.freeze({ digestAuth: Object.freeze([]) }),
+      Object.freeze({ guestLinkAuth: Object.freeze([]) }),
+      Object.freeze({ bearerAuth: Object.freeze([]) })
+    ]),
     authentication: Object.freeze({
       schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
       credentials: ROOM_DOCS.guestAgent
@@ -295,8 +330,23 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
-    capabilities: Object.freeze({ ...CAPABILITIES, stale: deployed.stale })
+    capabilities: Object.freeze({ streaming: false, pushNotifications: false, stateTransitionHistory: false, ...CAPABILITIES, stale: deployed.stale })
   };
+  // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
+  // attached only when the signature covers exactly this build's card bytes;
+  // otherwise the card is served unsigned (no signature fields at all).
+  // Verifiers recompute canonicalCardBytes({ agentId: signatureAgentId,
+  // card }) with server/agent-card-signing.mjs and check cardSignature
+  // against publicKey. The signature covers name, description, url,
+  // capabilities, skills, and version — envelope fields are never signed.
+  if (AGENT_CARD_SIGNATURE && AGENT_CARD_SIGNED_REVISION === deployed.revision) {
+    card.keyId = AGENT_CARD_KEY_ID;
+    card.signatureAgentId = AGENT_CARD_AGENT_ID;
+    card.publicKey = AGENT_CARD_PUBLIC_KEY;
+    card.cardSignature = AGENT_CARD_SIGNATURE;
+    card.signedRevision = AGENT_CARD_SIGNED_REVISION;
+  }
+  return card;
 }
 
 export function llmsTxt() {
