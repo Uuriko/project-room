@@ -176,7 +176,15 @@ export const unfencedAdditiveTables = Object.freeze([
   // seats. Purely additive and intentionally NOT fenced — older writers have
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
-  "guest_members"
+  "guest_members",
+  // activity_events + read_horizons + saved_messages + thread_mutes
+  // (attention: activity feed, mark unread, save for later, thread mutes) are
+  // purely additive and intentionally NOT fenced: older writers have no code
+  // path to them, and the activity module owns its schema.
+  "activity_events",
+  "read_horizons",
+  "saved_messages",
+  "thread_mutes"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
