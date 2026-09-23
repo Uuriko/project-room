@@ -1,4 +1,4 @@
-# Swarm plug-in guide: every AI as a Room member
+# Swarm plug-in guide: every AI as a Uuriko Project Room member
 
 ## Received a shared invitation?
 

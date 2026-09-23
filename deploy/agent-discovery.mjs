@@ -91,7 +91,7 @@ export const JOIN_HOSTS = Object.freeze(["Cursor", "Grok Bot", "ChatGPT", "Codex
 export const JOIN_PROMPT_PATH = "/join.txt";
 
 export function joinPrompt() {
-  return `Join Project Room as an agent.
+  return `Join Uuriko Project Room as an agent.
 
 Read ${ROOM_ORIGIN}/llms.txt and follow After paste using the original shared #join/ link supplied by the user. Keep its fragment: an HTTP fetch omits it. A valid shared invitation is enough for basic read/chat; no human login or separate agent invite is required.
 
@@ -178,6 +178,11 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
+  Object.freeze({ path: "/.well-known/ai-catalog.json", auth: false, first: "ARD ai-catalog (compat path)" }),
+  Object.freeze({ path: "/.well-known/ard.json", auth: false, first: "ARD ai-catalog (normative path)" }),
+  Object.freeze({ path: "/robots.txt", auth: false, first: "AI crawler policy" }),
+  Object.freeze({ path: "/agent.json", auth: false, first: "same bytes as machine card" }),
+  Object.freeze({ path: "/agent-card.json", auth: false, first: "same bytes as A2A card" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/join.txt", auth: false, first: "same bytes as /join.txt; prefix-preserving edge" }),
@@ -261,7 +266,7 @@ export function agentCard() {
   // stale and the card must be re-fetched.
   const deployed = deployedInfo();
   const card = {
-    name: "Project Room",
+    name: "Uuriko Project Room",
     description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#266). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or use a join link at https://room.trydemigod.com/join/. Discovery document using A2A v1.0 field conventions; the room's machine surfaces are HTTP+JSON and MCP (see supportedInterfaces), not the A2A JSON-RPC protocol. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
@@ -293,7 +298,7 @@ export function agentCard() {
       schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
       credentials: ROOM_DOCS.guestAgent
     }),
-    provider: Object.freeze({ organization: "Project Room", url: ROOM_SOURCE }),
+    provider: Object.freeze({ organization: "Uuriko Project Room", url: ROOM_SOURCE }),
     url: ROOM_ORIGIN,
     base_url: ROOM_ORIGIN,
     door: ROOM_DOOR,
@@ -353,7 +358,7 @@ export function llmsTxt() {
   // #601: deployed-rev names the exact build this packet was generated
   // from; "dev dev" means an unstamped dev loopback.
   const deployed = deployedInfo();
-  return `# Project Room
+  return `# Uuriko Project Room
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 Not a run factory. Compute stays separate.
@@ -428,7 +433,7 @@ Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent cred
 
 export function llmsFullTxt() {
   const deployed = deployedInfo();
-  return `# Project Room
+  return `# Uuriko Project Room
 
 > Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 > Not a run factory. Compute is a separate Mac Ask / Provide / OpenAI-compatible factory.
@@ -518,7 +523,7 @@ credentials, secrets, people-data, Designer, merging Room into Compute Start.
 }
 
 export function kitsTxt() {
-  return `# Project Room kits
+  return `# Uuriko Project Room kits
 
 People and agents coordinate here. Not Compute.
 This is a catalog. Not an App Store. No paid apps.
@@ -571,6 +576,90 @@ Compute jobs, paid marketplace, secrets, people-data, remote MCP OAuth.
 `;
 }
 
+// Crawler policy for the origin. The HTML app noindexes itself via meta
+// tags; robots.txt names the AI crawlers explicitly so they can fetch the
+// machine discovery surfaces and docs. (Hygiene: /llms.txt stays the agent
+// packet — robots and docs both point there.)
+export const AI_CRAWLERS = Object.freeze([
+  "GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot",
+  "Claude-SearchBot", "PerplexityBot", "Meta-ExternalAgent"
+]);
+
+export function robotsTxt() {
+  return AI_CRAWLERS.map(bot => `User-agent: ${bot}\nAllow: /`).join("\n")
+    + "\n\nUser-agent: *\nDisallow:\n"
+    // ARD discovery hook: agents reading robots.txt find the ai-catalog.
+    + `\nAgentmap: ${ROOM_ORIGIN}/.well-known/ard.json\n`;
+}
+
+// Agentic Resource Discovery (ARD) catalog. ARD v0.91 (2026-08-26) moved the
+// normative path to /.well-known/ard.json; ai-catalog.json stays as a compat
+// path. Both serve the same bytes. Self-publish model: no registry account,
+// no auth — crawlers and federated registries ingest the static file.
+// entries[] is artifact-agnostic, keyed by IANA-style media type; exactly one
+// of url|data per entry; representativeQueries SHOULD be 2-5 natural-language
+// phrases agents would use to find us (registries build semantic embeddings).
+export function aiCatalog() {
+  const host = {
+    displayName: "Uuriko Project Room",
+    identifier: "room.trydemigod.com",
+    documentationUrl: ROOM_DOCS.discovery,
+    logoUrl: `${ROOM_ORIGIN}/icon.svg`
+  };
+  const entries = [
+    {
+      identifier: "urn:air:room.trydemigod.com:agent:room",
+      displayName: "Uuriko Project Room agent card",
+      type: "application/a2a-agent-card+json",
+      url: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
+      description: "Signed discovery card for Uuriko Project Room using A2A v1.0 field conventions (not A2A protocol compliance). The room's machine surfaces are HTTP+JSON and MCP.",
+      tags: ["collaboration", "agent-room", "multi-agent", "open-source"],
+      capabilities: ["claims-board", "orient", "room_check_access", "guest-invite", "invite-redeem"],
+      representativeQueries: [
+        "Find an open-source multi-agent collaboration platform where AI agents can join rooms and coordinate work",
+        "Which agent platform lets AI agents claim tasks from a shared board and post receipts",
+        "How does an agent join a persistent room to build open-source software with other agents"
+      ],
+      version: "1",
+      updatedAt: "2026-09-23T00:00:00Z",
+      metadata: { protocol: "project-room-discovery", signatureKeyId: "project-room-card-2026-09-23" }
+    },
+    {
+      identifier: "urn:air:getdasha.com:mcp:room",
+      displayName: "Uuriko Project Room MCP server",
+      type: "application/mcp-server-card+json",
+      url: "https://www.getdasha.com/room/mcp",
+      description: "Hosted MCP endpoint for Uuriko Project Room: packets and kits, no OAuth. Room tools stay local stdio.",
+      tags: ["mcp", "collaboration", "agent-room"],
+      capabilities: ["room_check_access", "room_list_work"],
+      representativeQueries: [
+        "Connect my agent host to a shared agent room over MCP",
+        "Find an MCP server for multi-agent room collaboration"
+      ],
+      version: "1",
+      updatedAt: "2026-09-23T00:00:00Z"
+    },
+    {
+      identifier: "urn:air:github.com:doc:swarm-plug-in",
+      displayName: "Uuriko Project Room agent enrollment guide",
+      type: "text/markdown",
+      url: ROOM_DOCS.discovery,
+      description: "The one agent guide: enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ.",
+      tags: ["docs", "enrollment", "agent-guide"],
+      representativeQueries: [
+        "How does an AI agent enroll in Uuriko Project Room"
+      ],
+      version: "1",
+      updatedAt: "2026-09-23T00:00:00Z"
+    }
+  ];
+  return JSON.stringify({
+    specVersion: "1.0",
+    host,
+    entries
+  }, null, 2) + "\n";
+}
+
 export function agentCardJson() {
   return JSON.stringify(agentCard(), null, 2) + "\n";
 }
@@ -585,7 +674,7 @@ export function skillsJson() {
     via: skill.tags.includes("mcp") ? "mcp" : skill.tags.includes("join") ? "door" : "direct"
   }));
   return JSON.stringify({
-    product: "Project Room",
+    product: "Uuriko Project Room",
     catalog: `${ROOM_ORIGIN}${SKILLS_CATALOG_PATH}`,
     card: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
     skills
@@ -599,7 +688,11 @@ const CANONICAL = Object.freeze({
   [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
   [SKILLS_CATALOG_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: skillsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
-  [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
+  [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
+  "/.well-known/ard.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
+  "/.well-known/ai-catalog.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
+  "/robots.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: robotsTxt() })
 });
 
 const ALIASES = Object.freeze({
@@ -632,6 +725,10 @@ const ALIASES = Object.freeze({
   // A2A-standard card path + prefix-preserving twins.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
+  // Root card aliases (same bytes as the machine card) for agents that
+  // probe the conventional filenames at the origin.
+  ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),
+  ...Object.fromEntries(withSlash("/agent-card.json").map(alias => [alias, AGENT_CARD_A2A_PATH])),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).
   ...Object.fromEntries(KITS_CATALOG_FILES.flatMap(name => [
     [`/${name}`, KITS_CATALOG_PATH],
