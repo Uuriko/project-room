@@ -371,6 +371,18 @@ export class RoomClient {
       && sameAccountSession(this.session, owner.session));
   }
   ownsResponse(payload, session = this.session) {
+    // Room-cookie sessions (join flow, access-key login) carry no account.
+    // #720's anti-confusion check required session.account, so refresh()
+    // endAccess()ed every room-mode session and restore() returned null —
+    // stranding fresh joiners at the account gate despite a valid cookie.
+    // Bind account-less room sessions on room + viewer + session binding.
+    if (session?.authMode === "room" && !session.account) {
+      return typeof session.sessionBinding === "string"
+        && payload.roomId === session.roomId
+        && payload.viewerId === session.member.id
+        && payload.viewerSessionBinding === session.sessionBinding
+        && (!Number.isSafeInteger(session.sessionRevision) || payload.viewerSessionRevision === session.sessionRevision);
+    }
     return Boolean(session?.account && typeof session.account.id === "string" && Number.isSafeInteger(session.account.authEpoch) && typeof session.sessionBinding === "string")
       && (session.authMode !== "account" || this.ownsAccountSession())
       && payload.roomId === session.roomId
