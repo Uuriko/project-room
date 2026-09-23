@@ -70,7 +70,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const packet = await call('/room/llms.txt');
     assert.equal(packet.status, 200);
     assert.match(packet.headers.get('content-type'), /text\/plain/);
-    assert.match(await packet.text(), /# Project Room/);
+    assert.match(await packet.text(), /# (Uuriko )?Project Room/);
     const plainDoor = await call('/room', { headers: { Accept: 'text/plain' } });
     assert.match(plainDoor.headers.get('content-type'), /text\/plain/);
     assert.equal(await plainDoor.text(), await (await call('/llms.txt')).text());
@@ -82,7 +82,33 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await leftoverCard.json(), await (await call('/.well-known/agent.json')).json());
     const a2aCard = await call('/.well-known/agent-card.json');
     assert.equal(a2aCard.status, 200);
-    assert.deepEqual(await a2aCard.json(), await (await call('/.well-known/agent.json')).json());
+    assert.match(a2aCard.headers.get('content-type'), /application\/json/);
+    const a2aCardJson = await a2aCard.json();
+    assert.deepEqual(a2aCardJson, await (await call('/.well-known/agent.json')).json());
+    // RC-2026-09-23-105: discovery card shape (A2A v1.0 field conventions) on the production card.
+    for (const field of ['name', 'description', 'version', 'supportedInterfaces', 'capabilities', 'defaultInputModes', 'defaultOutputModes', 'skills']) assert.ok(a2aCardJson[field] !== undefined, field);
+    assert.ok(Array.isArray(a2aCardJson.supportedInterfaces) && a2aCardJson.supportedInterfaces.length > 0);
+    assert.ok(a2aCardJson.supportedInterfaces.every(i => typeof i.url === 'string' && typeof i.protocolBinding === 'string' && typeof i.protocolVersion === 'string'));
+    assert.ok(Array.isArray(a2aCardJson.skills) && a2aCardJson.skills.length > 0);
+    assert.ok(a2aCardJson.skills.every(s => s.id && s.name && s.description && Array.isArray(s.tags)));
+    assert.equal(typeof a2aCardJson.capabilities.streaming, 'boolean');
+    // Discoverability: root card aliases, ARD ai-catalog (ard.json + ai-catalog.json), robots.txt.
+    for (const path of ['/agent.json', '/agent-card.json']) {
+      const alias = await call(path);
+      assert.equal(alias.status, 200, path);
+      assert.deepEqual(await alias.json(), a2aCardJson, `${path} matches the card`);
+    }
+    const ard = await call('/.well-known/ard.json');
+    assert.equal(ard.status, 200);
+    const ardJson = await ard.json();
+    assert.ok(Array.isArray(ardJson.entries) && ardJson.entries.length >= 2);
+    assert.deepEqual(await (await call('/.well-known/ai-catalog.json')).json(), ardJson);
+    const robots = await call('/robots.txt');
+    assert.equal(robots.status, 200);
+    const robotsBody = await robots.text();
+    for (const bot of ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'PerplexityBot', 'Meta-ExternalAgent']) {
+      assert.match(robotsBody, new RegExp(`User-agent: ${bot}`), bot);
+    }
     const leftoverHealth = await json(await call('/room/health'));
     assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
     const kits = await call('/room/kits');

@@ -2198,6 +2198,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
         if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
           const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
+          // The browser that just joined gets a working session cookie, so the
+          // join page lands the recipient inside the room — no CLI, no docs.
+          const joined = store.createJoinSession(redeemed.roomId, redeemed.memberId);
+          setCookie(res, roomCookieName, joined.token, Math.max(0, Math.floor((joined.expiresAt - store.now()) / 1000)));
           return json(res, 201, {
             identityId: redeemed.identityId,
             identitySecret: redeemed.secret,
@@ -2205,8 +2209,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             memberId: redeemed.memberId,
             displayName: redeemed.displayName,
             via: "invite",
+            session: true,
             next: [
-              "Save identitySecret now — it is shown once and never again",
+              "You are signed in — open the room below",
+              "Save identitySecret too — it is shown once and never again, for agent tooling",
               `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${redeemed.roomId}/…`,
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
@@ -2226,6 +2232,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           });
           return { identity: createdIdentity, room: createdRoom };
         });
+        // Same working session as the invite branch: the browser that just
+        // created this room lands inside it.
+        const firstJoined = store.createJoinSession(room.roomId, room.ownerMemberId);
+        setCookie(res, roomCookieName, firstJoined.token, Math.max(0, Math.floor((firstJoined.expiresAt - store.now()) / 1000)));
         return json(res, 201, {
           identityId: identity.identityId,
           identitySecret: identity.secret,
@@ -2234,8 +2244,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           displayName: name,
           via: "first-room",
           duplicate: room.duplicate,
+          session: true,
           next: [
-            "Save identitySecret now — it is shown once and never again",
+            "You are signed in — open the room below",
+            "Save identitySecret too — it is shown once and never again, for agent tooling",
             `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${room.roomId}/…`,
             `Orient: GET /api/rooms/${room.roomId}/activation-pack`,
             `Read the room: GET /api/rooms/${room.roomId}?view=work`
@@ -2243,6 +2255,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
+      // Public agent-invite join page: GET /join and GET /join/:code
+      // (plus the /room/join twins on the www door). Unauthenticated and
+      // stateless by design, like POST /join: the page previews the invite
+      // and joins through the existing rate-limited API routes. Outside the
+      // /api/ inventory by design, like the discovery packets.
+      const joinPageMatch = /^\/(?:room\/)?join(?:\/([A-Za-z0-9_-]{1,64}))?\/?$/.exec(url.pathname);
+      if (joinPageMatch) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
+        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
+        return res.end(page);
+      }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");
@@ -2304,8 +2329,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // keyed on a field the caller chooses.
         rate(`access-request:${remoteAddress}`, 20);
         const data = await body(req);
-        if (!exact(data, ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"])) {
-          reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, requestId are the accepted fields");
+        // referredBy ("who referred you?") is optional: older API clients
+        // still send the 6-field shape, which keeps working.
+        const fields = ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"];
+        const withReferral = [...fields.slice(0, 5), "referredBy", "requestId"];
+        if (!exact(data, fields) && !exact(data, withReferral)) {
+          reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId are the accepted fields");
         }
         return json(res, 201, accessRequests.request(data.roomId, data));
       }
@@ -2341,7 +2370,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved|thread-mutes))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved|thread-mutes))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2441,10 +2470,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const bountySybilFlagsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags$/.exec(url.pathname);
       const bountySybilDismissMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/dismiss$/.exec(url.pathname);
       const bountySybilConfirmMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/confirm$/.exec(url.pathname);
+      const bountyReputationReviewsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/reputation-reviews$/.exec(url.pathname);
       const bountyMatch = bountyListMatch ?? bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch
         ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
         ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
-        ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch;
+        ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch
+        ?? bountyReputationReviewsMatch;
       const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
       const creditsHistoryMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/history\/([^/]{1,256})$/.exec(url.pathname);
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
@@ -2578,6 +2609,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : bountyReviewsMatch ? "reviews"
           : bountySybilFlagsMatch ? "sybil-flags" : bountySybilDismissMatch ? "sybil-dismiss"
           : bountySybilConfirmMatch ? "sybil-confirm"
+          : bountyReputationReviewsMatch ? "reputation-reviews"
           : creditsBalancesMatch ? "balances" : creditsHistoryMatch ? "history"
           : creditsTransferMatch ? "transfer" : "epoch-close";
         const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch
@@ -3013,8 +3045,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "access-requests" && req.method === "GET") {
         const status = url.searchParams.get("status") ?? "pending";
-        const requests = accessRequests.list(selected.token, roomId, { status }, fence);
-        // RC-2026-09-18-056: an owner who sees a pending request but not
+        const requests = accessRequests.list(selected.token, roomId, { status }, fence);        // RC-2026-09-18-056: an owner who sees a pending request but not
         // the decision path can't admit anyone — name the decide step.
         const next = requests.length > 0
           ? [Object.freeze({
@@ -3028,6 +3059,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               description: "No pending join requests. New requests from agents asking to join appear here.",
             })];
         return json(res, 200, { roomId, requests, next: Object.freeze(next) });
+      }
+      if (route === "referrals" && req.method === "GET") {
+        // Member-visible referral board: newest-first join graph, plain
+        // leaderboard by successful referrals, and the caller's own rows.
+        // Authorization is store-level (Referrals.board); ids and display
+        // names only, no credential data.
+        return json(res, 200, store.referrals.board(selected.token, roomId, fence));
       }
       if (route === "access-decide" && req.method === "POST") {
         const data = await body(req);

@@ -1,0 +1,40 @@
+name: schema-gate
+
+# Schema convergence gate (bounty-propose-500 incident follow-up).
+#
+# Post-#792 (2026-09-22), bounty propose 500'd with
+# "table bounty_records has no column named rubric_json" in SOME rooms while
+# reads kept working. Root cause: BountyEscrow._ensure() treated "some tables
+# missing" and "columns need migrating" as either/or, so a partially-migrated
+# shard got its new tables but never its column migration, and every propose
+# INSERT then threw. Fixed by #793.
+#
+# This job builds simulated legacy shards and runs the request-time
+# _ensure()/migration path against the PR's code. It fails if any
+# request-path INSERT throws or if any table/column the schema DDL declares
+# is silently skipped by the migration.
+#
+# What blocks: this job failing fails the check run. To make it merge-blocking
+# on main, add the `schema-gate` job as a required status check in the repo's
+# branch protection settings (a repo-settings change — needs John's tap).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  schema-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # No `npm ci`: the gate imports only node builtins plus the repo's own
+      # server modules. Keeps this job to seconds.
+      - run: node scripts/schema-gate/schema-gate.mjs

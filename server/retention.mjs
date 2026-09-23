@@ -2,8 +2,9 @@
 // per-category retention windows, compute which records are expired, and
 // build a purge plan. All inputs are caller-supplied; the module is pure
 // and dependency-free. Times are ISO strings; the caller supplies "now".
-// Frozen outputs; malformed inputs throw RetentionError. Actual deletion
-// wiring is a later slice.
+// Frozen outputs; malformed inputs throw RetentionError. The production
+// caller is server/retention-run.mjs. It records a dry-run plan. Deletion
+// stays off unless that caller is given allowDeletion true and a deleter.
 class RetentionError extends Error { constructor(code, message) { super(message); this.name = "RetentionError"; this.code = code; } }
 const fail = (code, message) => { throw new RetentionError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_retention", message); };

@@ -49,6 +49,7 @@ export const accessRequestSchema = `
     display_name TEXT NOT NULL,
     requested_permissions TEXT NOT NULL,
     note TEXT,
+    referred_by TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL,
     decided_at INTEGER,
@@ -74,6 +75,9 @@ const rowToRequest = row => row ? Object.freeze({
   displayName: row.display_name,
   requestedPermissions: JSON.parse(row.requested_permissions),
   note: row.note,
+  // "Who referred you?" free text, answered at request time; resolved to a
+  // member id only at approval, so the stored text is never an attribution.
+  referredBy: row.referred_by ?? null,
   status: row.status,
   createdAt: row.created_at,
   decidedAt: row.decided_at,
@@ -102,7 +106,7 @@ export class AccessRequests {
   // Unauthenticated: an identity (not yet a member) asks to join a room.
   // requestId is the caller's idempotency key: retries with the same id
   // return the original request instead of creating a duplicate.
-  request(roomId, { identityId, displayName, requestedPermissions, note, requestId }) {
+  request(roomId, { identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
     if (typeof roomId !== "string" || !roomId) fail(422, "invalid_request", "roomId is required");
     if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
     const name = typeof displayName === "string" ? displayName.trim() : "";
@@ -122,6 +126,12 @@ export class AccessRequests {
     // since JSON clients naturally send null for "no note".
     if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
       fail(422, "invalid_request", "note must be text of at most 500 characters");
+    }
+    // "Who referred you?" — optional free text, matched against member
+    // display names at approval time. Never blocks the join: unmatched or
+    // ambiguous answers simply attribute nothing.
+    if (referredBy !== undefined && referredBy !== null && (typeof referredBy !== "string" || referredBy.length > 80)) {
+      fail(422, "invalid_request", "referredBy must be text of at most 80 characters");
     }
     const rid = requestId ?? `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
     if (!REQUEST_ID_PATTERN.test(rid)) fail(422, "invalid_request", "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
@@ -160,9 +170,9 @@ export class AccessRequests {
       const now = this.store.now();
       this.db.prepare(`INSERT INTO access_requests(
           request_id, room_id, identity_id, display_name, requested_permissions,
-          note, status, created_at) VALUES(?,?,?,?,?,?, 'pending', ?)`)
+          note, referred_by, status, created_at) VALUES(?,?,?,?,?,?,?, 'pending', ?)`)
         .run(rid, roomId, identityId, name, JSON.stringify(requestedPermissions),
-          note?.trim() || null, now);
+          note?.trim() || null, typeof referredBy === "string" && referredBy.trim() ? referredBy.trim() : null, now);
       // RC-2026-09-19-071 (QAJ-006): the arrival is timeline-visible and
       // drives the owner's notification feed. Same transaction as the
       // insert, so a request is never recorded without its event. The
@@ -284,13 +294,24 @@ export class AccessRequests {
         fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
       const identities = this.store.identities;
+      // Referral attribution: match the "who referred you?" text against
+      // member display names. A unique match attributes the join; anything
+      // else joins with no referrer and the approval proceeds unchanged.
+      const referrerMemberId = this.store.referrals.matchReferrer(roomId, row.referred_by);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
-        permissions: grants
+        permissions: grants,
+        ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
         .run(now, auth.member.id, requestId);
+      // Journal the completed referral in the same transaction, after the
+      // new member exists. Exactly-once per referee via the referrals
+      // primary key, so a retried approval cannot double-count.
+      if (referrerMemberId && referrerMemberId !== linked.memberId) {
+        this.store.referrals.record({ roomId, referrerMemberId, refereeMemberId: linked.memberId, via: "request", at: now });
+      }
       const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
       // RC-2026-09-18-036: name the actual grant — the response used to echo
       // only requestedPermissions, so when the owner narrowed the grant the

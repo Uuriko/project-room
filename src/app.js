@@ -26,6 +26,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
+import { installReferralBoard } from "./referral-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
@@ -132,6 +133,7 @@ let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
 let agentInvitesUI = null;
+let referralBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -210,6 +212,7 @@ const client = new RoomClient({
     syncAttention();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
+    referralBoardUI?.sync();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
@@ -273,6 +276,7 @@ const client = new RoomClient({
     resetAttention();
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
+    referralBoardUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) {
       clearPrivateWorkspace({ preservePending: leavingPage });
@@ -373,6 +377,7 @@ const briefView = new ReturnBrief(client, {
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
+referralBoardUI = installReferralBoard({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
@@ -1163,6 +1168,7 @@ async function submitRequestAccessForm(event) {
   const checked = validateAccessRequestForm({
     displayName: $("#invitation-request-name").value,
     note: $("#invitation-request-note").value,
+    referredBy: $("#invitation-request-referred")?.value,
   });
   if (!checked.ok) { setRequestAccessStatus(checked.error, true); return; }
   const submit = $("#invitation-request-submit");
@@ -1186,6 +1192,7 @@ async function submitRequestAccessForm(event) {
       displayName: checked.displayName,
       requestedPermissions: defaultRequestPermissions(invitation.preview),
       note: checked.note,
+      referredBy: checked.referredBy,
       requestId,
     });
     stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
@@ -1628,7 +1635,6 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const focusedReactionPicker = focused?.matches(".reaction-picker > summary");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
@@ -1687,9 +1693,7 @@ function renderMessages() {
                 continue;
               }
             }
-            const reactionPickerOpen = selector === ".message-links" && before.querySelector(".reaction-picker")?.open;
             before.innerHTML = after.innerHTML;
-            if (reactionPickerOpen && before.querySelector(".reaction-picker")) before.querySelector(".reaction-picker").open = true;
           }
         }
       }
@@ -1735,9 +1739,9 @@ function renderMessages() {
   }
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
-    const replacement = focusedMessage ? row : focusedReactionPicker ? row?.querySelector(".reaction-picker > summary") : focusedFeedback ? row?.querySelector(".draft-state")
+    const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
       : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
-    const target = replacement?.closest(".reaction-picker:not([open])")?.querySelector("summary") || replacement;
+    const target = replacement;
     target?.focus({ preventScroll: true });
   }
   // Only when the update dropped focus to the body: a member who moved focus
@@ -1761,13 +1765,17 @@ function draftFeedbackHTML(message) {
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 // UI calming #2: per-message actions collapse to Reply + replies-count inline;
-// Save as result, Pin, Make this work, Record decision and moderation move into
-// one keyboard- and hover-reachable "⋯" overflow menu. Every action keeps its
+// Add reaction, Save as result, Pin, Make this work, Record decision and
+// moderation move into one keyboard- and hover-reachable "⋯" overflow menu.
+// Reactions otherwise surface only through a long-press / right-click sheet
+// (Slack/Discord style) — no always-visible picker. Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
-function messageLinksHTML(m, { linked, moderation, count, muted, reactionPicker = "" }) {
+function messageLinksHTML(m, { linked, moderation, count, muted, reactionOptions = "" }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
   const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
+  const reactHtml = reactionOptions
+    ? `<button class="message-to-work" type="button" data-message-action="add-reaction" data-message-id="${esc(m.id)}">Add reaction</button>` : "";
   const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>`;
   const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
   // Attention: mark-unread rewinds the read horizon; save/unsave toggles the
@@ -1779,9 +1787,22 @@ function messageLinksHTML(m, { linked, moderation, count, muted, reactionPicker 
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
   const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
-  const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
+  const overflow = [reactHtml, saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
-  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${reactionPicker}${replyHtml}${threadHtml}${menu}</div>`;
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+}
+// Reaction buttons for one message, split into already-used pills (rendered
+// under the message) and still-available options (long-press sheet / ⋯ menu).
+function reactionButtonsFor(m) {
+  const used = [], available = [];
+  reactionPills(m.reactions).forEach(({ key, symbol, memberIds, count, used: isUsed }) => {
+    const selected = memberIds.includes(session.member.id);
+    const pending = pendingReactions.get(`${m.id}:${key}`);
+    const label = `${pending && !pending.busy ? "Retry " : ""}${key}`;
+    const button = `<button type="button" class="reaction${isUsed ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${count}" title="${esc(memberIds.map(name).join(", ") || `React with ${key}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${key}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
+    (isUsed || pending ? used : available).push(button);
+  });
+  return { used: used.join(""), available: available.join("") };
 }
 function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
@@ -1796,21 +1817,11 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
-  const usedReactions = [], availableReactions = [];
-  reactionPills(m.reactions).forEach(({ key, symbol, memberIds, count, used }) => {
-    const selected = memberIds.includes(session.member.id);
-    const pending = pendingReactions.get(`${m.id}:${key}`);
-    const label = `${pending && !pending.busy ? "Retry " : ""}${key}`;
-    const button = `<button type="button" class="reaction${used ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${count}" title="${esc(memberIds.map(name).join(", ") || `React with ${key}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${key}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
-    (used || pending ? usedReactions : availableReactions).push(button);
-  });
-  const reactionButtons = usedReactions.join("");
-  const reactionPicker = !muted && !m.deletedAt && availableReactions.length
-    ? `<details class="reaction-picker"><summary aria-label="Add reaction" title="Add reaction">☺<span aria-hidden="true">+</span></summary><div class="reaction-options" role="group" aria-label="Choose a reaction">${availableReactions.join("")}</div></details>` : "";
+  const { used: reactionButtons, available: reactionOptions } = reactionButtonsFor(m);
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, reactionPicker })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, reactionOptions: !muted && !m.deletedAt ? reactionOptions : "" })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -3021,7 +3032,7 @@ $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   // An action picked from the "⋯" overflow menu closes the menu behind it.
-  button.closest("details.message-more, details.reaction-picker")?.removeAttribute("open");
+  button.closest("details.message-more")?.removeAttribute("open");
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "decide") openDecision(id);
@@ -3030,6 +3041,7 @@ $("#message-list").addEventListener("click", e => {
     if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
   }
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
+  else if (button.dataset.messageAction === "add-reaction") openReactionSheet(id, button.closest("li.message"));
   else if (button.dataset.messageAction === "pin") setPinned(id);
   else if (button.dataset.messageAction === "mark-unread") void markMessageUnread(id);
   else if (button.dataset.messageAction === "save") void toggleSaved(id);
@@ -3040,11 +3052,10 @@ $("#message-list").addEventListener("click", e => {
     if (button.dataset.messageAction === "reply") {
       replyToId = id;
       const author = replyAuthorToAddress(session.member.id, state.members[conversation.byId.get(id)?.authorId]);
+      // Replying stays public: the thread is room-visible and the @mention is
+      // text only. Never touch the DM recipient select here — a reply is not
+      // a DM and must never silently become one.
       if (author && !messageMentionsMember($("#message-input").value, author)) applyMentionMember(author);
-      else if (author) {
-        const select = $("#message-to-select");
-        if ([...select.options].some(option => option.value === author.id)) select.value = author.id;
-      }
       updateReply(); saveComposer();
     }
   }
@@ -3072,8 +3083,6 @@ $("#reply-mention").addEventListener("click", () => {
   const input = $("#message-input");
   if (messageMentionsMember(input.value, author)) {
     input.value = removeMention(input.value, author);
-    const select = $("#message-to-select");
-    if (select.value === author.id) select.value = "";
     saveComposer();
     input.focus({ preventScroll: true });
   } else applyMentionMember(author);
@@ -3124,8 +3133,8 @@ function applyMentionMember(member) {
   if (!input || !member) return;
   const next = addressMember(input.value, input.selectionStart, member);
   input.value = next.body;
-  const select = $("#message-to-select");
-  if ([...select.options].some(option => option.value === next.toMemberId)) select.value = next.toMemberId;
+  // Mentions are text only: never change the DM recipient select here.
+  // A message becomes a DM only when the sender explicitly picks a recipient.
   hideMentions(); saveComposer(); syncComposerChrome();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
@@ -3258,7 +3267,7 @@ function chatEscapeState() {
   };
 }
 document.addEventListener("click", event => {
-  for (const picker of document.querySelectorAll(".reaction-picker[open], .message-more[open]")) {
+  for (const picker of document.querySelectorAll(".message-more[open]")) {
     if (!picker.contains(event.target)) picker.open = false;
   }
 });
@@ -3269,7 +3278,7 @@ document.addEventListener("focusin", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
-  const picker = event.target.closest(".reaction-picker[open], .message-more[open]");
+  const picker = event.target.closest(".message-more[open]");
   if (!picker) return;
   event.preventDefault(); event.stopImmediatePropagation();
   picker.open = false; picker.querySelector("summary").focus();
@@ -3584,6 +3593,83 @@ async function setReaction(messageId, reaction) {
     if (generation === client.generation && state) { pending.busy = false; notice(`${error.message}. Retry keeps the same reaction choice.`, true); }
   } finally { if (state && generation === client.generation) renderMessages(); }
 }
+
+// Reaction sheet (Slack/Discord style): no always-visible picker. A long-press
+// on a message (touch), a right-click (desktop), or the "Add reaction" item in
+// the ⋯ menu opens a sheet with the room's reactions; tapping one toggles it.
+const REACTION_SHEET_LONGPRESS_MS = 550;
+let reactionSheetMessageId = null, reactionSheetInvokerKey = null;
+let longpressTimer = null, longpressAt = 0, longpressStartX = 0, longpressStartY = 0;
+function clearLongpress() {
+  if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
+}
+function openReactionSheet(messageId, invoker) {
+  const message = conversation?.byId.get(messageId);
+  if (!message || message.deletedAt || !state || busy) return;
+  if (isMutedBy(state, session.member.id, message.authorId)) return;
+  const { used, available } = reactionButtonsFor(message);
+  if (!used && !available) return;
+  reactionSheetMessageId = messageId;
+  reactionSheetInvokerKey = invoker?.dataset?.key || null;
+  const sheet = $("#reaction-sheet");
+  $("#reaction-sheet-label").textContent = `React to ${displayName(message.authorId)}’s message`;
+  $("#reaction-sheet-options").innerHTML = used + available;
+  if (!sheet.open) sheet.showModal();
+  $("#reaction-sheet-options button")?.focus({ preventScroll: true });
+}
+function closeReactionSheet() {
+  const sheet = $("#reaction-sheet");
+  if (sheet?.open) sheet.close();
+}
+$("#reaction-sheet-close").addEventListener("click", closeReactionSheet);
+$("#reaction-sheet").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeReactionSheet();
+});
+$("#reaction-sheet").addEventListener("close", () => {
+  reactionSheetMessageId = null;
+  if (reactionSheetInvokerKey) {
+    const node = document.querySelector(`#message-list [data-key="${CSS.escape(reactionSheetInvokerKey)}"]`);
+    node?.focus({ preventScroll: true });
+    reactionSheetInvokerKey = null;
+  }
+});
+$("#reaction-sheet-options").addEventListener("click", e => {
+  const button = e.target.closest("[data-reaction]");
+  if (!button || !reactionSheetMessageId || busy) return;
+  const id = reactionSheetMessageId;
+  closeReactionSheet();
+  setReaction(id, button.dataset.reaction);
+});
+// Long-press (touch/pen): hold a message to open the reaction sheet.
+$("#message-list").addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse" || e.button !== 0) return;
+  const node = e.target.closest("li.message");
+  if (!node?.dataset.messageRecordId) return;
+  clearLongpress();
+  longpressStartX = e.clientX; longpressStartY = e.clientY;
+  const messageId = node.dataset.messageRecordId;
+  longpressTimer = setTimeout(() => {
+    longpressTimer = null;
+    longpressAt = Date.now();
+    try { window.getSelection()?.removeAllRanges(); } catch {}
+    openReactionSheet(messageId, node);
+  }, REACTION_SHEET_LONGPRESS_MS);
+});
+$("#message-list").addEventListener("pointermove", e => {
+  if (!longpressTimer) return;
+  if (Math.hypot(e.clientX - longpressStartX, e.clientY - longpressStartY) > 10) clearLongpress();
+});
+for (const cancel of ["pointerup", "pointercancel"]) $("#message-list").addEventListener(cancel, clearLongpress);
+// Right-click (desktop): open the reaction sheet instead of the native menu.
+$("#message-list").addEventListener("contextmenu", e => {
+  const node = e.target.closest("li.message");
+  if (!node?.dataset.messageRecordId) return;
+  e.preventDefault();
+  // A contextmenu fired right after our own long-press already opened the sheet.
+  if (Date.now() - longpressAt < 800) return;
+  clearLongpress();
+  openReactionSheet(node.dataset.messageRecordId, node);
+});
 
 // Decision register (backlog F2): a human with decide promotes a message into
 // a source-backed decision; the room reads the register from the event feed.
@@ -4440,7 +4526,21 @@ window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
-  (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
+  // Same join-flow rule as the initial boot: a #room/ deep link first tries
+  // the room-cookie session (no account needed), then the account flow.
+  const restoreDeepLink = async () => {
+    if (!roomId) return client.restore();
+    try {
+      const joined = await client.restore();
+      if (joined?.roomId === roomId) return joined;
+      client.endAccess();
+    } catch (error) {
+      if (![401, 403].includes(error.status)) throw error;
+    }
+    const account = await ensureAccountSession();
+    return account?.authenticated ? client.restore(roomId) : null;
+  };
+  restoreDeepLink().catch(handleFailureNotice);
 });
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
@@ -5374,6 +5474,21 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation()) {
+    // Join-flow sessions are room-cookie sessions with no account behind
+    // them — the /join page's "Open room" link lands here with a valid
+    // __Host-room_session cookie but no account session. Try the room
+    // cookie before the account gate, or a fresh joiner is stranded at the
+    // sign-in panel despite holding a working session. A cookie for a
+    // different room is dropped and the account flow decides as before.
+    if (requestedRoom && !accountHomeFromLocation()) {
+      try {
+        const joined = await client.restore();
+        if (joined?.roomId === requestedRoom) return;
+        client.endAccess();
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
+    }
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
       authKind = "account";

@@ -39,9 +39,15 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/mcp-http.mjs');
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
+  paths.add('deploy/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by deploy/agent-discovery.mjs)
+  paths.add('deploy/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
+  paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
+  paths.add('join.html'); // Self-serve join page
+  paths.add('src/join.js'); // Join page logic
+  paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
   paths.add('src/work-recipes.js');
   paths.add('src/board.js');
@@ -74,6 +80,9 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/agent-key-registry.mjs'); // Integration map slice 9 (imported by server/store.mjs and server/agent-identities.mjs)
   paths.add('server/signed-evidence.mjs'); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs)
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
+  paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
+  paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
+  paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
   for (const path of ['server/sla-clocks.mjs', 'server/sla-urgent-notify.mjs', 'server/sla-sweep.mjs', 'server/sla-sweep-hooks.mjs', 'server/sla-breach-journal.mjs', 'server/morning-digest.mjs', 'server/digest-mode.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)

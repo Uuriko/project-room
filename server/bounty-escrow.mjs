@@ -59,7 +59,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
-import { claimEligibility, PROBATION_MAX_CLAIM_CREDITS } from "./bounty-reputation.mjs";
+import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 
 export const GENESIS_LANES = Object.freeze([
@@ -354,6 +354,26 @@ export const bountyEscrowSchema = `
   );
   CREATE INDEX IF NOT EXISTS bounty_sybil_flags_room ON bounty_sybil_flags(room_id, status);
   CREATE INDEX IF NOT EXISTS bounty_sybil_flags_cluster ON bounty_sybil_flags(room_id, cluster_id);
+`
+// Slice 4 (integration-map candidate #4): probation-gate review packets.
+// Written when the reputation claim-eligibility gate denies a claim — the
+// room's "adverse moves produce review packets for humans/arbiters" rule,
+// since bands never auto-suspend. Review-only and immutable once created:
+// rows here never drive bans, slashes, or balance/bond/reputation
+// movement; they exist so arbiters can see who the gate is hitting and why.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_reputation_packets (
+    room_id TEXT NOT NULL,
+    packet_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    band TEXT NOT NULL,
+    score REAL NOT NULL,
+    max_claim_millis INTEGER NOT NULL,
+    bounty_id TEXT NOT NULL,
+    signals_json TEXT NOT NULL CHECK(json_valid(signals_json))
+  );
+  CREATE INDEX IF NOT EXISTS bounty_reputation_packets_agent ON bounty_reputation_packets(room_id, agent_id);
 `;
 
 // Slice 1 (#762) shipped these tables to production before receipt_id /
@@ -535,6 +555,10 @@ const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex")
 export const SYBIL_COPY_PASTE_MIN_LANES = 2;         // distinct lanes, byte-identical normalized fingerprint
 export const SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES = 3;  // one lane's shared fingerprint spans N distinct bounties with another lane
 
+// Slice 4: probation-gate review-packet dedupe window. One packet per lane
+// per 24h — a lane retrying a denied claim does not spam the arbiter queue.
+export const REPUTATION_PACKET_DEDUPE_MS = 24 * 3600 * 1000;
+
 // Slice 10: normalized text for the submission fingerprint. Deterministic:
 // line endings -> \n, horizontal whitespace runs collapse to one space,
 // blank-line runs collapse to one newline, ends trimmed. Case is NOT
@@ -685,7 +709,7 @@ export class BountyEscrow {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
           "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-          "bounty_review_packets", "bounty_sybil_flags"];
+          "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         // Always converge columns after creating missing tables (not
         // either/or): a shard can be missing tables AND carry older columns
@@ -720,7 +744,7 @@ export class BountyEscrow {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
       "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-      "bounty_review_packets", "bounty_sybil_flags"];
+      "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
@@ -782,7 +806,8 @@ export class BountyEscrow {
     // All chunks are IF NOT EXISTS: safe no-ops when already present.
     const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
       .filter(sql => sql.includes(name));
-    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags"])
+    for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
+      "bounty_reputation_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
@@ -1371,10 +1396,32 @@ export class BountyEscrow {
 
   // --- claim / submit / accept --------------------------------------------------------
   claimBounty(roomId, bountyId, { claimant, actor } = {}) {
+    this._ensure();
+    const lane = canonicalLane(claimant);
+    // Slice 4: the reputation claim gate runs BEFORE the write transaction.
+    // The denial is the room's one automated adverse move, so it produces a
+    // review packet for humans/arbiters — written in its own transaction so
+    // the packet survives the claim's rollback (nesting a transaction inside
+    // the claim's write transaction is not guaranteed). Bands gate claim
+    // eligibility only: scores never touch payout amounts and never ban —
+    // decay always offers a way back.
+    const amountMillis = this.store.readTransaction(() => {
+      this._ensure();
+      const row = this.db.prepare(`SELECT amount_millis FROM bounty_records WHERE room_id=? AND bounty_id=?`)
+        .get(roomId, bountyId) ?? fail("unknown_bounty", `unknown bounty "${bountyId}"`);
+      return row.amount_millis;
+    });
+    const eligibility = claimEligibility(this, roomId, lane, amountMillis);
+    if (!eligibility.allowed) {
+      this.store.transaction(() => {
+        this._ensure();
+        this._storeReputationPacket(roomId, lane, bountyId, eligibility);
+      });
+      fail("reputation_probation", `probation reputation band: may only claim bounties up to ${PROBATION_MAX_CLAIM_CREDITS} credits`);
+    }
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
-      const lane = canonicalLane(claimant);
       const act = normalizeActor(actor, lane);
       const bounty = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId)
         ?? fail("unknown_bounty", `unknown bounty "${bountyId}"`));
@@ -1382,12 +1429,6 @@ export class BountyEscrow {
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");
       check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the claim window closed at the deadline");
-      // Reputation gates claim eligibility only: probation-band lanes may
-      // claim small bounties but not large ones. Scores never touch payout
-      // amounts and never ban — decay always offers a way back.
-      const eligibility = claimEligibility(this, roomId, lane, bounty.amountMillis);
-      if (!eligibility.allowed)
-        fail("reputation_probation", `probation reputation band: may only claim bounties up to ${PROBATION_MAX_CLAIM_CREDITS} credits`);
       // Slice 8: graduated anti-flake ladder. Rung 3+ lanes sit out a
       // cooldown; rung 2+ lanes post a double bond. The bond is forfeited
       // (not returned) on the next flake — see _timeoutRefund.
@@ -1652,9 +1693,54 @@ export class BountyEscrow {
         WHERE room_id=? AND flag_id=?`).run(resolution, resolvedAt, by, trimmed, roomId, flagId);
       this._event(roomId, "sybil.flag-resolved",
         { actor: normalizeActor(null, by),
-          data: { flagId, clusterId: row.cluster_id, signal: row.signal, resolution, reason: trimmed } });
+          data: { flagId, clusterId: row.cluster_id, signal: row.signal, resolution, reason: trimmed,
+            // Slice #4: the reputation projector reads memberLanes to apply
+            // sybil_confirmed to each member lane on "confirmed".
+            memberLanes: JSON.parse(row.member_lanes_json) } });
       return this._flagOf({ ...row, status: resolution, resolved_at: resolvedAt,
         resolved_by: by, resolution_reason: trimmed });
+    });
+  }
+
+  // Slice 4: probation-gate review packets. When the reputation claim gate
+  // denies a lane, arbiters get a packet with the lane's decayed score,
+  // band, and the signals that built it — review-only, immutable, never a
+  // suspension or a ban. Deduped to one packet per lane per 24h so a lane
+  // retrying a claim does not spam the queue.
+  _storeReputationPacket(roomId, lane, bountyId, eligibility) {
+    const cutoff = new Date(this.nowMs() - REPUTATION_PACKET_DEDUPE_MS).toISOString();
+    const recent = this.db.prepare(`SELECT packet_id FROM bounty_reputation_packets
+      WHERE room_id=? AND agent_id=? AND created_at >= ? LIMIT 1`).get(roomId, lane, cutoff);
+    if (recent) return null;
+    const summary = reputationSummary(this, roomId, lane, { nowMs: this.nowMs() });
+    const packetId = newId("rpkt_"), createdAt = isoNow(this.nowMs());
+    const signals = summary.signals.map(s => ({ seq: s.seq, at: s.at, type: s.type }));
+    this.db.prepare(`INSERT INTO bounty_reputation_packets
+      (room_id, packet_id, created_at, agent_id, band, score, max_claim_millis, bounty_id, signals_json)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(roomId, packetId, createdAt, lane, summary.band, summary.score,
+        eligibility.maxClaimMillis ?? PROBATION_MAX_CLAIM_MILLIS, bountyId, JSON.stringify(signals));
+    this._event(roomId, "reputation.packet-created",
+      { bountyId, actor: RULE_ACTOR,
+        data: { packetId, agentId: lane, band: summary.band, score: summary.score,
+          maxClaimMillis: eligibility.maxClaimMillis ?? PROBATION_MAX_CLAIM_MILLIS } });
+    return Object.freeze({ packetId, roomId, createdAt, agentId: lane, band: summary.band,
+      score: summary.score, maxClaimMillis: eligibility.maxClaimMillis ?? PROBATION_MAX_CLAIM_MILLIS,
+      bountyId, signals: Object.freeze(signals.map(s => Object.freeze({ ...s }))) });
+  }
+
+  // Slice 4: arbiter/human inspection of probation-gate review packets.
+  // Room-scoped read; packets are immutable once created.
+  getReputationPackets(roomId) {
+    return this.store.readTransaction(() => {
+      this._ensure();
+      return this.db.prepare(`SELECT * FROM bounty_reputation_packets WHERE room_id=? ORDER BY created_at`)
+        .all(roomId).map(row => Object.freeze({
+          packetId: row.packet_id, roomId: row.room_id, createdAt: row.created_at,
+          agentId: row.agent_id, band: row.band, score: row.score,
+          maxClaimMillis: row.max_claim_millis, bountyId: row.bounty_id,
+          signals: Object.freeze(JSON.parse(row.signals_json).map(s => Object.freeze({ ...s }))),
+        }));
     });
   }
 
@@ -1886,7 +1972,10 @@ export class BountyEscrow {
           data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution,
             // Reputation projection reads these (server/bounty-reputation.mjs).
             claimant: bounty.claimant,
-            challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null } });
+            challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null,
+            // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
+            // on trial — an "upheld" outcome overturns it (acceptance_overturned).
+            verifier: bounty.attestation?.recordedBy ?? null } });
       return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
         receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
     });
@@ -2239,13 +2328,26 @@ export class BountyEscrow {
   }
 
   // --- reads --------------------------------------------------------------------------
-  listBounties(roomId, { group = null } = {}) {
+  listBounties(roomId, { group = null, viewer = null } = {}) {
     return this.store.readTransaction(() => {
       this._ensure();
       if (group !== null) check(BOUNTY_GROUPS.includes(group), "invalid_input", `unknown bounty group "${group}"`);
       const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? ORDER BY created_at").all(roomId);
+      // Slice 4: optional per-viewer routing visibility. When a viewer lane
+      // is given, each bounty view carries the routing layer's band-derived
+      // answer for that viewer ({ band, maxClaimMillis, claimable }).
+      // Visibility only — bounties are never hidden, amounts never change,
+      // and the claim gate remains the sole enforcement point.
+      const routing = viewer === null || viewer === undefined ? null
+        : routingVisibility(this, roomId, canonicalLane(viewer));
       return rows
-        .map(row => this._viewBounty(row, roomId))
+        .map(row => {
+          const view = this._viewBounty(row, roomId);
+          if (routing === null) return view;
+          return Object.freeze({ ...view,
+            viewerRouting: Object.freeze({ band: routing.band, maxClaimMillis: routing.maxClaimMillis,
+              claimable: routing.claimable(row.amount_millis) }) });
+        })
         .filter(b => group === null || b.group === group);
     });
   }

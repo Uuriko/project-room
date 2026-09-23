@@ -146,6 +146,20 @@ function sweep() {
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }
   } catch { /* reported below, from the log, rather than swallowed here */ }
+  // referral.completed is appended by server/referrals.mjs, not by
+  // store.command, so the step() helper above cannot reach it. Driven through
+  // the real path: the sweep fixture's producer refers a new member.
+  try {
+    const referee = fixture.store.identities.create("Sweep referee");
+    fixture.store.command(fixture.keys.owner, "commons", {
+      id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: referee.identityId, displayName: "Sweep referee", kind: "agent", permissions: ["steer"] },
+    });
+    fixture.store.referrals.record({ roomId: "commons", referrerMemberId: "producer", refereeMemberId: referee.identityId, via: "invite" });
+    exercised.add(T.REFERRAL_COMPLETED);
+    try { auditRecovery(fixture.store); }
+    catch (error) { broke.push(`${T.REFERRAL_COMPLETED}: ${error.message}`); }
+  } catch { /* reported below, from the log, rather than swallowed here */ }
   // A step that quietly stopped working would leave this sweep passing because
   // it audited nothing, which is the failure mode the whole file is written
   // against. Read it back out of the log.
@@ -206,6 +220,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 45,
+  assert.equal(Object.values(T).length, 46,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

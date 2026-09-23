@@ -102,6 +102,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "bounty_flakes",
   "bounty_review_packets",
   "bounty_sybil_flags",
+  // Slice 4 (reputation): bounty_reputation_packets (probation-gate review
+  // packets). Purely additive and intentionally NOT fenced: older writers
+  // have no code path to it, and the packet journal verifies its own schema
+  // on open; rows never drive bans, slashes, or balances.
+  "bounty_reputation_packets",
   // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
   // room_verification_policy (per-room gate). Purely additive and
   // intentionally NOT fenced: older writers have no code path to them, and
@@ -184,7 +189,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "activity_events",
   "read_horizons",
   "saved_messages",
-  "thread_mutes"
+  "thread_mutes",
+  // referrals (referral attribution): one row per joined referee, the
+  // queryable source of truth behind the referral board. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // and the referrals module verifies its own schema on open.
+  "referrals"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

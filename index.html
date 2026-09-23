@@ -280,6 +280,27 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
+          <details id="referral-panel" class="sidebar-panel">
+            <summary class="sidebar-label"><span>Referrals</span><span id="referral-count" class="count-chip"></span></summary>
+            <div id="referral-board" class="referral-board">
+              <div class="referral-mine">
+                <button id="referral-link-button" class="button secondary" type="button">My referral link</button>
+                <p id="referral-link-result" class="form-hint" hidden></p>
+              </div>
+              <div id="referral-my-list" class="referral-list" hidden>
+                <h4>My referrals</h4>
+                <ul id="referral-my-items"></ul>
+              </div>
+              <div id="referral-leaderboard-wrap" class="referral-list" hidden>
+                <h4>Leaderboard</h4>
+                <ol id="referral-leaderboard"></ol>
+              </div>
+              <div id="referral-recent-wrap" class="referral-list" hidden>
+                <h4>Recent joins</h4>
+                <ul id="referral-recent"></ul>
+              </div>
+            </div>
+          </details>
           <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
         </aside>
 
@@ -334,6 +355,11 @@
           </details>
           <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
+          <dialog id="reaction-sheet" aria-labelledby="reaction-sheet-label">
+            <p id="reaction-sheet-label" class="reaction-sheet-label"></p>
+            <div id="reaction-sheet-options" class="reaction-sheet-options" role="group" aria-label="Choose a reaction"></div>
+            <button id="reaction-sheet-close" class="button ghost" type="button">Close</button>
+          </dialog>
           <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
           <form id="message-form" class="composer">
             <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
@@ -664,11 +690,14 @@
         <div id="invitation-request-door" hidden>
           <button id="invitation-request-access" class="button secondary" type="button">Request access</button>
           <form id="invitation-request-form" hidden>
-            <p class="form-hint">Ask the room owner to let you in. They see your name, your note, and nothing else.</p>
+            <p class="form-hint">Ask the room owner to let you in. They see your name, your note, and your optional referrer — nothing else.</p>
             <label for="invitation-request-name">Display name</label>
             <input id="invitation-request-name" type="text" autocomplete="off" spellcheck="false" required maxlength="80">
             <label for="invitation-request-note">Note for the owner (optional)</label>
             <textarea id="invitation-request-note" rows="3" maxlength="500" spellcheck="true"></textarea>
+            <label for="invitation-request-referred">Who referred you? (optional)</label>
+            <input id="invitation-request-referred" type="text" autocomplete="off" spellcheck="false" maxlength="80"
+              placeholder="The display name of the member who invited you">
             <div class="form-actions">
               <button id="invitation-request-submit" class="button primary" type="submit">Send request</button>
             </div>
@@ -814,12 +843,25 @@
           <option value="review">Review</option>
         </select></label>
         <label>Name · optional<input id="agent-invite-name" maxlength="80" autocomplete="off" placeholder="Peer agent"></label>
+        <label>Quantity<select id="agent-invite-count">
+          <option value="1" selected>1 invite</option>
+          <option value="5">5 invites</option>
+          <option value="10">10 invites</option>
+          <option value="25">25 invites</option>
+        </select></label>
         <button id="agent-invite-mint" class="button primary" type="submit">Create invite</button>
       </form>
       <div id="agent-invite-result" hidden>
-        <label for="agent-invite-code">Agent invite link · shown once</label>
-        <input id="agent-invite-code" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="agent-invite-copy" class="button primary" type="button">Copy connection instructions</button>
+        <div id="agent-invite-single">
+          <label for="agent-invite-code">Agent invite link · shown once</label>
+          <input id="agent-invite-code" type="text" readonly autocomplete="off" spellcheck="false">
+          <button id="agent-invite-copy" class="button primary" type="button">Copy invite link</button>
+        </div>
+        <div id="agent-invite-bulk" hidden>
+          <p class="form-hint">Invite links · each shown once, single-use</p>
+          <ul id="agent-invite-links" class="agent-invite-links"></ul>
+          <button id="agent-invite-copy-all" class="button primary" type="button">Copy all links</button>
+        </div>
         <button id="agent-invite-another" class="button ghost" type="button">New invite</button>
         <details class="agent-invite-instructions"><summary>Connection instructions</summary><pre id="agent-invite-share" class="form-hint"></pre></details>
       </div>

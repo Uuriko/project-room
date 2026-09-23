@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [...inboxAssets.slice(0, 2), "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -70,11 +70,13 @@ optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/public-assets.mjs"); // Shared live manifest; historical packages predate it.
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
+optional.push("deploy/agent-card-key.mjs", "deploy/agent-card-signed.mjs"); // RC-2026-09-23-105: room card signing key (public half) + build-time signature (imported by deploy/agent-discovery.mjs; pure)
 optional.push("server/guest-invites.mjs"); // RC-2026-09-23-100: GX-invite public handoff for external agents (imported by server/store.mjs + server/http.mjs)
 optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
+optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");
 optional.push("src/work-templates.js");
@@ -140,6 +142,8 @@ optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes 
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/mentions.mjs"); // RC-2026-09-18-051: mention parser (imported by server/store.mjs for wake-on-mention; pure, no imports)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");
+optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
+optional.push("server/retention.mjs", "server/audit-retention.mjs"); // pure planners (imported by server/retention-run.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
 optional.push("server/oauth-provider.mjs"); // OAuth2 authorization server for connectors (imported by server/http.mjs)
@@ -158,7 +162,10 @@ optional.push("src/invite-context.js"); // Invitation context stashed at OAuth s
 optional.push("src/room-deep-link.js"); // #room/{roomId} Open/People deep-link
 optional.push("src/browser-session.js"); // Last-room + Sign out session-hint clear
 optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collaborate/contribute)
+optional.push("src/referral-board.js"); // People-rail referral board (imports agent-invite-ui for "my referral link" mint)
 optional.push("server/room-export-html.mjs");
+optional.push("join.html"); // Self-serve join page (public asset)
+optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)

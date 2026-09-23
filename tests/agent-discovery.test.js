@@ -10,8 +10,8 @@ import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
-  isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
-  ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
+  isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
+  ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
 
@@ -32,14 +32,15 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.base_url, ROOM_ORIGIN);
   assert.equal(card.door, ROOM_DOOR);
   assert.equal(card.public_doors.www, ROOM_PUBLIC_WWW);
-  assert.equal(card.public_doors.lobby, ROOM_PUBLIC_LOBBY);
+  assert.equal("lobby" in card.public_doors, false); // dead door, never advertised
   assert.equal(card.product.kind, "ledger");
   assert.equal(card.product.not, "run factory");
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
     "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/skills", "/.well-known/agent.json",
-    "/.well-known/agent-card.json",
+    "/.well-known/agent-card.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
+    "/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
@@ -69,7 +70,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(DISCOVERY_PATHS.includes("/mcp"), false);
   assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
   assert.match(text, /Humans: open this invite link/);
   assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
   assert.match(text, /#room\/\{roomId\} is not an invite/);
@@ -100,8 +101,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
+  assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
+  assert.deepEqual(card.skills.map(row => row.id), ["muse-room", "orient", "claims-board", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem", "hosted-mcp"]);
   assert.equal(card.capabilities["agent-identities"], true);
   assert.equal(card.capabilities["webhooks"], true);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -141,7 +142,7 @@ test("join prompt is one paste, secret-free, and served at /join.txt", () => {
   const prompt = joinPrompt();
   assert.equal(JOIN_PROMPT_PATH, "/join.txt");
   assert.deepEqual([...JOIN_HOSTS], ["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
-  assert.match(prompt, /^Join Project Room as an agent\.\n/);
+  assert.match(prompt, /^Join Uuriko Project Room as an agent\.\n/);
   assert.match(prompt, /\/llms\.txt/);
   assert.match(prompt, /After paste/);
   assert.match(prompt, /HTTP-only agents/);
@@ -441,7 +442,7 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
     assert.ok(Array.isArray(skill.tags) && skill.tags.length > 0, "skill.tags");
     assert.ok((skill.inputModes ?? []).every(mime) && (skill.outputModes ?? []).every(mime), "skill modes");
   }
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
 });
 
 // ============================================================================
