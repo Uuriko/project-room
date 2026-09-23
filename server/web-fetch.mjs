@@ -377,12 +377,16 @@ function resolveLink(href, baseUrl) {
   } catch { return null; }
 }
 
+// mainContentOnly: drop scripts, styles, nav/footer/aside chrome. Shared by
+// the markdown converter and metadata extraction so headings describe the
+// same main content the markdown contains.
+const stripChrome = html => String(html)
+  .replace(/<!--[\s\S]*?-->/g, " ")
+  .replace(/<(script|style|noscript|template)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+  .replace(/<(nav|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, " ");
+
 export function htmlToMarkdown(html, baseUrl) {
-  let s = String(html);
-  s = s.replace(/<!--[\s\S]*?-->/g, " ");
-  // mainContentOnly: drop scripts, styles, nav/footer/aside chrome.
-  s = s.replace(/<(script|style|noscript|template)[^>]*>[\s\S]*?<\/\1>/gi, " ");
-  s = s.replace(/<(nav|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, " ");
+  let s = stripChrome(html);
   // Headings -> markdown headings (also the section markers for highlights).
   s = s.replace(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi,
     (match, tag, inner) => `\n\n${"#".repeat(Number(tag[1]))} ${cleanInline(inner)}\n\n`);
@@ -444,8 +448,10 @@ export function extractMetadata(html) {
     }
   }
   const language = /<html[^>]*\slang\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(s)?.slice(2, 5).find(Boolean)?.trim().toLowerCase() || "";
+  // Headings honor the same main-content-only extraction as the markdown:
+  // chrome regions are stripped first so nav/footer headings never appear.
   const headings = [];
-  for (const match of s.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi)) {
+  for (const match of stripChrome(s).matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi)) {
     const text = cleanInline(match[2]);
     if (text) headings.push(text);
   }
@@ -527,13 +533,31 @@ export function cacheKeyFor(normalizedUrl) {
 function validateInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input))
     fail(422, "invalid_fetch_input", "Request body must be a JSON object");
+  // Repository style is strict about unknown fields (the exact() helper on
+  // other routes): a misspelled option should fail loudly, not be ignored.
+  for (const key of Object.keys(input)) {
+    if (!["url", "formats", "highlightsParams", "maxAgeMs", "tags"].includes(key))
+      fail(422, "invalid_fetch_input", `Unknown field: ${key}`);
+  }
   const { url, formats, highlightsParams, maxAgeMs, tags } = input;
+  if (typeof formats !== "object" || formats === null || Array.isArray(formats))
+    fail(422, "invalid_fetch_input", "formats must be an object");
+  for (const key of Object.keys(formats)) {
+    if (!["markdown", "highlights"].includes(key))
+      fail(422, "invalid_fetch_input", `Unknown formats field: ${key}`);
+  }
   const markdown = formats?.markdown === true;
   const highlights = formats?.highlights === true;
-  if (typeof formats !== "object" || formats === null || (!markdown && !highlights))
+  if (!markdown && !highlights)
     fail(422, "invalid_fetch_input", "formats must request at least one of markdown or highlights");
   let query = null, maxPassages = WEB_FETCH_HIGHLIGHT_PASSAGES_DEFAULT;
   if (highlights) {
+    if (typeof highlightsParams !== "object" || highlightsParams === null || Array.isArray(highlightsParams))
+      fail(422, "invalid_fetch_input", "highlightsParams must be an object");
+    for (const key of Object.keys(highlightsParams)) {
+      if (!["query", "maxPassages"].includes(key))
+        fail(422, "invalid_fetch_input", `Unknown highlightsParams field: ${key}`);
+    }
     query = highlightsParams?.query;
     if (typeof query !== "string" || !query.trim() || query.length > 500)
       fail(422, "invalid_fetch_input", "highlightsParams.query is required when highlights are requested");
@@ -627,13 +651,25 @@ export class WebFetch {
   }
 
   async fetch(roomId, memberId, input) {
+    // The request id is minted before validation so every typed failure
+    // carries it — clients can correlate a failure with the room journal,
+    // which records error attempts under the same id.
+    const requestId = `wf_${randomUUID()}`;
+    try {
+      return await this.fetchInner(roomId, memberId, input, requestId);
+    } catch (error) {
+      if (error instanceof WebFetchError) error.requestId = requestId;
+      throw error;
+    }
+  }
+
+  async fetchInner(roomId, memberId, input, requestId) {
     const req = validateInput(input);
     const now = this.store.now();
     const normalized = normalizeUrl(req.url); // invalid_url before quota is touched
     this.checkRateLimits(roomId, memberId, now); // rate_limited: 429 + retry info
     const key = cacheKeyFor(normalized);
     const cached = this.getCache(key, now, req.maxAgeMs);
-    const requestId = `wf_${randomUUID()}`;
     let finalUrl, markdown, metadata, bytes, cacheStatus, ageMs;
     if (cached) {
       ({ final_url: finalUrl, markdown, bytes } = cached.row);

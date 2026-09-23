@@ -132,6 +132,11 @@ test("extractMetadata reads title, description, language, headings", () => {
   assert.deepEqual(meta.headings, ["Hello World"]);
 });
 
+test("extractMetadata headings skip nav/footer chrome", () => {
+  const meta = extractMetadata(`<html><body><nav><h2>Nav heading</h2></nav><footer><h3>Foot heading</h3></footer><h1>Real</h1></body></html>`);
+  assert.deepEqual(meta.headings, ["Real"]);
+});
+
 test("extractHighlights returns top passages in page order with [heading] prefix", () => {
   const md = `# Alpha\nThe quick brown fox jumps over the lazy dog.\n# Beta\nCompletely unrelated text about nothing.\n# Gamma\nAnother mention of the quick fox here.`;
   const hits = extractHighlights(md, "quick fox", 5);
@@ -363,11 +368,16 @@ test("invalid inputs are typed 4xx, never 500", async t => {
     [{ url: `${pageOrigin}/page`, formats: { highlights: true } }, 422, "invalid_fetch_input"],
     [{ url: `${pageOrigin}/page`, formats: { markdown: true }, maxAgeMs: -1 }, 422, "invalid_fetch_input"],
     [{ url: `${pageOrigin}/page`, formats: { markdown: true }, tags: new Array(21).fill("x") }, 422, "invalid_fetch_input"],
+    [{ url: `${pageOrigin}/page`, formats: { markdown: true }, bogus: 1 }, 422, "invalid_fetch_input"],
+    [{ url: `${pageOrigin}/page`, formats: { markdown: true, summary: true } }, 422, "invalid_fetch_input"],
+    [{ url: `${pageOrigin}/page`, formats: { highlights: true }, highlightsParams: { query: "x", extra: 1 } }, 422, "invalid_fetch_input"],
   ];
   for (const [data, status, code] of cases) {
     const res = await request("/api/web/fetch", { method: "POST", token: ownerKey, data });
     assert.equal(res.status, status, JSON.stringify(data));
-    assert.equal((await res.json()).error.code, code, JSON.stringify(data));
+    const body = await res.json();
+    assert.equal(body.error.code, code, JSON.stringify(data));
+    assert.match(body.request_id, /^wf_/, "typed failures carry a request id");
   }
 });
 

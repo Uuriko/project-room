@@ -2273,10 +2273,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data));
         } catch (error) {
           // Quota-exceeded is a typed 429 with retry info, never a 500.
-          if (error instanceof WebFetchError && error.code === "rate_limited") {
-            res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-            return json(res, 429, { error: { code: error.code, message: error.message },
-              retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+          // Every typed failure carries its request_id for journal correlation.
+          if (error instanceof WebFetchError) {
+            const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
+            if (error.code === "rate_limited") {
+              res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+            }
+            return json(res, error.status, payload);
           }
           throw error;
         }

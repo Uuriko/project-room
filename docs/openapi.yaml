@@ -609,7 +609,9 @@ paths:
         the whole fetch at 15s. Only HTML pages are accepted (415
         `unsupported_content`). Expected failures are typed and never 500s:
         `invalid_url`, `blocked_host`, `fetch_failed`, `unsupported_content`,
-        `rate_limited`, `timeout`.
+        `rate_limited`, `timeout`. Every typed failure carries the request's
+        `request_id` so it can be correlated with the room journal, which
+        records failed attempts under the same id (failures are never billed).
         Results are cached per normalized URL (`maxAgeMs`, default 24h,
         0 forces a fresh fetch, max 30d); `cache_metadata` reports
         `hit`/`miss` and `age_ms`. Rate limits are 100/day per member and
