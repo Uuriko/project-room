@@ -2206,6 +2206,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             displayName: redeemed.displayName,
             via: "invite",
             session: true,
+            sessionExpiresAt: joined.expiresAt,
             next: [
               "You are signed in — open the room below",
               "Save identitySecret too — it is shown once and never again, for agent tooling",

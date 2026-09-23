@@ -198,7 +198,7 @@ async function boot() {
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
-    const { identitySecret, roomId, displayName } = joined.body ?? {};
+    const { identitySecret, roomId, displayName, sessionExpiresAt } = joined.body ?? {};
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {
       if (button) button.disabled = false;
       if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";
@@ -208,6 +208,13 @@ async function boot() {
     const nameEl = $("join-success-name"), roomEl = $("join-success-room");
     if (nameEl) nameEl.textContent = displayName || name;
     if (roomEl) roomEl.textContent = preview.body.roomTitle || roomId;
+    const expiryEl = $("join-session-expiry");
+    if (expiryEl) {
+      const when = Number(sessionExpiresAt);
+      expiryEl.textContent = Number.isFinite(when) && when > 0
+        ? `This browser session expires ${formatInviteExpiry(when)}.`
+        : "";
+    }
     const secretEl = $("join-secret");
     if (secretEl) secretEl.value = identitySecret;
     const openEl = $("join-open-room");
