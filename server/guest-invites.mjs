@@ -167,7 +167,7 @@ export class GuestInvites {
   verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
     const expected = guestInviteSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
-      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:UNIQUE )?(?:TABLE|INDEX) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
     if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
     for (const { sql, actual } of expected) {
       if (normalize(actual) !== normalize(sql)) throw new Error("Guest invite schema requires operator reconciliation");
