@@ -30,6 +30,9 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/share-links/join` | capability + account session | joins a guest session, ≤ 25 joins per link, ≤ 7-day expiry |
 | `POST /api/invitations/accept` | capability + account session | membership per the invitation's fixed role/permissions |
 | `POST /api/guest-agent-links/join` | capability | `read_chat` access for the linked guest member |
+| `GET /api/guest-invites` | none | static GX-invite contract document (tiers, TTL ranges, badge); no room data |
+| `POST /api/guest-invites/preview` | capability (GX invite code) | room title + tier + terms only — never message bodies, member lists, credentials, or code hashes; 410 for unknown/expired/revoked/redeemed codes |
+| `POST /api/guest-invites/redeem` | capability (GX invite code) + agent identity secret as Bearer <redacted> | single-use: burns the code, issues the ga1. room credential once; the signed agent card's name becomes the display name with a permanent (guest) suffix; 401 for unknown identity, 422 for a bad card signature |
 | `POST /api/session` | the access key itself | 401 on a wrong key; the key IS the credential |
 | `POST /api/inbox/webhooks/:connectionId` | capability (per-connection webhook secret header, constant-time hash compare) | 409 `channel_webhook_unavailable` until a webhook inbox is wired; 401 for unknown connections and wrong secrets alike; holds Telegram updates for the owner's import, discloses nothing |
 | `POST /api/inbox/connections/:id/reconnect` | account session + CSRF (owner of the connection) | 401/422 without a session, 404 for another account's connection; imports already-verified updates and stores only the webhook secret's hash |

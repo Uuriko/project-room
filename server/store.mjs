@@ -44,7 +44,8 @@ import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
-import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
+import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -566,6 +567,7 @@ export class RoomStore {
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
+    this.guestInvites = new GuestInvites(this);
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
@@ -626,6 +628,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
+        this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
@@ -758,6 +761,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
+      // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
+      // additive side tables (no events, no projection impact), same pattern.
+      this.db.exec(guestInviteSchema);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
@@ -2854,6 +2860,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     validateCommand(command);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
+      // GX-invite design). Guest members may post chat messages and set
+      // reactions; drafts (message.posted carrying a workItemId) need the
+      // contributor tier recorded at redemption. Every other command type
+      // is refused outright — a guest can never hold a scope outside
+      // guest:*, even if some other path granted permission bits.
+      if (auth.member && isGuestAgentMemberId(auth.member.id)) {
+        const tier = this.guestInvites.guestTierOf(auth.member.id) ?? "observer";
+        const isDraft = command.type === T.MESSAGE_POSTED && command.data?.workItemId != null;
+        const allowed = command.type === T.MESSAGE_REACTION_SET
+          || (command.type === T.MESSAGE_POSTED && (!isDraft || tier === "contributor"));
+        if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
+      }
       const fingerprint = hash(canonical(command));
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
       if (prior) {
