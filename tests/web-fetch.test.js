@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   normalizeUrl, ipLiteralBlocked, htmlToMarkdown, extractMetadata,
-  extractHighlights, cacheKeyFor, assertFetchableUrl, fetchPage,
+  extractHighlights, cacheKeyFor, assertFetchableUrl,
   WebFetchError, webFetchContract, migrateWebFetchLogColumns,
 } from "../server/web-fetch.mjs";
 
