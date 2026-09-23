@@ -4461,7 +4461,21 @@ window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
-  (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
+  // Same join-flow rule as the initial boot: a #room/ deep link first tries
+  // the room-cookie session (no account needed), then the account flow.
+  const restoreDeepLink = async () => {
+    if (!roomId) return client.restore();
+    try {
+      const joined = await client.restore();
+      if (joined?.roomId === roomId) return joined;
+      client.endAccess();
+    } catch (error) {
+      if (![401, 403].includes(error.status)) throw error;
+    }
+    const account = await ensureAccountSession();
+    return account?.authenticated ? client.restore(roomId) : null;
+  };
+  restoreDeepLink().catch(handleFailureNotice);
 });
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
@@ -5103,6 +5117,21 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation()) {
+    // Join-flow sessions are room-cookie sessions with no account behind
+    // them — the /join page's "Open room" link lands here with a valid
+    // __Host-room_session cookie but no account session. Try the room
+    // cookie before the account gate, or a fresh joiner is stranded at the
+    // sign-in panel despite holding a working session. A cookie for a
+    // different room is dropped and the account flow decides as before.
+    if (requestedRoom && !accountHomeFromLocation()) {
+      try {
+        const joined = await client.restore();
+        if (joined?.roomId === requestedRoom) return;
+        client.endAccess();
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
+    }
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
       authKind = "account";
