@@ -114,6 +114,8 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   // sessions with MCP tools" became "Best for local coding sessions"). The
   // catalog text comes from innerText, which never contains markup, so assert
   // the shortened copy positively and the old suffix negatively instead.
+  assert.equal(await f.page.locator("#agent-other-types").evaluate(node => node.open), false);
+  assert.equal(await catalog.locator("button:visible").count(), 4);
   const catalogText = await catalog.innerText();
   assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
   assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
@@ -139,6 +141,7 @@ test("agent type catalog renders and click fills the same join path", { timeout:
 test("named roster fills Muse and Grok Build; Grok Build shows import checklist", { timeout: 25000 }, async t => {
   const f = await setup(t);
   await f.open();
+  await f.page.locator("#agent-other-types > summary").click();
   await f.page.locator('[data-roster="muse"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Muse");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "chat");

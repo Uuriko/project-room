@@ -120,7 +120,7 @@ export function installAgentConnections({ client, getState }) {
   }
   function reset() {
     flow++; listVersion++; owner = null; generation = null; ownerRevision = null; pending = null; forget(); busy = false;
-    conceal(); form.reset(); rosterId = null;
+    conceal(); form.reset(); rosterId = null; $("#agent-other-types").open = false;
     if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
     if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
     list.replaceChildren(); status(""); render(); dialog.close();

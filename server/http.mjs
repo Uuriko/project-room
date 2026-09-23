@@ -2814,9 +2814,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // B4: per-member feed derived from the event tail after the member's cursor. Read model only; the
         // store method re-authenticates membership, and the read rate limit above already covers it.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit only");
+        if ([...params.keys()].some(key => !["limit", "before", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit and before sequence");
         if (params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_notification_limit", "Choose a positive limit");
-        return json(res, 200, store.notifications.list(selected.token, roomId, fence, params.has("limit") ? { limit: Number(params.get("limit")) } : {}));
+        if (params.has("before") && !/^[1-9]\d*$/.test(params.get("before"))) reject(422, "invalid_notification_selection", "Choose a positive before sequence");
+        return json(res, 200, store.notifications.list(selected.token, roomId, fence, {
+          ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
+          ...(params.has("before") ? { before: Number(params.get("before")) } : {})
+        }));
       }
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
       if (route === "diagnostics" && req.method === "GET") {

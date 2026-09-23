@@ -382,6 +382,8 @@
               <p class="form-hint">Mentions, replies, and work naming you.</p>
               <p id="notification-status" class="status form-status" role="status"></p>
               <ul id="notification-list" class="rb-list"></ul>
+              <button id="notification-newest" class="button ghost" type="button" hidden>Newest</button>
+              <button id="notification-older" class="button ghost" type="button" hidden>Older notifications</button>
               <button id="notification-read-button" class="button ghost" type="button" hidden>Mark read</button>
             </details>
             <details id="reminder-panel" class="rb-panel">
@@ -706,14 +708,16 @@
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CX</span><span class="agent-type-copy"><strong>Codex</strong><span>Best for OpenAI coding</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">CR</span><span class="agent-type-copy"><strong>Cursor</strong><span>Best for your IDE, by pasting a prompt</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
+          </div>
+          <details id="agent-other-types"><summary>Other agents</summary><div class="agent-type-grid">
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">HM</span><span class="agent-type-copy"><strong>Hermes</strong><span>Best for research tasks</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">OC</span><span class="agent-type-copy"><strong>OpenCode</strong><span>Best for open-source coding</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-icon" aria-hidden="true">π</span><span class="agent-type-copy"><strong>Pi</strong><span>Best for a lightweight agent</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">GB</span><span class="agent-type-copy"><strong>Grok Bot</strong><span>Best for a hosted bot</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-icon" aria-hidden="true">IN</span><span class="agent-type-copy"><strong>Instinct</strong><span>Best for iMessage</span></span></button>
             <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
-          </div>
+          </div></details>
         </div>
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>

@@ -4388,7 +4388,7 @@ let notificationOwner = null, notificationFeed = null, notificationSerial = 0, n
 // Saved-but-not-refreshed, shown in the feed's own status line. Kept apart from
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
-let notificationNote = "";
+let notificationNote = "", notificationBefore = null, notificationLoading = false;
 // DM consent pairs for the signed-in member (consent-bound DMs, PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
@@ -4404,6 +4404,8 @@ const NOTIFICATION_COALESCE_MS = 1500;
 const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
+  notificationBefore = null; notificationLoading = false;
+  $("#notification-older").hidden = true; $("#notification-newest").hidden = true;
   notificationSerial++; notificationOwner = null; notificationFeed = null; notificationBusy = false; notificationError = ""; notificationNote = "";
   clearTimeout(notificationTimer); notificationTimer = null;
   $("#notification-count").textContent = ""; $("#notification-count").hidden = true;
@@ -4415,13 +4417,17 @@ function renderNotifications() {
   const owned = Boolean(state) && ownsNotifications(notificationOwner);
   const feed = owned ? notificationFeed : null, items = feed?.notifications ?? [], count = feed?.unread ?? 0;
   const badge = $("#notification-count");
-  badge.textContent = count ? `${count} for you` : ""; badge.hidden = !count;
+  badge.textContent = count ? `${count}${feed?.nextBefore ? "+" : ""} for you` : ""; badge.hidden = !count;
   $("#notification-panel").hidden = !owned;
-  const note = notificationError || notificationNote || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : "");
+  const note = notificationError || notificationNote || (feed?.basis?.truncated ? "Older notifications may be available." : "");
   setText("#notification-status", note);
   $("#notification-status").classList.toggle("visible", Boolean(note));
-  $("#notification-read-button").hidden = !owned || !count;
-  $("#notification-read-button").disabled = !owned || notificationBusy || !count;
+  $("#notification-older").hidden = !owned || !feed?.nextBefore;
+  $("#notification-newest").hidden = !owned || (notificationBefore === null && !feed?.pageBefore);
+  $("#notification-older").disabled = notificationLoading;
+  $("#notification-newest").disabled = notificationLoading;
+  $("#notification-read-button").hidden = !owned || !count || Boolean(feed?.nextBefore) || Boolean(feed?.pageBefore) || notificationBefore !== null;
+  $("#notification-read-button").disabled = !owned || notificationBusy || notificationLoading || !count;
   $("#notification-read-button").textContent = notificationBusy ? "Marking read…" : "Mark read";
   renderBriefList("#notification-list", items.map(item => {
     // RC-2026-09-19-071 (QAJ-006): an access_request item links to its
@@ -4437,21 +4443,36 @@ function renderNotifications() {
     const actor = item.kind === "access_request" && item.displayName ? item.displayName : memberLabel(item.actorId);
     const label = `${actor} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
-  }).join("") || (owned && feed && !notificationError ? '<li class="rb-empty">Nothing new for you.</li>' : ""));
+  }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
 }
 async function loadNotifications() {
+  const pagingFocus = ["notification-older", "notification-newest"].includes(document.activeElement?.id) ? document.activeElement : null;
   const ticket = notificationOwner, request = ++notificationSerial;
   if (!ownsNotifications(ticket)) return;
   try {
-    const result = await client.notifications();
+    notificationLoading = true; renderNotifications();
+    const result = await client.notifications(notificationBefore);
     if (!ownsNotifications(ticket) || request !== notificationSerial || !result) return;
+    if (notificationBefore !== null && result.cursor >= notificationBefore) { notificationBefore = null; return loadNotifications(); }
     notificationFeed = result; notificationError = "";
   } catch {
     if (!ownsNotifications(ticket) || request !== notificationSerial) return;
     notificationError = "Notifications could not refresh.";
   }
+  if (request === notificationSerial) notificationLoading = false;
   renderNotifications();
+  if (pagingFocus?.hidden && (document.activeElement === document.body || document.activeElement === pagingFocus)) {
+    ($("#notification-newest").hidden ? $("#notification-heading") : $("#notification-newest")).focus({ preventScroll: true });
+  }
 }
+$("#notification-older").addEventListener("click", () => {
+  if (notificationLoading || !notificationFeed?.nextBefore) return;
+  notificationBefore = notificationFeed.nextBefore; void loadNotifications();
+});
+$("#notification-newest").addEventListener("click", () => {
+  if (notificationLoading) return;
+  notificationBefore = null; void loadNotifications();
+});
 function scheduleNotifications(delay) {
   // One pending fetch at a time; an immediate request replaces a coalesced one.
   if (notificationTimer !== null && delay > 0) return;
@@ -4581,7 +4602,7 @@ async function runDmConsentAction(action, peerId, button) {
 }
 $("#notification-read-button").addEventListener("click", async () => {
   const ticket = notificationOwner, feed = notificationFeed;
-  if (!ownsNotifications(ticket) || !feed?.unread || notificationBusy) return;
+  if (!ownsNotifications(ticket) || !feed?.unread || feed.nextBefore || feed.pageBefore || notificationBefore !== null || notificationBusy || notificationLoading) return;
   notificationBusy = true; notificationNote = ""; renderNotifications();
   let saved = false;
   try {

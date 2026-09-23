@@ -115,26 +115,31 @@ export function deriveNotifications({ events, state, member }) {
 export class Notifications {
   constructor(store) { this.store = store; this.db = store.db; }
   // `tail` is an internal bound for tests; the HTTP route never passes it.
-  list(token, roomId, binding = null, { limit = NOTIFICATION_DEFAULT_LIMIT, tail = NOTIFICATION_TAIL } = {}) {
+  list(token, roomId, binding = null, { limit = NOTIFICATION_DEFAULT_LIMIT, tail = NOTIFICATION_TAIL, before = null } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > NOTIFICATION_MAX_LIMIT) fail(422, "invalid_notification_limit", `Choose a limit between 1 and ${NOTIFICATION_MAX_LIMIT}`);
     if (!Number.isSafeInteger(tail) || tail < 1 || tail > NOTIFICATION_TAIL) fail(422, "invalid_notification_limit", `Choose a tail between 1 and ${NOTIFICATION_TAIL}`);
+    if (before !== null && (!Number.isSafeInteger(before) || before < 1)) fail(422, "invalid_notification_selection", "Choose a positive before sequence");
     return this.store.readTransaction(() => {
       // Membership is rechecked on every read; nothing here is cached per member.
       const auth = this.store.authenticate(token, roomId, binding);
       const room = this.store.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       // Fetch one row past the bound so truncation is a fact, not a guess at exactly `tail` rows.
-      const fetched = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence DESC LIMIT ?").all(roomId, cursor, tail + 1);
+      const through = before === null ? room.sequence : Math.min(room.sequence, before - 1);
+      const fetched = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence DESC LIMIT ?").all(roomId, cursor, through, tail + 1);
       const truncated = fetched.length > tail;
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const member = room.state.members[auth.member.id] ?? auth.member;
       const notifications = deriveNotifications({ events: rows, state: room.state, member });
+      const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
+        : truncated ? rows[0].sequence : null;
       return {
+        pageBefore: before, nextBefore,
         roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
         evaluatedAt: this.store.now(), sequence: room.sequence, cursor,
         // Items derive from events (cursor, sequence]; `from` names the oldest event actually scanned.
-        basis: { from: rows[0]?.sequence ?? null, through: room.sequence, truncated },
+        basis: { from: rows[0]?.sequence ?? null, through, truncated },
         preferences: { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) },
         unread: notifications.length,
         notifications: notifications.slice(0, limit)

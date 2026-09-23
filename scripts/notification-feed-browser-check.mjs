@@ -133,3 +133,38 @@ for (const mobile of [false, true]) {
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
   });
 }
+
+test("older notification paging finds a buried mention without acknowledging unseen history", { timeout: 90000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  f.store.markCaughtUp(f.keys.owner, "commons", f.store.room("commons").sequence);
+  const cursor = f.store.snapshot(f.keys.owner, "commons").cursor;
+  const send = (id, body) => f.store.command(f.keys.guest, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: id, body } });
+  send("buried-mention", "@Room owner please review the plan");
+  for (let i = 0; i < 600; i++) send(`noise-${i}`, "Routine progress");
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  browser = await chromium.launch({ headless: true });
+  const p = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  p.setDefaultTimeout(10000);
+  await p.goto(`http://127.0.0.1:${server.address().port}`);
+  await fillAccessKey(p, f.keys.owner); await p.locator("#auth-form button[type=submit]").click();
+  await p.locator("#main").waitFor({ state: "visible" });
+  await openCatchUpPanel(p, "notification-panel");
+  await p.locator("#notification-older").waitFor({ state: "visible" });
+  assert.doesNotMatch(await p.locator("#notification-list").textContent(), /Nothing new for you/);
+  assert.equal(await p.locator("#notification-read-button").isHidden(), true);
+  // Failure keeps the continuation available; retry must not acknowledge anything.
+  let fail = true;
+  await p.route("**/notifications?before=*", route => fail ? (fail = false, route.abort()) : route.continue());
+  await p.locator("#notification-older").click();
+  await p.locator("#notification-status").filter({ hasText: "could not refresh" }).waitFor();
+  await p.locator("#notification-older").click();
+  await p.locator('#notification-list [href*="buried-mention"]').waitFor();
+  assert.equal(await p.locator("#notification-read-button").isHidden(), true);
+  assert.equal(await p.evaluate(() => document.activeElement.id), "notification-newest");
+  assert.equal(f.store.snapshot(f.keys.owner, "commons").cursor, cursor);
+  await p.locator("#notification-newest").click();
+  await p.locator("#notification-newest").waitFor({ state: "hidden" });
+  await p.locator("#notification-older").waitFor({ state: "visible" });
+});

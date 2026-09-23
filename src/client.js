@@ -504,13 +504,13 @@ export class RoomClient {
       throw error;
     }
   }
-  async notifications() {
+  async notifications(before = null) {
     // B4: read-only feed; a 401/403 ends access exactly like the sibling reads.
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
     try {
-      const result = await this.request(this.path("/notifications"));
+      const result = await this.request(this.path(`/notifications${before === null ? "" : `?before=${encodeURIComponent(before)}`}`));
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;

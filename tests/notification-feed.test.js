@@ -232,3 +232,35 @@ test("deriveNotifications is pure: same input, same output, and unknown preferen
   assert.deepEqual(deriveNotifications({ events, state, member }), first);
   assert.deepEqual(state.messages[0], { id: "m1", authorId: "owner", body: "@Test agent hi" }, "input untouched");
 });
+
+
+test("older mentions remain reachable after 600 unrelated events, with read and access fencing", async t => {
+  const { store, send, feed, ownerKey, agentKey } = await serve(t);
+  store.markCaughtUp(agentKey, "commons", store.room("commons").sequence);
+  const mention = send(ownerKey, T.MESSAGE_POSTED, { messageId: "buried", body: "@Test agent please check" });
+  for (let i = 0; i < 600; i++) send(ownerKey, T.MESSAGE_POSTED, { messageId: `noise-${i}`, body: "Routine progress" });
+  const newest = (await feed(agentKey)).body;
+  assert.equal(newest.notifications.length, 0);
+  assert.ok(newest.nextBefore);
+  const older = (await feed(agentKey, `?before=${newest.nextBefore}`)).body;
+  assert.deepEqual(kinds(older), ["mention:buried"]);
+  assert.equal(older.nextBefore, null);
+  assert.equal(older.basis.through, newest.nextBefore - 1);
+  store.markCaughtUp(agentKey, "commons", mention.sequence);
+  assert.deepEqual((await feed(agentKey, `?before=${newest.nextBefore}`)).body.notifications, []);
+  assert.equal((await feed(agentKey, "?before=0")).status, 422);
+  assert.equal((await feed(agentKey, "?before=1&before=2")).status, 422);
+  send(ownerKey, T.MEMBER_ACCESS_CHANGED, { memberId: "agent", expectedMemberRevision: 0, active: false, permissions: [] });
+  assert.ok([401, 403].includes((await feed(agentKey, `?before=${newest.nextBefore}`)).status));
+});
+
+test("notification item limits also provide a continuation without skipping items", async t => {
+  const { feed, send, ownerKey, agentKey } = await serve(t);
+  for (let i = 0; i < 5; i++) send(ownerKey, T.MESSAGE_POSTED, { messageId: `page-${i}`, body: "@Test agent check" });
+  let before = null; const found = [];
+  do {
+    const page = (await feed(agentKey, `?limit=2${before ? `&before=${before}` : ""}`)).body;
+    found.push(...kinds(page)); before = page.nextBefore;
+  } while (before !== null);
+  assert.deepEqual(found, [4,3,2,1,0].map(i => `mention:page-${i}`));
+});
