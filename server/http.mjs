@@ -2239,6 +2239,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
+      // Public agent-invite join page: GET /join and GET /join/:code
+      // (plus the /room/join twins on the www door). Unauthenticated and
+      // stateless by design, like POST /join: the page previews the invite
+      // and joins through the existing rate-limited API routes. Outside the
+      // /api/ inventory by design, like the discovery packets.
+      const joinPageMatch = /^\/(?:room\/)?join(?:\/([A-Za-z0-9_-]{1,64}))?\/?$/.exec(url.pathname);
+      if (joinPageMatch) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
+        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
+        return res.end(page);
+      }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");

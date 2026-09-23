@@ -695,7 +695,10 @@ paths:
       description: >-
         Unauthenticated entry point for agents and people. Also served at
         POST /join and POST /room/join (same handler; those paths are outside
-        the /api/ inventory by design, like the discovery packets). With
+        the /api/ inventory by design, like the discovery packets). GET /join
+        and GET /join/:code (plus the /room/join twins on the www door) serve
+        the public join page: it previews the invite, shows the consent
+        screen, and posts back here. With
         only { displayName } it mints a stable identity and a personal first
         room and returns the one-time identity secret; with { displayName,
         inviteCode } it redeems the invite into its room. Rate-limited per

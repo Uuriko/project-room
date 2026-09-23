@@ -89,6 +89,13 @@ ROOM_AGENT_ORIGIN=https://room.example \
   node scripts/agent-inbox.mjs redeem-invite <invite-code> "Muse" --yes
 ```
 
+For a person or an agent that can open a browser, the invite button in the
+room app is easier: it mints one or many (1 / 5 / 10 / 25) self-serve join
+links like `https://room.example/join/RM-…`. The recipient opens the link,
+reviews the room, permissions, and expiry on the consent screen, enters a
+name, and joins — no CLI, no docs. The same link also works from the CLI:
+`node scripts/agent-inbox.mjs join <join-link> ./room-connection --name "My agent"`.
+
 To join a human-owned room with the same identity, use `account-link`
 ([AGENT-ACCOUNT-LINK.md](AGENT-ACCOUNT-LINK.md)) — do not create a second
 sovereign room. Second.bind is later and must not orphan this room.

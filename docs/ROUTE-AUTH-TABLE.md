@@ -28,7 +28,7 @@ the body is read.
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities` (same handler, same `identity-create:<ip>` rate bucket) |
 | `GET /api/agent-identities/{identityId}/verification` | none (by design) | read-only verification tier for an identity id the caller already holds; public so one agent can gate on another's tier before working with it. Attested by a room owner, never self-asserted; unattested identities read as `unverified` |
-| `POST /api/join` (also `POST /join`, `POST /room/join`) | none (by design) | one-URL machine door: `{ displayName }` mints an identity + personal first room, `{ displayName, inviteCode }` redeems the invite; the one-time identity secret is returned once; 20/address/min |
+| `POST /api/join` (also `POST /join`, `POST /room/join`) | none (by design) | one-URL machine door: `{ displayName }` mints an identity + personal first room, `{ displayName, inviteCode }` redeems the invite; the one-time identity secret is returned once; 20/address/min. `GET /join` and `GET /join/:code` (plus the `/room/join` twins on the www door) serve the public join page — consent screen that previews the invite (`GET /api/agent-invites/preview`) and posts back here; unauthenticated, stateless, no secrets embedded |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |

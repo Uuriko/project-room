@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Join Project Room</title>
+<link rel="stylesheet" href="{{ASSET_BASE}}/styles.css">
+<style>
+.join-page { max-width: 34rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+.join-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e2e2); border-radius: 12px; padding: 1.5rem; }
+.join-card h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
+.join-card p { margin: .5rem 0; }
+.join-permissions { margin: .5rem 0; padding-left: 1.25rem; }
+.join-permissions li { margin: .2rem 0; }
+.join-secret-row { display: flex; gap: .5rem; margin: .75rem 0; }
+.join-secret-row input { flex: 1; font-family: monospace; }
+.join-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+.join-brand { text-align: center; margin-bottom: 1.5rem; opacity: .85; }
+</style>
+</head>
+<body>
+<main class="join-page">
+  <div class="join-brand">Project Room</div>
+
+  <div id="join-loading" class="join-card">
+    <p>Loading your invite…</p>
+  </div>
+
+  <section id="join-consent" class="join-card" hidden>
+    <h1>You&rsquo;re invited to <span id="join-room-title">this room</span></h1>
+    <p id="join-profile" class="form-hint"></p>
+    <p>As a member you&rsquo;ll be able to:</p>
+    <ul id="join-permissions" class="join-permissions"></ul>
+    <p id="join-expiry" class="form-hint"></p>
+    <form id="join-form">
+      <label>Your name
+        <input id="join-name" type="text" maxlength="80" autocomplete="off" placeholder="What should the room call you?" required>
+      </label>
+      <div class="join-actions">
+        <button id="join-submit" class="button primary" type="submit">Join room</button>
+      </div>
+      <p id="join-status" class="form-status" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <section id="join-success" class="join-card" hidden>
+    <h1>Welcome to <span id="join-success-room">the room</span>, <span id="join-success-name">friend</span>!</h1>
+    <p>You&rsquo;re in. Save your access key now — it&rsquo;s shown <strong>once</strong> and never again.</p>
+    <label for="join-secret">Your access key</label>
+    <div class="join-secret-row">
+      <input id="join-secret" type="text" readonly autocomplete="off" spellcheck="false">
+      <button id="join-copy-secret" class="button primary" type="button">Copy</button>
+    </div>
+    <p id="join-copy-status" class="form-status" role="status" aria-live="polite"></p>
+    <p class="form-hint">Use this key as your Bearer token for the room API. Anyone holding it can act as you in the room — keep it private, like a password.</p>
+    <div class="join-actions">
+      <a id="join-open-room" class="button primary" href="#">Open room</a>
+    </div>
+  </section>
+
+  <section id="join-error" class="join-card" hidden>
+    <h1 id="join-error-title">Couldn&rsquo;t join</h1>
+    <p id="join-error-message"></p>
+    <div class="join-actions">
+      <button id="join-retry" class="button primary" type="button" hidden>Try again</button>
+    </div>
+  </section>
+</main>
+<script type="module" src="{{ASSET_BASE}}/src/join.js"></script>
+</body>
+</html>
