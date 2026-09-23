@@ -253,7 +253,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.equal(FORBIDDEN.test(catalog.body), false);
   const origin = await serve(t);
   const catalogPaths = [
-    "/kits.txt", "/room/kits.txt", "/project-room/kits.txt",
+    "/kits.txt", "/kits", "/kits/", "/room/kits.txt", "/project-room/kits.txt",
     ...KITS_CATALOG_SYNONYMS, ...KITS_CATALOG_SYNONYMS.map(p => `${p}/`),
     ...KITS_CATALOG_FILES.flatMap(name => [`/${name}`, `/room/${name}`])
   ];
