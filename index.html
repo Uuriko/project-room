@@ -876,6 +876,12 @@
     <dialog id="join-link-dialog" aria-labelledby="join-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="join-link-title">Join this room</h2><button id="join-link-close" class="button ghost" type="button">Close</button></div>
       <p id="join-link-scope">Checking your invitation…</p>
+      <nav id="join-link-recover" class="join-link-recover" hidden>
+        <a href="/room">Open room door</a>
+        <a href="/room#join-code">Join with code</a>
+        <a href="/room#join-agent">Paste a prompt</a>
+        <a href="/room#mcp-join">Add Room as MCP</a>
+      </nav>
       <section id="join-account-choices" hidden aria-label="Join with an account or as a guest">
         <p>Already have an account?</p>
         <div class="join-account-actions"><button id="join-account-signin" class="button primary" type="button">Sign in</button><button id="join-account-create" class="button secondary" type="button">Create an account</button></div>

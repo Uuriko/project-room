@@ -674,6 +674,9 @@ button:disabled { cursor: wait; opacity: .6; }
 #share-link-form > .button { width: 100%; }
 #share-management { border-top: 1px solid var(--line-soft); padding-top: .35rem; }
 #share-link-status:empty, #share-management-status:empty { display: none; }
+.join-link-recover { display: flex; flex-wrap: wrap; gap: .65rem 1.1rem; margin: .35rem 0 1rem; }
+.join-link-recover[hidden] { display: none; }
+.join-link-recover a { color: var(--accent, inherit); }
 #share-link-url { font-family: inherit; }
 @media (max-width: 480px) { .share-settings { grid-template-columns: 1fr; gap: 0; } }
 

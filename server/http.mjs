@@ -57,7 +57,7 @@ const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
 ]);
-const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
 // RFC 8288 discovery hints on machine-readable surfaces: the A2A agent card,
 // the llms packet, the skills catalog, and the public HTML door.
 const discoveryLinks = () => [
@@ -2299,6 +2299,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (data.recoverable && !registrationCredential) reject(401, "unauthenticated", "Saved registration credential required");
         return json(res, 201, store.identities.create(data.displayName, { secret: registrationCredential }));
       }
+      // POST-only mint. GET must not look like a missing route (404) or an
+      // auth challenge (401): there is nothing to authenticate.
+      if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
@@ -2306,6 +2311,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) }));
+      }
+      if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent invite preview: read-only consent data for the pre-redemption
       // review screen. Unauthenticated (the code is the bearer credential);
@@ -2352,6 +2360,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const created = agentRooms.create(secret, data);
         return json(res, created.duplicate ? 200 : 201, created);
+      }
+      // GET is a documented identity-secret list (401 without a pri_), not a
+      // POST-only route. Other methods are not part of that contract.
+      if (url.pathname === "/api/agent-rooms") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {

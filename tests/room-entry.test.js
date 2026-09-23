@@ -37,6 +37,9 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Conversations, shared work, and a private Inbox\./);
   assert.match(html, /<strong>Create Room<\/strong>/);
   assert.match(html, /bootstrap-agent-room/);
+  assert.match(html, /local-only/);
+  assert.match(html, /no <code>POST \/api\/bootstrap-agent-room<\/code>/);
+  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
   assert.match(html, /POST \/room\/api\/agent-rooms/);
   assert.match(html, /kind: personal\|organization/);
   assert.match(html, /<strong>Invite agents<\/strong>/);
@@ -147,6 +150,15 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /claude mcp add --transport http/);
   assert.match(html, /Join with code/);
   assert.match(html, /id="join-code"/);
+  assert.match(html, /id="join-empty"/);
+  assert.match(html, /id="join-empty-recover"/);
+  assert.match(html, />Open room door</);
+  assert.match(html, /href="#join-code">Join with code</);
+  assert.match(html, /href="#join-agent">Paste a prompt</);
+  assert.match(html, /href="#mcp-join">Add Room as MCP</);
+  assert.match(html, /id="join-code-status"/);
+  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
+  assert.match(html, new RegExp(`data-room-origin="${origin}"`));
   assert.match(html, /class="whisper"[^>]*href="#join-code"/);
   assert.match(html, /id="connect"/);
   assert.match(html, /id="connect-title">Connect</);
@@ -175,6 +187,9 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
   assert.match(html, /<strong>Create Room<\/strong>/);
   assert.match(html, /bootstrap-agent-room/);
+  assert.match(html, /local-only/);
+  assert.match(html, /no <code>POST \/api\/bootstrap-agent-room<\/code>/);
+  assert.doesNotMatch(html, /project-room-staging\.getdasha\.workers\.dev/);
   assert.match(html, /POST \/room\/api\/agent-rooms/);
   assert.match(html, /kind: personal\|organization/);
   assert.match(html, /<strong>Invite agents<\/strong>/);
@@ -283,14 +298,20 @@ test("www /room #join/<token>/work/<id> keeps the purpose path on the forwarded 
   assert.equal(result.replaced, `${ROOM_ORIGIN}/${hash}`);
 });
 
-test("www /room #code/ABC-DEF-GHJ writes the short code onto Join and leaves the wrapper", () => {
+test("www /room #code/ABC-DEF-GHJ stays on the door instead of a silent leave", () => {
   const result = runDoorHash("#code/abc-def-ghj");
-  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
-  assert.equal(result.replaced, `${ROOM_ORIGIN}/#code/ABC-DEF-GHJ`);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
+  assert.equal(result.replaced, "");
 });
 
 test("www /room #join/ stub does not auto-leave the wrapper", () => {
   const result = runDoorHash("#join/");
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
+  assert.equal(result.replaced, "");
+});
+
+test("www /room short #join/ does not leave the wrapper", () => {
+  const result = runDoorHash(`#join/${"x".repeat(10)}`);
   assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
   assert.equal(result.replaced, "");
 });
