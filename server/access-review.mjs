@@ -51,6 +51,16 @@ export function assembleAccessReview(store, roomId) {
   const joined = new Map(db.prepare(`SELECT json_extract(body,'$.data.memberId') AS member, min(json_extract(body,'$.at')) AS at
     FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('member.added','member.joined_via_invitation') GROUP BY member`).all(roomId).map(row => [row.member, row.at]));
   const accounts = new Map(db.prepare("SELECT member_id, account_id FROM member_accounts WHERE room_id=?").all(roomId).map(row => [row.member_id, row.account_id]));
+  const delegationRows = db.prepare(`SELECT identity_id AS identityId, granted_by AS grantedBy, granted_at AS grantedAt
+    FROM membership_delegation_grants WHERE room_id=? AND revoked_at IS NULL ORDER BY granted_at ASC, identity_id ASC`).all(roomId);
+  const delegationByIdentity = new Map(delegationRows.map(row => [row.identityId, row]));
+  const authorityOf = member => {
+    const paths = [];
+    if (member.id === state.room.ownerId) paths.push("owner");
+    if (member.delegatedAdmin === true) paths.push("delegated_admin");
+    if (member.identityId && delegationByIdentity.has(member.identityId)) paths.push("membership_delegation");
+    return { authorityPaths: paths, dualGrantHazard: paths.includes("delegated_admin") && paths.includes("membership_delegation") };
+  };
   const active = Object.values(state.members).filter(member => member.active !== false);
   const members = active.filter(member => !isGuest(member)).map(member => ({
     memberId: member.id, displayName: member.displayName, kind: member.kind, role: member.role ?? null,
@@ -59,7 +69,7 @@ export function assembleAccessReview(store, roomId) {
     // admin bits via an explicit owner grant. The grant is server-stamped;
     // this flag makes the exception inspectable in review output.
     delegatedAdmin: member.delegatedAdmin === true,
-    identityId: member.identityId ?? null, accountBound: accounts.has(member.id),
+    identityId: member.identityId ?? null, ...authorityOf(member), accountBound: accounts.has(member.id),
     membershipOrigin: member.membershipOrigin?.kind ?? (member.id === state.room.ownerId ? "bootstrap" : "added"), joinedAt: joined.get(member.id) ?? null,
     liveAccessKeys: liveKeys.get(member.id)?.n ?? 0, latestAccessKeyExpiresAt: iso(liveKeys.get(member.id)?.latest),
     lastActivityAt: lastActivity.get(member.id) ?? null
@@ -91,21 +101,34 @@ export function assembleAccessReview(store, roomId) {
   });
   const agentIdentities = db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
-      WHERE l.room_id=? ORDER BY l.linked_at, l.identity_id`).all(roomId).map(row => ({
-    identityId: row.identityId, displayName: row.displayName, memberId: row.memberId, linkedAt: iso(row.linkedAt),
-    memberActive: state.members[row.memberId]?.active !== false, lastActivityAt: lastActivity.get(row.memberId) ?? null
-  }));
+      WHERE l.room_id=? ORDER BY l.linked_at, l.identity_id`).all(roomId).map(row => {
+    const member = state.members[row.memberId];
+    const authority = member ? authorityOf(member) : { authorityPaths: delegationByIdentity.has(row.identityId) ? ["membership_delegation"] : [], dualGrantHazard: false };
+    return {
+      identityId: row.identityId, displayName: row.displayName, memberId: row.memberId, linkedAt: iso(row.linkedAt),
+      memberActive: member?.active !== false, lastActivityAt: lastActivity.get(row.memberId) ?? null,
+      authorityPaths: authority.authorityPaths, dualGrantHazard: authority.dualGrantHazard
+    };
+  });
   const agentConnections = db.prepare("SELECT * FROM agent_connections WHERE room_id=? ORDER BY created_at,member_id").all(roomId).map(row => {
     const { memberId, displayName, generation, memberRevision, permissions, expiresAt, status, firstActionAt } = store.agentConnections.view(row);
     return { memberId, displayName, generation, memberRevision, permissions, sponsorMemberId: row.sponsor_member_id,
       createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), expiresAt: iso(expiresAt), status, firstActionAt,
       lastActivityAt: lastActivity.get(memberId) ?? null };
   });
+  const membershipDelegations = delegationRows.map(row => {
+    const identity = agentIdentities.find(item => item.identityId === row.identityId);
+    return {
+      identityId: row.identityId, memberId: identity?.memberId ?? null, grantedBy: row.grantedBy, grantedAt: iso(row.grantedAt),
+      authorityPaths: identity?.authorityPaths ?? ["membership_delegation"], dualGrantHazard: identity?.dualGrantHazard === true
+    };
+  });
   const roomLastActivityAt = [...lastActivity.values()].filter(Boolean).sort().at(-1) ?? null;
   return { format: ACCESS_REVIEW_FORMAT, roomId, roomTitle: state.room.title, ownerId: state.room.ownerId, generatedAt: iso(now),
     lastActivityAt: roomLastActivityAt, counts: { members: members.length, guests: guests.length, shareLinks: shareLinks.length,
-      pendingInvites: pendingInvites.length, agentIdentities: agentIdentities.length, agentConnections: agentConnections.length },
-    members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections };
+      pendingInvites: pendingInvites.length, agentIdentities: agentIdentities.length, agentConnections: agentConnections.length,
+      membershipDelegations: membershipDelegations.length },
+    members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections, membershipDelegations };
 }
 
 // Plain-text rendering shared by the CLI; one block per room.
@@ -113,13 +136,15 @@ export function renderAccessReview(report) {
   const lines = [], when = value => value ?? "never", grants = list => list.length ? list.join(", ") : "none";
   lines.push(`Room ${report.roomId} — ${report.roomTitle} (owner ${report.ownerId}); generated ${report.generatedAt}; last activity ${when(report.lastActivityAt)}`);
   lines.push(`Members (${report.members.length}):`);
-  for (const m of report.members) lines.push(`  ${m.memberId}  ${m.displayName}  ${m.kind}${m.role ? ` (${m.role})` : ""}  grants: ${grants(m.permissions)}  live keys: ${m.liveAccessKeys}  last activity: ${when(m.lastActivityAt)}`);
+  for (const m of report.members) lines.push(`  ${m.memberId}  ${m.displayName}  ${m.kind}${m.role ? ` (${m.role})` : ""}  grants: ${grants(m.permissions)}  paths: ${grants(m.authorityPaths ?? [])}${m.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}  live keys: ${m.liveAccessKeys}  last activity: ${when(m.lastActivityAt)}`);
   lines.push(`Guests (${report.guests.length}):`);
   for (const g of report.guests) lines.push(`  ${g.memberId}  ${g.displayName}  ${g.kind}  ${g.status}  joined ${when(g.joinedAt)}  expires ${when(g.expiresAt)}  last activity: ${when(g.lastActivityAt)}`);
   lines.push(`Share links (${report.shareLinks.length}):`);
   for (const l of report.shareLinks) lines.push(`  ${l.id}  ${l.status}  joins ${l.joins}/${l.maxJoins} (${l.remainingJoins} remaining)  issued by ${l.issuerMemberId}  expires ${l.expiresAt}`);
   lines.push(`Pending agent invites (${report.pendingInvites.length}):`);
   for (const i of report.pendingInvites) lines.push(`  ${i.inviteId}  ${i.displayName ?? "(unnamed)"}  ${i.status}  grants: ${grants(i.permissions)}  issued by ${i.inviterMemberId}  created ${i.createdAt}  expires ${i.expiresAt}`);
+  lines.push(`Membership delegations (${report.membershipDelegations?.length ?? 0}):`);
+  for (const grant of report.membershipDelegations ?? []) lines.push(`  ${grant.identityId}  member ${grant.memberId ?? "unlinked"}  granted by ${grant.grantedBy}  at ${when(grant.grantedAt)}  paths: ${grants(grant.authorityPaths)}${grant.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}`);
   lines.push(`Agent identities (${report.agentIdentities.length}):`);
   for (const i of report.agentIdentities) lines.push(`  ${i.identityId}  ${i.displayName}  member ${i.memberId}${i.memberActive ? "" : " (inactive)"}  linked ${i.linkedAt}  last activity: ${when(i.lastActivityAt)}`);
   lines.push(`Agent connections (${report.agentConnections.length}):`);
