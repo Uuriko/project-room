@@ -186,7 +186,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // root). Purely additive and intentionally NOT fenced — older writers have
   // no code path to it, and muting is a private read-time filter, never a
   // room-visible state change.
-  "thread_mutes"
+  "thread_mutes",
+  // referrals (referral attribution): one row per joined referee, the
+  // queryable source of truth behind the referral board. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // and the referrals module verifies its own schema on open.
+  "referrals"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

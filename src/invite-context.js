@@ -140,7 +140,7 @@ export function defaultRequestPermissions(preview) {
 // fails fast before any network call.
 export const ACCESS_REQUEST_NAME_MAX = 80;
 export const ACCESS_REQUEST_NOTE_MAX = 500;
-export function validateAccessRequestForm({ displayName, note }) {
+export function validateAccessRequestForm({ displayName, note, referredBy }) {
   const name = typeof displayName === "string" ? displayName.trim() : "";
   if (!name) return { ok: false, error: "Enter the display name the room owner will see." };
   if (name.length > ACCESS_REQUEST_NAME_MAX) return { ok: false, error: `Display name must be at most ${ACCESS_REQUEST_NAME_MAX} characters.` };
@@ -149,7 +149,15 @@ export function validateAccessRequestForm({ displayName, note }) {
       return { ok: false, error: `Note must be at most ${ACCESS_REQUEST_NOTE_MAX} characters.` };
     }
   }
-  return { ok: true, displayName: name, note: typeof note === "string" && note.trim() ? note.trim() : null };
+  // "Who referred you?" — optional free text, matched against member display
+  // names at approval time; never blocks the join.
+  if (referredBy !== undefined && referredBy !== null && referredBy !== "") {
+    if (typeof referredBy !== "string" || referredBy.length > ACCESS_REQUEST_NAME_MAX) {
+      return { ok: false, error: `Referrer name must be at most ${ACCESS_REQUEST_NAME_MAX} characters.` };
+    }
+  }
+  return { ok: true, displayName: name, note: typeof note === "string" && note.trim() ? note.trim() : null,
+    referredBy: typeof referredBy === "string" && referredBy.trim() ? referredBy.trim() : null };
 }
 
 // Idempotency-key mint for the access request. Same shape as the server's

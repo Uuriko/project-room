@@ -92,13 +92,15 @@ test("QAJ-001: requested permissions default to the dead invite's grant, else a 
 
 test("QAJ-001: form validation mirrors the server limits before any network call", () => {
   assert.deepEqual(validateAccessRequestForm({ displayName: "  Ada  ", note: " hi " }),
-    { ok: true, displayName: "Ada", note: "hi" });
+    { ok: true, displayName: "Ada", note: "hi", referredBy: null });
   assert.deepEqual(validateAccessRequestForm({ displayName: "Ada" }),
-    { ok: true, displayName: "Ada", note: null });
+    { ok: true, displayName: "Ada", note: null, referredBy: null });
+  assert.deepEqual(validateAccessRequestForm({ displayName: "Ada", referredBy: "  Bob  " }),
+    { ok: true, displayName: "Ada", note: null, referredBy: "Bob" });
   assert.equal(validateAccessRequestForm({ displayName: "   " }).ok, false);
   assert.equal(validateAccessRequestForm({ displayName: "" }).ok, false);
   assert.equal(validateAccessRequestForm({ displayName: "x".repeat(81) }).ok, false);
-  assert.equal(validateAccessRequestForm({ displayName: "Ada", note: "x".repeat(501) }).ok, false);
+  assert.equal(validateAccessRequestForm({ displayName: "Ada", referredBy: "x".repeat(81) }).ok, false);
 });
 
 test("QAJ-001: request ids match the server's idempotency-key pattern", () => {

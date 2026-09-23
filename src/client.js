@@ -171,9 +171,9 @@ export class AccountClient {
   mintAccessIdentity(displayName) {
     return this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName } });
   }
-  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, requestId }) {
+  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
     return this.request("/api/access-requests", { method: "POST", credentials: "omit",
-      data: { roomId, identityId, displayName, requestedPermissions, note, requestId } });
+      data: { roomId, identityId, displayName, requestedPermissions, note, referredBy: referredBy ?? null, requestId } });
   }
   async joinShareLink({ linkToken, displayName, redemptionId }) {
     const session = this.currentSession("joining a room");

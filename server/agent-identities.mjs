@@ -135,7 +135,7 @@ export class AgentIdentities {
   // RC-2026-09-18-038: a membership-administration delegate may also link,
   // because decide() drives link() with the approver's token — approving an
   // access request is exactly what the delegation exists for.
-  link(token, roomId, { identityId, memberId, displayName, permissions }, expectedSessionBinding = null) {
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
@@ -160,6 +160,12 @@ export class AgentIdentities {
       fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
     }
     if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
+    // Referral attribution: optional member id of the referrer, written onto
+    // the new member record and journaled via referral.completed. Shape is
+    // validated here; the member.added event validator re-validates it.
+    if (referredBy !== undefined && (typeof referredBy !== "string" || !MEMBER_ID_PATTERN.test(referredBy))) {
+      fail(422, "invalid_identity", "referredBy must be a member id");
+    }
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
@@ -181,7 +187,8 @@ export class AgentIdentities {
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
-        data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId } }, expectedSessionBinding);
+        data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId,
+          ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
       return { roomId, identityId, memberId: resolvedMemberId };

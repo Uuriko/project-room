@@ -26,6 +26,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
+import { installReferralBoard } from "./referral-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
@@ -132,6 +133,7 @@ let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
 let agentInvitesUI = null;
+let referralBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -210,6 +212,7 @@ const client = new RoomClient({
     syncNotifications();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
+    referralBoardUI?.sync();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
@@ -272,6 +275,7 @@ const client = new RoomClient({
     resetNotifications();
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
+    referralBoardUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) {
       clearPrivateWorkspace({ preservePending: leavingPage });
@@ -372,6 +376,7 @@ const briefView = new ReturnBrief(client, {
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
+referralBoardUI = installReferralBoard({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
@@ -1163,6 +1168,7 @@ async function submitRequestAccessForm(event) {
   const checked = validateAccessRequestForm({
     displayName: $("#invitation-request-name").value,
     note: $("#invitation-request-note").value,
+    referredBy: $("#invitation-request-referred")?.value,
   });
   if (!checked.ok) { setRequestAccessStatus(checked.error, true); return; }
   const submit = $("#invitation-request-submit");
@@ -1186,6 +1192,7 @@ async function submitRequestAccessForm(event) {
       displayName: checked.displayName,
       requestedPermissions: defaultRequestPermissions(invitation.preview),
       note: checked.note,
+      referredBy: checked.referredBy,
       requestId,
     });
     stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
@@ -4524,7 +4531,21 @@ window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
-  (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
+  // Same join-flow rule as the initial boot: a #room/ deep link first tries
+  // the room-cookie session (no account needed), then the account flow.
+  const restoreDeepLink = async () => {
+    if (!roomId) return client.restore();
+    try {
+      const joined = await client.restore();
+      if (joined?.roomId === roomId) return joined;
+      client.endAccess();
+    } catch (error) {
+      if (![401, 403].includes(error.status)) throw error;
+    }
+    const account = await ensureAccountSession();
+    return account?.authenticated ? client.restore(roomId) : null;
+  };
+  restoreDeepLink().catch(handleFailureNotice);
 });
 // Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
@@ -5166,6 +5187,21 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation()) {
+    // Join-flow sessions are room-cookie sessions with no account behind
+    // them — the /join page's "Open room" link lands here with a valid
+    // __Host-room_session cookie but no account session. Try the room
+    // cookie before the account gate, or a fresh joiner is stranded at the
+    // sign-in panel despite holding a working session. A cookie for a
+    // different room is dropped and the account flow decides as before.
+    if (requestedRoom && !accountHomeFromLocation()) {
+      try {
+        const joined = await client.restore();
+        if (joined?.roomId === requestedRoom) return;
+        client.endAccess();
+      } catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+      }
+    }
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
       authKind = "account";

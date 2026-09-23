@@ -58,6 +58,7 @@ import {
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
+import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
@@ -367,7 +368,7 @@ const shapes = {
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
@@ -559,6 +560,7 @@ export class RoomStore {
     this.delegation = new MembershipDelegation(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
+    this.referrals = new Referrals(this);
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
@@ -677,7 +679,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${invitationSchema}
       ${agentIdentitySchema}
       ${accountLoginMethodsSchema}
-      ${agentInviteSchema}`);
+      ${agentInviteSchema}
+      ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -739,6 +742,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // Referral attribution (invite/access-request joins): purely additive —
+      // no migration, no fence impact; referrals are only written by the join
+      // paths, and the table holds no credential data.
+      this.db.exec(referralSchema);
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);
@@ -825,6 +832,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      // "Who referred you?" free text on access requests (referral
+      // attribution): converge deployed databases that predate the column.
+      {
+        const cols = new Set(this.db.prepare("PRAGMA table_info(access_requests)").all().map(c => c.name));
+        if (!cols.has("referred_by")) this.db.exec("ALTER TABLE access_requests ADD COLUMN referred_by TEXT");
+      }
       // Owner-granted membership administration for agent identities
       // (RC-2026-09-18-038): purely additive, intentionally outside the
       // writer fence like access_requests — older writers have no code path
@@ -2142,6 +2155,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (auth.credentialScope !== "room" || auth.kind !== "access" || auth.member.kind !== "human") fail(403, "access_denied", "Browser sessions require a human Room access key");
       const token = this.insertCredential(auth.roomId, auth.member.id, "session", auth.credentialHash, Math.min(auth.expiresAt, this.now() + 8 * 3600000));
       return { token, session: this.authenticate(token) };
+    });
+  }
+  // Join-flow browser session. After a successful self-serve join the new
+  // agent member's browser needs a working session — the join page's "open
+  // the room" link would otherwise strand them with a secret but no session.
+  // Narrowly scoped: agent-kind only, room-bound, 8-hour expiry like human
+  // browser sessions. The session carries exactly the member's permissions —
+  // no more, no less — and the invite redemption (or first-room creation) in
+  // the same request is the authorization, so callers must only invoke it for
+  // the member minted there. Invite profiles are agent-safe by construction,
+  // so invite sessions can never mint admin rights.
+  createJoinSession(roomId, memberId) {
+    return this.transaction(() => {
+      const member = this.room(roomId).state.members[memberId];
+      if (!member || member.active === false) fail(403, "access_denied", "Room member required");
+      if (member.kind !== "agent") fail(403, "access_denied", "Join sessions are for agent joins");
+      const expiresAt = this.now() + 8 * 3600000;
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
+      return { token, expiresAt };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }

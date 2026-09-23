@@ -234,7 +234,11 @@ export class AgentInvites {
       if (!canInviteMembers(room.state, row.created_by)) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) {
+      // Reserve two event slots: member.added plus the referral.completed
+      // journal event written in the same transaction. A one-slot check would
+      // admit the member at the last slot and then fail journaling the
+      // referral, rolling the whole join back after the fact.
+      if (room.sequence + 1 >= 10000 || Object.keys(room.state.members).length >= 100) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
@@ -260,6 +264,9 @@ export class AgentInvites {
           permissions,
           identityId: identity.identityId,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+          // Referral attribution: the invite minter is the referrer. The
+          // member.added validator re-checks the shape and the self rule.
+          referredBy: row.created_by,
         },
       });
       let state;
@@ -277,6 +284,14 @@ export class AgentInvites {
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);
       if (burned.changes !== 1) fail(409, "invite_already_used", "Invite code was already used");
+      // Referral attribution, same transaction, after the winning burn: the
+      // minter is the referrer. Exactly-once per referee via the referrals
+      // table primary key; a retry of this same redemption returns the
+      // duplicate path above and never reaches here. Self-joins (minter
+      // redeeming their own code) record nothing — no self-referrals.
+      if (row.created_by !== memberId) {
+        this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.created_by, refereeMemberId: memberId, via: "invite", at: now });
+      }
       // No account session, no member_accounts row: the identity secret is the
       // only credential. The secret is shown once, like identity-create. The
       // response carries the same machine-readable next[] shape as signup
@@ -289,8 +304,9 @@ export class AgentInvites {
   // Read-only invite preview for the pre-redemption consent screen. Mirrors
   // redeem()'s lookup, folding and failure codes exactly, but consumes
   // nothing: the code stays live. Returns the room, the granted
-  // permissions, the matching standing profile (or "custom"), and the
-  // expiry timestamp. Never reveals member or identity data.
+  // permissions, the matching standing profile (or "custom"), the expiry
+  // timestamp, and the inviter's display name. Never reveals member ids or
+  // identity data.
   preview(code) {
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
     if (!CODE_PATTERN.test(normalized)) {
@@ -315,8 +331,12 @@ export class AgentInvites {
       const set = agentAccessProfiles[name];
       return set.length === permissions.length && set.every(p => permissions.includes(p));
     }) ?? "custom";
+    // Inviter display name for the consent screen ("Invited by …"). The
+    // member id is never exposed — display name only, so no identity leaks.
+    const inviter = room.state?.members?.[row.created_by];
+    const inviterDisplayName = typeof inviter?.displayName === "string" && inviter.displayName ? inviter.displayName : null;
     return { roomId: row.room_id, roomTitle: room.state?.room?.title ?? row.room_id,
-      permissions, profile, expiresAt: row.expires_at };
+      permissions, profile, expiresAt: row.expires_at, inviterDisplayName };
   }
 
   // Owner-only: revoke an unredeemed code by the handle list() and create()
