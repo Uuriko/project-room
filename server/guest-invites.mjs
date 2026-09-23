@@ -18,6 +18,7 @@ import { verifyCardSignature } from "./agent-card-signing.mjs";
 import {
   GUEST_AGENT_TOKEN_PREFIX,
   GUEST_AGENT_TOKEN_PATTERN,
+  GUEST_AGENT_MAX_JOINS,
   guestAgentMemberId,
   isGuestAgentMemberId,
 } from "./guest-agent-links.mjs";
@@ -219,6 +220,89 @@ export class GuestInvites {
     return row.tier;
   }
 
+  // Self-serve expiry sweep for the redemption path, where no owner token
+  // exists. Mirrors GuestAgentLinks#sweepExpired member-for-member but builds
+  // the journal events directly (the redeem MEMBER_ADDED pattern) with the
+  // sponsoring owner as actor, replicating store.command's deactivating
+  // MEMBER_ACCESS_CHANGED side effects (connection revocation, credential
+  // revocation, reminder retirement) so both sweep flavors leave the same
+  // wake. Returns the refreshed room ({ sequence, state }).
+  sweepExpiredGuests(roomId, room, actorMemberId) {
+    let { sequence, state } = room;
+    let swept = 0;
+    for (const member of Object.values(state.members)) {
+      if (!isGuestAgentMemberId(member.id) || member.kind !== "agent" || member.active === false) continue;
+      const cred = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'")
+        .get(roomId, member.id);
+      if (cred && cred.revoked === 0 && cred.expires_at > this.store.now()) continue;
+      const eventId = `guest-agent-end-${hash(`${member.id}:${cred?.hash || "none"}`).slice(0, 40)}`;
+      const incoming = event({
+        id: eventId, idempotencyKey: eventId, roomId, actorId: actorMemberId,
+        type: T.MEMBER_ACCESS_CHANGED, at: new Date(this.store.now()).toISOString(),
+        data: {
+          memberId: member.id,
+          expectedMemberRevision: member.revision,
+          permissions: member.permissions,
+          active: false,
+          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+        },
+      });
+      try {
+        state = { ...applyEventWithGrowth(state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      } catch (error) { fail(422, "command_rejected", error.message); }
+      sequence += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      // store.command side effects for a deactivating MEMBER_ACCESS_CHANGED
+      // (see server/store.mjs): connection revocation, credential revocation,
+      // reminder retirement.
+      this.store.agentConnections.revokeMember(roomId, member.id);
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
+      this.store.reminders.retireMember(roomId, member.id);
+      swept++;
+    }
+    if (swept > 0) {
+      const projection = JSON.stringify(state);
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    }
+    return { sequence, state };
+  }
+
+  // Identity-bound seat reactivation for a returning guest whose seat was
+  // deactivated (owner disconnect or expiry sweep). Only the identity owning
+  // the guest_members row can ever reclaim the seat — the member id is
+  // deterministic per identity, so this is a reactivation, never a fresh
+  // seat that would leak (or collide with) the old one. The tier stays
+  // whatever the owner last set; the display name stays as first minted.
+  // Returns the refreshed room ({ sequence, state }).
+  reactivateGuestSeat(roomId, room, actorMemberId, inviteId, member) {
+    const now = this.store.now();
+    const eventId = `guest-invite-reactivate-${hash(`${member.id}:${inviteId}`).slice(0, 40)}`;
+    const incoming = event({
+      id: eventId, idempotencyKey: eventId, roomId, actorId: actorMemberId,
+      type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
+      data: {
+        memberId: member.id,
+        expectedMemberRevision: member.revision,
+        permissions: member.permissions,
+        active: true,
+        authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+      },
+    });
+    let state;
+    try {
+      state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    } catch (error) { fail(422, "command_rejected", error.message); }
+    const projection = JSON.stringify(state), sequence = room.sequence + 1;
+    if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
+    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    // Rebind the seat to the redeeming invite; the tier is owner-set and
+    // never escalated by redemption.
+    this.db.prepare("UPDATE guest_members SET invite_id=?, created_at=? WHERE member_id=?").run(inviteId, now, member.id);
+    return { sequence, state };
+  }
+
   mint(token, roomId, details, binding) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
@@ -322,8 +406,12 @@ export class GuestInvites {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
       const roomId = row.room_id;
-      const room = this.store.room(roomId);
+      let room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
+      // Sweep expired guest seats before any capacity decision: an expired
+      // membership must not consume the concurrent-guest cap, and the seat
+      // logic below must see a consistent state.
+      room = this.sweepExpiredGuests(roomId, room, row.minted_by_member_id);
       // One seat per identity per room: faces are cheap, seats are not.
       // The seat check comes before the name check — a returning guest
       // re-redeeming with its own card name must reuse its seat, not
@@ -339,10 +427,26 @@ export class GuestInvites {
         memberId = existingMember.id;
         tier = seat.tier;
         duplicate = true;
+      } else if (existingMember && existingMember.kind === "agent" && isGuestAgentMemberId(existingMember.id)) {
+        // The same identity's seat was deactivated (owner disconnect or
+        // expiry sweep). Reactivate it identity-bound instead of failing
+        // seat_taken forever on the deterministic id.
+        memberId = existingMember.id;
+        tier = seat.tier;
+        duplicate = true;
+        room = this.reactivateGuestSeat(roomId, room, row.minted_by_member_id, row.id, existingMember);
       } else {
         const name = this.checkedGuestName(room.state, card.name);
         if (this.activeGuestCount(roomId) >= GUEST_INVITE_MAX_ACTIVE_PER_ROOM) {
           fail(429, "rate_limited", "This room is at its concurrent external-guest limit; ask the owner to disconnect a guest");
+        }
+        // The documented absolute cap was never enforced on this path: a
+        // room could accumulate unlimited guest seats over time. Deactivated
+        // seats keep their deterministic ids, so they count — this is the
+        // absolute member cap, not the concurrent one.
+        const guestSeats = Object.values(room.state.members).filter(m => isGuestAgentMemberId(m.id)).length;
+        if (guestSeats >= GUEST_AGENT_MAX_JOINS) {
+          fail(429, "rate_limited", "This room is at its absolute external-guest seat limit; ask the owner to disconnect a guest");
         }
         memberId = guestAgentMemberId(identity.identityId, roomId);
         if (room.state.members[memberId]) fail(409, "seat_taken", "This identity already holds a guest seat in this room");
@@ -530,6 +634,16 @@ export class GuestInvites {
       const member = this.store.room(roomId).state.members[memberId];
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
       if (seat.tier === tier) return { memberId, tier, unchanged: true };
+      // The tier change is journaled as a MEMBER_ACCESS_CHANGED carrying
+      // exactly the validator's four fields — no `tier` key: the tier itself
+      // lives in guest_members, and the journal records the owner as actor
+      // at the moment of the change. (A `tier` field here is rejected by
+      // strict command validation: "Unexpected field: tier".)
+      this.store.command(token, roomId, {
+        id: `guest-tier-${hash(`${memberId}:${tier}:${this.store.now()}`).slice(0, 40)}`,
+        type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: true },
+      }, binding);
       this.db.prepare("UPDATE guest_members SET tier=? WHERE member_id=? AND room_id=?").run(tier, memberId, roomId);
       return { memberId, tier, unchanged: false };
     });

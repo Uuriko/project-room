@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, validateCommand } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   guestInviteContract, guestVoteExcluded, isGuestInviteCode,
@@ -447,4 +447,184 @@ test("owner revokes an unredeemed invite; the list never leaks hashes or codes",
   const guestKey = store.issueAccessKey("commons", "guest");
   assert.equal((await request("/api/rooms/commons/guest-invites-list", { method: "POST", token: guestKey, data: {} })).status, 403);
   assert.equal((await request("/api/rooms/commons/guest-invites-revoke", { method: "POST", token: guestKey, data: { inviteId: minted.inviteId } })).status, 403);
+});
+
+test("a disconnected guest rejoins on the same identity-bound seat", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey } = s;
+  const guest = await redeemGuest(t, s, { name: "Returner" });
+  const memberId = guest.member.id;
+  assert.equal(memberId, guest.member.id);
+
+  // Owner disconnects the guest; the seat goes inactive.
+  const disc = await request("/api/rooms/commons/guest-invites-disconnect", { method: "POST", token: ownerKey, data: { memberId } });
+  assert.equal(disc.status, 200);
+  assert.equal(store.room("commons").state.members[memberId].active, false);
+
+  // The same identity redeems a fresh invite: no seat_taken, the seat is
+  // reactivated identity-bound with the same member id and tier, exactly one
+  // guest_members row, and the reactivation is journaled.
+  const minted = await mintInvite(request, ownerKey, { guestLabel: "returner encore" });
+  const identity = guest.identity;
+  const keys = generateKeyPair();
+  const cardBody = { name: "Returner", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const re = await request("/api/guest-invites/redeem", { method: "POST", token: identity.secret, data: { inviteCode: minted.code, card } });
+  assert.equal(re.status, 200); // duplicate seat, same as an active re-redeem
+  const rej = await re.json();
+  assert.equal(rej.member.id, memberId);
+  assert.equal(rej.duplicate, true);
+  assert.equal(store.room("commons").state.members[memberId].active, true);
+  assert.equal(rej.tier, "observer");
+  assert.equal(store.db.prepare("SELECT COUNT(*) c FROM guest_members WHERE room_id='commons' AND guest_identity_id=?").get(identity.identityId).c, 1);
+  // Fresh credential works; the old one died with the disconnect.
+  assert.ok(store.authenticate(rej.token, "commons").member);
+  assert.throws(() => store.authenticate(guest.token, "commons"), e => e.code === "unauthenticated" || e.status === 401);
+  const journal = store.db.prepare("SELECT body FROM events WHERE room_id='commons'").all()
+    .map(r => JSON.parse(r.body)).filter(e => e.type === T.MEMBER_ACCESS_CHANGED && e.data.memberId === memberId && e.data.active === true);
+  assert.ok(journal.length >= 1);
+  assert.equal(journal.at(-1).actorId, store.roomAuthority("commons").ownerId);
+
+  // A different identity cannot steal the seat by name collision: the taken
+  // name is refused outright, and a fresh name mints a distinct seat.
+  const other = store.identities.create("Squatter");
+  const okeys = generateKeyPair();
+  const ocardBody = { name: "Returner", description: "squatter", capabilities: ["chat"] };
+  const ocard = { ...ocardBody, publicKey: okeys.publicKey, signature: signCard({ agentId: other.identityId, card: ocardBody, privateKey: okeys.privateKey }) };
+  const minted2 = await mintInvite(request, ownerKey, { guestLabel: "squatter" });
+  const sq = await request("/api/guest-invites/redeem", { method: "POST", token: other.secret, data: { inviteCode: minted2.code, card: ocard } });
+  assert.equal(sq.status, 422);
+  const minted3 = await mintInvite(request, ownerKey, { guestLabel: "squatter2" });
+  const ocardBody2 = { name: "Squatter", description: "squatter", capabilities: ["chat"] };
+  const ocard2 = { ...ocardBody2, publicKey: okeys.publicKey, signature: signCard({ agentId: other.identityId, card: ocardBody2, privateKey: okeys.privateKey }) };
+  const sq2 = await request("/api/guest-invites/redeem", { method: "POST", token: other.secret, data: { inviteCode: minted3.code, card: ocard2 } });
+  assert.equal(sq2.status, 201);
+  assert.notEqual((await sq2.json()).member.id, memberId);
+});
+
+test("an expired guest rejoins after the redemption-path sweep; expired seats never consume the five-seat cap", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey, advance } = s;
+  // A 1h guest whose credential will expire.
+  const minted1 = await mintInvite(request, ownerKey, { guestLabel: "short-lived", credentialTtlMs: 3600 * 1000 });
+  const identity = store.identities.create("ShortLived");
+  const keys = generateKeyPair();
+  const cardBody = { name: "ShortLived", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const r1 = await request("/api/guest-invites/redeem", { method: "POST", token: identity.secret, data: { inviteCode: minted1.code, card } });
+  assert.equal(r1.status, 201);
+  const shortId = (await r1.json()).member.id;
+
+  // Fill the room to the five-seat concurrent cap with 1h guests.
+  for (let i = 0; i < 4; i++) {
+    const m = await mintInvite(request, ownerKey, { guestLabel: `filler ${i}`, credentialTtlMs: 3600 * 1000 });
+    const idn = store.identities.create(`Filler${i}`);
+    const k = generateKeyPair();
+    const cb = { name: `Filler${i}`, description: "visiting agent", capabilities: ["chat"] };
+    const c = { ...cb, publicKey: k.publicKey, signature: signCard({ agentId: idn.identityId, card: cb, privateKey: k.privateKey }) };
+    assert.equal((await request("/api/guest-invites/redeem", { method: "POST", token: idn.secret, data: { inviteCode: m.code, card: c } })).status, 201);
+  }
+  // A sixth guest exceeds five — the cap fires before expiry.
+  const over = await mintInvite(request, ownerKey, { guestLabel: "overfull", credentialTtlMs: 3600 * 1000 });
+  const overIdn = store.identities.create("Overfull");
+  const ok = generateKeyPair();
+  const ocb = { name: "Overfull", description: "visiting agent", capabilities: ["chat"] };
+  const oc = { ...ocb, publicKey: ok.publicKey, signature: signCard({ agentId: overIdn.identityId, card: ocb, privateKey: ok.privateKey }) };
+  assert.equal((await request("/api/guest-invites/redeem", { method: "POST", token: overIdn.secret, data: { inviteCode: over.code, card: oc } })).status, 429);
+
+  // Advance past the 1h credential TTL. The next redemption sweeps the
+  // expired seats itself — no owner mint needed — and succeeds.
+  advance(3600 * 1000 + 1000);
+  const late = await mintInvite(request, ownerKey, { guestLabel: "latecomer", credentialTtlMs: 3600 * 1000 });
+  const lateIdn = store.identities.create("Latecomer");
+  const lk = generateKeyPair();
+  const lcb = { name: "Latecomer", description: "visiting agent", capabilities: ["chat"] };
+  const lc = { ...lcb, publicKey: lk.publicKey, signature: signCard({ agentId: lateIdn.identityId, card: lcb, privateKey: lk.privateKey }) };
+  const rl = await request("/api/guest-invites/redeem", { method: "POST", token: lateIdn.secret, data: { inviteCode: late.code, card: lc } });
+  assert.equal(rl.status, 201);
+  assert.equal(store.room("commons").state.members[shortId].active, false);
+  const sweeps = store.db.prepare("SELECT body FROM events WHERE room_id='commons'").all()
+    .map(r => JSON.parse(r.body)).filter(e => e.type === T.MEMBER_ACCESS_CHANGED && e.data.active === false && e.data.memberId === shortId);
+  assert.ok(sweeps.length >= 1);
+
+  // The expired guest itself can rejoin on its own seat.
+  const encore = await mintInvite(request, ownerKey, { guestLabel: "short-lived encore", credentialTtlMs: 3600 * 1000 });
+  const re = await request("/api/guest-invites/redeem", { method: "POST", token: identity.secret, data: { inviteCode: encore.code, card } });
+  assert.equal(re.status, 200); // duplicate seat
+  assert.equal((await re.json()).member.id, shortId);
+  assert.equal(store.room("commons").state.members[shortId].active, true);
+});
+
+test("the absolute ten-seat guest cap holds across disconnects; existing identities may still rejoin", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey } = s;
+  // Accumulate ten distinct guest seats. Direct store calls here: the HTTP
+  // redeem route is rate-limited to 10/min per address, which would mask the
+  // room-level cap this test is about. The eleventh redeem goes over HTTP.
+  const redeemOne = async name => {
+    const minted = await mintInvite(request, ownerKey, { guestLabel: name });
+    const idn = store.identities.create(name);
+    const k = generateKeyPair();
+    const cb = { name, description: "visiting agent", capabilities: ["chat"] };
+    const c = { ...cb, publicKey: k.publicKey, signature: signCard({ agentId: idn.identityId, card: cb, privateKey: k.privateKey }) };
+    const res = store.guestInvites.redeem(minted.code, idn.secret, c);
+    return { res, idn, card: c, name };
+  };
+  // Ten distinct guests, disconnecting to stay under the five-seat
+  // concurrent cap while accumulating absolute seats.
+  const seats = [];
+  let firstGuest = null;
+  for (let i = 0; i < 10; i++) {
+    const g = await redeemOne(`CapGuest${i}`);
+    if (i === 0) firstGuest = g;
+    seats.push(g);
+    if (i % 2 === 1) {
+      for (const s2 of seats.splice(0)) store.guestInvites.disconnect(ownerKey, "commons", s2.res.member.id);
+    }
+  }
+  for (const s2 of seats.splice(0)) store.guestInvites.disconnect(ownerKey, "commons", s2.res.member.id);
+  // Eleventh distinct identity: absolute cap refuses, over the real HTTP path.
+  const m11 = await mintInvite(request, ownerKey, { guestLabel: "eleventh" });
+  const id11 = store.identities.create("Eleventh");
+  const k11 = generateKeyPair();
+  const cb11 = { name: "Eleventh", description: "visiting agent", capabilities: ["chat"] };
+  const c11 = { ...cb11, publicKey: k11.publicKey, signature: signCard({ agentId: id11.identityId, card: cb11, privateKey: k11.privateKey }) };
+  const r11 = await request("/api/guest-invites/redeem", { method: "POST", token: id11.secret, data: { inviteCode: m11.code, card: c11 } });
+  assert.equal(r11.status, 429);
+  assert.match((await r11.json()).error.message, /absolute external-guest seat limit/);
+  // One of the existing ten identities may still rejoin its own seat.
+  const encore = await mintInvite(request, ownerKey, { guestLabel: "cap encore" });
+  const re = await request("/api/guest-invites/redeem", { method: "POST", token: firstGuest.idn.secret, data: { inviteCode: encore.code, card: firstGuest.card } });
+  assert.equal(re.status, 200); // duplicate seat
+  assert.equal((await re.json()).member.id, firstGuest.res.member.id);
+});
+
+test("guest tier upgrade journals a strictly-valid MEMBER_ACCESS_CHANGED event", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey } = s;
+  const guest = await redeemGuest(t, s, { name: "Upgradable" });
+  const memberId = guest.member.id;
+  const ownerId = store.roomAuthority("commons").ownerId;
+
+  const up = await request("/api/rooms/commons/guest-invites-upgrade", { method: "POST", token: ownerKey, data: { memberId, tier: "contributor" } });
+  assert.equal(up.status, 200);
+  assert.equal(store.db.prepare("SELECT tier FROM guest_members WHERE member_id=?").get(memberId).tier, "contributor");
+
+  const journaled = store.db.prepare("SELECT body FROM events WHERE room_id='commons'").all()
+    .map(r => JSON.parse(r.body))
+    .filter(e => e.type === T.MEMBER_ACCESS_CHANGED && e.data.memberId === memberId);
+  assert.ok(journaled.length >= 1);
+  const ev = journaled.at(-1);
+  assert.equal(ev.actorId, ownerId);
+  // Exactly the validator's four fields plus the store-added authority
+  // policy version — no `tier` key anywhere in the event.
+  assert.deepEqual(Object.keys(ev.data).sort(), ["active", "authorityPolicyVersion", "expectedMemberRevision", "memberId", "permissions"].sort());
+  assert.equal(ev.data.active, true);
+  assert.ok(!("tier" in ev.data));
+  // The command shape behind the journaled event passes strict validation
+  // as-is (the authority policy version is added by the store after
+  // validation, exactly like every other member-authority event).
+  const { authorityPolicyVersion, ...commandData } = ev.data;
+  assert.equal(authorityPolicyVersion, MEMBERSHIP_AUTHORITY_POLICY_VERSION);
+  assert.doesNotThrow(() => validateCommand({ id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: commandData }));
 });
