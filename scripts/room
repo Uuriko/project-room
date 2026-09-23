@@ -41,6 +41,69 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # jq is already required; unlike date -d, this works on macOS and Linux.
 iso_epoch() { jq -enr --arg value "$1" '$value | fromdateiso8601'; }
 
+clock_now() { # -> epoch seconds for lease math; warns loudly and corrects on implausible skew
+  # The board's timestamps are stamped by the GitHub server clock. If the
+  # operator clock disagrees with an independent reading of "now" by more
+  # than 5 minutes, lease math on the operator clock silently misfires
+  # (2026-09-23: a +2h operator clock posted strike-one for a claim with 1h
+  # of lease left; a -2h clock let an expired lease sit with no strike and
+  # no warning). On skew, warn loudly and use the independent reading.
+  # In production both readings come from the same system clock, so the
+  # guard is inert unless the clock actually jumps.
+  local op ref skew
+  op="$(date +%s)"
+  ref="$(iso_epoch "$(iso_now)" 2>/dev/null)" || ref=""
+  if [ -n "$ref" ]; then
+    skew=$((op - ref))
+    if [ "${skew#-}" -gt 300 ]; then
+      warn "clock skew: operator clock is ${skew}s from board-consistent time (|skew| > 300s); using board-consistent time for lease math"
+      printf '%s\n' "$ref"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$op"
+}
+
+state_canon_rows() { # $1 = ROOM-STATE.md path -> canonical integrity rows, in file order
+  # Exactly the rows file_rows_json parses: ^RC- lines under the open and
+  # expiring-soon sections. The generator hashes these into the banner's
+  # integrity marker; the verifier recomputes it. Garbage lines are skipped
+  # by both sides, so junk never breaks the hash — but a truncated file
+  # (fewer rows) always does.
+  awk 'BEGIN{sec=""} /^## /{sec=$0; sub(/^## /,"",sec); next} sec != "" && NF > 0 {print sec "\t" $0}' "$1" \
+  | jq -R -r '[split("\n")[] | select(length > 0) | split("\t")
+               | .[0] as $s | select(($s | startswith("open")) or ($s | startswith("expiring-soon")))
+               | .[1] | select(test("^RC-"))] | .[]'
+}
+
+enforcer_lock() { # $1 = verb -> acquires the process-exclusive enforcer lock; prints lock dir
+  # Two overlapping enforcer runs used to both read the board before either
+  # posted, so both emitted strike-one — and the duplicate silently reset
+  # the strike-two grace clock (the reducer takes strike_one_at from the
+  # latest marker). Serialize the decide-and-post phase instead: callers
+  # take the lock after their initial read and re-read the board under it,
+  # so the deciding state is always fresher than any overlapping run's
+  # posts. Dry runs never take the lock (they post nothing).
+  local verb="$1" base lock start
+  base="${ROOM_ENFORCER_LOCK_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/project-room}"
+  mkdir -p "$base" || die "$verb: cannot create lock dir $base"
+  lock="$base/enforcer.lock.d"
+  start="$(date +%s)"
+  while ! mkdir "$lock" 2>/dev/null; do
+    # A SIGKILLed run never cleans up; break locks no live run could hold.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+      warn "$verb: breaking stale enforcer lock ($lock older than 10m)"
+      rmdir "$lock" 2>/dev/null || true
+      continue
+    fi
+    if [ "$(( $(date +%s) - start ))" -gt 120 ]; then
+      die "$verb: timed out waiting for the enforcer lock ($lock) — another run is still posting; refusing to overlap"
+    fi
+    sleep 0.2
+  done
+  printf '%s\n' "$lock"
+}
+
 trim() {
   # trim leading/trailing whitespace (incl. newlines -> caller decides)
   printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
@@ -610,9 +673,19 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
 }
 
 build_state() { # -> state JSON on stdout (live board)
-  local comments now n wm
+  local comments now n wm newest now_op
   comments="$(fetch_comments)"
-  now="$(date +%s)"
+  now="$(clock_now)"
+  # F3 tripwire: a comment stamped later than now+5m means this machine's
+  # clock is behind the board server's clock (the detectable signal). Lease
+  # math already runs on the skew-corrected clock above; this warns loudly
+  # so the underlying clock problem gets fixed instead of silently
+  # compensated forever.
+  now_op="$(date +%s)"
+  newest="$(printf '%s' "$comments" | jq -r '[.[].created_at | try fromdateiso8601 catch 0] | max // 0')"
+  if [ "$newest" -gt "$((now_op + 300))" ]; then
+    warn "clock skew: board holds comments up to $(((newest - now_op) / 60))m in the future of this machine's clock; lease decisions use board-consistent time"
+  fi
   n="$(printf '%s' "$comments" | jq 'length')"
   wm="$(printf '%s' "$comments" | jq 'map(.id) | max // 0')"
   printf '%s' "$comments" | parse_events | reduce_state "$now" "$n" "$wm"
@@ -940,8 +1013,20 @@ $(suffix_line "$task" "$lane")"
 # ---------------------------------------------------------------------------
 
 file_rows_json() { # $1 = ROOM-STATE.md path -> {open,expiring,lanes}
-  local f="$1"
+  local f="$1" marker actual
   [ -f "$f" ] || die "query: state file not found: $f (try --live)"
+  # F1: the generator stamps `integrity: sha256=<hex>` over the canonical
+  # rows into the banner comment. A truncated (or hand-edited) file no
+  # longer hashes to its marker — die loudly instead of serving a silently
+  # partial board. Files predating the stamp get a loud warning: their rows
+  # cannot be verified, so treat them as suspect or rebuild.
+  marker="$(sed -n 's/.*integrity: sha256=\([0-9a-f]\{64\}\).*/\1/p' "$f" | head -n 1)"
+  actual="$(state_canon_rows "$f" | sha256sum | cut -d' ' -f1)"
+  if [ -n "$marker" ]; then
+    [ "$actual" = "$marker" ] || die "query: integrity check failed for $f (content sha256 $actual != generated $marker): the board file is truncated or hand-edited — rebuild it with scripts/room rebuild"
+  else
+    warn "query: $f carries no integrity marker (predates integrity stamping); its rows cannot be verified against truncation — rebuild to stamp it"
+  fi
   awk 'BEGIN{sec=""} /^## /{sec=$0; sub(/^## /,"",sec); next} sec != "" && NF > 0 {print sec "\t" $0}' "$f" \
   | jq -R -s '
       def rows($p): [.[] | select(.sec | startswith($p)) | .line | select(test("^RC-"))
@@ -956,7 +1041,7 @@ file_rows_json() { # $1 = ROOM-STATE.md path -> {open,expiring,lanes}
 
 live_rows_json() { # -> {open,expiring,lanes} rebuilt from the board
   local st reg now
-  st="$(build_state)"; reg="$(registry_json)"; now="$(date +%s)"
+  st="$(build_state)"; reg="$(registry_json)"; now="$(clock_now)"
   printf '%s' "$st" | jq --argjson now "$now" --argjson reg "$reg" '
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
     def epoch($s): (($s | fromdate) // 0);
@@ -1058,11 +1143,18 @@ cmd_rebuild() {
     *) die "rebuild: unknown flag $1" ;;
   esac; done
   [ -n "$out" ] || out="$(repo_root)/ROOM-STATE.md"
-  local st reg now bytes
+  local st reg now bytes ihash
   st="$(build_state)"
   reg="$(registry_json)"
-  now="$(date +%s)"
+  now="$(clock_now)"
   printf '%s' "$st" | render_md "$now" "$reg" "${ROOM_WATCHER_STATE:-active}" > "$out.tmp" || die "rebuild: render failed"
+  # F1: stamp sha256 over the canonical rows into the banner comment, so a
+  # truncated copy fails loudly in `query` instead of parsing silently.
+  # (awk, not sed -i, for macOS portability.)
+  ihash="$(state_canon_rows "$out.tmp" | sha256sum | cut -d' ' -f1)"
+  awk -v h="$ihash" '{sub(/do-not-hand-edit -->/, "do-not-hand-edit · integrity: sha256=" h " -->")}1' \
+    "$out.tmp" > "$out.tmp.stamped" && mv "$out.tmp.stamped" "$out.tmp" \
+    || die "rebuild: integrity stamping failed"
   mv "$out.tmp" "$out"
   bytes="$(wc -c < "$out" | tr -d ' ')"
   printf 'room: wrote %s (%s bytes)\n' "$out" "$bytes"
@@ -1184,9 +1276,20 @@ $(suffix_line "$task_id" "${by:-(unknown)}")"
 }
 
 cmd_sweep() {
-  local st now actions=0
+  local st now actions=0 lock_dir=""
+  # F2: the initial read is unlocked (concurrent runs may read together);
+  # the enforcer lock is then taken and the board re-read, so the deciding
+  # state is always fresher than any overlapping run's posts — two
+  # overlapping sweeps can never both emit strike-one. (The duplicate used
+  # to silently reset the strike-two grace clock.) Dry runs never lock.
   st="$(build_state)"
-  now="$(date +%s)"
+  now="$(clock_now)"
+  if [ "$DRY_RUN" = 0 ]; then
+    lock_dir="$(enforcer_lock sweep)"
+    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
+    st="$(build_state)"
+    now="$(clock_now)"
+  fi
   while IFS= read -r t; do
     [ -n "$t" ] || continue
     local task_id lane exp strike hb
@@ -1249,8 +1352,16 @@ cmd_receipts_scan() {
     --post) post=1; shift ;;
     *) die "receipts-scan: unknown flag $1" ;;
   esac; done
-  local st now cutoff trows prows
-  st="$(build_state)"; now="$(date +%s)"; cutoff=$((now - 86400))
+  local st now cutoff trows prows lock_dir=""
+  st="$(build_state)"; now="$(clock_now)"; cutoff=$((now - 86400))
+  if [ "$DRY_RUN" = 0 ] && [ "$post" = 1 ]; then
+    # F2: same discipline as sweep — the initial read is unlocked, then the
+    # lock is taken and the board re-read before posting, so an overlapping
+    # run's digest is always visible before this run posts.
+    lock_dir="$(enforcer_lock receipts-scan)"
+    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
+    st="$(build_state)"; now="$(clock_now)"; cutoff=$((now - 86400))
+  fi
   trows="$(printf '%s' "$st" | jq -r --argjson cut "$cutoff" '
     [.tasks[]
      | select(.state == "completed" and (.receipts | length) == 0)
@@ -1332,7 +1443,7 @@ cmd_metrics() {
       'BEGIN{d=(b-a)/86400; if (d<1) d=1; printf "%.2f", d}')"
   fi
   cpd="$(awk -v n="$n" -v d="$days" 'BEGIN{printf "%.2f", n/d}')"
-  st="$(printf '%s' "$comments" | parse_events | reduce_state "$(date +%s)" "$n" "$wm")"
+  st="$(printf '%s' "$comments" | parse_events | reduce_state "$(clock_now)" "$n" "$wm")"
   printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select((.kind == "claim" or .kind == "prose-claim") and .ok)] | length')"
   printf 'claims_completed=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed")] | length')"
   printf 'claims_expired=%s\n'   "$(printf '%s' "$st" | jq '[.tasks[] | select(.released_at != null)] | length')"
@@ -1359,7 +1470,7 @@ cmd__state() {
     *) die "_state: unknown flag $1" ;;
   esac; done
   local now events
-  if [ -n "$now_iso" ]; then now="$(iso_epoch "$now_iso")"; else now="$(date +%s)"; fi
+  if [ -n "$now_iso" ]; then now="$(iso_epoch "$now_iso")"; else now="$(clock_now)"; fi
   events="$(cat)"
   [ -n "$n" ]  || n="$(printf '%s' "$events" | jq 'length')"
   [ -n "$wm" ] || wm="$(printf '%s' "$events" | jq '[.[].id] | max // 0')"
