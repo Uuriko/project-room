@@ -420,7 +420,8 @@ export function convergeBountyDeployedSchema(db) {
 // slice 6, and record each pin in bounty_rubric_versions. Exported for the
 // _migrateColumns fallback path (older test doubles); the boot convergence
 // above is the production path.
-export function _backfillRubricPins(db) {  const rows = db.prepare(
+export function _backfillRubricPins(db) {
+  const rows = db.prepare(
     "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
   const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
     (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by) VALUES (?,?,?,?,?,?,?)`);
