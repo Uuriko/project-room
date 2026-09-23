@@ -1,4 +1,4 @@
-import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { workContextMarkdown, RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { createInterface } from "node:readline";
@@ -235,7 +235,7 @@ if (action === "join") {
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs search "phrase" [--needs-me]
   node scripts/agent-inbox.mjs find "phrase" [messages|work|all]
-  node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers]
+  node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers] [--brief]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|next|brief|changes CHECKPOINT|packet WORK_ID]
@@ -359,7 +359,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
-      || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
+      || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers", "--brief"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
@@ -461,6 +461,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     if (action === "export") process.stdout.write(result.ndjson);
     // redeem-invite returns undefined on consent abort (exit code already
     // set, explanation on stderr): nothing machine-readable to print.
+    else if (action === "work" && extra.includes("--brief")) console.log(workContextMarkdown(result));
     else if (result !== undefined) console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.

@@ -176,3 +176,34 @@ test("independently generated participant answer imports unchanged as an unverif
   assert.deepEqual(after.state.workItems, before.state.workItems);
   assert.equal(after.cursor, before.cursor);
 });
+
+
+test("progress export is opt-in, bounded, exact-version aware and excludes structured private references", t => {
+  const f = fixture(t), state = structuredClone(f.snapshot().state), item = state.workItems["test-handoff"];
+  item.handoff = { open: true, doneSummary: "Restart sentinel", nextAction: "Run the remaining tests", limitReason: "Context ended",
+    evidenceUrl: "https://example.invalid/private-ref", actorId: "private-actor", haltAll: true };
+  item.receipt = { eventId: "current", evidenceVersion: "v2", summary: "Old producer progress", nextAction: "Review", checksClaimed: ["unit tests"], evidenceUrl: "https://example.invalid/private-result" };
+  item.verification = { completionEventId: "old", evidenceVersion: "v1", result: "pass", summary: "Stale review sentinel" };
+  item.decision = { completionEventId: "old", evidenceVersion: "v1", decision: "approved", reason: "Stale approval sentinel" };
+  item.claim = { status: "active", expiresAt: "2000-01-01T00:00:00.000Z", paths: ["private-path"], holderId: "private-actor" };
+  assert.equal(packetMarkdown(workPacket(state, item.id)).includes("Restart sentinel"), false);
+  const packet = workPacket(state, item.id, { includeProgress: true });
+  const text = packetMarkdown(packet);
+  assert.match(text, /Restart sentinel/); assert.match(text, /Write reservation: expired/);
+  assert.match(text, /stop was requested/); assert.match(text, /No review recorded for this exact result/);
+  for (const omitted of ["private-ref", "private-result", "private-path", "private-actor", "Stale review sentinel", "Stale approval sentinel"])
+    assert.equal(text.includes(omitted), false, omitted);
+  assert.equal(packet.progress.reportedProgress, "Restart sentinel");
+  item.verification = { completionEventId: "current", evidenceVersion: "v2", result: "pass", summary: "Checked current parser" };
+  assert.match(packetMarkdown(workPacket(state, item.id, { includeProgress: true })), /Checked current parser/);
+  item.handoff.doneSummary = "a".repeat(17000);
+  assert.throws(() => workPacket(state, item.id, { includeProgress: true }), /too large/);
+  assert.doesNotThrow(() => workPacket(state, item.id));
+  assert.throws(() => workPacket(state, item.id, { includeProgress: "yes" }), /Invalid packet options/);
+});
+
+test("portable source omits a deleted message even if an old body remains in a stale projection", t => {
+  const f = fixture(t), state = structuredClone(f.snapshot().state);
+  state.messages.find(message => message.id === "test-request").deletedAt = new Date().toISOString();
+  assert.deepEqual(workPacket(state, "test-handoff", { includeSource: true }).sources, []);
+});
