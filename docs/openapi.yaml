@@ -679,6 +679,8 @@ paths:
                       status: { type: string, enum: [hit, miss] }
                       age_ms: { type: number, description: 0 on a fresh miss }
                   request_id: { type: string }
+        '400':
+          description: The URL is not a fetchable http(s) URL (invalid_url)
         '401':
           description: No room credential, or membership ended (unauthenticated)
         '403':
