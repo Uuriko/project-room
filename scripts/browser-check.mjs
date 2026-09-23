@@ -316,8 +316,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The saved position is the durable claim. On a starved runner a request in this
     // flow can fail (room refreshes are coalesced, so any in-flight failure rejects the
     // acknowledgement's refresh too), and the brief then deliberately stops in one of
-    // its explicit states instead of reloading on its own: "Position saved. Refresh to
-    // see the latest changes." (saved, view stale) or "Saving could not be confirmed.
+    // its explicit states instead of reloading on its own: "Your caught-up position
+    // was saved, but the latest room view could not be refreshed. Refresh before
+    // relying on this brief." (saved, view stale; the in-dialog reconcile note,
+    // which shadows the brief's own "Position saved. Refresh to see the latest
+    // changes.") or "Saving could not be confirmed.
     // Refresh to check your position before retrying." (not saved). Waiting only for
     // "nothing new" then stalls for the whole budget, which is how this test went red
     // on CI at every budget tried. Accept those states, prove exactly what each one
@@ -327,14 +330,14 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const settled = () => page.evaluate(() => {
       const status = document.querySelector("#rb-status").textContent, boundary = document.querySelector("#rb-history-boundary").textContent;
       if (boundary.includes("nothing new")) return "acknowledged";
-      if (status.startsWith("Position saved.")) return "saved-stale";
+      if (status.startsWith("Position saved.") || status.startsWith("Your caught-up position was saved")) return "saved-stale";
       if (status.startsWith("Saving could not be confirmed.")) return "unsaved";
       if (status.startsWith("Catch-up could not load.")) return "unloaded";
       return null;
     });
     const awaitSettled = () => page.waitForFunction(() => {
       const status = document.querySelector("#rb-status").textContent;
-      return document.querySelector("#rb-history-boundary").textContent.includes("nothing new") || /^(Position saved\.|Saving could not be confirmed\.|Catch-up could not load\.)/.test(status);
+      return document.querySelector("#rb-history-boundary").textContent.includes("nothing new") || /^(Position saved\.|Your caught-up position was saved|Saving could not be confirmed\.|Catch-up could not load\.)/.test(status);
     }, null, { timeout: 30000 });
     await awaitSettled();
     for (let attempt = 0; await settled() !== "acknowledged"; attempt++) {
