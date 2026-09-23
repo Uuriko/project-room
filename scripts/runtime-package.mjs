@@ -162,6 +162,8 @@ optional.push("src/browser-session.js"); // Last-room + Sign out session-hint cl
 optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collaborate/contribute)
 optional.push("src/referral-board.js"); // People-rail referral board (imports agent-invite-ui for "my referral link" mint)
 optional.push("server/room-export-html.mjs");
+optional.push("join.html"); // Self-serve join page (public asset)
+optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
