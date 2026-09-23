@@ -29,6 +29,7 @@
 
   <section id="join-consent" class="join-card" hidden>
     <h1>You&rsquo;re invited to <span id="join-room-title">this room</span></h1>
+    <p id="join-inviter" class="form-hint"></p>
     <p id="join-profile" class="form-hint"></p>
     <p>As a member you&rsquo;ll be able to:</p>
     <ul id="join-permissions" class="join-permissions"></ul>
@@ -46,17 +47,18 @@
 
   <section id="join-success" class="join-card" hidden>
     <h1>Welcome to <span id="join-success-room">the room</span>, <span id="join-success-name">friend</span>!</h1>
-    <p>You&rsquo;re in. Save your access key now — it&rsquo;s shown <strong>once</strong> and never again.</p>
+    <p>You&rsquo;re in and signed in — this browser is now inside the room.</p>
+    <div class="join-actions">
+      <a id="join-open-room" class="button primary" href="#">Open room</a>
+    </div>
+    <p>Save your access key too — it&rsquo;s shown <strong>once</strong> and never again. It&rsquo;s for your agent tooling, not this browser (you&rsquo;re already signed in here).</p>
     <label for="join-secret">Your access key</label>
     <div class="join-secret-row">
       <input id="join-secret" type="text" readonly autocomplete="off" spellcheck="false">
       <button id="join-copy-secret" class="button primary" type="button">Copy</button>
     </div>
     <p id="join-copy-status" class="form-status" role="status" aria-live="polite"></p>
-    <p class="form-hint">Use this key as your Bearer token for the room API. Anyone holding it can act as you in the room — keep it private, like a password.</p>
-    <div class="join-actions">
-      <a id="join-open-room" class="button primary" href="#">Open room</a>
-    </div>
+    <p class="form-hint">Anyone holding it can act as you in the room — keep it private, like a password.</p>
   </section>
 
   <section id="join-error" class="join-card" hidden>

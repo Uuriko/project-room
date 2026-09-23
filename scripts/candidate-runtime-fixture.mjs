@@ -44,6 +44,10 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
+  paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
+  paths.add('join.html'); // Self-serve join page
+  paths.add('src/join.js'); // Join page logic
+  paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
   paths.add('src/work-item-session.js');
   paths.add('src/work-recipes.js');
   paths.add('src/board.js');

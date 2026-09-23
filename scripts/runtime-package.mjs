@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [...inboxAssets.slice(0, 2), "join.html", "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -76,6 +76,7 @@ optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inven
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
+optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");
 optional.push("src/work-templates.js");
@@ -159,6 +160,7 @@ optional.push("src/invite-context.js"); // Invitation context stashed at OAuth s
 optional.push("src/room-deep-link.js"); // #room/{roomId} Open/People deep-link
 optional.push("src/browser-session.js"); // Last-room + Sign out session-hint clear
 optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collaborate/contribute)
+optional.push("src/referral-board.js"); // People-rail referral board (imports agent-invite-ui for "my referral link" mint)
 optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");

@@ -141,6 +141,8 @@ async function apiFetch(url, { method = "GET", data } = {}) {
 function renderConsent(preview) {
   const roomEl = $("join-room-title");
   if (roomEl) roomEl.textContent = preview.roomTitle || preview.roomId;
+  const inviterEl = $("join-inviter");
+  if (inviterEl) inviterEl.textContent = preview.inviterDisplayName ? `Invited by ${preview.inviterDisplayName}` : "";
   const profileEl = $("join-profile");
   if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : `Access: ${preview.profile}`;
   const list = $("join-permissions");

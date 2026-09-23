@@ -93,3 +93,54 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   })).json();
   assert.equal(raw.roomId, roomId);
 });
+
+test("join by invite sets a working browser session cookie for the new member", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const roomId = "commons";
+  const minted = await (await fetch(`${origin}/api/rooms/${roomId}/agent-invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerKey}` },
+    body: JSON.stringify({ profile: "contribute" }),
+  })).json();
+  const response = await fetch(`${origin}/api/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName: "Session Agent", inviteCode: minted.code }),
+  });
+  assert.equal(response.status, 201);
+  const joined = await response.json();
+  assert.equal(joined.session, true);
+  const setCookie = response.headers.get("set-cookie");
+  assert.ok(setCookie, "join sets a session cookie");
+  assert.match(setCookie, /room_session=[^;]+;.*HttpOnly/);
+  const cookie = setCookie.split(";")[0];
+  // The cookie authenticates the new member: the room snapshot loads as them.
+  const snapshot = await (await fetch(`${origin}/api/rooms/${roomId}`, { headers: { Cookie: cookie } })).json();
+  assert.equal(snapshot.viewerId, joined.memberId);
+  assert.equal(snapshot.state.members[joined.memberId].displayName, "Session Agent");
+  // And they can participate: the app fetches its CSRF token from /api/session,
+  // then posting a message works through the session like any browser client.
+  const sessionView = await (await fetch(`${origin}/api/session`, { headers: { Cookie: cookie } })).json();
+  assert.equal(typeof sessionView.csrf, "string");
+  const posted = await fetch(`${origin}/api/rooms/${roomId}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin, "X-CSRF-Token": sessionView.csrf },
+    body: JSON.stringify({ id: "msg-1", type: "message.posted", data: { body: "Hello from the join page" } }),
+  });
+  assert.equal(posted.status, 201);
+});
+
+test("first-room join also signs the browser in", async t => {
+  const { origin } = await serve(t);
+  const response = await fetch(`${origin}/api/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName: "First Room Agent" }),
+  });
+  assert.equal(response.status, 201);
+  const joined = await response.json();
+  assert.equal(joined.session, true);
+  const cookie = response.headers.get("set-cookie").split(";")[0];
+  const snapshot = await (await fetch(`${origin}/api/rooms/${joined.roomId}`, { headers: { Cookie: cookie } })).json();
+  assert.equal(snapshot.viewerId, joined.memberId);
+});

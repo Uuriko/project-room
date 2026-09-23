@@ -26,6 +26,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
+import { installReferralBoard } from "./referral-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
@@ -132,6 +133,7 @@ let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
 let agentInvitesUI = null;
+let referralBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -209,6 +211,7 @@ const client = new RoomClient({
     syncNotifications();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
+    referralBoardUI?.sync();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
@@ -269,6 +272,7 @@ const client = new RoomClient({
     resetNotifications();
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
+    referralBoardUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) {
       clearPrivateWorkspace({ preservePending: leavingPage });
@@ -369,6 +373,7 @@ const briefView = new ReturnBrief(client, {
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
+referralBoardUI = installReferralBoard({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
@@ -1159,6 +1164,7 @@ async function submitRequestAccessForm(event) {
   const checked = validateAccessRequestForm({
     displayName: $("#invitation-request-name").value,
     note: $("#invitation-request-note").value,
+    referredBy: $("#invitation-request-referred")?.value,
   });
   if (!checked.ok) { setRequestAccessStatus(checked.error, true); return; }
   const submit = $("#invitation-request-submit");
@@ -1182,6 +1188,7 @@ async function submitRequestAccessForm(event) {
       displayName: checked.displayName,
       requestedPermissions: defaultRequestPermissions(invitation.preview),
       note: checked.note,
+      referredBy: checked.referredBy,
       requestId,
     });
     stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
