@@ -582,11 +582,24 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
   assert.equal(check.memberId, identity.identityId);
   assert.ok(check.permissions.includes("manage_members"), "owner keeps manage_members");
   assert.ok(check.permissions.includes("decide"), "owner keeps decide");
-  // A non-owner agent member carrying owner-class bits still fails the ladder.
+  // An explicit owner-delegated admin grant is valid without transferring ownership.
   const other = store.identities.create("Helper");
   store.identities.link(identity.secret, "keeper-den", {
     identityId: other.identityId, displayName: "Helper", permissions: ["accept_work", "manage_members"]
   });
   const otherClient = new RoomAgentClient({ origin, roomId: "keeper-den", token: other.secret, memberId: other.identityId });
-  await assert.rejects(() => otherClient.checkConnection(), /not linked to this room/);
+  const delegated = await otherClient.checkConnection();
+  assert.equal(delegated.status, "credential_accepted");
+  assert.ok(delegated.permissions.includes("manage_members"));
+  assert.equal(store.room("keeper-den").state.room.ownerId, identity.identityId);
+  const snapshot = await otherClient.snapshot();
+  assert.equal(snapshot.state.members[other.identityId].delegatedAdmin, true);
+  for (const marker of [undefined, false, "true"]) {
+    const payload = structuredClone(snapshot);
+    payload.state.members[other.identityId].delegatedAdmin = marker;
+    const unmarked = new RoomAgentClient({ origin, roomId: "keeper-den", token: other.secret,
+      memberId: other.identityId, fetchImpl: async () => new Response(JSON.stringify(payload),
+        { status: 200, headers: { "Content-Type": "application/json" } }) });
+    await assert.rejects(() => unmarked.checkConnection(), /not linked to this room/);
+  }
 });
