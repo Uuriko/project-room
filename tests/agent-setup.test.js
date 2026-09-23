@@ -28,6 +28,16 @@ async function fixture(t) {
   const connect = extra => connectRoom({ origin, directory, name: "Peer", accept: true, ...extra });
   return { root, store, keys, origin, directory, invite, connect };
 }
+test("self-serve join links parse in the CLI and connect like the old hash links", async t => {
+  const f = await fixture(t), invite = f.invite();
+  assert.deepEqual(setupTarget(`${f.origin}/join/${invite.code}`), { origin: f.origin, code: invite.code });
+  assert.deepEqual(setupTarget(`${f.origin}/room/join/${invite.code}/`), { origin: f.origin, code: invite.code });
+  // The old hash link format still parses.
+  assert.deepEqual(setupTarget(`${f.origin}/#agent-invite/${invite.code}`), { origin: f.origin, code: invite.code });
+  const result = await f.connect({ target: `${f.origin}/join/${invite.code}` });
+  assert.equal(result.status, "connected");
+  assert.equal(result.roomId, "commons");
+});
 test("one connection survives lost registration and redemption responses with one identity and membership", async t => {
   const f = await fixture(t), invite = f.invite(); let lose = "agent-identities";
   const fetchImpl = async (url, options) => {

@@ -56,7 +56,13 @@ export const EVENT_TYPES = Object.freeze({
   // timeline-visible, notification-driving record. The handler validates the
   // envelope and records nothing in the projection — decisions mutate the
   // table, never the projection, so a projection copy would go stale.
-  ACCESS_REQUESTED: "access.requested"
+  ACCESS_REQUESTED: "access.requested",
+  // Referral attribution: a member joined because another member referred
+  // them. The referrals table stays the source of truth (queryable for the
+  // board/leaderboard); this event is the timeline-visible audit record.
+  // The handler validates the envelope and records nothing in the
+  // projection.
+  REFERRAL_COMPLETED: "referral.completed"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -320,7 +326,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
     [EVENT_TYPES.SESSION_STOPPED]: applySession,
     [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities,
-    [EVENT_TYPES.ACCESS_REQUESTED]: recordAccessRequest
+    [EVENT_TYPES.ACCESS_REQUESTED]: recordAccessRequest,
+    [EVENT_TYPES.REFERRAL_COMPLETED]: recordReferral
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -507,6 +514,17 @@ function addMember(state, incoming) {
     && (typeof incoming.data.agentType !== "string" || !/^[a-z][a-z0-9-]{0,31}$/.test(incoming.data.agentType))) {
     throw new Error("agentType must be a short catalog id");
   }
+  // Referral attribution: optional, validated, never self-referential. The
+  // referrer must already be a member — checked at record time; the event
+  // handler guards the shape so a corrupt log cannot forge it.
+  if (incoming.data.referredBy != null) {
+    if (typeof incoming.data.referredBy !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(incoming.data.referredBy)) {
+      throw new Error("referredBy must be a member id");
+    }
+    if (incoming.data.referredBy === memberId) throw new Error("a member cannot refer themselves");
+    const referrer = state.members?.[incoming.data.referredBy];
+    if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
+  }
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
@@ -515,6 +533,10 @@ function addMember(state, incoming) {
     // identity; kept conditional so stored projections from before this field
     // rebuild byte-identically.
     ...(incoming.data.identityId === undefined ? {} : { identityId: incoming.data.identityId }),
+    // Referral attribution: the member ID that referred this member, set at
+    // join time from the invite's minter or a matched "who referred you?"
+    // answer. Omitted otherwise so older projections replay byte-identically.
+    ...(incoming.data.referredBy ? { referredBy: incoming.data.referredBy } : {}),
     // First-party Connect catalog type. Omitted on older members so replay stays
     // byte-identical. Not a marketplace listing.
     ...(incoming.data.agentType ? { agentType: incoming.data.agentType } : {}),
@@ -1009,6 +1031,23 @@ function recordAccessRequest(state, incoming) {
   if (!Array.isArray(permissions)) {
     throw new Error("Event data missing permissions");
   }
+}
+
+// Referral attribution audit record. The referrals table is the queryable
+// source of truth; this event is the timeline-visible proof that a join was
+// attributed. Validates the envelope and records nothing in the projection.
+function recordReferral(state, incoming) {
+  requireFields(incoming.data, ["referrerMemberId", "refereeMemberId", "via", "completedAt"]);
+  const { referrerMemberId, refereeMemberId, via } = incoming.data;
+  for (const id of [referrerMemberId, refereeMemberId]) {
+    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error("referral member ids must be valid");
+  }
+  if (referrerMemberId === refereeMemberId) throw new Error("a member cannot refer themselves");
+  if (!["invite", "request"].includes(via)) throw new Error("referral via must be invite or request");
+  if (!Number.isInteger(incoming.data.completedAt)) throw new Error("referral completedAt must be an integer timestamp");
+  // Both sides must be members at journal time; the referee was just added.
+  requireMember(state, referrerMemberId);
+  requireMember(state, refereeMemberId);
 }
 
 function recordHandoff(state, incoming) {
