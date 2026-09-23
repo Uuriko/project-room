@@ -37,6 +37,10 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
+import {
+  listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
+  getReadHorizon, setReadHorizon, listSaved, setSaved
+} from "./activity.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -2417,7 +2421,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|thread-mutes|referrals))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2428,6 +2432,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const delegationGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/grant$/.exec(url.pathname);
       const delegationRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/revoke$/.exec(url.pathname);
       const delegationListMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation$/.exec(url.pathname);
+      // Attention: DELETE /api/rooms/:roomId/saved/:messageId unsaves one message.
+      const savedDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/saved\/([^/]{1,384})$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
       // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
       const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
@@ -2531,20 +2537,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
-        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
+        && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
-        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
+        ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
+      const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
-        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings"
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -2972,6 +2979,53 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
+      if (route === "activity" && req.method === "GET") {
+        // Attention: personal activity feed (write-time fan-out). Query:
+        // before (exclusive event id), limit (1..100), type (one of the four
+        // activity types). Read model; the store function re-authenticates.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["limit", "before", "type", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_activity_selection", "Choose an optional limit, before, and type");
+        return json(res, 200, listActivity(store, selected.token, roomId, {
+          ...(params.has("limit") ? { limit: params.get("limit") } : {}),
+          ...(params.has("before") ? { before: params.get("before") } : {}),
+          ...(params.has("type") ? { type: params.get("type") } : {})
+        }, fence));
+      }
+      if (route === "activity-unread-count" && req.method === "GET") {
+        return json(res, 200, activityUnreadCount(store, selected.token, roomId, fence));
+      }
+      if (route === "activity-read" && req.method === "POST") {
+        return json(res, 200, markActivityRead(store, selected.token, roomId, await body(req), fence));
+      }
+      if (route === "activity-read-all" && req.method === "POST") {
+        return json(res, 200, markActivityReadAll(store, selected.token, roomId, await body(req), fence));
+      }
+      if (route === "read-horizon" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["threadId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional threadId");
+        return json(res, 200, getReadHorizon(store, selected.token, roomId, {
+          ...(params.has("threadId") ? { threadId: params.get("threadId") } : {})
+        }, fence));
+      }
+      if (route === "read-horizon" && req.method === "POST") {
+        return json(res, 200, setReadHorizon(store, selected.token, roomId, await body(req), fence));
+      }
+      if (route === "saved" && req.method === "GET") {
+        return json(res, 200, listSaved(store, selected.token, roomId, fence));
+      }
+      if (route === "saved" && (req.method === "POST" || req.method === "DELETE")) {
+        // Save (POST {messageId, saved:true}) or unsave (DELETE {messageId}).
+        const data = await body(req);
+        if (req.method === "DELETE") return json(res, 200, setSaved(store, selected.token, roomId, { messageId: data.messageId, saved: false }, fence));
+        return json(res, 200, setSaved(store, selected.token, roomId, data, fence));
+      }
+      if (route === "saved-delete" && req.method === "DELETE") {
+        // DELETE /api/rooms/:roomId/saved/:messageId — unsave one message.
+        return json(res, 200, setSaved(store, selected.token, roomId, { messageId: savedDeleteMessageId, saved: false }, fence));
+      }
+      // Thread mutes are served by the canonical store.threadMutes module
+      // (GET list + POST set below); the activity fan-out reads the same
+      // thread_mutes table for thread_reply suppression.
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);
         return json(res, 200, { diagnostics: diagnostics.list(roomId) });
