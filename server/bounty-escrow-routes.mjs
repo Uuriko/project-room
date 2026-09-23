@@ -114,7 +114,13 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (escrowRoute === "list" && req.method === "GET") {
     const group = url.searchParams.get("group");
     if (group !== null && !BOUNTY_GROUPS.includes(group)) invalidInput(reject, `group one of ${BOUNTY_GROUPS.join(", ")}`);
-    const bounties = runPure(reject, () => escrow.listBounties(roomId, { group }));
+    // Slice 4: optional per-viewer routing visibility (?viewer=self or a lane
+    // id). Read-only; annotates each bounty with the routing layer's
+    // band-derived claimable answer for that viewer. Bounties are never
+    // hidden — visibility only.
+    const viewerParam = url.searchParams.get("viewer");
+    const viewer = viewerParam === null ? null : viewerParam === "self" ? caller : viewerParam;
+    const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer }));
     return json(res, 200, { roomId, bounties });
   }
   // Slice 10: arbiter inspection of correlation review packets. Read-only
@@ -145,6 +151,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     return idem(payload, `bounty.sybil-${resolution}`, 200, () =>
       runPure(reject, () => ({ roomId,
         flag: escrow.resolveSybilFlag(roomId, sybilFlagId, { resolution, reason: payload.reason, resolver: caller }) })));
+  }
+  // Slice 4 (reputation): arbiter/human inspection of probation-gate review
+  // packets. Read-only (rooms:read); packets are immutable once created.
+  if (escrowRoute === "reputation-reviews" && req.method === "GET") {
+    const packets = runPure(reject, () => escrow.getReputationPackets(roomId));
+    return json(res, 200, { roomId, packets });
   }
   if (escrowRoute === "create" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);

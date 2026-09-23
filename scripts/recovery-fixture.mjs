@@ -229,6 +229,15 @@ export function createRecoveryFixture(filename) {
     now += 2 * 60000;
     escrow.finalizeBounty("commons", flaky.bountyId, { caller: poster });
     escrow.idemExecute("commons", "recovery-fixture-bounty", "post", 200, () => ({ ok: true }));
+    // Slice 4: the probation gate never fires in the fixture's positive-only
+    // flows, so seed one review packet directly — the room_attachments
+    // pattern. The capture comparison needs a substantive row in
+    // bounty_reputation_packets.
+    store.db.prepare(`INSERT INTO bounty_reputation_packets
+      (room_id, packet_id, created_at, agent_id, band, score, max_claim_millis, bounty_id, signals_json)
+      VALUES('commons','recovery-rep-packet',?,'id:agent/recovery-flake','probation',-26,5000,?,
+      '[{"seq":1,"at":0,"type":"claim_flaked"},{"seq":2,"at":0,"type":"dispute_lost"}]')`)
+      .run(new Date(now).toISOString(), first.bountyId);
   }
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,

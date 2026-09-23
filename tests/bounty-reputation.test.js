@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { bandOf, BOUNTY_SIGNAL_WEIGHTS, REPUTATION_BANDS } from "../server/reputation.mjs";
-import { projectBountyReputation, reputationSummary, claimBand, claimEligibility,
-  signalsForEvent, PROBATION_MAX_CLAIM_CREDITS } from "../server/bounty-reputation.mjs";
+import { projectBountyReputation, reputationSummary, claimBand, claimEligibility, routingVisibility,
+  signalsForEvent, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "../server/bounty-reputation.mjs";
 
 const ROOM = "room-rep";
 const JILL = "id:agent/jill";       // poster lane
@@ -57,6 +57,10 @@ function runToPaid(escrow, { amount = 0.5, verifier = null, worker = GROK } = {}
 }
 
 const scoreOf = (escrow, agent) => reputationSummary(escrow, ROOM, agent, { nowMs }).score;
+const expectConserved = escrow => {
+  const c = escrow.verifyConservation(ROOM);
+  assert.equal(c.ok, true, `conservation violated: ${JSON.stringify(c.violations)}`);
+};
 
 test("band boundaries: trusted >= 40, standard >= -20, probation below", () => {
   assert.equal(bandOf(100), REPUTATION_BANDS.TRUSTED);
@@ -243,4 +247,222 @@ test("claimEligibility reports the band and the probation cap", () => {
   assert.equal(open.allowed, true);
   assert.equal(open.band, REPUTATION_BANDS.STANDARD);
   assert.equal(open.maxClaimMillis, null);
+});
+
+test("verifier acceptance overturned: upheld dispute penalizes the verifier (overturn-rate feed)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/9", summary: "shoddy" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: INSTINCT,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
+  // The verifier's pinned-rubric acceptance was overturned: -8.
+  assert.equal(scoreOf(escrow, INSTINCT), BOUNTY_SIGNAL_WEIGHTS.acceptance_overturned);
+  const summary = reputationSummary(escrow, ROOM, INSTINCT, { nowMs });
+  assert.ok(summary.signals.some(s => s.type === "acceptance_overturned"), "overturn signal recorded");
+  assert.equal(summary.band, REPUTATION_BANDS.STANDARD);
+  // Claimant/challenger signals are unchanged.
+  assert.equal(scoreOf(escrow, GROK),
+    BOUNTY_SIGNAL_WEIGHTS.submission_accepted + BOUNTY_SIGNAL_WEIGHTS.dispute_lost + BOUNTY_SIGNAL_WEIGHTS.bond_forfeited);
+  assert.equal(scoreOf(escrow, CODEX), BOUNTY_SIGNAL_WEIGHTS.dispute_won);
+});
+
+test("rejected dispute overturns nothing: no acceptance_overturned for the verifier", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/10", summary: "fine work" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: INSTINCT,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "sour grapes" });
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "rejected", reasonCodes: ["frivolous"] });
+  // The acceptance stood: the verifier takes no signal.
+  assert.equal(scoreOf(escrow, INSTINCT), 0);
+  const summary = reputationSummary(escrow, ROOM, INSTINCT, { nowMs });
+  assert.deepEqual(summary.signals, []);
+});
+
+test("sybil flag confirmed: member lanes take sybil_confirmed; dismissed stays neutral", () => {
+  const { escrow } = makeEscrow();
+  const identical = { evidenceUrl: "https://example.com/pr/sybil-rep",
+    evidenceKind: "work.completed", summary: "identical submission" };
+  // First pair: byte-identical evidence -> copy-paste flag -> confirmed.
+  const a = post(escrow, { amount: 5 });
+  escrow.fundBounty(ROOM, a.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, a.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, a.bountyId, { claimant: GROK, evidence: { ...identical } });
+  const b = post(escrow, { amount: 5 });
+  escrow.fundBounty(ROOM, b.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, b.bountyId, { claimant: CODEX });
+  const { flags } = escrow.submitWork(ROOM, b.bountyId, { claimant: CODEX, evidence: { ...identical } });
+  assert.ok(flags.length >= 1, "copy-paste cluster raised a flag");
+  tick(1000);
+  escrow.resolveSybilFlag(ROOM, flags[0].flagId,
+    { resolution: "confirmed", reason: "same author behind two lanes", resolver: JILL });
+  assert.equal(scoreOf(escrow, GROK), BOUNTY_SIGNAL_WEIGHTS.sybil_confirmed);
+  assert.ok(Math.abs(scoreOf(escrow, CODEX) - BOUNTY_SIGNAL_WEIGHTS.sybil_confirmed) < 1e-3,
+    "confirmed flag adds exactly one sybil_confirmed per member lane");
+  const grokSummary = reputationSummary(escrow, ROOM, GROK, { nowMs });
+  assert.ok(grokSummary.signals.some(s => s.type === "sybil_confirmed"));
+  // Second pair, different evidence: flag raised, then dismissed as honest
+  // coincidence — no reputation trace for either lane.
+  const c = post(escrow, { amount: 5 });
+  escrow.fundBounty(ROOM, c.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, c.bountyId, { claimant: INSTINCT });
+  escrow.submitWork(ROOM, c.bountyId, { claimant: INSTINCT,
+    evidence: { evidenceUrl: "https://example.com/pr/template", evidenceKind: "work.completed", summary: "template task" } });
+  const d = post(escrow, { amount: 5 });
+  escrow.fundBounty(ROOM, d.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, d.bountyId, { claimant: CODEX });
+  const r2 = escrow.submitWork(ROOM, d.bountyId, { claimant: CODEX,
+    evidence: { evidenceUrl: "https://example.com/pr/template", evidenceKind: "work.completed", summary: "template task" } });
+  assert.ok(r2.flags.length >= 1, "second copy-paste cluster raised a flag");
+  tick(1000);
+  escrow.resolveSybilFlag(ROOM, r2.flags[0].flagId,
+    { resolution: "dismissed", reason: "same template on a trivial task", resolver: JILL });
+  assert.equal(scoreOf(escrow, INSTINCT), 0, "dismissed flag leaves no trace");
+  assert.ok(Math.abs(scoreOf(escrow, CODEX) - BOUNTY_SIGNAL_WEIGHTS.sybil_confirmed) < 1e-3,
+    "dismissed flag adds nothing on top of the earlier confirmed penalty");
+});
+
+test("probation gate denial produces a review packet for arbiters (never a suspension)", () => {
+  const { escrow } = makeEscrow();
+  // Drive GROK into probation with two upheld disputes.
+  for (let i = 0; i < 2; i++) {
+    const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+    escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+    escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+    escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+      evidence: { evidenceUrl: `https://example.com/pr/gate-${i}`, summary: "shoddy" } });
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
+      verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+    escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+    escrow.decideDispute(ROOM, bounty.bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
+    tick(1000);
+  }
+  assert.equal(claimBand(escrow, ROOM, GROK, { nowMs }), REPUTATION_BANDS.PROBATION);
+  const big = post(escrow, { amount: 10 });
+  escrow.fundBounty(ROOM, big.bountyId, { funder: JILL });
+  expectCode(() => escrow.claimBounty(ROOM, big.bountyId, { claimant: GROK }), "reputation_probation");
+  const packets = escrow.getReputationPackets(ROOM);
+  assert.equal(packets.length, 1);
+  assert.equal(packets[0].agentId, GROK);
+  assert.equal(packets[0].band, "probation");
+  assert.ok(packets[0].score < -20, `expected probation score, got ${packets[0].score}`);
+  assert.equal(packets[0].bountyId, big.bountyId);
+  assert.equal(packets[0].maxClaimMillis, PROBATION_MAX_CLAIM_MILLIS);
+  assert.ok(packets[0].signals.some(s => s.type === "dispute_lost"), "packet carries the signals");
+  // Retrying the denied claim does not spam the queue: one packet per 24h.
+  expectCode(() => escrow.claimBounty(ROOM, big.bountyId, { claimant: GROK }), "reputation_probation");
+  assert.equal(escrow.getReputationPackets(ROOM).length, 1);
+  // After the dedupe window a fresh denial produces a fresh packet.
+  tick(25 * 3600 * 1000);
+  expectCode(() => escrow.claimBounty(ROOM, big.bountyId, { claimant: GROK }), "reputation_probation");
+  assert.equal(escrow.getReputationPackets(ROOM).length, 2);
+  // The lane is still not suspended: small claims keep working.
+  const small = post(escrow, { amount: PROBATION_MAX_CLAIM_CREDITS });
+  escrow.fundBounty(ROOM, small.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, small.bountyId, { claimant: GROK });
+  assert.equal(escrow.getBounty(ROOM, small.bountyId).state, "claimed");
+});
+
+test("sybil.flag-resolved without member lanes never crashes the projector", () => {
+  assert.deepEqual(signalsForEvent({ type: "sybil.flag-resolved", data: {} }), []);
+  assert.deepEqual(signalsForEvent({ type: "sybil.flag-resolved",
+    data: { resolution: "dismissed", memberLanes: [GROK, CODEX] } }), []);
+  assert.deepEqual(signalsForEvent({ type: "sybil.flag-resolved",
+    data: { resolution: "confirmed", memberLanes: [GROK, CODEX] } }),
+    [{ agent: GROK, type: "sybil_confirmed" }, { agent: CODEX, type: "sybil_confirmed" }]);
+});
+
+test("routing visibility: per-viewer claimable annotation mirrors the claim gate; never hides, never touches money", () => {
+  const { escrow } = makeEscrow();
+  const small = post(escrow, { amount: PROBATION_MAX_CLAIM_CREDITS });
+  const big = post(escrow, { amount: PROBATION_MAX_CLAIM_CREDITS + 1 });
+  escrow.fundBounty(ROOM, small.bountyId, { funder: JILL });
+  escrow.fundBounty(ROOM, big.bountyId, { funder: JILL });
+
+  // No viewer: no annotation at all, nothing hidden.
+  const plain = escrow.listBounties(ROOM, {});
+  assert.equal(plain.length, 2);
+  assert.ok(plain.every(b => b.viewerRouting === undefined), "no viewer -> no routing annotation");
+
+  // Standard-band viewer: every bounty is routable to them.
+  const std = escrow.listBounties(ROOM, { viewer: JILL });
+  assert.equal(std.length, 2, "the listing never hides bounties");
+  assert.ok(std.every(b => b.viewerRouting.band === REPUTATION_BANDS.STANDARD));
+  assert.ok(std.every(b => b.viewerRouting.claimable === true), "standard band: all bounties routable");
+  assert.ok(std.every(b => b.viewerRouting.maxClaimMillis === null));
+
+  // Drop GROK to probation with two upheld disputes (claimant: +4 accepted,
+  // -12 dispute_lost, -10 bond_forfeited each).
+  for (const n of [1, 2]) {
+    const b = post(escrow, { amount: 10, verifierId: INSTINCT });
+    escrow.fundBounty(ROOM, b.bountyId, { funder: JILL });
+    escrow.claimBounty(ROOM, b.bountyId, { claimant: GROK });
+    escrow.submitWork(ROOM, b.bountyId, { claimant: GROK,
+      evidence: { evidenceUrl: `https://example.com/pr/r${n}`, summary: "shoddy" } });
+    escrow.acceptWork(ROOM, b.bountyId, { acceptor: JILL,
+      verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm",
+        citations: [{ criterionId: "c1", verdict: "pass" }] } });
+    escrow.disputeBounty(ROOM, b.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+    escrow.decideDispute(ROOM, b.bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
+  }
+  assert.equal(claimBand(escrow, ROOM, GROK, { nowMs }), REPUTATION_BANDS.PROBATION);
+
+  // Probation viewer: the small bounty is routable, the large one is not —
+  // and the listing still shows everything (the two dispute bounties too).
+  const prob = escrow.listBounties(ROOM, { viewer: GROK });
+  assert.equal(prob.length, 4, "probation hides nothing from the listing");
+  const byId = Object.fromEntries(prob.map(b => [b.bountyId, b.viewerRouting]));
+  assert.equal(byId[small.bountyId].band, REPUTATION_BANDS.PROBATION);
+  assert.equal(byId[small.bountyId].claimable, true, "small bounty stays routable on probation");
+  assert.equal(byId[big.bountyId].claimable, false, "large bounty not routable on probation");
+  assert.equal(byId[big.bountyId].maxClaimMillis, PROBATION_MAX_CLAIM_MILLIS);
+  // Routing visibility never touches money: amounts and conservation intact.
+  assert.equal(prob.find(b => b.bountyId === big.bountyId).amountMillis, (PROBATION_MAX_CLAIM_CREDITS + 1) * 1000);
+  expectConserved(escrow);
+});
+
+test("routingVisibility mirrors claimEligibility across bands and amounts (no drift)", () => {
+  const { escrow } = makeEscrow();
+  // GROK to probation via two upheld disputes.
+  for (const n of [1, 2]) {
+    const b = post(escrow, { amount: 10, verifierId: INSTINCT });
+    escrow.fundBounty(ROOM, b.bountyId, { funder: JILL });
+    escrow.claimBounty(ROOM, b.bountyId, { claimant: GROK });
+    escrow.submitWork(ROOM, b.bountyId, { claimant: GROK,
+      evidence: { evidenceUrl: `https://example.com/pr/d${n}`, summary: "shoddy" } });
+    escrow.acceptWork(ROOM, b.bountyId, { acceptor: JILL,
+      verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm",
+        citations: [{ criterionId: "c1", verdict: "pass" }] } });
+    escrow.disputeBounty(ROOM, b.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
+    escrow.decideDispute(ROOM, b.bountyId,
+      { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
+  }
+  for (const lane of [JILL, GROK]) {
+    const vis = routingVisibility(escrow, ROOM, lane, { nowMs });
+    for (const amountMillis of [1, PROBATION_MAX_CLAIM_MILLIS, PROBATION_MAX_CLAIM_MILLIS + 1, 10_000_000]) {
+      const gate = claimEligibility(escrow, ROOM, lane, amountMillis, { nowMs });
+      assert.equal(vis.claimable(amountMillis), gate.allowed,
+        `routing claimable must mirror the gate for ${lane} at ${amountMillis} millis`);
+      assert.equal(vis.band, gate.band, "same band on both paths");
+    }
+  }
+  const prob = routingVisibility(escrow, ROOM, GROK, { nowMs });
+  assert.equal(prob.band, REPUTATION_BANDS.PROBATION);
+  assert.equal(prob.claimable(PROBATION_MAX_CLAIM_MILLIS), true);
+  assert.equal(prob.claimable(PROBATION_MAX_CLAIM_MILLIS + 1), false);
+  const std = routingVisibility(escrow, ROOM, JILL, { nowMs });
+  assert.equal(std.maxClaimMillis, null, "non-probation bands carry no cap");
 });
