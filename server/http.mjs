@@ -45,7 +45,7 @@ const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "agent-signin-ui.js", "invite-context.js", "room-deep-link.js", "browser-session.js", "agent-invite-ui.js", "share-invite-code.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]],
   ["/connectors/muse.md", ["connectors/muse.md", "text/markdown; charset=utf-8"]],
 ]);
@@ -1759,6 +1759,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["accessKey"]) || typeof data.accessKey !== "string") reject(422, "invalid_login", "An access key is required");
         const { token, session } = store.createSession(data.accessKey);
+        setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
+        return json(res, 201, sessionView(session));
+      }
+      // Agent browser sign-in (RC-2026-09-23): agents can sign in on their
+      // own account via the browser UI. POST /api/auth/agent/rooms verifies
+      // the identity secret and lists linked rooms; POST /api/auth/agent/session
+      // creates a room-scoped browser session for the chosen room.
+      if (url.pathname === "/api/auth/agent/rooms" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`login:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["identityId", "secret"]) || typeof data.identityId !== "string" || typeof data.secret !== "string") {
+          reject(422, "invalid_login", "An agent identity ID and secret are required");
+        }
+        const identity = store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        const rooms = store.identities.roomsForIdentity(data.identityId);
+        return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
+      }
+      if (url.pathname === "/api/auth/agent/session" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`login:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["identityId", "secret", "roomId"]) || typeof data.identityId !== "string" || typeof data.secret !== "string" || typeof data.roomId !== "string") {
+          reject(422, "invalid_login", "An agent identity ID, secret, and room are required");
+        }
+        // Verify the secret before creating the session
+        store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        const { token, session } = store.createAgentSession(data.identityId, data.roomId);
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }
