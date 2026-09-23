@@ -1043,7 +1043,7 @@ function recordReferral(state, incoming) {
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error("referral member ids must be valid");
   }
   if (referrerMemberId === refereeMemberId) throw new Error("a member cannot refer themselves");
-  if (!["invite", "access-request"].includes(via)) throw new Error("referral via must be invite or access-request");
+  if (!["invite", "request"].includes(via)) throw new Error("referral via must be invite or request");
   if (!Number.isInteger(incoming.data.completedAt)) throw new Error("referral completedAt must be an integer timestamp");
   // Both sides must be members at journal time; the referee was just added.
   requireMember(state, referrerMemberId);

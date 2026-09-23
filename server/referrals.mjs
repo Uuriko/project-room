@@ -40,14 +40,14 @@ export const referralSchema = `
     referrer_member_id TEXT NOT NULL,
     referee_member_id TEXT NOT NULL,
     completed_at INTEGER NOT NULL,
-    via TEXT NOT NULL CHECK(via IN ('invite','access-request')),
+    via TEXT NOT NULL CHECK(via IN ('invite','request')),
     PRIMARY KEY (room_id, referee_member_id)
   );
   CREATE INDEX IF NOT EXISTS referrals_referrer ON referrals(room_id, referrer_member_id);
 `;
 
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-export const REFERRAL_VIA = Object.freeze(["invite", "access-request"]);
+export const REFERRAL_VIA = Object.freeze(["invite", "request"]);
 
 export class Referrals {
   constructor(store) { this.store = store; this.db = store.db; }
@@ -61,7 +61,7 @@ export class Referrals {
       if (typeof id !== "string" || !MEMBER_ID_PATTERN.test(id)) fail(422, "invalid_referral", `${name} must be a member id`);
     }
     if (referrerMemberId === refereeMemberId) fail(422, "invalid_referral", "a member cannot refer themselves");
-    if (!REFERRAL_VIA.includes(via)) fail(422, "invalid_referral", "via must be invite or access-request");
+    if (!REFERRAL_VIA.includes(via)) fail(422, "invalid_referral", "via must be invite or request");
     const members = this.store.room(roomId).state.members ?? {};
     const referrer = members[referrerMemberId];
     const referee = members[refereeMemberId];

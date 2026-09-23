@@ -1468,7 +1468,7 @@ paths:
                         refereeMemberId: { type: string }
                         refereeDisplayName: { type: string }
                         completedAt: { type: integer }
-                        via: { type: string, enum: [invite, access-request] }
+                        via: { type: string, enum: [invite, request] }
                   leaderboard:
                     type: array
                     description: Ranked by successful referrals, most first

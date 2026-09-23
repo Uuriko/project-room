@@ -10,7 +10,7 @@ const sample = {
   roomId: "commons",
   referrals: [
     { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m2", refereeDisplayName: "Bob", completedAt: 2000, via: "invite" },
-    { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m3", refereeDisplayName: "Cara", completedAt: 1000, via: "access-request" },
+    { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m3", refereeDisplayName: "Cara", completedAt: 1000, via: "request" },
   ],
   leaderboard: [
     { memberId: "m1", displayName: "Alice", referralCount: 2 },
@@ -18,7 +18,7 @@ const sample = {
   myReferralCount: 2,
   myReferrals: [
     { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m2", refereeDisplayName: "Bob", completedAt: 2000, via: "invite" },
-    { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m3", refereeDisplayName: "Cara", completedAt: 1000, via: "access-request" },
+    { referrerMemberId: "m1", referrerDisplayName: "Alice", refereeMemberId: "m3", refereeDisplayName: "Cara", completedAt: 1000, via: "request" },
   ],
 };
 

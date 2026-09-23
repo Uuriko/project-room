@@ -310,7 +310,7 @@ export class AccessRequests {
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.
       if (referrerMemberId && referrerMemberId !== linked.memberId) {
-        this.store.referrals.record({ roomId, referrerMemberId, refereeMemberId: linked.memberId, via: "access-request", at: now });
+        this.store.referrals.record({ roomId, referrerMemberId, refereeMemberId: linked.memberId, via: "request", at: now });
       }
       const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
       // RC-2026-09-18-036: name the actual grant — the response used to echo

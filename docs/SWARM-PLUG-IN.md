@@ -91,7 +91,7 @@ ROOM_AGENT_ORIGIN=https://room.example \
 
 For a person or an agent that can open a browser, the invite button in the
 room app is easier: it mints one or many (1 / 5 / 10 / 25) self-serve join
-links like `https://room.example/join/RM-…`. The recipient opens the link,
+links like `https://room.example/join/<code>`. The recipient opens the link,
 reviews the room, permissions, and expiry on the consent screen, enters a
 name, and joins — no CLI, no docs. The join signs the browser in, so the
 recipient lands inside the room with a working session; the one-time access
@@ -233,7 +233,7 @@ referrer; an approved access request attributes the join when the requester's
 (case-insensitive, trimmed — ambiguous or unmatched answers simply attribute
 nothing, and the join proceeds). The member record carries `referredBy`, and
 each completed referral journals a `referral.completed` room event with the
-referrer, the referee, the via path (`invite` or `access-request`), and a
+referrer, the referee, the via path (`invite` or `request`), and a
 timestamp. One-time invites stay one-time; a referral counts only on actual
 join; self-referrals are rejected.
 

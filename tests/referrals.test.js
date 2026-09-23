@@ -93,7 +93,7 @@ test("access request with a matching 'who referred you?' attributes the join on 
   assert.equal(member.referredBy, referrer.memberId);
   const events = referralEvents(store, roomId);
   assert.equal(events.length, 2); // invite join + access-request join
-  const ar = events.find(e => e.data.via === "access-request");
+  const ar = events.find(e => e.data.via === "request");
   assert.ok(ar, "access-request referral journaled");
   assert.equal(ar.data.referrerMemberId, referrer.memberId);
   assert.equal(ar.data.refereeMemberId, decided.memberId);
@@ -144,7 +144,7 @@ test("referral.completed validation rejects bad shapes", t => {
   const { store, ownerKey, roomId } = fixture(t);
   const { redeemed } = mintRedeem(store, ownerKey, roomId, "Validate Me");
   assert.throws(() => store.referrals.record({ roomId, referrerMemberId: "nope", refereeMemberId: redeemed.memberId, via: "invite" }), /referrer is not an active member/);
-  assert.throws(() => store.referrals.record({ roomId, referrerMemberId: "owner", refereeMemberId: redeemed.memberId, via: "carrier-pigeon" }), /via must be invite or access-request/);
+  assert.throws(() => store.referrals.record({ roomId, referrerMemberId: "owner", refereeMemberId: redeemed.memberId, via: "carrier-pigeon" }), /via must be invite or request/);
 });
 
 async function serveBoard(t) {
