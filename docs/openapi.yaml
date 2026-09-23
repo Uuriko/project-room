@@ -6971,6 +6971,28 @@ paths:
       responses:
         '200': { description: "{ roomId, timeoutMs }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/members/{memberId}:
+    delete:
+      summary: Deactivate the caller's own membership (self-leave)
+      description: >-
+        The {memberId} path segment must equal the authenticated member's own
+        id; naming anyone else is 403 access_denied. Emits member.access_changed
+        with active:false through the event-sourced path (the self-leave branch
+        skips the manage_members gate). The room owner cannot self-deactivate
+        (403 owner_cannot_deactivate — transfer ownership first). The identity
+        link is kept: identity is not deleted, only the membership becomes
+        inactive. 409 already_inactive when the membership is already inactive.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The caller's own member id.
+      responses:
+        '200': { description: "{ roomId, memberId, active:false, sequence }" }
+        '403': { description: "access_denied when naming another member; owner_cannot_deactivate for the owner" }
+        '409': { description: already_inactive }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads

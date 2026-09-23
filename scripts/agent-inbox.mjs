@@ -261,6 +261,7 @@ if (action === "join") {
   (omit permissions for a read/chat-only link)
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
+  node scripts/agent-inbox.mjs leave-room
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
@@ -347,7 +348,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -383,6 +384,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "membership-grants" && (checkpoint !== undefined || extra.length))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
+      || (action === "leave-room" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
     const config = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
       client = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
@@ -420,6 +422,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
+      : action === "leave-room" ? await client.deactivateMembership()
       : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint.startsWith("profile:")
             ? { profile: checkpoint.slice("profile:".length) }
             : { permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean) }),

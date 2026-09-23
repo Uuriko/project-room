@@ -2452,6 +2452,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // mistaken for a message event id.
       const mentionSettingsMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/settings$/.exec(url.pathname);
       const mentionAckMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/([^/]{1,128})\/ack$/.exec(url.pathname);
+      // RC-2026-09-23: self-deactivation. DELETE /api/rooms/{roomId}/members/{memberId}
+      // deactivates the caller's own membership (memberId must equal the
+      // authenticated member id; anything else is 403). Emits
+      // member.access_changed with active:false via the event-sourced path;
+      // the identity link is kept (identity is not deleted).
+      const memberDeactivateMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
@@ -2544,21 +2550,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
-        && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch) reject(404, "not_found", "Not found");
+        && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
-        ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch)[1]);
+        ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
+      const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
+        : memberDeactivateMatch ? "member-deactivate"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -3078,6 +3086,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
         return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
+      }
+      if (route === "member-deactivate" && req.method === "DELETE") {
+        // RC-2026-09-23: self-deactivation. The caller names its own member
+        // id; naming anyone else is 403. Emits member.access_changed with
+        // active:false through the event-sourced path (the self-leave
+        // branch of changeMemberAccess skips the manage_members gate, and
+        // the owner invariant still holds — the owner cannot self-deactivate).
+        // The identity link is kept: identity is not deleted, only the
+        // membership becomes inactive.
+        if (deactivateMemberId !== auth.member.id) reject(403, "access_denied", "You can only deactivate your own membership");
+        const member = auth.member;
+        if (member.active === false) reject(409, "already_inactive", "Membership is already inactive");
+        if (store.roomAuthority(roomId).ownerId === member.id)
+          reject(403, "owner_cannot_deactivate", "The room owner cannot deactivate its own membership; transfer ownership first");
+        const result = store.command(selected.token, roomId, {
+          id: randomUUID(), type: "member.access_changed",
+          data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: member.permissions, active: false }
+        }, fence);
+        return json(res, 200, { roomId, memberId: member.id, active: false, sequence: result.sequence });
       }
       // Per-thread mutes: private per-member suppression of a thread's
       // activity from the notification/unread feed. GET lists the caller's
