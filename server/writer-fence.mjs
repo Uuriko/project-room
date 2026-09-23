@@ -170,7 +170,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // directory with validity windows and rotation overlap. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,
   // every row is scoped to an agent identity, and the table is append-only.
-  "agent_key_registry"
+  "agent_key_registry",
+  // guest_invites + guest_members (GX guest-invite public handoff,
+  // RC-2026-09-23-100): hash-only invite rows and per-room guest membership
+  // seats. Purely additive and intentionally NOT fenced — older writers have
+  // no code path to them, and the module verifies its own schema on open.
+  "guest_invites",
+  "guest_members"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
