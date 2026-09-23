@@ -423,7 +423,7 @@ export class GuestInvites {
         .map(row => {
           // Public shape is camelCase; code hashes and the minter's account
           // id never leave the server.
-          const { code_hash, minted_by_account_id, ...rest } = row;
+          const { code_hash, minted_by_account_id } = row;
           void code_hash; void minted_by_account_id;
           return {
             inviteId: row.id,

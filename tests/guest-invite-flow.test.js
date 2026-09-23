@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,13 +45,6 @@ async function mintInvite(request, ownerKey, extras = {}) {
   const res = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: mintBody(extras) });
   assert.equal(res.status, 201);
   return res.json();
-}
-
-async function redeemInvite(request, code, guest) {
-  return request("/api/guest-invites/redeem", {
-    method: "POST", token: guest.identity.secret,
-    data: { inviteCode: code, card: guest.card },
-  });
 }
 
 test("contract advertises the GX public-handoff terms", async t => {
@@ -278,8 +271,6 @@ async function redeemGuest(t, serveResult, { name = "Synapse", tier } = {}) {
   return { ...(await res.json()), identity, minted };
 }
 
-const guestDenied = error => error && (error.code === "guest_scope_denied" || error.status === 403);
-
 test("observer guests chat and react; everything else is refused at the command gate", async t => {
   const s = await serve(t);
   const { store } = s;
@@ -299,7 +290,6 @@ test("observer guests chat and react; everything else is refused at the command 
     assert.throws(() => store.command(guest.token, "commons", { id: randomUUID(), type, data: {} }),
       error => error.code === "guest_scope_denied", `guest blocked from ${type}`);
   }
-  void guestDenied;
 });
 
 test("contributor guests may post work-item drafts but nothing else", async t => {
