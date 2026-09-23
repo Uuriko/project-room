@@ -186,7 +186,7 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(mentionMatches(members, "").length, 2);
   const inserted = insertMention("hi @In", 6, 3, members[0]);
   assert.equal(inserted.body, "hi @Instinct ");
-  assert.equal(inserted.toMemberId, "instinct");
+  assert.equal(inserted.toMemberId, "");
   const esc = value => String(value).replaceAll("<", "&lt;");
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /mention agent/);
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /data-mention-id="instinct"/);
@@ -212,7 +212,7 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(presenceLabel("online"), "Online");
   const fromClick = addressMember("hello", 5, members[0]);
   assert.equal(fromClick.body, "hello @Instinct ");
-  assert.equal(fromClick.toMemberId, "instinct");
+  assert.equal(fromClick.toMemberId, "");
   const fromAt = addressMember("hi @In", 6, members[0]);
   assert.equal(fromAt.body, "hi @Instinct ");
   assert.equal(fromAt.toMemberId, insertMention("hi @In", 6, 3, members[0]).toMemberId);

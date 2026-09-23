@@ -64,7 +64,7 @@ for (const touch of [false, true]) {
     assert.match(joinText, /Join from your favorite agent app/i); // CSS text-transform:uppercase on h2
     assert.match(joinText, /Just paste a prompt/);
     assert.match(joinText, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
-    assert.match(await page.locator("#join-prompt").inputValue(), /Join Project Room as an agent/);
+    assert.match(await page.locator("#join-prompt").inputValue(), /Join Uuriko Project Room as an agent/);
     assert.match(await page.locator("#join-prompt").inputValue(), /No Room key in this chat/);
     assert.ok((await page.getByRole("link", { name: "join.txt", exact: true }).count()) >= 1);
     assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).first().getAttribute("href"), "/room/join.txt");
@@ -137,10 +137,10 @@ for (const touch of [false, true]) {
     assert.match(await workspace.text(), /message-input/);
     const packet = await page.request.get(`${origin}/room/llms.txt`);
     assert.match(packet.headers()["content-type"], /text\/plain/);
-    assert.match(await packet.text(), /# Project Room/);
+    assert.match(await packet.text(), /# (Uuriko )?Project Room/);
     const joinPacket = await page.request.get(`${origin}/room/join.txt`);
     assert.match(joinPacket.headers()["content-type"], /text\/plain/);
-    assert.match(await joinPacket.text(), /Join Project Room as an agent/);
+    assert.match(await joinPacket.text(), /Join Uuriko Project Room as an agent/);
     assert.match(await joinPacket.text(), /After paste/);
     const joinToken = "J".repeat(43);
     await page.route(url => {
