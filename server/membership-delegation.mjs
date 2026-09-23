@@ -194,6 +194,47 @@ export class MembershipDelegation {
     return memberCan(authority, auth?.member?.id, "manage_members");
   }
 
+  // One owner action for both administration stores. A #761 table grant and a
+  // #742 delegatedAdmin member bit can be active together. Revoking only the
+  // table row leaves the member bit, and stripping only the bit leaves the
+  // table row. This clears whichever of those is present so the next access
+  // review shows no membership-administration path for the identity.
+  revokeEffective(token, roomId, { identityId } = {}, expectedSessionBinding = null) {
+    if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) {
+      fail(422, "invalid_identity", "identityId is not a valid agent identity");
+    }
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    const authority = this.store.roomAuthority(roomId);
+    this.#requireOwner(auth, authority);
+    const adminBits = ["manage_members", "decide"];
+    return this.store.transaction(() => {
+      const grant = this.db.prepare(
+        "SELECT added_invite_member FROM membership_delegation_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL").get(roomId, identityId);
+      const target = this.store.identities.resolveIdentityLink(identityId, roomId);
+      const member = target ? this.store.roomAuthority(roomId).members[target.member.id] : null;
+      if (member?.id === authority.ownerId) fail(409, "already_administers", "The room owner retains membership administration");
+      const hasAdmin = !!member && member.permissions.some(permission => adminBits.includes(permission));
+      if (!grant && !hasAdmin) fail(404, "not_found", "No membership-administration authority for this identity");
+      if (grant) {
+        this.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+          .run(this.store.now(), roomId, identityId);
+      }
+      let strippedAdmin = false;
+      if (member && member.active !== false) {
+        let permissions = [...member.permissions];
+        if (grant?.added_invite_member) permissions = permissions.filter(permission => permission !== "invite_member");
+        if (permissions.some(permission => adminBits.includes(permission))) strippedAdmin = true;
+        permissions = permissions.filter(permission => !adminBits.includes(permission));
+        if (permissions.length !== member.permissions.length || permissions.some((permission, index) => permission !== member.permissions[index])) {
+          this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
+            data: { memberId: member.id, expectedMemberRevision: member.revision, permissions, active: member.active } },
+            expectedSessionBinding);
+        }
+      }
+      return Object.freeze({ roomId, identityId, revokedGrant: !!grant, strippedAdmin });
+    });
+  }
+
   #requireOwner(auth, authority) {
     if (auth?.member?.id !== authority?.ownerId) {
       fail(403, "access_denied", "Only the room owner may grant or revoke membership administration");

@@ -146,7 +146,7 @@ test("owner account session reads the full review; removed members are absent", 
   assert.equal(report.agentConnections[0].status, "key_issued");
   assert.equal(report.agentConnections[0].sponsorMemberId, "owner");
   assert.deepEqual(report.agentConnections[0].permissions, ["accept_work", "complete_work"]);
-  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1 });
+  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1, membershipDelegations: 0 });
   assert.equal(report.lastActivityAt, [...report.members, ...report.guests].map(m => m.lastActivityAt).filter(Boolean).sort().at(-1));
   // The owner's room key (CLI path) reads the same report.
   const viaKey = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
@@ -264,4 +264,41 @@ test("the review shares the per-credential read allowance with sibling room read
   assert.equal(limited.json.error.code, "rate_limited");
   assert.equal(limited.headers.get("x-ratelimit-limit"), "600");
   assert.equal(limited.headers.get("retry-after"), "60");
+});
+
+test("a review of one identity shows both administration stores, and one revoke removes the effective permission", async t => {
+  const f = await fixture(t);
+  const identityId = f.identity.identityId;
+  const member = f.store.room("commons").state.members[identityId];
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+    memberId: identityId, expectedMemberRevision: member.revision,
+    permissions: [...member.permissions, "manage_members"], active: true
+  } });
+  f.store.delegation.grant(f.ownerKey, "commons", { identityId });
+  const before = assembleAccessReview(f.store, "commons");
+  const row = before.members.find(item => item.memberId === identityId);
+  const identity = before.agentIdentities.find(item => item.identityId === identityId);
+  const grant = before.membershipDelegations.find(item => item.identityId === identityId);
+  assert.equal(row.delegatedAdmin, true);
+  assert.deepEqual(row.authorityPaths, ["delegated_admin", "membership_delegation"]);
+  assert.equal(row.dualGrantHazard, true);
+  assert.deepEqual(identity.authorityPaths, row.authorityPaths);
+  assert.equal(grant.memberId, identityId);
+  assert.equal(grant.grantedBy, "owner");
+  assert.equal(grant.dualGrantHazard, true);
+  assert.match(renderAccessReview(before), /\[DUAL-GRANT HAZARD\]/);
+  const cleared = f.store.delegation.revokeEffective(f.ownerKey, "commons", { identityId });
+  assert.deepEqual(cleared, { roomId: "commons", identityId, revokedGrant: true, strippedAdmin: true });
+  const after = assembleAccessReview(f.store, "commons");
+  const next = after.members.find(item => item.memberId === identityId);
+  assert.equal(next.delegatedAdmin, false);
+  assert.equal(next.dualGrantHazard, false);
+  assert.deepEqual(next.authorityPaths, []);
+  assert.equal(after.membershipDelegations.length, 0);
+  assert.equal(f.store.delegation.canAdministerMembership(
+    f.store.roomAuthority("commons"),
+    { member: { id: identityId, identityId, permissions: next.permissions } },
+    "commons"
+  ), false);
+  assert.throws(() => f.store.delegation.revokeEffective(f.ownerKey, "commons", { identityId }), /No membership-administration authority/);
 });
