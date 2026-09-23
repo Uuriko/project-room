@@ -62,8 +62,10 @@ export const WEB_FETCH_MAX_TAGS = 20;
 export const WEB_FETCH_TAG_CHARS = 64;
 
 // Env-gated loopback allowance for tests (in-process HTTP servers). Strict by
-// default: production never sets this. Guarded for Workers (no process).
-const ALLOW_LOOPBACK = typeof process !== "undefined"
+// default: production never sets this. Only the loopback ranges are allowed —
+// every other private/reserved range stays blocked, so redirect-to-private
+// tests remain meaningful. Guarded for Workers (no process).
+const allowLoopback = () => typeof process !== "undefined"
   && process?.env?.WEB_FETCH_ALLOW_LOOPBACK === "1";
 
 export const webFetchSchema = `
@@ -106,9 +108,14 @@ export function normalizeUrl(raw) {
   if (!url.hostname)
     fail(400, "invalid_url", "URL must have a host");
   const defaultPort = url.protocol === "http:" ? "80" : "443";
-  if (url.port && url.port !== defaultPort)
+  // The test-only loopback allowance also opens arbitrary loopback ports so
+  // in-process HTTP servers on random ports can be exercised; production
+  // stays on 80/443 only.
+  const loopbackPortOk = allowLoopback()
+    && (url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "::1");
+  if (url.port && url.port !== defaultPort && !loopbackPortOk)
     fail(400, "invalid_url", "Only ports 80 and 443 can be fetched");
-  url.port = "";
+  if (!loopbackPortOk) url.port = "";
   url.hash = "";
   return url.href;
 }
@@ -185,15 +192,21 @@ const ipv6In = (ip, [base, bits]) => (ip >> BigInt(128 - bits)) === (base >> Big
 // True when a literal IP string is in a blocked range. Non-IP hostnames
 // return false here — they go through DNS resolution instead.
 export function ipLiteralBlocked(host) {
-  if (ALLOW_LOOPBACK) return false;
   const v4 = parseIpv4(host);
-  if (v4 !== null) return IPV4_BLOCKS.some(block => ipv4In(v4, block));
+  if (v4 !== null) {
+    // The test-only loopback allowance opens 127/8 and ::1; every other
+    // private/reserved range stays blocked under it.
+    if (allowLoopback() && ipv4In(v4, [0x7f000000, 8])) return false;
+    return IPV4_BLOCKS.some(block => ipv4In(v4, block));
+  }
   // Strip brackets if a caller passes [::1].
   const v6 = parseIpv6(host.replace(/^\[|\]$/g, ""));
   if (v6 !== null) {
+    if (allowLoopback() && v6 === 1n) return false; // ::1
     // IPv4-mapped IPv6 (::ffff:10.0.0.1) inherits the IPv4 verdict.
     if ((v6 >> 32n) === 0xffffn) {
       const mapped = Number(v6 & 0xffffffffn);
+      if (allowLoopback() && ipv4In(mapped, [0x7f000000, 8])) return false;
       return IPV4_BLOCKS.some(block => ipv4In(mapped, block));
     }
     return IPV6_BLOCKS.some(block => ipv6In(v6, block));
@@ -215,7 +228,6 @@ export async function assertPublicHost(hostname) {
   const host = hostname.replace(/^\[|\]$/g, "");
   if (ipLiteralBlocked(host))
     fail(403, "blocked_host", "Refusing to fetch a private, loopback, or otherwise reserved address");
-  if (ALLOW_LOOPBACK) return [];
   const dns = await dnsModule();
   if (!dns) return []; // Workers: no private network exists, nothing to guard
   const addresses = new Set();
@@ -636,7 +648,7 @@ export class WebFetch {
       bytes = page.bytes;
       this.store.transaction(() => {
         this.putCache(key, normalized, finalUrl, markdown, metadata, bytes, this.store.now());
-      })();
+      });
       cacheStatus = "miss";
       ageMs = null;
     }
