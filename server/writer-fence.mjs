@@ -185,7 +185,8 @@ export const unfencedAdditiveTables = Object.freeze([
   // activity_events + read_horizons + saved_messages + thread_mutes
   // (attention: activity feed, mark unread, save for later, thread mutes) are
   // purely additive and intentionally NOT fenced: older writers have no code
-  // path to them, and the activity module owns its schema.
+  // path to them, and the activity module owns its schema. thread_mutes is
+  // shared with server/thread-mutes.mjs (convergent DDL).
   "activity_events",
   "read_horizons",
   "saved_messages",

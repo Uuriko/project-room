@@ -34,7 +34,7 @@ const compare = (older, reference) => {
 test('equal independently captured data is not permission to reopen; all 104 tables are compared', async t => {
   const f = await fixture(t), reference = await f.capture(), report = compare(f.older, reference);
   assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 104,
-    "a table was added or removed: confirm the comparison covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: collab_assignments, collab_notes, collab_draft_locks, collab_approvals, collab_routing_events (RC-2026-09-18-011); +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (#658 mention lifecycle); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +4: activity_events, read_horizons, saved_messages, thread_mutes (attention: activity feed, read horizons, saved messages, thread mutes); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution)
+    "a table was added or removed: confirm the comparison covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: collab_assignments, collab_notes, collab_draft_locks, collab_approvals, collab_routing_events (RC-2026-09-18-011); +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (#658 mention lifecycle); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution)
   assert.equal(report.history.equalRooms, 2); assert.equal(report.history.olderHistoryIsPrefix, true);
   assert.equal(report.accessDifferences, false);
   assert.ok(report.tables.every(row => row.added + row.removed + row.changed === 0));
@@ -43,6 +43,19 @@ test('equal independently captured data is not permission to reopen; all 104 tab
     f.nativeBody, 'recovery-target', 'Managed recovery agent', 'commons', f.older, reference]) {
     assert.equal(serialized.includes(value), false, 'report omits private row values and paths');
   }
+});
+
+test('private thread mute changes are included in capture comparison', async t => {
+  const f = await fixture(t);
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'message.posted',
+    data: { messageId: 'comparison-muted-thread', body: 'Synthetic discussion' } });
+  const before = await f.capture();
+  f.store.threadMutes.set(f.keys.owner, 'commons', { threadId: 'comparison-muted-thread', muted: true });
+  const report = compare(before, await f.capture());
+  assert.equal(report.status, 'differences_require_review');
+  assert.equal(delta(report, 'thread_mutes').added, 1);
+  assert.equal(report.history.laterEvents, 0, 'private preferences add no public room events');
+  assert.equal(JSON.stringify(report).includes('comparison-muted-thread'), false);
 });
 
 test('content and retry changes are visible without inventing an access change', async t => {

@@ -10,8 +10,10 @@
 //   activity_events  one row per (recipient, triggering message, actor)
 //   read_horizons    per-member "read up to" marker, room-wide or per thread
 //   saved_messages   per-member saved ("later") messages
-//   thread_mutes     per-member muted threads (server-side only for now;
-//                    the client toggle ships with the thread-options slice)
+//   thread_mutes     per-member muted threads (shared table with
+//                    server/thread-mutes.mjs; the canonical mute/unmute API
+//                    lives there, this module only reads it for activity
+//                    fan-out suppression)
 //
 // The store (server/store.mjs) owns persistence and calls recordActivityEvents
 // inside the command transaction, next to trackMentions: an activity row is
@@ -419,31 +421,3 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
   });
 }
 
-// --- thread mutes (server-side only for now) ------------------------------------
-
-export function setThreadMute(store, token, roomId, data, expectedSessionBinding = null) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) fail(422, "invalid_thread_mute", "threadId and muted are required");
-  const keys = Object.keys(data);
-  if (!keys.includes("threadId") || !keys.includes("muted") || keys.some(key => !["threadId", "muted"].includes(key))) {
-    fail(422, "invalid_thread_mute", "threadId and muted are required");
-  }
-  if (typeof data.threadId !== "string" || !data.threadId.trim() || data.threadId.length > 384) {
-    fail(422, "invalid_thread_mute", "threadId must be a message id");
-  }
-  if (typeof data.muted !== "boolean") fail(422, "invalid_thread_mute", "muted must be true or false");
-  const auth = authed(store, token, roomId, expectedSessionBinding);
-  const member = auth.member;
-  return store.transaction(() => {
-    const rootId = threadRootOf(store.room(roomId).state.messages, data.threadId);
-    if (!rootId) fail(404, "message_not_found", "No such thread in this room");
-    const now = store.now();
-    if (data.muted) {
-      store.db.prepare("INSERT OR IGNORE INTO thread_mutes (room_id,member_id,thread_id,created_at) VALUES(?,?,?,?)")
-        .run(roomId, member.id, rootId, now);
-    } else {
-      store.db.prepare("DELETE FROM thread_mutes WHERE room_id=? AND member_id=? AND thread_id=?")
-        .run(roomId, member.id, rootId);
-    }
-    return { ...viewerEnvelope(auth, roomId), threadId: rootId, muted: data.muted };
-  });
-}

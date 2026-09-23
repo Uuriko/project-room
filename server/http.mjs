@@ -38,7 +38,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import {
   listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
-  getReadHorizon, setReadHorizon, listSaved, setSaved, setThreadMute
+  getReadHorizon, setReadHorizon, listSaved, setSaved
 } from "./activity.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
@@ -2370,7 +2370,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved|thread-mutes))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2971,9 +2971,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // DELETE /api/rooms/:roomId/saved/:messageId — unsave one message.
         return json(res, 200, setSaved(store, selected.token, roomId, { messageId: savedDeleteMessageId, saved: false }, fence));
       }
-      if (route === "thread-mutes" && req.method === "POST") {
-        return json(res, 200, setThreadMute(store, selected.token, roomId, await body(req), fence));
-      }
+      // Thread mutes are served by the canonical store.threadMutes module
+      // (GET list + POST set below); the activity fan-out reads the same
+      // thread_mutes table for thread_reply suppression.
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);
         return json(res, 200, { diagnostics: diagnostics.list(roomId) });
@@ -3019,6 +3019,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
         return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
+      }
+      // Per-thread mutes: private per-member suppression of a thread's
+      // activity from the notification/unread feed. GET lists the caller's
+      // muted thread-root ids; POST {threadId, muted} mutes or unmutes
+      // (threadId may be any message in the thread; it resolves to the root).
+      if (route === "thread-mutes" && req.method === "GET") {
+        return json(res, 200, store.threadMutes.list(selected.token, roomId, fence));
+      }
+      if (route === "thread-mutes" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
+        return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named
