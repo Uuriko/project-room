@@ -1,0 +1,48 @@
+✔ Invite reveals agent setup independently of the People disclosure (742.048125ms)
+✔ Invite reveals agent setup from the mobile sidebar (419.350792ms)
+✔ browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access (1035.078417ms)
+✔ agent type catalog renders and click fills the same join path (532.696417ms)
+✔ named roster fills Muse and Grok Build; Grok Build shows import checklist (623.270625ms)
+✔ unknown enrollment survives close and retries the original digest and identity (660.398042ms)
+✔ mobile disclosure stays lightweight, fits the viewport and conceals setup on close (648.668875ms)
+✔ owned list access denial clears previously revealed setup (610.403ms)
+✔ snapshot access changes conceal a held private key (547.107125ms)
+✔ retained setup warns before sign-out; expiry prevents reveal or copy (717.25ms)
+✔ a rotation ahead of an older inactive snapshot keeps the new private setup (872.268875ms)
+✔ incomplete 2xx enrollment metadata preserves the exact pending retry (733.743833ms)
+✔ a delayed enrollment receipt cannot restore setup after owner access ends (495.526375ms)
+✔ People panel: owner pauses, resumes and removes an agent with a two-click confirm (1360.542125ms)
+✔ deleted messages render a tombstone, never crash, and leave search (753.919417ms)
+✔ draft return committed-empty: exact retry resolves without replacing the contribution (652.177583ms)
+✔ draft return uncommitted-empty: exact retry resolves without replacing the contribution (659.551875ms)
+✔ draft return wrong-actor: exact retry resolves without replacing the contribution (605.09725ms)
+✔ draft return wrong-message: exact retry resolves without replacing the contribution (582.60875ms)
+✔ draft return malformed-json: exact retry resolves without replacing the contribution (588.1765ms)
+✔ draft return first-rate-limit: exact retry resolves without replacing the contribution (617.037416ms)
+room diagnostic op_KAaq2i7E 409 command_rejected conflict /api/rooms/:roomId/commands
+✔ uncommitted return retry unlocks only after stale rejection, preserving message identity through explicit correction (700.451417ms)
+✔ confirmed draft with failed snapshot remains saved, then becomes findable on refresh (629.161125ms)
+✔ posted draft returns to its exact conversation record and work link preserves unrelated thread drafts (920.450917ms)
+✔ mobile guest draft is discoverable by the returning accountable member without implying work completion (860.198917ms)
+✔ late draft success cannot alter a replacement session (670.691834ms)
+✔ late draft failure cannot alter a replacement session (665.494792ms)
+✔ work destination desktop: leaving a thread restores the work card and keeps both drafts (414.54125ms)
+✔ work destination mobile: leaving a thread restores the work card and keeps both drafts (416.443834ms)
+✔ work destination follows its proposal channel (383.720708ms)
+✔ draft choices desktop: catch-up opens the timeline and releases modal focus (570.024167ms)
+✔ draft choices mobile: catch-up opens the timeline and releases modal focus (534.072375ms)
+✔ results desktop: find, read and return without losing conversation (738.227291ms)
+✔ results touch: find, read and return without losing conversation (665.51925ms)
+✔ results update after review and reopening; a pinned open reader becomes earlier, not a replacement (684.226542ms)
+✔ result read failure preserves the list and allows a deliberate retry (574.918375ms)
+✔ late result reads cannot restore content after sign-out, and the Results view resets (473.934667ms)
+✔ guest Results remain useful with large text and no creation controls (483.576584ms)
+✔ creating new work from the composer requires explicit confirmed submission (519.403ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26402.374792

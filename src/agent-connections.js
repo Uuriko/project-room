@@ -71,7 +71,7 @@ export function installAgentConnections({ client, getState }) {
     if ($("#agent-create")) $("#agent-create").hidden = packet;
     if ($("#agent-create-note")) {
       $("#agent-create-note").hidden = packet;
-      $("#agent-create-note").textContent = "The browser sends only a digest.";
+      $("#agent-create-note").textContent = "Next: connect the agent in its own app.";
     }
     if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet;
     if ($("#agent-host-snippets")) $("#agent-host-snippets").hidden = route !== "mcp";
