@@ -1336,3 +1336,11 @@ summary { overflow-wrap: anywhere; }
 .reaction-options { top: calc(100% + .25rem); bottom: auto; z-index: 45; }
 #session-menu-panel #connection-details { margin: 0; padding: .4rem .6rem; }
 #session-menu-panel #connection-details > summary { min-height: 32px; font-size: .875rem; }
+
+/* Large text must reflow on the signed-out screen with platform font metrics. */
+.app-shell > .topbar { flex-wrap: wrap; }
+.app-shell > .topbar .topbar-actions { min-width: 0; max-width: 100%; }
+#refresh-button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.connection-bar { flex-wrap: wrap; }
+.auth-panel { min-width: 0; overflow-wrap: anywhere; }
+.auth-panel > * { min-width: 0; max-width: 100%; }

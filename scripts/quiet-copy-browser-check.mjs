@@ -93,9 +93,11 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      await page.evaluate(() => JSON.stringify([...document.querySelectorAll("body *")].filter(node => { const r = node.getBoundingClientRect(); return r.width && r.right > innerWidth + 1; }).map(node => ({ id: node.id, tag: node.tagName, width: node.getBoundingClientRect().width })))));
     await help.click();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      await page.evaluate(() => JSON.stringify([...document.querySelectorAll("body *")].filter(node => { const r = node.getBoundingClientRect(); return r.width && r.right > innerWidth + 1; }).map(node => ({ id: node.id, tag: node.tagName, width: node.getBoundingClientRect().width })))));
     await page.screenshot({ path: `test-results/quiet-copy-${label}-large-text.png`, fullPage: true });
     assert.deepEqual(errors, []);
   });
