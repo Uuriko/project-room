@@ -448,8 +448,17 @@ export function validateCommand(command) {
 // to a DM (the sender's memberId goes back into toMemberId on the
 // message.posted command); assignments and routing mentions point at
 // their own read/resolve routes. An empty inbox says what it will carry.
-const inboxNext = (roomId, directMessages, assignments, mentions) => {
+const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = []) => {
   const steps = [];
+  if (directMentions.length > 0) {
+    const latest = directMentions[0];
+    steps.push(Object.freeze({
+      action: "reply-mention",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. Any post by you marks your pending mentions responded; reply under the message so the asker sees the answer in context. Send your identity secret as the Bearer token.`,
+    }));
+  }
   if (directMessages.length > 0) {
     const latest = directMessages[0];
     steps.push(Object.freeze({
@@ -479,7 +488,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions) => {
   if (steps.length === 0) {
     steps.push(Object.freeze({
       action: "watch-inbox",
-      description: "Your inbox is empty. It will carry targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
+      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
     }));
   }
   return steps;
@@ -2817,7 +2826,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // member reads its own items only:
   //   - targeted DMs addressed to it (message.posted with toMemberId = me),
   //   - collab threads currently assigned to it,
-  //   - open @agent routing mentions naming it.
+  //   - open @agent routing mentions naming it,
+  //   - direct @mentions of it that are still waiting for an answer
+  //     (mention_states delivered/acknowledged/timed_out), with the message
+  //     text, so an agent that only polls its inbox never misses a question.
   // Additive and room-scoped; the human /api/inbox/* account-session gate
   // is untouched. The HTTP layer additionally requires agent membership
   // and, for API-key callers, the inbox:read scope.
@@ -2875,16 +2887,52 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
+      const directMentions = this.openDirectMentions(roomId, memberId, limit);
       return Object.freeze({
         agentId: memberId,
         roomId,
         directMessages: Object.freeze(directMessages),
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
-        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions)),
+        directMentions: Object.freeze(directMentions),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions)),
         dmRequests: Object.freeze(dmRequests),
       });
     });
+  }
+  // Direct @mentions of this member that nobody has answered yet, newest
+  // first, joined to the message that carried them. Pure read: expiry is
+  // derived from timeout_at here rather than flipped, because this runs
+  // inside a read-only transaction. A mention inside a private message is
+  // shown only to that message's two parties. A database from before the
+  // #658 schema has no mention_states table and simply has no mentions.
+  openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now()) {
+    let rows;
+    try {
+      rows = this.db.prepare(
+        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
+         ORDER BY e.sequence DESC LIMIT ?`
+      ).all(roomId, memberId, limit);
+    } catch (error) {
+      if (/no such table/i.test(error?.message ?? "")) return [];
+      throw error;
+    }
+    return rows.map(row => ({ row, event: JSON.parse(row.body) }))
+      .filter(({ event }) => event?.type === T.MESSAGE_POSTED
+        && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
+      .map(({ row, event }) => Object.freeze({
+        sequence: row.sequence,
+        eventId: row.eventId,
+        messageId: event.data.messageId ?? null,
+        replyToId: event.data.messageId ?? row.eventId,
+        from: event.actorId,
+        body: event.data.body,
+        at: event.at,
+        state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
+        channel: event.data.channelId ?? "general",
+      }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
   // horizon, the cursor, the paged events, and the live projection at the same commit.

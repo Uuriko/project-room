@@ -1,0 +1,103 @@
+// An agent that only polls its inbox, or only has the stdio MCP host, must
+// still see a direct @mention and be able to read the conversation around it.
+// Before this, GET /agent-inbox said "empty" while /mentions held the row, and
+// the MCP host had no tool that read messages or mentions at all.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
+
+function enrolledAgent(t) {
+  const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
+  f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "mention-enroll", memberId: "mention-agent", displayName: "Scout", access: "chat",
+    keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  return { f, token };
+}
+const say = (f, key, data) => f.store.command(key, "commons", { id: randomUUID(), type: "message.posted", data });
+
+test("agent inbox carries an unanswered direct @mention with the text and a replyToId, then drops it once answered", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const empty = f.store.agentInbox(token, "commons");
+  assert.deepEqual(empty.directMentions, []);
+  assert.match(empty.next.at(-1).description, /direct @mentions/);
+
+  say(f, f.keys.owner, { messageId: "ask-scout", body: "@Scout can you list the two venue options?" });
+  // A private message between two other members that names the agent is not the agent's to read.
+  f.store.dmConsents.request("commons", "guest", "owner", "test"); f.store.dmConsents.decide("commons", "owner", "guest", "approve");
+  say(f, f.keys.guest, { messageId: "private-aside", body: "between us, @Scout is slow", toMemberId: "owner" });
+
+  const inbox = f.store.agentInbox(token, "commons");
+  assert.equal(inbox.directMentions.length, 1);
+  const [mention] = inbox.directMentions;
+  assert.equal(mention.messageId, "ask-scout");
+  assert.equal(mention.replyToId, "ask-scout");
+  assert.equal(mention.from, "owner");
+  assert.equal(mention.body, "@Scout can you list the two venue options?");
+  assert.equal(mention.state, "delivered");
+  assert.equal(inbox.next[0].action, "reply-mention");
+  assert.match(inbox.next[0].description, /replyToId: "ask-scout"/);
+  assert.equal(JSON.stringify(inbox).includes("private-aside"), false);
+
+  say(f, token, { messageId: "scout-answer", body: "The loft and the studio.", replyToId: "ask-scout" });
+  assert.deepEqual(f.store.agentInbox(token, "commons").directMentions, []);
+});
+
+test("an overdue mention reads as timed_out without a write inside the read", t => {
+  const { f } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  say(f, f.keys.owner, { messageId: "old-ask", body: "@Scout still there?" });
+  const later = Date.now() + 24 * 3600000;
+  const [mention] = f.store.openDirectMentions("commons", "mention-agent", 50, later);
+  assert.equal(mention.state, "timed_out");
+});
+
+test("MCP host reads the inbox and room messages through real stdio against a real server", { timeout: 20000 }, async t => {
+  const { f, token } = enrolledAgent(t);
+  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const directory = join(f.directory, "mcp"); saveAgentConnection(directory, { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "mention-agent", token });
+  let mcp;
+  t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  say(f, f.keys.owner, { messageId: "ask-scout", body: "@Scout what's blocking the agenda?" });
+  mcp = await openMcpTestClient(directory);
+  const inbox = (await mcp.call("room_read_inbox", {})).result.structuredContent;
+  assert.equal(inbox.directMentions[0].replyToId, "ask-scout");
+  assert.equal(inbox.next[0].action, "reply-mention");
+  const page = (await mcp.call("room_read_messages", { after: 0, limit: 100 })).result.structuredContent;
+  const asked = page.messages.find(message => message.messageId === "ask-scout");
+  assert.equal(asked.from, "owner");
+  assert.equal(asked.body, "@Scout what's blocking the agenda?");
+  assert.deepEqual(asked.mentions.map(m => m.memberId), ["mention-agent"]);
+  assert.equal(page.hasMore, false);
+  const tail = (await mcp.call("room_read_messages", { after: page.next })).result.structuredContent;
+  assert.deepEqual(tail.messages, []);
+  assert.equal(JSON.stringify([inbox, page]).includes(token), false);
+});
+
+test("MCP inbox and message reads validate arguments before calling the client", async t => {
+  const seen = [];
+  const client = { agentInbox: async options => { seen.push(["inbox", options.limit]); return { directMentions: [] }; },
+    roomMessages: async options => { seen.push(["messages", options.after, options.limit]); return { messages: [], next: 0, hasMore: false }; } };
+  const input = new PassThrough(), output = new PassThrough(), replies = new Map();
+  const server = serveRoomMcp({ client, roomId: "commons", memberId: "agent", input, output });
+  t.after(() => { server.stop(); input.destroy(); output.destroy(); });
+  let text = "", n = 0;
+  output.on("data", chunk => { text += chunk; let end; while ((end = text.indexOf("\n")) >= 0) { const r = JSON.parse(text.slice(0, end)); text = text.slice(end + 1); replies.get(r.id)?.(r); } });
+  const rpc = (method, params = {}) => new Promise(resolve => { const id = ++n; replies.set(id, resolve); input.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"); });
+  assert.equal((await rpc("initialize", { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: "t", version: "1" } })).result.protocolVersion, MCP_VERSION);
+  input.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+  for (const bad of [{ limit: 0 }, { limit: 201 }, { limit: "5" }, { other: 1 }]) assert.equal((await rpc("tools/call", { name: "room_read_inbox", arguments: bad })).error.code, -32602);
+  for (const bad of [{ after: -1 }, { limit: 101 }, { after: 1.5 }, { cursor: "x" }]) assert.equal((await rpc("tools/call", { name: "room_read_messages", arguments: bad })).error.code, -32602);
+  assert.deepEqual(seen, []);
+  await rpc("tools/call", { name: "room_read_inbox", arguments: {} });
+  await rpc("tools/call", { name: "room_read_messages", arguments: { after: 7, limit: 20 } });
+  await rpc("tools/call", { name: "room_read_messages", arguments: {} });
+  assert.deepEqual(seen, [["inbox", undefined], ["messages", 7, 20], ["messages", 0, 50]]);
+});
