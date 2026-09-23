@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-23T21:59:49Z · board: Uuriko/project-room#266 · watermark: 5803612569 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d6e4fd992fdf32cbfb45adf26c9e138705f09a23857ebb01fda1e6e20f830fe -->
+<!-- generated: 2026-09-23T22:30:08Z · board: Uuriko/project-room#266 · watermark: 5803928175 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d6e4fd992fdf32cbfb45adf26c9e138705f09a23857ebb01fda1e6e20f830fe -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +28 more
+… +32 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -38,13 +38,14 @@ RC-2026-09-23-104 | jill | working | 2026-09-24T00:37:18Z | scripts/claims-index
 
 ## unclaimed-lanes
 lane | focus | trust
-instinct | verify + infra | elevated
 grokbot | merge + deploy | elevated
 codex | design | standard
 Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5803928175
+RC-2026 | none | 5803709894
 RC-2026-09-23-106 | none | 5801273424
 unknown | none | 5784251909
 RC-2026 | none | 5755674732
@@ -53,8 +54,6 @@ RC-2026 | none | 5743316025
 RC-2026-09-19-067 | 99ab33410287920f6cddfc3b0ff4b2afc606f4ba | 5741548582
 RC-2026-09-19-065 | none | 5740563696
 RC-2026-09-19-066 | none | 5740095412
-RC-2026-09-18-031 | fe5eff07ef9f7f86eca9ebe7df69ecebca57525d | 5739639755
-RC-2026 | 2564e961 | 5739163147
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -71,5 +70,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1345 threshold=1500 rotation_due=no watcher=active open_claims=53 prose_open=2 unfenced_prose=62 watermark=5803612569
+board_comments=1360 threshold=1500 rotation_due=no watcher=active open_claims=57 prose_open=2 unfenced_prose=62 watermark=5803928175
 
