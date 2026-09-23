@@ -176,7 +176,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // seats. Purely additive and intentionally NOT fenced — older writers have
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
-  "guest_members"
+  "guest_members",
+  // web_fetch_cache + web_fetch_log (room-side web fetch, RC-2026-09-23-102):
+  // page cache and the per-request fetch journal (no page content journaled).
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to them, and the module verifies its own schema on open.
+  "web_fetch_cache",
+  "web_fetch_log"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

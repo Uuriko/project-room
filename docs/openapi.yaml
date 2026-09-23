@@ -586,6 +586,111 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/web/fetch:
+    post:
+      summary: Fetch a public web page as markdown and/or deterministic highlights
+      description: |
+        Room-side web fetch (clean-room scrape-style API; no external service).
+        One fetch covers every requested format: `formats.markdown` returns
+        the page as hand-rolled markdown (scripts/styles/nav/footer/aside
+        stripped, links resolved against the final URL), and
+        `formats.highlights` returns deterministic query-relevant passages —
+        the markdown is split on headings, sections are scored by query-term
+        overlap, and the top passages come back in page order, each prefixed
+        with its section heading in [brackets]. No LLM is involved.
+        At least one format must be true; `highlightsParams.query` is required
+        when highlights are requested.
+        SSRF hardening: http/https only, no credentials in the URL, ports
+        80/443 only, the host is DNS-resolved and private/loopback/link-local/
+        multicast/reserved/CGNAT addresses are refused (403 `blocked_host`),
+        every redirect is re-validated (max 5), the body is capped at 2MB and
+        the whole fetch at 15s. Only HTML pages are accepted (415
+        `unsupported_content`). Expected failures are typed and never 500s:
+        `invalid_url`, `blocked_host`, `fetch_failed`, `unsupported_content`,
+        `rate_limited`, `timeout`.
+        Results are cached per normalized URL (`maxAgeMs`, default 24h,
+        0 forces a fresh fetch, max 30d); `cache_metadata` reports
+        `hit`/`miss` and `age_ms`. Rate limits are 100/day per member and
+        1000/day per room (SQLite-backed, cache hits count); exceeding them
+        answers 429 `rate_limited` with `retryAfterMs`/`resetAt` and a
+        `Retry-After` header. Every attempt is journaled per room (host, cache
+        hit/miss, bytes, tags, request_id); page content is never journaled.
+        Owner and full members only — guests get 403 `guest_scope_denied`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, formats]
+              properties:
+                url: { type: string, description: http/https URL to fetch }
+                formats:
+                  type: object
+                  properties:
+                    markdown: { type: boolean }
+                    highlights: { type: boolean }
+                  description: At least one of markdown/highlights must be true
+                highlightsParams:
+                  type: object
+                  required: [query]
+                  properties:
+                    query: { type: string, maxLength: 500 }
+                    maxPassages: { type: integer, minimum: 1, maximum: 20, default: 5 }
+                maxAgeMs: { type: number, minimum: 0, maximum: 2592000000, default: 86400000,
+                  description: Cache freshness; 0 forces a fresh fetch }
+                tags: { type: array, maxItems: 20, items: { type: string, maxLength: 64 },
+                  description: Journaled labels for the fetch }
+      responses:
+        '200':
+          description: Fetch result with cache metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, description: Final URL after redirects }
+                  markdown:
+                    type: object
+                    properties:
+                      requested: { type: boolean }
+                      data: { type: string, nullable: true }
+                  highlights:
+                    type: object
+                    properties:
+                      requested: { type: boolean }
+                      data: { type: array, items: { type: string } }
+                  metadata:
+                    type: object
+                    properties:
+                      title: { type: string }
+                      description: { type: string }
+                      language: { type: string }
+                      headings: { type: array, items: { type: string } }
+                  cache_metadata:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [hit, miss] }
+                      age_ms: { type: number, nullable: true }
+                  request_id: { type: string }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Guest members are refused (guest_scope_denied), or the host is blocked (blocked_host)
+        '405':
+          description: Only POST is served on this route
+        '415':
+          description: Only HTML pages can be fetched (unsupported_content)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Daily fetch quota exceeded (rate_limited); Retry-After header + retryAfterMs/resetAt body
+        '502':
+          description: The page could not be fetched (fetch_failed)
+        '504':
+          description: Fetching exceeded the 15s limit (timeout)
   /api/agent-identities:
     post:
       summary: Create a multi-room agent identity

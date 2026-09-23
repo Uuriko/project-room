@@ -26,6 +26,7 @@ import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -2351,6 +2352,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionAckMatch = /^\/api\/rooms\/([^/]{1,384})\/mentions\/([^/]{1,128})\/ack$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
+      // Room-side web fetch (RC-2026-09-23-102): POST-only scrape-style API,
+      // documented in docs/openapi.yaml like every other route literal here.
+      const webFetchMatch = /^\/api\/rooms\/([^/]{1,384})\/web\/fetch$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
       // route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file.
@@ -2439,11 +2443,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
-        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
+        && !mentionAckMatch && !mentionSettingsMatch && !webFetchMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
-        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
+        ?? mentionAckMatch ?? mentionSettingsMatch ?? webFetchMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
@@ -2452,7 +2456,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
-        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";      const selected = roomCredentials(req, url);
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings"
+        : webFetchMatch ? "web-fetch" : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
         : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -2690,6 +2695,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.agentPlugin.setRoomVerificationPolicy({
           roomId, requireVerified: data.requireVerified, setBy: auth.member.id,
         }));
+      }
+      if (route === "web-fetch") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        // RC-2026-09-23-102: owner + full members only. The guest gate uses
+        // the #798 code and copy (isWebFetchGuest covers ga1. guest-agents
+        // and human share-link guests with role === "guest"). There is no
+        // drafts-only member tier in the room data model, so every other
+        // active member qualifies; the choice is documented in the PR.
+        if (!auth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(auth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        const data = await body(req);
+        try {
+          return json(res, 200, await store.webFetch.fetch(roomId, auth.member.id, data));
+        } catch (error) {
+          // Quota-exceeded is a typed 429 with retry info, never a 500.
+          if (error instanceof WebFetchError && error.code === "rate_limited") {
+            res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+            return json(res, 429, { error: { code: error.code, message: error.message },
+              retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+          }
+          throw error;
+        }
       }
       if (route === "search" && req.method === "GET") {
         // Round-2 #113: full-text search over messages and work items.
