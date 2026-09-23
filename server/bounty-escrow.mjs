@@ -297,6 +297,7 @@ export const bountyEscrowSchema = `
 // pruned by the ladder itself.
 + `
   CREATE TABLE IF NOT EXISTS bounty_flakes (
+    flake_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL,
     lane TEXT NOT NULL,
     bounty_id TEXT NOT NULL,
@@ -1256,8 +1257,9 @@ export class BountyEscrow {
   _recordFlake(roomId, lane, bountyId, reason) {
     const now = this.nowMs();
     const rung = Math.min(this._flakeStrikes(roomId, lane, now).length + 1, FLAKE_COOLDOWN_RUNG);
-    this.db.prepare(`INSERT INTO bounty_flakes (room_id, lane, bounty_id, struck_at_ms, reason, rung)
-      VALUES (?,?,?,?,?,?)`).run(roomId, lane, bountyId, now, reason, rung);
+    const flakeId = newId("flk_");
+    this.db.prepare(`INSERT INTO bounty_flakes (flake_id, room_id, lane, bounty_id, struck_at_ms, reason, rung)
+      VALUES (?,?,?,?,?,?,?)`).run(flakeId, roomId, lane, bountyId, now, reason, rung);
     const state = this._flakeState(roomId, lane);
     const event = this._event(roomId, "flake.recorded",
       { bountyId, actor: RULE_ACTOR,
