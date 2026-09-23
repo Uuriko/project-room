@@ -182,6 +182,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // web_fetch_cache + web_fetch_log (room-side web fetch, RC-2026-09-23-102):
+  // page cache and the per-request fetch journal (no page content journaled).
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to them, and the module verifies its own schema on open.
+  "web_fetch_cache",
+  "web_fetch_log",
   // thread_mutes (per-thread mutes): one row per (room, member, thread
   // root). Purely additive and intentionally NOT fenced — older writers have
   // no code path to it, and muting is a private read-time filter, never a

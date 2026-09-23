@@ -26,6 +26,7 @@ import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -2283,6 +2284,43 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
+      // Room-side web fetch (RC-2026-09-23-102): POST /api/web/fetch. The room
+      // comes from the credential itself — room bearer credentials (access
+      // keys and room sessions) carry their room_id, so no roomId appears in
+      // the path. Identity secrets and API keys cannot resolve a room without
+      // one and answer 401 here; use a room bearer credential instead.
+      // Documented in docs/openapi.yaml like every other route literal here.
+      if (url.pathname === "/api/web/fetch") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        const isBearer = Boolean(req.headers.authorization);
+        const token = bearer(req) ?? cookie(req, roomCookieName);
+        const webAuth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
+        // Owner + full members only. The guest gate uses the #798 code and
+        // copy (isWebFetchGuest covers ga1. guest-agents and human
+        // share-link guests with role === "guest"). There is no drafts-only
+        // member tier in the room data model, so every other active member
+        // qualifies; the choice is documented in the PR.
+        if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        protectWrite(req, webAuth, isBearer);
+        rate(`write:${webAuth.credentialHash}`, 60);
+        const data = await body(req);
+        try {
+          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
+        } catch (error) {
+          // Quota-exceeded is a typed 429 with retry info, never a 500.
+          // Every typed failure carries its request_id for journal correlation.
+          if (error instanceof WebFetchError) {
+            const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
+            if (error.code === "rate_limited") {
+              res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+            }
+            return json(res, error.status, payload);
+          }
+          throw error;
+        }
+      }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
@@ -2493,7 +2531,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
-        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";      const selected = roomCredentials(req, url);
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings"
+        : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
         : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
