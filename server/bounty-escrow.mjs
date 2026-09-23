@@ -411,14 +411,16 @@ export function convergeBountyDeployedSchema(db) {
   // keep a pinned version to cite against. Deterministic: the same criteria
   // text always yields the same v1 pin.
   _backfillRubricPins(db);
+  // 5. 2026-09-23 slug-collision repair: re-key bounty_sequences by room
+  // slug (see migrateBountySequencesToSlugKey). Data-only, idempotent.
+  migrateBountySequencesToSlugKey(db);
 }
 
 // Pin the default derived rubric (v1) onto bounty_records rows that predate
 // slice 6, and record each pin in bounty_rubric_versions. Exported for the
 // _migrateColumns fallback path (older test doubles); the boot convergence
 // above is the production path.
-export function _backfillRubricPins(db) {
-  const rows = db.prepare(
+export function _backfillRubricPins(db) {  const rows = db.prepare(
     "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
   const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
     (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by) VALUES (?,?,?,?,?,?,?)`);
@@ -430,6 +432,54 @@ export function _backfillRubricPins(db) {
     update.run(json, hash, row.bounty_id);
     insert.run(row.room_id, row.bounty_id, 1, hash, json, row.created_at, row.poster ?? "unknown");
   }
+}
+
+// Bounty-id slug-collision repair (2026-09-23 production incident).
+//
+// bounty_records.bounty_id is a GLOBAL primary key, but _nextBountyId keyed
+// the per-id sequence by room_id while minting `${roomSlug(roomId)}-${n}` —
+// and roomSlug truncates to 12 alphanumeric characters. Two rooms whose
+// slugs collide (e.g. instinct-bp-1790125051 and instinct-bp-1790153495 both
+// slug to INSTINCTBP17) each started their own counter at 1, so the second
+// room's every propose died with "UNIQUE constraint failed:
+// bounty_records.bounty_id" — a permanent 500, since the per-room sequence
+// rolled back with the failed transaction and retries never healed. Reads
+// kept working, matching the observed signature exactly.
+//
+// The repair keys the sequence by the slug instead of the room id: ids stay
+// in the same quotable `${SLUG}-${n}` shape, stay sequential in the common
+// (distinct-slug) case, and can never collide across rooms. Same-slug rooms
+// share one counter, so the second room's first bounty is SLUG-2 — slightly
+// surprising numbering, infinitely better than a permanent 500.
+//
+// The sequence table keeps its DDL byte-identical (the strict DDL-text
+// verifySchema compares stored DDL verbatim, so no comment or rename may
+// touch the schema literal): the `room_id` column now stores the slug key.
+// This migration is idempotent and runs both at RoomStore boot
+// (convergeBountyDeployedSchema, the production path) and in the
+// request-time _ensure() fallback for direct (non-store) construction.
+export function migrateBountySequencesToSlugKey(db) {
+  const bySlug = new Map(); // slug -> next_n
+  // Defense in depth first: a minted bounty row without a sequence row must
+  // never let the counter rewind below an id that already exists.
+  for (const { bounty_id } of db.prepare("SELECT bounty_id FROM bounty_records").all()) {
+    const m = /^([A-Z0-9]{1,12})-(\d+)$/.exec(bounty_id);
+    if (!m) continue;
+    const n = Number(m[2]);
+    if (Number.isSafeInteger(n)) bySlug.set(m[1], Math.max(bySlug.get(m[1]) ?? 0, n + 1));
+  }
+  const rows = db.prepare("SELECT room_id AS k, next_n AS n FROM bounty_sequences").all();
+  for (const { k, n } of rows) {
+    const slug = roomSlug(k);
+    if (Number.isSafeInteger(n)) bySlug.set(slug, Math.max(bySlug.get(slug) ?? 0, n));
+  }
+  if (bySlug.size === 0) return;
+  // Skip the rewrite when the table is already converged (the common case
+  // after the first run): avoids write churn on every boot.
+  if (rows.length === bySlug.size && rows.every(({ k, n }) => bySlug.get(k) === n)) return;
+  db.exec("DELETE FROM bounty_sequences");
+  const insert = db.prepare("INSERT INTO bounty_sequences (room_id, next_n) VALUES (?, ?)");
+  for (const [slug, n] of bySlug) insert.run(slug, n);
 }
 
 class EscrowError extends Error {
@@ -580,9 +630,13 @@ export function citationsAgainstRubric(citations, rubric) {
       `pinned rubric criterion "${id}" has no citation`);
   return Object.freeze(citations.map(c => Object.freeze({ criterionId: c.criterionId, verdict: c.verdict })));
 }
-// Quotable sequential bounty ids per room (e.g. ROOM-12). The bracketed form
+// Human-readable bounty id prefix per room (e.g. ROOM-12). The bracketed form
 // [ROOM-12] is link-only in slice 1: no code path scans text for references,
-// so bare or bracketed mentions can never trigger a side effect.
+// so bare or bracketed mentions can never trigger a side effect. NOTE: the
+// slug is only 12 alphanumeric characters and is NOT unique per room —
+// _nextBountyId keys the sequence by slug (shared counter for colliding
+// slugs) because bounty_records.bounty_id is a global primary key
+// (2026-09-23 slug-collision repair).
 const roomSlug = roomId => roomId.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12) || "ROOM";
 
 export class BountyEscrow {
@@ -640,6 +694,10 @@ export class BountyEscrow {
         // bounty_records has no column named rubric_json" while reads kept
         // working — the 2026-09-22 post-#792 regression.
         this._migrateColumns();
+        // 2026-09-23 slug-collision repair (see migrateBountySequencesToSlugKey):
+        // the request-time fallback path must converge the sequence key the
+        // same way the boot path does.
+        migrateBountySequencesToSlugKey(this.db);
         this._ready = true;
       }
     }
@@ -871,11 +929,18 @@ export class BountyEscrow {
   }
 
   // --- sequential bounty ids --------------------------------------------------
+  // Quotable sequential ids per room slug (e.g. ROOM-12). The sequence is
+  // keyed by the 12-char slug, NOT the room id: bounty_records.bounty_id is
+  // a global primary key, so two rooms whose slugs collide must share one
+  // counter or the second room's every propose 500s on UNIQUE constraint
+  // failure (2026-09-23 incident). Same-slug rooms therefore share
+  // numbering; distinct slugs are unaffected.
   _nextBountyId(roomId) {
+    const slug = roomSlug(roomId);
     const n = this.db.prepare(`INSERT INTO bounty_sequences(room_id, next_n) VALUES(?, 2)
       ON CONFLICT(room_id) DO UPDATE SET next_n = bounty_sequences.next_n + 1
-      RETURNING next_n - 1 AS n`).get(roomId).n;
-    return `${roomSlug(roomId)}-${n}`;
+      RETURNING next_n - 1 AS n`).get(slug).n;
+    return `${slug}-${n}`;
   }
 
   // --- watchers -----------------------------------------------------------------
