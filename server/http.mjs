@@ -25,7 +25,8 @@ import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
-import { guestAgentLinkContract } from "./guest-agent-links.mjs";
+import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX } from "./guest-agent-links.mjs";
+import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
@@ -2065,6 +2066,99 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
         return json(res, 200, store.guestAgentLinks.join(data.linkToken));
       }
+      // GX-… guest invites (RC-2026-09-23-100): the public-handoff flow.
+      // The invite code is public-safe (single-use, hash-stored, grants
+      // nothing); the ga1. credential is issued only at redemption, after
+      // the guest presents an ai_… identity and a signed agent card.
+      if (url.pathname === "/api/guest-invites" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, guestInviteContract(), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/guest-invites" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-mint:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room and guest invite mint fields");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
+          : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer <redacted> sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        protectWrite(req, auth, selected.bearer);
+        const result = store.guestInvites.mint(selected.token, data.roomId, data, fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (url.pathname === "/api/guest-invites/preview" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-preview:${remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["inviteCode"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Guest invite code required");
+        return json(res, 200, store.guestInvites.preview(data.inviteCode));
+      }
+      if (url.pathname === "/api/guest-invites/redeem" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-redeem:${remoteAddress}`, 10);
+        // The identity secret rides the Authorization header (never the
+        // body): the share-links join-agent flow uses the same convention.
+        const identitySecret = bearer(req);
+        const data = await body(req);
+        if (!identitySecret) reject(401, "unauthenticated", "Present your agent identity secret as a Bearer token");
+        if (!exact(data, ["inviteCode", "card"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Supply the invite code and a signed agent card");
+        rate(`guest-invite-redeem-code:${rateHash(data.inviteCode)}`, 5);
+        const result = store.guestInvites.redeem(data.inviteCode, identitySecret, data.card);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-rotate:${remoteAddress}`, 10);
+        const guestToken = bearer(req);
+        if (!guestToken) reject(401, "unauthenticated", "Present your guest credential as a Bearer token");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
+        const fence = expectedBinding(req);
+        return json(res, 200, store.guestInvites.rotate(guestToken, data.roomId, fence));
+      }
+      if (url.pathname === "/api/guest-invites/list" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.guestInvites.list(selected.token, data.roomId, fence));
+      }
+      if (url.pathname === "/api/guest-invites/revoke" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId) || typeof data.inviteId !== "string") reject(422, "invalid_guest_invite", "Supply the room and invite id");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.guestInvites.revoke(selected.token, data.roomId, data.inviteId, fence));
+      }
+      if (url.pathname === "/api/guest-invites/disconnect" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId) || typeof data.memberId !== "string") reject(422, "invalid_guest_invite", "Supply the room and guest member id");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.guestInvites.disconnect(selected.token, data.roomId, data.memberId, fence));
+      }
+      if (url.pathname === "/api/guest-invites/revoke-all" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.guestInvites.revokeAll(selected.token, data.roomId, fence));
+      }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`link-preview:${remoteAddress}`, 30);
@@ -3073,6 +3167,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
+        // RC-2026-09-23-100: per-guest message token bucket (chat spam
+        // mitigation). The per-request scope gate in RoomStore#command is
+        // the authority boundary; this is volume control.
+        if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
+          rate(`guest-post:${rateHash(selected.token)}`, 120);
+        }
         const result = store.command(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
