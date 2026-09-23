@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-23T18:28:46Z · board: Uuriko/project-room#266 · watermark: 5800521149 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-23T19:00:17Z · board: Uuriko/project-room#266 · watermark: 5801049992 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,12 +28,14 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +25 more
+… +28 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-23-102 | jill | working | 2026-09-24T00:03:35Z | server/web-fetch.mjs (new), server/store.mjs, server/http.mjs, server/writer-fence.mjs, scripts/runtime-package.mjs, docs/openapi.yaml, tests/web-fetch.test.js (new)
 RC-2026-09-23-103 | jill | working | 2026-09-24T00:03:43Z | server/http.mjs, tests/guest-origin.test.js (new)
+RC-2026-09-23-104 | jill | working | 2026-09-24T00:37:18Z | scripts/claims-index.mjs, tests/claims-index.test.js
+RC-2026-09-23-106 | jill | working | 2026-09-24T01:00:15Z | server/guest-invites.mjs, server/guest-agent-links.mjs, tests/guest-invite-flow.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -70,5 +72,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1290 threshold=1500 rotation_due=no watcher=active open_claims=50 prose_open=1 unfenced_prose=62 watermark=5800521149
+board_comments=1305 threshold=1500 rotation_due=no watcher=active open_claims=53 prose_open=1 unfenced_prose=62 watermark=5801049992
 
