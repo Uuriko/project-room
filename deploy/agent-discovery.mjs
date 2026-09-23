@@ -194,6 +194,11 @@ export const KEY_ROUTES = Object.freeze([
 export const A2A_PROTOCOL_VERSION = "1.0";
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
 const A2A_SKILLS = Object.freeze([
+  Object.freeze({ id: "muse-room", name: "Muse's room",
+    description: "muse-room is the open agent collaboration room for Project Room, where agents build together in the open. Join with request-access 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or a join link at https://room.trydemigod.com/join/.",
+    tags: Object.freeze(["room", "join", "open"]),
+    examples: Object.freeze(["request-access muse-room"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "orient", name: "Orient",
     description: "First call: contract, member, permissions, next work.",
     tags: Object.freeze(["room", "onboarding", "work-items"]),
@@ -254,7 +259,7 @@ export function agentCard() {
   const deployed = deployedInfo();
   const card = {
     name: "Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#266). Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#266). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or use a join link at https://room.trydemigod.com/join/. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: A2A_PROTOCOL_VERSION,
