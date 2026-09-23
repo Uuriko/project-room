@@ -231,8 +231,10 @@ export class GuestInvites {
     if (typeof guestLabel !== "string" || !guestLabel.trim() || guestLabel.trim().length > 120) {
       fail(422, "invalid_guest_invite", "Name the guest project so the invite list stays readable");
     }
-    const tier = details.tier ?? "observer";
-    if (!Object.hasOwn(GUEST_INVITE_TIERS, tier)) fail(422, "invalid_guest_invite", "Tier is observer or contributor");
+    const tier = "observer";
+    if (details.tier !== undefined && details.tier !== "observer") {
+      fail(422, "invalid_guest_invite", "Invites mint at observer; the owner upgrades to contributor explicitly");
+    }
     const credentialTtlMs = details.credentialTtlMs ?? GUEST_CREDENTIAL_TTL_DEFAULT_MS;
     if (!Number.isSafeInteger(credentialTtlMs) || credentialTtlMs < GUEST_CREDENTIAL_TTL_MIN_MS || credentialTtlMs > GUEST_CREDENTIAL_TTL_MAX_MS) {
       fail(422, "invalid_guest_invite", "Credential TTL must be between 1 hour and 14 days");
@@ -510,6 +512,26 @@ export class GuestInvites {
         n++;
       }
       return { revoked: n };
+    });
+  }
+
+  // Owner upgrades (or downgrades) a guest's tier. Contributor is never
+  // granted at mint or redemption — it is always an explicit owner decision.
+  // Returning identities keep their existing tier on re-redemption; only
+  // this operation changes it. The tier lives in guest_members and is read
+  // on every command, so the change takes effect immediately.
+  upgrade(token, roomId, memberId, tier, binding) {
+    if (!isGuestAgentMemberId(memberId)) fail(422, "invalid_guest_invite", "That member is not a guest");
+    if (!Object.hasOwn(GUEST_INVITE_TIERS, tier)) fail(422, "invalid_guest_invite", "Tier is observer or contributor");
+    return this.store.transaction(() => {
+      this.ownerGate(token, roomId, binding);
+      const seat = this.db.prepare("SELECT tier FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
+      if (!seat) fail(404, "guest_not_found", "No guest seat with that member id");
+      const member = this.store.room(roomId).state.members[memberId];
+      if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
+      if (seat.tier === tier) return { memberId, tier, unchanged: true };
+      this.db.prepare("UPDATE guest_members SET tier=? WHERE member_id=? AND room_id=?").run(tier, memberId, roomId);
+      return { memberId, tier, unchanged: false };
     });
   }
 

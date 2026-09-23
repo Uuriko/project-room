@@ -6884,6 +6884,34 @@ paths:
         '200': { description: "{ revoked: n }" }
         '403': { description: owner_required }
         '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites-upgrade:
+    post:
+      summary: Upgrade or downgrade a GX guest's tier
+      description: >-
+        Owner by ID with `manage_members`. Contributor is never granted at
+        mint or redemption — it is always an explicit owner decision via
+        this operation. Body is exactly `{ memberId, tier }` where tier is
+        `observer` or `contributor`. The tier change takes effect immediately
+        (read on every command) and is visible in the invite list. 30 per
+        address per minute.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memberId, tier]
+              properties:
+                memberId: { type: string, description: "guest-agent-* member id" }
+                tier: { type: string, enum: [observer, contributor] }
+      responses:
+        '200': { description: "{ memberId, tier, unchanged }" }
+        '403': { description: owner_required }
+        '404': { description: guest_not_found }
+        '422': { description: invalid_guest_invite }
+        '429': { description: rate_limited }
   /api/rooms/{roomId}/invitations/{invitationId}/revoke:
     post:
       summary: Revoke a targeted membership invitation

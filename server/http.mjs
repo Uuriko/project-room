@@ -2327,7 +2327,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3019,6 +3019,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "guest-invites-revoke-all" && req.method === "POST") {
         rate(`guest-invite-admin:${remoteAddress}`, 30);
         return json(res, 200, store.guestInvites.revokeAll(selected.token, roomId, fence));
+      }
+      if (route === "guest-invites-upgrade" && req.method === "POST") {
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const upgradeBody = await body(req);
+        return json(res, 200, store.guestInvites.upgrade(selected.token, roomId, upgradeBody.memberId, upgradeBody.tier, fence));
       }
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);

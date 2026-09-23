@@ -115,9 +115,13 @@ test("mint validates TTL range and tier", async t => {
   assert.equal(twoWeeks.status, 201);
   const badTier = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: mintBody({ tier: "admin" }) });
   assert.equal(badTier.status, 422);
-  const contributor = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: mintBody({ tier: "contributor", guestLabel: "drafts" }) });
-  assert.equal(contributor.status, 201);
-  assert.deepEqual((await contributor.json()).scopes, ["guest:read", "guest:post", "guest:draft"]);
+  // Contributor is an explicit owner upgrade, never a mint tier.
+  const contributorMint = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: mintBody({ tier: "contributor", guestLabel: "drafts" }) });
+  assert.equal(contributorMint.status, 422);
+  assert.equal((await contributorMint.json()).error.code, "invalid_guest_invite");
+  const observer = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: mintBody({ guestLabel: "observer-default" }) });
+  assert.equal(observer.status, 201);
+  assert.deepEqual((await observer.json()).scopes, ["guest:read", "guest:post"]);
 });
 
 test("preview reveals the room and terms but no people-data and no credential", async t => {
@@ -261,14 +265,24 @@ test("one seat per identity per room; names come from the card and collide safel
 
 async function redeemGuest(t, serveResult, { name = "Synapse", tier } = {}) {
   const { store, request, ownerKey } = serveResult;
-  const minted = await mintInvite(request, ownerKey, tier ? { tier, guestLabel: `${name} ${tier}` } : { guestLabel: name });
+  // Invites always mint at observer; contributor comes from an explicit
+  // owner upgrade after redemption.
+  const minted = await mintInvite(request, ownerKey, { guestLabel: tier ? `${name} ${tier}` : name });
   const identity = store.identities.create(name);
   const keys = generateKeyPair();
   const cardBody = { name, description: "visiting agent", capabilities: ["chat"] };
   const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
   const res = await request("/api/guest-invites/redeem", { method: "POST", token: identity.secret, data: { inviteCode: minted.code, card } });
   assert.equal(res.status, 201);
-  return { ...(await res.json()), identity, minted };
+  const guest = { ...(await res.json()), identity, minted };
+  if (tier === "contributor") {
+    const upgraded = await request("/api/rooms/commons/guest-invites-upgrade", {
+      method: "POST", token: ownerKey, data: { memberId: guest.member.id, tier: "contributor" },
+    });
+    assert.equal(upgraded.status, 200);
+    guest.scopes = ["guest:read", "guest:post", "guest:draft"];
+  }
+  return guest;
 }
 
 test("observer guests chat and react; everything else is refused at the command gate", async t => {
@@ -316,6 +330,44 @@ test("guest votes never count: the exclusion predicate covers every guest member
   assert.equal(guestVoteExcluded("owner"), false);
   assert.equal(guestVoteExcluded("guest-agent-abc123"), true);
   assert.equal(guestVoteExcluded(null), false);
+});
+
+test("owner upgrades a guest to contributor explicitly; re-redemption cannot escalate", async t => {
+  const s = await serve(t);
+  const { store, request, ownerKey } = s;
+  const guest = await redeemGuest(t, s, { name: "Upgradable" });
+  assert.deepEqual(guest.scopes, ["guest:read", "guest:post"]);
+
+  // Non-owners cannot upgrade.
+  const anonUpgrade = await request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", data: { memberId: guest.member.id, tier: "contributor" },
+  });
+  assert.equal(anonUpgrade.status, 401);
+
+  // Owner upgrades: tier changes, journaled.
+  const upgraded = await request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", token: ownerKey, data: { memberId: guest.member.id, tier: "contributor" },
+  });
+  assert.equal(upgraded.status, 200);
+  assert.equal((await upgraded.json()).tier, "contributor");
+  assert.equal(store.guestInvites.guestTierOf(guest.member.id), "contributor");
+
+  // Invalid tier and unknown member are refused.
+  const badTier = await request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", token: ownerKey, data: { memberId: guest.member.id, tier: "admin" },
+  });
+  assert.equal(badTier.status, 422);
+  const unknown = await request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", token: ownerKey, data: { memberId: "guest-agent-0000000000000000", tier: "contributor" },
+  });
+  assert.equal(unknown.status, 404);
+
+  // Owner can downgrade back to observer.
+  const downgraded = await request("/api/rooms/commons/guest-invites-upgrade", {
+    method: "POST", token: ownerKey, data: { memberId: guest.member.id, tier: "observer" },
+  });
+  assert.equal(downgraded.status, 200);
+  assert.equal(store.guestInvites.guestTierOf(guest.member.id), "observer");
 });
 
 test("expiry stops the credential and the next owner mint sweeps the member", async t => {
