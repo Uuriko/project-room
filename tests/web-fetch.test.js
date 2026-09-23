@@ -14,6 +14,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -22,7 +23,7 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   normalizeUrl, ipLiteralBlocked, htmlToMarkdown, extractMetadata,
   extractHighlights, cacheKeyFor, assertFetchableUrl, fetchPage,
-  WebFetchError, webFetchContract,
+  WebFetchError, webFetchContract, migrateWebFetchLogColumns,
 } from "../server/web-fetch.mjs";
 
 // The loopback allowance is read dynamically, so strict-mode tests can
@@ -291,6 +292,34 @@ test("owner fetch returns markdown, highlights, metadata and a miss", async t =>
   assert.ok(row.bytes > 0);
   assert.deepEqual(JSON.parse(row.tags_json), ["research"]);
   assert.ok(!("markdown" in row) && !("content" in row), "no page content in journal");
+  // Key-awareness seam for a future per-key API tier: the credential hash is
+  // journaled (never enforced) so per-key counting needs no rework.
+  assert.ok(typeof row.credential_hash === "string" && row.credential_hash.length > 0,
+    "credential hash journaled");
+});
+
+test("migrateWebFetchLogColumns backfills credential_hash on old tables", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-web-fetch-mig-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(directory, "mig.sqlite"));
+  // Simulate a pre-feature table without the credential_hash column.
+  db.exec(`CREATE TABLE web_fetch_log (
+    request_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, member_id TEXT NOT NULL,
+    host TEXT NOT NULL, cache_status TEXT NOT NULL, bytes INTEGER NOT NULL,
+    tags_json TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+  db.prepare(`INSERT INTO web_fetch_log
+    (request_id, room_id, member_id, host, cache_status, bytes, tags_json, created_at)
+    VALUES('wf_old','r1','m1','example.com','miss',10,'[]',1)`).run();
+  migrateWebFetchLogColumns(db);
+  migrateWebFetchLogColumns(db); // idempotent
+  const cols = db.prepare("PRAGMA table_info(web_fetch_log)").all().map(c => c.name);
+  assert.ok(cols.includes("credential_hash"), "column added");
+  const row = db.prepare("SELECT credential_hash FROM web_fetch_log WHERE request_id='wf_old'").get();
+  assert.equal(row.credential_hash, null, "old rows read as null");
+  const idx = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name='web_fetch_log_key_time'").get();
+  assert.ok(idx, "key-time index exists for future per-key counting");
+  db.close();
 });
 
 test("second fetch is a cache hit with age_ms; maxAgeMs 0 forces fresh", async t => {

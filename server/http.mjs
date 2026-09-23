@@ -2271,7 +2271,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`write:${webAuth.credentialHash}`, 60);
         const data = await body(req);
         try {
-          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data));
+          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
         } catch (error) {
           // Quota-exceeded is a typed 429 with retry info, never a 500.
           // Every typed failure carries its request_id for journal correlation.

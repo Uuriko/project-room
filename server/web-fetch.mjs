@@ -84,6 +84,7 @@ export const webFetchSchema = `
     request_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL REFERENCES rooms(id),
     member_id TEXT NOT NULL,
+    credential_hash TEXT,
     host TEXT NOT NULL,
     cache_status TEXT NOT NULL CHECK(cache_status IN ('hit','miss','error')),
     bytes INTEGER NOT NULL CHECK(bytes >= 0),
@@ -92,7 +93,17 @@ export const webFetchSchema = `
   );
   CREATE INDEX IF NOT EXISTS web_fetch_log_room_time ON web_fetch_log(room_id, created_at);
   CREATE INDEX IF NOT EXISTS web_fetch_log_member_time ON web_fetch_log(room_id, member_id, created_at);
+  CREATE INDEX IF NOT EXISTS web_fetch_log_key_time ON web_fetch_log(credential_hash, created_at);
 `;
+
+// Additive column convergence for databases created before credential_hash
+// existed: old rows backfill NULL and read as { credentialHash: null }.
+// (Same pattern as migrateSpamQuarantineColumns.)
+export function migrateWebFetchLogColumns(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(web_fetch_log)").all().map(c => c.name));
+  if (!columns.has("credential_hash")) db.exec("ALTER TABLE web_fetch_log ADD COLUMN credential_hash TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS web_fetch_log_key_time ON web_fetch_log(credential_hash, created_at)");
+}
 
 // ---------------------------------------------------------------------------
 // URL validation + normalization (invalid_url)
@@ -644,25 +655,29 @@ export class WebFetch {
   }
 
   journal(entry) {
-    this.db.prepare(`INSERT INTO web_fetch_log(request_id, room_id, member_id, host, cache_status, bytes, tags_json, created_at)
-      VALUES(?,?,?,?,?,?,?,?)`).run(entry.requestId, entry.roomId, entry.memberId,
+    // credential_hash is the key-awareness seam: a future outside-agent API
+    // tier (e.g. N fetches/day/key) can count per key off this column without
+    // rework. It is journaled, never enforced, today.
+    this.db.prepare(`INSERT INTO web_fetch_log(request_id, room_id, member_id, credential_hash, host, cache_status, bytes, tags_json, created_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(entry.requestId, entry.roomId, entry.memberId, entry.credentialHash ?? null,
       entry.host, entry.cacheStatus, entry.bytes, JSON.stringify(entry.tags), entry.at);
   }
 
-  async fetch(roomId, memberId, input) {
+  async fetch(roomId, memberId, input, opts = {}) {
     // The request id is minted before validation so every typed failure
     // carries it — clients can correlate a failure with the room journal,
     // which records error attempts under the same id.
     const requestId = `wf_${randomUUID()}`;
+    const credentialHash = opts.credentialHash ?? null;
     try {
-      return await this.fetchInner(roomId, memberId, input, requestId);
+      return await this.fetchInner(roomId, memberId, input, requestId, credentialHash);
     } catch (error) {
       if (error instanceof WebFetchError) error.requestId = requestId;
       throw error;
     }
   }
 
-  async fetchInner(roomId, memberId, input, requestId) {
+  async fetchInner(roomId, memberId, input, requestId, credentialHash) {
     const req = validateInput(input);
     const now = this.store.now();
     const normalized = normalizeUrl(req.url); // invalid_url before quota is touched
@@ -681,7 +696,7 @@ export class WebFetch {
         page = await fetchPage(normalized); // blocked_host / fetch_failed / timeout / unsupported_content
       } catch (error) {
         if (error instanceof WebFetchError) {
-          this.journal({ requestId, roomId, memberId, host: safeHost(normalized), cacheStatus: "error", bytes: 0, tags: req.tags, at: this.store.now() });
+          this.journal({ requestId, roomId, memberId, credentialHash, host: safeHost(normalized), cacheStatus: "error", bytes: 0, tags: req.tags, at: this.store.now() });
         }
         throw error;
       }
@@ -699,7 +714,7 @@ export class WebFetch {
       ? extractHighlights(markdown, req.query, req.maxPassages, metadata.title)
       : [];
     this.journal({
-      requestId, roomId, memberId, host: safeHost(finalUrl),
+      requestId, roomId, memberId, credentialHash, host: safeHost(finalUrl),
       cacheStatus, bytes, tags: req.tags, at: this.store.now(),
     });
     return {

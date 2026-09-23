@@ -46,7 +46,7 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
-import { WebFetch, webFetchSchema } from "./web-fetch.mjs";
+import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -770,6 +770,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
+      migrateWebFetchLogColumns(this.db);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
