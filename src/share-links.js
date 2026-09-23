@@ -50,6 +50,7 @@ export function setShareLinkStatus(element, text) {
 }
 
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
+const changedJoinSession = error => ["csrf_denied", "session_binding_changed", "stale_session_revision", "account_session_required"].includes(error?.code);
 export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
 // Raw transport text ("signal is aborted without reason", "Unexpected token '<'") is not a user message.
 export function requestFailureMessage(error) {
@@ -112,6 +113,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joinFocus = null;
+  let needsSessionReview = false, reviewedSession = null;
   let joined = null, previewRoomId = null, previewRoomTitle = null;
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
@@ -153,6 +155,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     }
   }
   function joinFailureStatus(error) {
+    if (changedJoinSession(error)) return "Your browser session changed, possibly because another tab joined. Review the current browser session before continuing. You do not need to create an account.";
     const room = previewRoomTitle ? `“${previewRoomTitle}”` : "the room";
     if (error?.code === "join_session_lost") return invitationFailureMessage(error);
     if (error?.uncertainJoin) {
@@ -411,17 +414,19 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const retryHadFocus = document.activeElement === $("#join-link-retry");
     const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null; previewRoomTitle = null;
     joinAttempted = false; joinLanded = false;
+    needsSessionReview = false; reviewedSession = null;
     // Resume path (#657 defect 3): an earlier attempt with this token left an
     // uncertain redemption record. Reuse the SAME redemption id — never mint a
     // second join for it.
     const uncertain = readUncertainJoin();
-    const resume = uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
+    const resume = !fragment.reviewSession && uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
     if (resume) redemptionId = resume.redemptionId;
     onAccountSignin(null);
     $("#join-account-choices").hidden = true; $("#join-account-auth").hidden = true;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
+    $("#join-link-retry").textContent = "Retry";
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
@@ -429,6 +434,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
     if (!joinSecret) { $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link."; return; }
     try {
+      if (fragment.reviewSession && !await accountClient.restore()) throw new Error("Unable to confirm your browser session. Review it again.");
+      if (version !== joinVersion) return;
       const { preview, session: account } = await accountClient.prepareShareLink(joinSecret);
       if (version !== joinVersion || !account) return;
       previewRoomId = preview.room.id; previewRoomTitle = preview.room.title;
@@ -445,6 +452,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-guest-note").hidden = Boolean(account.authenticated);
       $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated ? "Join room" : "Continue as guest";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
+      if (fragment.reviewSession) {
+        reviewedSession = account;
+        const identity = account.account?.id;
+        joinStatus(identity
+          ? `Current browser identity: ${identity}. Choose “Confirm and continue” to join or open this room with this identity. Existing membership is reused; unsent drafts from another identity will not be carried over.`
+          : "No signed-in identity is active. Choose “Confirm and continue” only if you want to join as a new guest and use an invitation place.");
+        $("#join-link-submit").textContent = "Confirm and continue";
+      }
       if (resume && version === joinVersion && !joining) {
         // The guest already consented to this exact request; its outcome is
         // unknown. Check whether it completed instead of asking them to re-join.
@@ -464,9 +479,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
         return;
       }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
-      const retryable = canRetryInvitation(error);
+      needsSessionReview = Boolean(fragment.reviewSession) || changedJoinSession(error);
+      const retryable = needsSessionReview || canRetryInvitation(error);
       $("#join-link-retry").hidden = !retryable;
-      joinStatus(interrupted(error) ? "Connection interrupted. Try again." : invitationFailureMessage(error));
+      $("#join-link-retry").textContent = needsSessionReview ? "Review browser session" : "Retry";
+      joinStatus(interrupted(error) ? "Connection interrupted. Try again." : joinFailureStatus(error));
       if (retryable && retryHadFocus && [document.body, $("#join-link-retry")].includes(document.activeElement)) $("#join-link-retry").focus();
     }
   }
@@ -490,15 +507,20 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     try { await navigator.clipboard.writeText(value); if (version === joinVersion) joinStatus("Agent instructions copied."); }
     catch { if (version === joinVersion) { field.focus(); field.select(); joinStatus("Select and copy the agent instructions."); } }
   });
-  $("#join-link-retry").addEventListener("click", () => { if (joinSecret && !joining) open({ token: joinSecret }); });
+  $("#join-link-retry").addEventListener("click", () => {
+    if (joinSecret && !joining) return open({ token: joinSecret, focus: joinFocus, reviewSession: needsSessionReview });
+  });
   async function performJoin({ resume = false } = {}) {
-    if (joining || !joinSecret) return;
+    if (joining || !joinSecret || needsSessionReview) return;
     const version = joinVersion, name = $("#join-link-name").value.trim(); let failed = false;
     joinBusy(true);
     joinStatus(joined ? "Opening room…" : resume ? "Checking whether your earlier join completed…" : "Joining room…");
     try {
+      if (reviewedSession && accountClient.session !== reviewedSession) {
+        throw Object.assign(new Error("Browser session changed"), { code: "session_binding_changed" });
+      }
       if (!joined) {
-        if (getState()) joined = await reuseVisibleRoom(client, previewRoomId, getSession());
+        if (getState() && !reviewedSession) joined = await reuseVisibleRoom(client, previewRoomId, getSession());
         if (!joined) {
           if (!accountClient.session) await accountClient.restore();
           if (version !== joinVersion) return;
@@ -548,6 +570,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion) return;
       failed = true;
       joinStatus(joinFailureStatus(error));
+      if (changedJoinSession(error)) {
+        needsSessionReview = true; reviewedSession = null; joined = null;
+        $("#join-link-form").hidden = true;
+        $("#join-account-choices").hidden = true;
+        $("#join-link-retry").hidden = false;
+        $("#join-link-retry").textContent = "Review browser session";
+      }
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
       const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
@@ -555,7 +584,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);
-      if (failed && version === joinVersion && joinDialog.open) $("#join-link-submit").focus();
+      if (failed && version === joinVersion && joinDialog.open) $(needsSessionReview ? "#join-link-retry" : "#join-link-submit").focus();
     }
   }
   $("#join-link-form").addEventListener("submit", event => { event.preventDefault(); return performJoin(); });

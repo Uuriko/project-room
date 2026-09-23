@@ -33,10 +33,26 @@ const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field 
 
 // Pure derivation. `events` are { sequence, event } rows strictly after the
 // member's cursor, in ascending order; `state` is the live projection so edits
-// and deletions are honoured without a second store.
-export function deriveNotifications({ events, state, member }) {
+// and deletions are honoured without a second store. `mutedThreadIds` is the
+// member's muted thread-root ids (a Set); items from muted threads are
+// skipped at read time, so unmuting restores them on the next read.
+export function deriveNotifications({ events, state, member, mutedThreadIds = null }) {
   const preferences = { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) };
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
+  const muted = mutedThreadIds instanceof Set ? mutedThreadIds : new Set();
+  // A message's thread root: itself when top-level. Walk the reply chain so
+  // a mute on the thread hides every reply in it, not just the root.
+  const threadRootOf = messageId => {
+    let node = messages.get(messageId);
+    const seen = new Set();
+    while (node?.replyToId && !seen.has(node.id)) {
+      seen.add(node.id);
+      const parent = messages.get(node.replyToId);
+      if (!parent) break;
+      node = parent;
+    }
+    return node?.id ?? messageId;
+  };
   const items = new Map(); // dedupe key (messageId|workItemId, kind) -> item
   const put = (kind, targetKind, targetId, row, extra = {}) => {
     const key = `${kind}:${targetId}`;
@@ -54,6 +70,9 @@ export function deriveNotifications({ events, state, member }) {
       const messageId = event.data.messageId || event.id;
       const current = messages.get(messageId);
       if (current?.deletedAt) continue; // A tombstone hides the item with the body.
+      // A muted thread's activity never reaches the feed — read per request,
+      // so unmuting brings its items back on the next read.
+      if (muted.has(threadRootOf(messageId))) continue;
       const message = current ?? { id: messageId, body: event.data.body, replyToId: event.data.replyToId || null, toMemberId: event.data.toMemberId || null };
       // RC-2026-09-19-070: a DM belongs to its two parties. Every other read
       // surface applies this filter at the HTTP layer; this feed derives its
@@ -130,7 +149,8 @@ export class Notifications {
       const truncated = fetched.length > tail;
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const member = room.state.members[auth.member.id] ?? auth.member;
-      const notifications = deriveNotifications({ events: rows, state: room.state, member });
+      const mutedThreadIds = this.store.threadMutes.mutedThreadIds(roomId, auth.member.id);
+      const notifications = deriveNotifications({ events: rows, state: room.state, member, mutedThreadIds });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       return {
