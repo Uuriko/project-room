@@ -109,3 +109,11 @@ A first-time person should find Inbox/Rooms, send a message, reply, invite someo
 Validate after relocation: every old action still reachable, no hidden critical state, no hover-only touch feature, no horizontal overflow, no focus trapped outside a detail pane, no lost drafts or duplicate sends, no private email/DM exposure, no widening permissions. Run core, Cloudflare, invitation, account/session, inbox/Gmail, composer, thread, work/recovery and accessibility gates. Deploy only an exact tested tree and verify public assets.
 
 The clickable concept is a local simulation with synthetic content. It demonstrates Room, Inbox, Work, contextual menus, a detail pane and mobile navigation; it does not send messages, connect accounts or implement the full feature map. It is deliberately not presented as a working replacement for production.
+
+## Second look — interaction corrections
+
+The direction still holds. A bounded second pass corrected the concept's accidental form submissions from Add/Save draft, hidden mobile panels after navigation, and Back skipping nested screens. Nested panes retain their previous controls and input state; the main message draft survives view changes. Close dismisses a root pane; Back returns one level, and Escape dismisses a menu before its containing pane. Icon-only overflow controls have descriptive accessible names.
+
+Room invitations stay in room views. In-progress work does not offer result approval. Duplicate sample rooms/messages that opened the wrong content were removed, and the current user's profile opens account controls. Sample draft/archive feedback now states its actual limits. These are prototype corrections, not production fixes.
+
+Verified at 320, 390 and 1024px with no horizontal overflow or script errors, including nested navigation, mobile invitation visibility, unsent draft retention, Add/Save draft not submitting forms, and no approval action on in-progress work. Production implementation still needs the complete acceptance gates above.
