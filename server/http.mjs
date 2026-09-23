@@ -484,6 +484,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function checkOrigin(req, required = false) {
     if ((required || req.headers.origin) && req.headers.origin !== expectedOrigin()) reject(403, "origin_denied", "Request origin is not allowed");
   }
+  // Origin checks are a CSRF defense for cookie/browser sessions. A request
+  // presenting an Authorization: Bearer credential is not an ambient-auth
+  // browser flow — the bearer credential IS the authentication — so the
+  // browser-Origin requirement is waived for it. Credential validity is
+  // still enforced by each route's own auth (format via bearer(), scope and
+  // identity via the store); a forged or missing Origin on a bearer request
+  // buys an attacker nothing.
+  function carriesBearer(req) {
+    return typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");
+  }
   function protectWrite(req, auth, isBearer) {
     checkOrigin(req, !isBearer);
     if (!isBearer) {
@@ -2037,7 +2047,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
       }
       if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
-        checkOrigin(req, true);
+        checkOrigin(req, !carriesBearer(req));
         rate(`guest-agent-mint:${remoteAddress}`, 30);
         const selected = roomCredentials(req, url);
         if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
@@ -2081,7 +2091,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.guestInvites.preview(data.inviteCode));
       }
       if (url.pathname === "/api/guest-invites/redeem" && req.method === "POST") {
-        checkOrigin(req, true);
+        checkOrigin(req, !carriesBearer(req));
         rate(`guest-invite-redeem:${remoteAddress}`, 10);
         // The identity secret rides the Authorization header (never the
         // body): the share-links join-agent flow uses the same convention.
@@ -2094,7 +2104,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
-        checkOrigin(req, true);
+        checkOrigin(req, !carriesBearer(req));
         rate(`guest-invite-rotate:${remoteAddress}`, 10);
         const guestToken = bearer(req);
         if (!guestToken) reject(401, "unauthenticated", "Present your guest credential as a Bearer token");
@@ -2111,7 +2121,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.shareLinks.preview(data.linkToken, cookie(req, accountCookieName), expectedBinding(req)));
       }
       if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
-        checkOrigin(req, true);
+        checkOrigin(req, !carriesBearer(req));
         rate(`link-agent-join:${remoteAddress}`, 20);
         const identitySecret = bearer(req);
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
