@@ -197,10 +197,23 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
 
 // --- HTTP-facing reads/writes (membership re-checked on every call) ----------
 
-function authedMember(store, token, roomId, expectedSessionBinding) {
+function authed(store, token, roomId, expectedSessionBinding) {
   const auth = store.authenticate(token, roomId, expectedSessionBinding);
   if (!auth.member || auth.member.active === false) fail(403, "access_denied", "Room membership is inactive");
-  return auth.member;
+  return auth;
+}
+
+// Session-ownership envelope, mirroring the notifications route: the client's
+// guarded readers end the session when a response lacks these fields.
+function viewerEnvelope(auth, roomId) {
+  return {
+    roomId,
+    viewerId: auth.member.id,
+    viewerAccountId: auth.account?.id ?? null,
+    viewerAuthEpoch: auth.account?.authEpoch ?? null,
+    viewerSessionBinding: auth.sessionBinding,
+    viewerSessionRevision: auth.sessionRevision ?? null,
+  };
 }
 
 // Public view of one event row, joined against the live message so edits and
@@ -222,7 +235,8 @@ function eventView(store, roomId, row, memberId) {
 const ACTIVITY_LIMIT_DEFAULT = 50, ACTIVITY_LIMIT_MAX = 100;
 
 export function listActivity(store, token, roomId, params = {}, expectedSessionBinding = null) {
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   const { before = null, limit = ACTIVITY_LIMIT_DEFAULT, type = null } = params ?? {};
   if (before !== null && !(typeof before === "string" && /^[1-9]\d*$/.test(before))) {
     fail(422, "invalid_activity_selection", "before must be a positive event id");
@@ -246,19 +260,20 @@ export function listActivity(store, token, roomId, params = {}, expectedSessionB
       const view = eventView(store, roomId, row, member.id);
       if (view) items.push(view);
     }
-    return { roomId, items, hasMore: rows.length > count, before: before === null ? null : Number(before) };
+    return { ...viewerEnvelope(auth, roomId), items, hasMore: rows.length > count, before: before === null ? null : Number(before) };
   });
 }
 
 export function activityUnreadCount(store, token, roomId, expectedSessionBinding = null) {
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.readTransaction(() => {
     const rows = store.db.prepare(
       `SELECT type, COUNT(*) AS n FROM activity_events
        WHERE room_id=? AND user_id=? AND read_at IS NULL GROUP BY type`).all(roomId, member.id);
     const byType = Object.fromEntries(ACTIVITY_TYPES.map(t => [t, 0]));
     for (const row of rows) byType[row.type] = row.n;
-    return { roomId, total: rows.reduce((sum, row) => sum + row.n, 0), byType };
+    return { ...viewerEnvelope(auth, roomId), total: rows.reduce((sum, row) => sum + row.n, 0), byType };
   });
 }
 
@@ -269,14 +284,15 @@ export function markActivityRead(store, token, roomId, data, expectedSessionBind
     || data.ids.some(id => !Number.isInteger(id) || id < 1)) {
     fail(422, "invalid_activity_read", "ids must be a non-empty array of up to 200 positive event ids");
   }
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.transaction(() => {
     const now = store.now();
     const placeholders = data.ids.map(() => "?").join(",");
     const result = store.db.prepare(
       `UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL AND id IN (${placeholders})`
     ).run(now, roomId, member.id, ...data.ids);
-    return { roomId, read: result.changes };
+    return { ...viewerEnvelope(auth, roomId), read: result.changes };
   });
 }
 
@@ -287,7 +303,8 @@ export function markActivityReadAll(store, token, roomId, data = {}, expectedSes
   if (data.type !== undefined && !isActivityType(data.type)) {
     fail(422, "invalid_activity_type", `type must be one of ${ACTIVITY_TYPES.join(", ")}`);
   }
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.transaction(() => {
     const now = store.now();
     const result = data.type
@@ -297,21 +314,22 @@ export function markActivityReadAll(store, token, roomId, data = {}, expectedSes
       : store.db.prepare(
         "UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL")
         .run(now, roomId, member.id);
-    return { roomId, read: result.changes, type: data.type ?? null };
+    return { ...viewerEnvelope(auth, roomId), read: result.changes, type: data.type ?? null };
   });
 }
 
 // --- read horizons ------------------------------------------------------------
 
 export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   const threadId = params?.threadId ?? "";
   if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
   return store.readTransaction(() => {
     const row = store.db.prepare(
       "SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
       .get(roomId, member.id, threadId);
-    return { roomId, threadId, lastReadMessageId: row?.last_read_message_id ?? null };
+    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId: row?.last_read_message_id ?? null };
   });
 }
 
@@ -327,7 +345,8 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
   if (lastReadMessageId !== null && (typeof lastReadMessageId !== "string" || !lastReadMessageId.trim() || lastReadMessageId.length > 384)) {
     fail(422, "invalid_horizon", "lastReadMessageId must be a message id or null");
   }
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.transaction(() => {
     if (lastReadMessageId !== null) {
       const message = store.room(roomId).state.messages.find(m => m.id === lastReadMessageId);
@@ -338,7 +357,7 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
       `INSERT INTO read_horizons (room_id,member_id,thread_id,last_read_message_id,updated_at) VALUES(?,?,?,?,?)
        ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at`)
       .run(roomId, member.id, threadId, lastReadMessageId, now);
-    return { roomId, threadId, lastReadMessageId };
+    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId };
   });
 }
 
@@ -357,7 +376,8 @@ function savedView(store, roomId, row, memberId) {
 }
 
 export function listSaved(store, token, roomId, expectedSessionBinding = null) {
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.readTransaction(() => {
     const rows = store.db.prepare(
       "SELECT * FROM saved_messages WHERE room_id=? AND member_id=? ORDER BY saved_at DESC, message_id").all(roomId, member.id);
@@ -366,7 +386,7 @@ export function listSaved(store, token, roomId, expectedSessionBinding = null) {
       const view = savedView(store, roomId, row, member.id);
       if (view) items.push(view);
     }
-    return { roomId, count: items.length, items };
+    return { ...viewerEnvelope(auth, roomId), count: items.length, items };
   });
 }
 
@@ -380,7 +400,8 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
     fail(422, "invalid_saved", "messageId must be a message id");
   }
   if (typeof data.saved !== "boolean") fail(422, "invalid_saved", "saved must be true or false");
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.transaction(() => {
     const message = store.room(roomId).state.messages.find(m => m.id === data.messageId);
     if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
@@ -394,7 +415,7 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
       store.db.prepare("DELETE FROM saved_messages WHERE room_id=? AND member_id=? AND message_id=?")
         .run(roomId, member.id, data.messageId);
     }
-    return { roomId, messageId: data.messageId, saved: data.saved };
+    return { ...viewerEnvelope(auth, roomId), messageId: data.messageId, saved: data.saved };
   });
 }
 
@@ -410,7 +431,8 @@ export function setThreadMute(store, token, roomId, data, expectedSessionBinding
     fail(422, "invalid_thread_mute", "threadId must be a message id");
   }
   if (typeof data.muted !== "boolean") fail(422, "invalid_thread_mute", "muted must be true or false");
-  const member = authedMember(store, token, roomId, expectedSessionBinding);
+  const auth = authed(store, token, roomId, expectedSessionBinding);
+  const member = auth.member;
   return store.transaction(() => {
     const rootId = threadRootOf(store.room(roomId).state.messages, data.threadId);
     if (!rootId) fail(404, "message_not_found", "No such thread in this room");
@@ -422,6 +444,6 @@ export function setThreadMute(store, token, roomId, data, expectedSessionBinding
       store.db.prepare("DELETE FROM thread_mutes WHERE room_id=? AND member_id=? AND thread_id=?")
         .run(roomId, member.id, rootId);
     }
-    return { roomId, threadId: rootId, muted: data.muted };
+    return { ...viewerEnvelope(auth, roomId), threadId: rootId, muted: data.muted };
   });
 }

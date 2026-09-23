@@ -235,7 +235,10 @@ test("thread mutes: mute and unmute persist per member", async t => {
   const f = await serve(t);
   seedActivity(f);
   const mute = (token, data) => f.call("/api/rooms/commons/thread-mutes", { method: "POST", token, data });
-  assert.deepEqual((await mute(f.mayaKey, { threadId: "r1", muted: true })).body, { roomId: "commons", threadId: "root", muted: true }, "child message resolves to the thread root");
+  const muted = (await mute(f.mayaKey, { threadId: "r1", muted: true })).body;
+  assert.deepEqual({ roomId: muted.roomId, threadId: muted.threadId, muted: muted.muted },
+    { roomId: "commons", threadId: "root", muted: true }, "child message resolves to the thread root");
+  assert.equal(muted.viewerId, "maya", "responses carry the session-ownership envelope");
   assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM thread_mutes").get().n, 1);
   assert.deepEqual((await mute(f.mayaKey, { threadId: "root", muted: false })).body.muted, false);
   assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM thread_mutes").get().n, 0);
