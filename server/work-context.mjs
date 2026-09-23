@@ -1,4 +1,4 @@
-import { nextWorkStep, workActions, workCollaboration } from "../src/workflow.js";
+import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
@@ -65,7 +65,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const message = includeSource ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
-  const next = nextWorkStep(item, now);
+  const next = nextWorkStep(item, now, state.room.ownerId);
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
@@ -75,6 +75,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   return {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
+    resume: workResume(work, now, state.room.ownerId),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),

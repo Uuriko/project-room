@@ -216,6 +216,15 @@ test("work CLI prints one selected context and rejects extra arguments without d
     const result = await run(args); assert.equal(result.code, 1); assert.equal(result.stdout, "");
     assert.equal(JSON.parse(result.stderr).code, "usage_error"); assert.equal(result.stderr.includes(f.keys.producer), false);
   }
+  const compact = await run(["work", "test-handoff", "--brief"]);
+  assert.equal(compact.code, 0, compact.stderr);
+  assert.match(compact.stdout, /Current progress/);
+  assert.match(compact.stdout, /Accept the assignment/);
+  assert.equal(compact.stdout.includes("Please prepare an agenda"), false);
+  assert.equal(compact.stdout.includes(f.keys.producer), false);
+  const compactSource = await run(["work", "test-handoff", "--brief", "--include-source"]);
+  assert.equal(compactSource.code, 0, compactSource.stderr);
+  assert.match(compactSource.stdout, /Please prepare an agenda/);
   const guide = readFileSync(new URL("../docs/WORK-CONTEXT.md", import.meta.url), "utf8");
   const code = guide.match(/<!-- work-context-example -->\n```js\n([\s\S]*?)\n```/)[1];
   const read = new (Object.getPrototypeOf(async function () {}).constructor)("client", "workId", code + "\nreturn { context, work, source }; ");
@@ -284,4 +293,24 @@ test("access summary lists only what the member can read; quoted mentions and im
   assert.throws(() => verifyAccessSummary(completed, { roomId: "commons", workItemId: "another" }), error => error.code === "invalid_response");
   assert.throws(() => verifyAccessSummary({ ...completed, accessSummary: undefined }, { roomId: "commons", workItemId: "test-handoff" }), error => error.code === "invalid_response");
   assert.throws(() => verifyAccessSummary({ ...completed, evaluatedAt: "later" }, { roomId: "commons", workItemId: "test-handoff" }), error => error.code === "invalid_response");
+});
+
+
+test("restart brief follows the persisted handoff without acknowledging, assigning or completing work", async t => {
+  const f = await fixture(t);
+  f.send("producer", T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: 0 });
+  f.send("producer", T.WORK_HANDOFF_RECORDED, { workItemId: "test-handoff", expectedRevision: 1,
+    doneSummary: "Implemented the first parser", nextAction: "Check escaped separators", limitReason: "Session ending" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const context = await f.client("producer").workContext("test-handoff");
+  assert.equal(context.resume.reportedProgress, "Implemented the first parser");
+  assert.equal(context.resume.handoff.nextAction, "Check escaped separators");
+  assert.equal(context.resume.next.action, "triaged_handoff");
+  assert.equal(context.resume.next.memberId, "owner");
+  assert.equal(context.resume.authority, "context_only");
+  assert.equal(context.resume.result, null);
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before);
+  const tampered = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: async () => new Response(JSON.stringify({ ...context, resume: { ...context.resume, next: { action: "complete" } } }), { status: 200 }) });
+  await assert.rejects(tampered.workContext("test-handoff"), error => error.code === "invalid_response");
 });

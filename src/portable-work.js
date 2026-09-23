@@ -18,6 +18,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     // Retain its latch until settlement so a new prompt cannot race that write.
     version++; entry = null; pending = null; saving = uncertain = false;
     $("packet-preview").value = ""; $("portable-result").value = ""; $("portable-work-title").textContent = "";
+    $("portable-progress").checked = false; $("portable-progress-label").hidden = true;
     $("portable-source").checked = false; $("portable-older").checked = false; $("portable-older-label").hidden = true;
     $("portable-original").hidden = true; $("portable-original").open = false; $("portable-original-body").textContent = "";
     status(""); dialog.close();
@@ -48,12 +49,12 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-submit").textContent = uncertain ? "Retry draft" : "Post draft";
     $("packet-copy").disabled = copying || !$("packet-preview").value;
     $("packet-copy").textContent = copying ? "Copying…" : "Copy";
-    $("portable-source").disabled = copying;
+    $("portable-source").disabled = copying; $("portable-progress").disabled = copying;
     $("portable-form").setAttribute("aria-busy", String(saving));
   }
   function preview() {
     try {
-      const packet = workPacket(entry.state, entry.workId, { ...entry.packetOptions, includeSource: $("portable-source").checked });
+      const packet = workPacket(entry.state, entry.workId, { ...entry.packetOptions, includeSource: $("portable-source").checked, includeProgress: $("portable-progress").checked });
       $("packet-preview").value = packetMarkdown(packet); $("packet-preview").setSelectionRange(0, 0); status("");
     } catch (error) { $("packet-preview").value = ""; status(error.message); }
     controls();
@@ -93,12 +94,15 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-original").hidden = !source;
     $("portable-original-body").textContent = source?.body ?? "";
     $("portable-work-title").textContent = state.workItems[workId].title;
+    const item = state.workItems[workId];
+    $("portable-progress-label").hidden = !(item.handoff || item.receipt || item.blocker || item.claim);
     $("portable-source-label").hidden = !state.workItems[workId].sourceMessageId;
     controls(); if (!entry.native) preview(); dialog.showModal(); mode(entry.native || button.dataset.portableMode === "result");
   });
   $("portable-close").addEventListener("click", close);
   dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
   $("portable-source").addEventListener("change", preview);
+  $("portable-progress").addEventListener("change", preview);
   $("portable-older").addEventListener("change", controls);
   $("portable-add-result").addEventListener("click", () => mode(true));
   $("packet-copy").addEventListener("click", async () => {

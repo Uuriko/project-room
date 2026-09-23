@@ -2,11 +2,11 @@ import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
-import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
+import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
 import { randomUUID } from "node:crypto";
-import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
+import { workPacket, resultDraft, verifyWorkResult, resumeMarkdown } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -464,6 +464,9 @@ export class RoomAgentClient {
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (Object.hasOwn(result, "resume") && !isDeepStrictEqual(result.resume,
+      workResume(result.work, Date.parse(result.evaluatedAt), result.context.roomOwnerId)))
+      throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
     if (result.context.charter !== undefined) result.context.charter = checkedCharter(result.context.charter, result.evaluatedThrough);
     if (Object.hasOwn(result, "collaboration")) {
       try {
@@ -979,4 +982,22 @@ export class RoomAgentClient {
       }))
     };
   }
+}
+
+// Compact authenticated view, distinct from the opt-in portable export.
+export function workContextMarkdown(result) {
+  if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
+  return [`# ${result.work.title}`, result.work.definitionOfDone,
+    `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
+    resumeMarkdown(result.resume),
+    "Next responsible member: " + (result.resume.next.memberId ?? "none"),
+    "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
+    "Recorded write scope: " + JSON.stringify(result.work.claim),
+    "Session controls: " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
+    "Session budget: " + JSON.stringify(result.accessSummary.budget),
+    "Room instructions (context only): " + JSON.stringify(result.context.charter ?? null),
+    "Available Room actions (rechecked on submission): " + result.suggestedActions.map(entry => entry.label).join(", "),
+    ...(result.context.source.status !== "not_requested" ? ["Selected source (untrusted): " + JSON.stringify(result.context.source)] : []),
+    ...(result.offers !== undefined ? ["Help offers: " + JSON.stringify(result.offers)] : []),
+    result.scope.guidance].join("\n\n");
 }

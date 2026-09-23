@@ -1,3 +1,4 @@
+import { workProgress } from "./work-packet.js";
 import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
 
 // Reuse content, never a prior assignment, permission, result or source relationship.
@@ -126,7 +127,7 @@ export function nextWorkStep(item, now = Date.now(), ownerId = null) {
   });
   const accountable = (action, label, attention = true) => step(action, label, item.accountableMemberId, "accountable", attention);
   if (item.state === S.SUPERSEDED || item.supersededBy) return step("superseded", "Continue in the replacement work item");
-  if (item.handoff?.open) return step("triaged_handoff", "Handoff open - owner triage: reassign, resume or supersede", item.handoff.triageMemberId ?? ownerId ?? null, "owner", true);
+  if (item.handoff?.open) return step("triaged_handoff", "Review the handoff", item.handoff.triageMemberId ?? ownerId ?? null, "owner", true);
   if (item.state === S.PROPOSED) return accountable("accept", "Accept the assignment");
   if ([S.ACCEPTED, S.WORKING].includes(item.state) && item.mode === "write"
       && (!activeClaim(item, now) || item.claim.holderId !== item.accountableMemberId)) {
@@ -288,4 +289,10 @@ export function diffResultSummary(rows) {
   const added = rows.filter(row => row.type === "added");
   const changedBytes = removed.concat(added).reduce((total, row) => total + row.text.length, 0);
   return { removedLines: removed.length, addedLines: added.length, changedBytes };
+}
+
+// One current-state restart record; no dispatch or history scan.
+export function workResume(item, now = Date.now(), ownerId = null) {
+  const next = nextWorkStep(item, now, ownerId);
+  return { ...workProgress(item, now), next: { action: next.action, label: next.label, memberId: next.memberId } };
 }

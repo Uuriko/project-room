@@ -22,6 +22,13 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");
   const selected = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
   assert.equal(selected.context.source.status, "not_requested");
+  const compact = (await mcp.call("room_read_work", { workItemId: "test-handoff", brief: true })).result.structuredContent;
+  assert.equal(compact.workItemId, "test-handoff");
+  assert.match(compact.brief, /Accept the assignment/);
+  assert.match(compact.brief, /Session budget/);
+  assert.equal(compact.brief.includes("Please prepare an agenda"), false);
+  assert.ok(JSON.stringify(compact).length < JSON.stringify(selected).length);
+  assert.deepEqual(f.store.snapshot(token, "commons"), before);
   const input = { requestId: "stable-mcp-draft", workItemId: "test-handoff", packetId: "mcp-fixture", basisRevision: 0, body: "Synthetic draft for human review.", replyToId: "test-request" };
   const posted = (await mcp.call("room_post_draft", input)).result.structuredContent;
   assert.equal(posted.status, "draft_posted"); assert.equal(posted.duplicate, false);

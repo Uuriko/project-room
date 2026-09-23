@@ -168,3 +168,11 @@ invitation-discovery view. Default raw API reads remain unchanged.
 Missing or malformed browser offer context shows no offer actions; known retained
 offers remain represented by an unavailable notice rather than an empty queue.
 See [human offer controls](HUMAN-HELP-OFFERS-2026-09-08.md).
+
+## Restarting with a brief
+
+`node scripts/agent-inbox.mjs work WORK_ID --brief` prints a compact authenticated restart record. Add `--include-source` or `--include-offers` only when needed. MCP clients use `room_read_work` with `{ "workItemId": "WORK_ID", "brief": true }`. Normal reads retain their existing shape and add `resume`.
+
+The brief joins existing facts: reported progress, current blocker, handoff, next responsible member, effective claim status, review requirements and reviews matching the exact current result. It includes live-read scope, evidence references, budget and room instructions. A handoff does not authorize restarting a stopped worker, and reported tests are not independently verified by this read. Refresh before a write; use the existing action tools and stable request IDs for retries. Resume support is required for the explicit compact option; an older service returns a failure rather than silently inventing context.
+
+The browser's **Use my AI** prompt is narrower: optional **Include progress and handoff** exports selected work prose but omits structured member identities, evidence URLs and repository paths. Review the preview because free text may itself contain private details. This does not send anything or change work.
