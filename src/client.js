@@ -371,6 +371,18 @@ export class RoomClient {
       && sameAccountSession(this.session, owner.session));
   }
   ownsResponse(payload, session = this.session) {
+    // Room-cookie sessions (join flow, access-key login) carry no account.
+    // #720's anti-confusion check required session.account, so refresh()
+    // endAccess()ed every room-mode session and restore() returned null —
+    // stranding fresh joiners at the account gate despite a valid cookie.
+    // Bind account-less room sessions on room + viewer + session binding.
+    if (session?.authMode === "room" && !session.account) {
+      return typeof session.sessionBinding === "string"
+        && payload.roomId === session.roomId
+        && payload.viewerId === session.member.id
+        && payload.viewerSessionBinding === session.sessionBinding
+        && (!Number.isSafeInteger(session.sessionRevision) || payload.viewerSessionRevision === session.sessionRevision);
+    }
     return Boolean(session?.account && typeof session.account.id === "string" && Number.isSafeInteger(session.account.authEpoch) && typeof session.sessionBinding === "string")
       && (session.authMode !== "account" || this.ownsAccountSession())
       && payload.roomId === session.roomId
@@ -511,6 +523,42 @@ export class RoomClient {
     const generation = this.generation, session = this.session;
     try {
       const result = await this.request(this.path(`/notifications${before === null ? "" : `?before=${encodeURIComponent(before)}`}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async threadMutes() {
+    // Per-thread mutes for the current member. Read-only list; 401/403 ends
+    // access like the sibling reads.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/thread-mutes"));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async setThreadMute(threadId, muted) {
+    // Mute or unmute a thread for the current member. Returns the resolved
+    // { threadId, muted } (threadId is the thread root).
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/thread-mutes"), { method: "POST", data: { threadId, muted } });
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;
