@@ -2268,6 +2268,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, webAuth, isBearer);
+        rate(`write:${webAuth.credentialHash}`, 60);
         const data = await body(req);
         try {
           return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data));

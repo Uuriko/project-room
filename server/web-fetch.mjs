@@ -28,8 +28,9 @@
 // EXISTS, no schema version bump), following the wake-queue / heartbeat /
 // guest-invite additive pattern. Fetches are journaled per-request (host,
 // cache hit/miss, bytes, tags, request_id) — full page content is never
-// journaled. Rate limits (100/day/member, 1000/day/room) count journaled
-// attempts, so cache hits still cost quota, exactly like a credit model.
+// journaled. Rate limits (100/day/member, 1000/day/room) count successful
+// journaled fetches (hit/miss); typed failures are journaled but never
+// billed. Cache hits still cost quota, exactly like a credit model.
 import { createHash, randomUUID } from "node:crypto";
 import { promises as dns } from "node:dns";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -231,10 +232,8 @@ export async function assertPublicHost(hostname) {
     if (ipLiteralBlocked(ip))
       fail(403, "blocked_host", "Refusing to fetch a host that resolves to a private, loopback, or otherwise reserved address");
   }
-  if (addresses.size === 0 && ipLiteralBlocked(host) === false) {
-    // Unresolvable here usually means NXDOMAIN; let the fetch itself produce
-    // the typed failure so DNS quirks do not become 500s either way.
-  }
+  // Unresolvable here usually means NXDOMAIN; the fetch itself then produces
+  // the typed failure, so DNS quirks never become 500s either way.
   return [...addresses];
 }
 
@@ -260,7 +259,7 @@ async function readCapped(body, limit) {
     bytes += value.byteLength;
     if (bytes > limit) {
       try { await reader.cancel(); } catch { /* ignore */ }
-      fail(422, "fetch_failed", `Response body exceeds the ${limit} byte fetch limit`);
+      fail(502, "fetch_failed", `Response body exceeds the ${limit} byte fetch limit`);
     }
     chunks.push(value);
   }
