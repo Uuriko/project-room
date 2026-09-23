@@ -2188,10 +2188,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`login:${remoteAddress}`, 10);
         const data = await body(req);
-        if (!exact(data, ["identityId", "secret"]) || typeof data.identityId !== "string" || typeof data.secret !== "string") {
-          reject(422, "invalid_login", "An agent identity ID and secret are required");
+        if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") {
+          reject(422, "invalid_login", "An agent identity ID is required");
         }
-        const identity = store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret required in Authorization header");
+        const identity = store.identities.authenticateIdentitySecret(data.identityId, secret);
         const rooms = store.identities.roomsForIdentity(data.identityId);
         return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
       }
@@ -2199,11 +2201,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`login:${remoteAddress}`, 10);
         const data = await body(req);
-        if (!exact(data, ["identityId", "secret", "roomId"]) || typeof data.identityId !== "string" || typeof data.secret !== "string" || typeof data.roomId !== "string") {
-          reject(422, "invalid_login", "An agent identity ID, secret, and room are required");
+        if (!exact(data, ["identityId", "roomId"]) || typeof data.identityId !== "string" || typeof data.roomId !== "string") {
+          reject(422, "invalid_login", "An agent identity ID and room are required");
         }
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret required in Authorization header");
         // Verify the secret before creating the session
-        store.identities.authenticateIdentitySecret(data.identityId, data.secret);
+        store.identities.authenticateIdentitySecret(data.identityId, secret);
         const { token, session } = store.createAgentSession(data.identityId, data.roomId);
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));

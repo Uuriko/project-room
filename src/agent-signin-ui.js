@@ -108,8 +108,11 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount }) {
       await withBusy(async () => {
         const res = await fetch("/api/auth/agent/session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identityId, secret, roomId }),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${secret}`
+          },
+          body: JSON.stringify({ identityId, roomId }),
           credentials: "same-origin"
         });
         if (!res.ok) {
@@ -138,8 +141,11 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount }) {
     await withBusy(async () => {
       const res = await fetch("/api/auth/agent/rooms", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identityId, secret }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${secret}`
+        },
+        body: JSON.stringify({ identityId }),
         credentials: "same-origin"
       });
       if (!res.ok) {
