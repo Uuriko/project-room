@@ -26,7 +26,8 @@ export function configuredHost(config) {
       mkdirSync(lock, { mode: 0o700 });
     } catch { throw new Error("Checkout has an active or unresolved host, or its lock is unavailable; reconcile before running"); }
     try {
-      const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
+      // The lock above uses the parent homedir(). HOME is not inherited; config.env may set it.
+      const env = Object.fromEntries(["PATH", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
       Object.assign(env, settings.env ?? {});
       const options = { cwd: settings.cwd, env, signal };
       const output = await hostSubprocess(settings, { ...options, input: payload });
