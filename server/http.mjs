@@ -2073,22 +2073,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/guest-invites" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestInviteContract(), req.method === "HEAD");
       }
-      if (url.pathname === "/api/guest-invites" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-invite-mint:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room and guest invite mint fields");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
-          : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer <redacted> sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        protectWrite(req, auth, selected.bearer);
-        const result = store.guestInvites.mint(selected.token, data.roomId, data, fence);
-        return json(res, result.duplicate ? 200 : 201, result);
-      }
       if (url.pathname === "/api/guest-invites/preview" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`guest-invite-preview:${remoteAddress}`, 30);
@@ -2118,46 +2102,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
         const fence = expectedBinding(req);
         return json(res, 200, store.guestInvites.rotate(guestToken, data.roomId, fence));
-      }
-      if (url.pathname === "/api/guest-invites/list" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.guestInvites.list(selected.token, data.roomId, fence));
-      }
-      if (url.pathname === "/api/guest-invites/revoke" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId) || typeof data.inviteId !== "string") reject(422, "invalid_guest_invite", "Supply the room and invite id");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.guestInvites.revoke(selected.token, data.roomId, data.inviteId, fence));
-      }
-      if (url.pathname === "/api/guest-invites/disconnect" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId) || typeof data.memberId !== "string") reject(422, "invalid_guest_invite", "Supply the room and guest member id");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.guestInvites.disconnect(selected.token, data.roomId, data.memberId, fence));
-      }
-      if (url.pathname === "/api/guest-invites/revoke-all" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to manage guest invites.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_guest_invite", "Supply the room");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.guestInvites.revokeAll(selected.token, data.roomId, fence));
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
@@ -2383,7 +2327,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3047,6 +2991,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`guest-agent-mint:${remoteAddress}`, 30);
         const result = store.guestAgentLinks.mint(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
+      }
+      // GX-… guest invites: owner-administered through the same room funnel
+      // (store-level owner gate). Public preview/redeem/rotate live at the
+      // top-level /api/guest-invites/* routes above.
+      if (route === "guest-invites" && req.method === "POST") {
+        rate(`guest-invite-mint:${remoteAddress}`, 30);
+        const result = store.guestInvites.mint(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "guest-invites-list" && req.method === "POST") {
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        return json(res, 200, store.guestInvites.list(selected.token, roomId, fence));
+      }
+      if (route === "guest-invites-revoke" && req.method === "POST") {
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_guest_invite", "Supply the invite id");
+        return json(res, 200, store.guestInvites.revoke(selected.token, roomId, data.inviteId, fence));
+      }
+      if (route === "guest-invites-disconnect" && req.method === "POST") {
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["memberId"]) || typeof data.memberId !== "string") reject(422, "invalid_guest_invite", "Supply the guest member id");
+        return json(res, 200, store.guestInvites.disconnect(selected.token, roomId, data.memberId, fence));
+      }
+      if (route === "guest-invites-revoke-all" && req.method === "POST") {
+        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        return json(res, 200, store.guestInvites.revokeAll(selected.token, roomId, fence));
       }
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);

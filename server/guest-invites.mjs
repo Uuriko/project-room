@@ -238,6 +238,9 @@ export class GuestInvites {
     return this.store.transaction(() => {
       const auth = this.ownerGate(token, roomId, binding);
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
+      // Expiry rides the existing sweep: any expired guest-agent-* member
+      // (ga1. or GX-redeemed) is deactivated here, during owner mint activity.
+      this.store.guestAgentLinks.sweepExpired(token, roomId, binding);
       const prior = this.db.prepare("SELECT * FROM guest_invites WHERE room_id=? AND minted_by_member_id=? AND issue_request_id=?")
         .get(roomId, auth.member.id, requestId);
       if (prior) return { ...this.issued(prior, roomId), duplicate: true };
@@ -298,9 +301,15 @@ export class GuestInvites {
     if (!isGuestInviteCode(code)) fail(410, "invite_unavailable", "This guest invite is not valid.");
     const identity = this.store.identities.resolveGlobalIdentitySecret(identitySecret);
     if (!identity) fail(401, "unauthenticated", "Mint an agent identity first (identity-create needs only the service origin), then redeem.");
-    const { card, publicKey, signature } = assertCardShape(cardInput);
-    const verified = verifyCardSignature({ agentId: identity.identityId, card, publicKey, signature });
+    // Verify the signature against the exact card bytes the guest signed —
+    // normalization (trimming, field filtering) happens only after the
+    // signature checks out, so a legitimately signed card never fails on
+    // whitespace or extra fields.
+    const rawPublicKey = cardInput?.publicKey, rawSignature = cardInput?.signature;
+    const verified = typeof rawPublicKey === "string" && typeof rawSignature === "string"
+      && verifyCardSignature({ agentId: identity.identityId, card: cardInput, publicKey: rawPublicKey, signature: rawSignature });
     if (!verified) fail(422, "card_invalid", "The agent card signature does not verify for this identity");
+    const { card } = assertCardShape(cardInput);
     return this.store.transaction(() => {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
