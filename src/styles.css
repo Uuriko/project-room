@@ -1344,3 +1344,9 @@ summary { overflow-wrap: anywhere; }
 .connection-bar { flex-wrap: wrap; }
 .auth-panel { min-width: 0; overflow-wrap: anywhere; }
 .auth-panel > * { min-width: 0; max-width: 100%; }
+
+/* A direct result visit omits unrelated administration without duplicating state. */
+#settings-dialog.results-only > :not(.dialog-head):not(#results-panel) { display: none; }
+
+#settings-dialog.results-only #results-panel > summary { display: none; }
+#settings-dialog.results-only #results-panel { border: 0; padding: 0; }

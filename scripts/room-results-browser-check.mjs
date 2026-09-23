@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -136,4 +136,25 @@ test("creating new work from the composer requires explicit confirmed submission
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
   await p.locator('#message-list [data-work-timeline]').first().waitFor();
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
+});
+
+for (const mobile of [false, true]) test(`automatic Results shortcut ${mobile ? "phone" : "desktop"}: appears for useful results and preserves settings`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile }), p = f.p;
+  await p.locator("#message-input").fill("My unfinished thought");
+  await ensureSidebarOpen(p);
+  await p.locator("#room-results-open").click();
+  assert.equal(await p.locator("#results-panel").isVisible(), true);
+  assert.equal(await p.locator("#room-about").isVisible(), false);
+  await f.capture(mobile ? "direct-phone" : "direct-desktop");
+  await f.read(); await f.ready();
+  await p.keyboard.press("Escape");
+  await p.keyboard.press("Escape");
+  assert.equal(await p.evaluate(() => document.activeElement.id), "room-results-open");
+  assert.equal(await p.locator("#message-input").inputValue(), "My unfinished thought");
+  await clickChrome(p, "#topbar-settings");
+  assert.equal(await p.locator("#room-about").isVisible(), true);
+  assert.equal(await p.locator("#settings-title").textContent(), "Settings");
+  await p.locator("#settings-close").click();
+  f.reopen("native-result"); f.reopen("approved-result");
+  await p.locator("#room-results-open").waitFor({ state: "hidden" });
 });

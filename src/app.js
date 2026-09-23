@@ -3937,10 +3937,12 @@ $("#room-overview-dialog").addEventListener("click", event => {
 function openSettings(panelId) {
   const dialog = $("#settings-dialog");
   if (!dialog) return;
+  dialog.classList.toggle("results-only", panelId === "results-panel");
+  $("#settings-title").textContent = panelId === "results-panel" ? "Results" : "Settings";
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
-    if (panel) { panel.open = true; panel.querySelector("summary")?.focus({ preventScroll: true }); }
+    if (panel) { panel.open = true; (panelId === "results-panel" ? $("#room-results-list") : panel.querySelector("summary"))?.focus({ preventScroll: true }); }
   }
 }
 function openCatchUp() {
@@ -3978,7 +3980,7 @@ function closeResult(restore = true) {
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
-      (row?.querySelector("[data-read-result]") || $("#results-panel > summary")).focus({ preventScroll: true });
+      (row?.querySelector("[data-read-result]") || ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary"))).focus({ preventScroll: true });
       return;
     }
     const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
@@ -4714,6 +4716,7 @@ function renderReturnBrief() {
   renderContribution(contributions, owned);
   setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
@@ -4721,7 +4724,7 @@ function renderReturnBrief() {
     syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
     renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>');
-    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#results-panel > summary").focus({ preventScroll: true });
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
     resultStatus();
     syncActionForm();
     const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
@@ -4904,6 +4907,10 @@ document.addEventListener("keydown", event => {
   $("#sidebar-toggle").focus();
 });
 $("#topbar-settings").addEventListener("click", () => openSettings());
+$("#room-results-open").addEventListener("click", () => {
+  if (!state || !session || busy) return;
+  selectWorkView("results");
+});
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
 $("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
 $("#topbar-search-toggle").addEventListener("click", () => {

@@ -280,7 +280,7 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
-          <div id="sidebar-tools" class="sidebar-tools"></div>
+          <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
         </aside>
 
         <section class="room-main" aria-labelledby="conversation-title">
@@ -443,7 +443,7 @@
           </details>
           <details id="results-panel" class="panel">
             <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
-            <ol id="room-results-list" class="results-list" aria-label="Completed work results"></ol>
+            <ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol>
           </details>
           <details id="record-panel" class="panel record-panel">
             <summary class="panel-header section-summary"><span class="section-label"><strong id="record-title">History</strong></span><span id="event-count" class="count-chip"></span></summary>
