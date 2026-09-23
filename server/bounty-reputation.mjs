@@ -3,15 +3,31 @@
 // Feeds the room's richest source of observed agent behavior — the bounty
 // event stream — into the generic reputation tracker. Projection is a pure
 // fold over `bounty_events`: replaying it twice yields byte-identical
-// scores, so retries can never double-count. No new tables, no new
-// persistent state; scores are derived, never stored.
+// scores, so retries can never double-count. Scores are derived, never
+// stored; the only persistent reputation state is the review-only packet
+// journal for probation-gate denials (written by the escrow, read by
+// arbiters).
 //
-// Standing flows into exactly one gate: CLAIM ELIGIBILITY. A probation-band
-// lane may only claim bounties up to PROBATION_MAX_CLAIM_CREDITS credits.
-// Scores never touch payout amounts, never auto-ban, never auto-slash:
-// adverse moves produce review packets for humans/arbiters (the dispute
-// machine stays the human-bound path), and decay always offers a way back.
-// Scores are reputation points, never money — the room stays credits-only.
+// Standing flows into exactly two surfaces, both read-side and
+// review-shaped — never money, never suspension:
+//   1. CLAIM ELIGIBILITY (the gate): a probation-band lane may only claim
+//      bounties up to PROBATION_MAX_CLAIM_CREDITS credits. Denials produce
+//      review packets for humans/arbiters (the dispute machine stays the
+//      human-bound path).
+//   2. ROUTING VISIBILITY (the annotation): the bounty listing can carry a
+//      per-viewer { band, maxClaimMillis, claimable } answer so the routing
+//      layer sees which bounties are routable to that lane. Nothing is ever
+//      hidden and the claim gate stays the sole enforcement point.
+// Scores never touch payout amounts, never auto-ban, never auto-slash, and
+// decay always offers a way back. Scores are reputation points, never
+// money — the room stays credits-only.
+//
+// Beyond the five bounty-lifecycle signals, the projector consumes the
+// human-verdict signals #792 added: a verifier's pinned-rubric acceptance
+// overturned by an upheld dispute (acceptance_overturned, the overturn-rate
+// feed candidate #6 names) and an arbiter-confirmed sybil cluster
+// (sybil_confirmed; dismissed flags stay neutral — honest coincidence must
+// be dismissible without lasting harm).
 import { createReputation, bandOf, REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS } from "./reputation.mjs";
 
 export { REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS };
@@ -23,8 +39,8 @@ export const PROBATION_MAX_CLAIM_MILLIS = PROBATION_MAX_CLAIM_CREDITS * 1000;
 const laneOf = value => typeof value === "string" && value.length > 0 ? value : null;
 
 // Typed signals for a `bounty.decided` event. The enriched event data
-// carries claimant + challenger (bounty-escrow.mjs); old events without
-// them are skipped rather than guessed at.
+// carries claimant + challenger + verifier (bounty-escrow.mjs); old events
+// without them are skipped rather than guessed at.
 function decidedSignals(data) {
   const claimant = laneOf(data.claimant), challenger = laneOf(data.challenger);
   if (!claimant || !challenger) return [];
@@ -32,10 +48,16 @@ function decidedSignals(data) {
   const outcome = data.outcome;
   if (outcome === "upheld") {
     // Challenger was right: the work was judged bad. Claimant loses the
-    // dispute and the anti-flake bond is slashed to the pool.
+    // dispute and the anti-flake bond is slashed to the pool. The verifier
+    // whose pinned-rubric acceptance the dispute overturned takes the
+    // acceptance_overturned signal (the overturn-rate feed integration-map
+    // candidate #6 names; slice #6's rubrics make the verdict checkable).
     out.push({ agent: claimant, type: "dispute_lost" });
     out.push({ agent: claimant, type: "bond_forfeited" });
     out.push({ agent: challenger, type: "dispute_won" });
+    const verifier = laneOf(data.verifier);
+    if (verifier && verifier !== claimant && verifier !== challenger)
+      out.push({ agent: verifier, type: "acceptance_overturned" });
   } else if (outcome === "rejected" || outcome === "timeout-default" || outcome === "frivolous") {
     // Claimant was right (or the challenge died unresolved, or was ruled
     // frivolous): challenger loses; a forfeited challenge bond costs extra.
@@ -75,6 +97,15 @@ export function signalsForEvent(event) {
     }
     case "bounty.decided":
       return decidedSignals(data);
+    case "sybil.flag-resolved": {
+      // Slice #4 + #10: an arbiter confirmed the lane's membership in a
+      // correlated (sybil) cluster — a judged verdict, so it lands as a
+      // penalty on every member lane. Dismissed flags (honest coincidence)
+      // stay neutral: no signal, no lasting harm.
+      if (data.resolution !== "confirmed") return [];
+      const lanes = Array.isArray(data.memberLanes) ? data.memberLanes : [];
+      return lanes.map(laneOf).filter(Boolean).map(agent => ({ agent, type: "sybil_confirmed" }));
+    }
     default:
       return [];
   }
@@ -123,6 +154,23 @@ export function claimEligibility(escrow, roomId, agentId, amountMillis, { nowMs 
   if (band === REPUTATION_BANDS.PROBATION && amountMillis > PROBATION_MAX_CLAIM_MILLIS)
     return { allowed: false, band, maxClaimMillis: PROBATION_MAX_CLAIM_MILLIS };
   return { allowed: true, band, maxClaimMillis: null };
+}
+
+// Routing visibility for one lane: the band-derived view the routing layer
+// uses when deciding which bounties to surface to this lane. Projected once
+// per call; claimable(amountMillis) answers per bounty without re-folding
+// the event stream, and mirrors the claim gate's cap rule so the routing
+// layer and the gate can never drift. Visibility only — nothing here hides
+// bounties, blocks claims, or touches money; the claim gate stays the sole
+// enforcement point, and bands still never suspend.
+export function routingVisibility(escrow, roomId, agentId, { nowMs } = {}) {
+  const summary = reputationSummary(escrow, roomId, agentId, { nowMs });
+  const maxClaimMillis = summary.band === REPUTATION_BANDS.PROBATION ? PROBATION_MAX_CLAIM_MILLIS : null;
+  return Object.freeze({
+    agentId, band: summary.band, score: summary.score, maxClaimMillis,
+    nowMs: summary.nowMs,
+    claimable: amountMillis => maxClaimMillis === null || amountMillis <= maxClaimMillis,
+  });
 }
 
 export { bandOf };

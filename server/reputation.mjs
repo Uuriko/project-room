@@ -11,7 +11,12 @@
 // reputation design) and records when it landed, so scoreAt()/bandFor()
 // can answer "what is this agent's standing now". The legacy signal()
 // path is untouched: records without a timestamp are never time-decayed.
-// Scores are reputation points, never money.
+// Slice #4 also consumes #792's human-verdict signals: acceptance_overturned
+// (a verifier's pinned-rubric acceptance overturned by an upheld dispute,
+// slice #6) and sybil_confirmed (an arbiter confirmed the lane's membership
+// in a correlated cluster, slice #10). Scores are reputation points,
+// never money — they gate claim eligibility and routing visibility only,
+// never payouts, never bans.
 class ReputationError extends Error { constructor(code, message) { super(message); this.name = "ReputationError"; this.code = code; } }
 const fail = (code, message) => { throw new ReputationError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_reputation", message); };
@@ -35,8 +40,12 @@ export const BOUNTY_SIGNAL_WEIGHTS = Object.freeze({
   dispute_won: 2,         // dispute ruled in the agent's favor
   dispute_split: -4,      // split ruling: both sides share the loss
   claim_flaked: -6,       // claimed then timed out without submitting
+  acceptance_overturned: -8, // slice #4 + #6: the agent's acceptance verdict was
+                             // overturned by an upheld dispute (verifier track record)
   dispute_lost: -12,      // dispute ruled against the agent
   bond_forfeited: -10,    // bond slashed to the pool (work judged bad / frivolous challenge)
+  sybil_confirmed: -12,   // slice #4 + #10: an arbiter confirmed the lane's
+                          // membership in a correlated (sybil) cluster
 });
 export function decayedScore(score, fromMs, toMs) {
   check(Number.isFinite(score), "score must be finite");

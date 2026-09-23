@@ -2250,6 +2250,17 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [proposed, funded, claimed, in-review, paid, cancelled] }
+        - name: viewer
+          in: query
+          required: false
+          schema: { type: string }
+          description: |
+            Optional per-viewer routing visibility (slice 4): `self` or a lane
+            id. Each bounty gains a `viewerRouting` annotation —
+            `{ band, maxClaimMillis, claimable }` — the routing layer's
+            band-derived answer for which bounties are routable to that
+            viewer. Visibility only: bounties are never hidden, amounts never
+            change, and the claim gate stays the sole enforcement point.
       responses:
         '200':
           description: The room's bounties in the requested group
@@ -2428,6 +2439,35 @@ paths:
                   packets:
                     type: array
                     items: { $ref: '#/components/schemas/ReviewPacket' }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/reputation-reviews:
+    get:
+      summary: Inspect probation-gate review packets (slice 4)
+      description: |
+        Arbiter/human inspection of reputation probation-gate review packets.
+        Read-only; packets are immutable once created. When the reputation
+        claim-eligibility gate denies a probation-band lane's claim — the
+        room's one automated adverse move — a packet records the lane's
+        decayed score, band, and the signals that built it, so humans can see
+        who the gate is hitting and why. REVIEW-ONLY: packets never
+        auto-ban, auto-slash, or move balances, bonds, or reputation — bands
+        gate claim eligibility only, never payouts, and decay always offers a
+        way back. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's reputation review packets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  packets:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReputationReviewPacket' }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/sybil-flags:
@@ -7557,6 +7597,20 @@ components:
                 properties:
                   criterionId: { type: string }
                   description: { type: string }
+        viewerRouting:
+          type: object
+          nullable: true
+          description: |
+            Slice 4 — per-viewer routing visibility, present only when the
+            list endpoint is called with `?viewer=`. The routing layer's
+            band-derived answer for this viewer: the lane's reputation band,
+            the probation claim cap (null for other bands), and whether this
+            bounty is routable to them. Visibility only — never hides
+            bounties, never gates money.
+          properties:
+            band: { type: string, enum: [trusted, standard, probation] }
+            maxClaimMillis: { type: integer, nullable: true }
+            claimable: { type: boolean }
     ReviewPacket:
       type: object
       description: |
@@ -7582,6 +7636,31 @@ components:
         matchedBounties: { type: array, items: { type: object } }
         graph: { type: object }
         evidence: { type: object }
+    ReputationReviewPacket:
+      type: object
+      description: |
+        Slice 4 — frozen probation-gate review packet: the lane's decayed
+        score, standing band, and the reputation signals that built it at the
+        moment the claim-eligibility gate denied a claim. Review-only;
+        packets are immutable once created and never auto-ban, auto-slash,
+        or move balances, bonds, or reputation.
+      properties:
+        packetId: { type: string }
+        roomId: { type: string }
+        createdAt: { type: string, format: date-time }
+        agentId: { type: string }
+        band: { type: string, enum: [trusted, standard, probation] }
+        score: { type: number }
+        maxClaimMillis: { type: integer, description: Milli-credit cap the gate applied }
+        bountyId: { type: string, description: The bounty whose claim was denied }
+        signals:
+          type: array
+          items:
+            type: object
+            properties:
+              seq: { type: integer }
+              at: { type: integer, description: Millisecond epoch when the signal landed }
+              type: { type: string }
     SybilFlag:
       type: object
       description: |

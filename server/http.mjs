@@ -2435,10 +2435,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const bountySybilFlagsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags$/.exec(url.pathname);
       const bountySybilDismissMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/dismiss$/.exec(url.pathname);
       const bountySybilConfirmMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/sybil-flags\/([^/]{1,128})\/confirm$/.exec(url.pathname);
+      const bountyReputationReviewsMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/reputation-reviews$/.exec(url.pathname);
       const bountyMatch = bountyListMatch ?? bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch
         ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
         ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
-        ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch;
+        ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch
+        ?? bountyReputationReviewsMatch;
       const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
       const creditsHistoryMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/history\/([^/]{1,256})$/.exec(url.pathname);
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
@@ -2571,6 +2573,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : bountyReviewsMatch ? "reviews"
           : bountySybilFlagsMatch ? "sybil-flags" : bountySybilDismissMatch ? "sybil-dismiss"
           : bountySybilConfirmMatch ? "sybil-confirm"
+          : bountyReputationReviewsMatch ? "reputation-reviews"
           : creditsBalancesMatch ? "balances" : creditsHistoryMatch ? "history"
           : creditsTransferMatch ? "transfer" : "epoch-close";
         const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch

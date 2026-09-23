@@ -43,11 +43,11 @@ const colsOf = (db, table) => new Set(
 
 // A shard as the pre-#792 build left it: the 7 original bounty tables with
 // the old bounty_records column set (no rubric_*/submission_hash columns),
-// none of the 4 slice-6/8/10 tables.
+// none of the 5 slice-4/6/8/10 tables.
 function makePartialShard() {
   const db = new DatabaseSync(":memory:");
   db.exec(bountyEscrowSchema);
-  for (const t of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags"])
+  for (const t of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"])
     db.exec(`DROP TABLE ${t}`);
   for (const c of ["rubric_json", "rubric_hash", "rubric_version", "submission_hash"])
     db.exec(`ALTER TABLE bounty_records DROP COLUMN ${c}`);
@@ -72,7 +72,7 @@ test("partially-migrated shard: first write converges tables AND columns, propos
   assert.ok(bounty.bountyId, "propose returns a bounty");
 
   // The shard is now fully converged.
-  for (const t of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags"])
+  for (const t of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"])
     assert.ok(tablesOf(db).has(t), `table converged: ${t}`);
   for (const c of ["rubric_json", "rubric_hash", "rubric_version", "submission_hash"])
     assert.ok(colsOf(db, "bounty_records").has(c), `column converged: bounty_records.${c}`);
