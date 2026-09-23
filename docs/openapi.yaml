@@ -6731,6 +6731,191 @@ paths:
       responses:
         '200': { description: "{ roomId, timeoutMs }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/activity:
+    get:
+      summary: List the caller's personal activity feed
+      description: >-
+        Member-readable persisted activity feed: mention, reply,
+        thread_reply, and reaction events naming the caller, newest first.
+        Optional type filter (mention, reply, thread_reply, reaction) and
+        before/limit paging. Every response carries the session-ownership
+        envelope (viewerId, viewerAccountId, viewerAuthEpoch,
+        viewerSessionBinding, viewerSessionRevision).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: type
+          in: query
+          schema: { type: string, enum: [mention, reply, thread_reply, reaction] }
+        - name: before
+          in: query
+          schema: { type: string, description: "page before this event id" }
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, items: [{ id, type, actorId, messageId, threadId, messageBody, messageDeleted, createdAt, readAt }], hasMore, before }" }
+  /api/rooms/{roomId}/activity-unread-count:
+    get:
+      summary: Count unread activity events
+      description: >-
+        Returns the caller's unread activity-event count (drives the
+        Activity topbar badge). Session-ownership envelope included.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, viewerId, unread }" }
+  /api/rooms/{roomId}/activity-read:
+    post:
+      summary: Mark activity events read
+      description: >-
+        Marks the caller's activity events read by id list. Body:
+        `{ ids: [integer] }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { description: "{ roomId, viewerId, marked }" }
+  /api/rooms/{roomId}/activity-read-all:
+    post:
+      summary: Mark all activity events read
+      description: >-
+        Marks every unread activity event read for the caller, optionally
+        filtered by type. Body: `{ type? }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [mention, reply, thread_reply, reaction] }
+      responses:
+        '200': { description: "{ roomId, viewerId, marked }" }
+  /api/rooms/{roomId}/read-horizon:
+    get:
+      summary: Read the caller's read horizon
+      description: >-
+        Returns the caller's last-read message id for the room (threadId
+        "") or a thread. Query: `threadId?`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: threadId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
+    post:
+      summary: Advance the caller's read horizon
+      description: >-
+        Sets last_read_message_id for the room or thread. "Mark unread"
+        on message M is this endpoint with the id of the message before M.
+        Body: `{ threadId?, lastReadMessageId }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lastReadMessageId]
+              properties:
+                threadId: { type: string }
+                lastReadMessageId: { type: string }
+      responses:
+        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
+  /api/rooms/{roomId}/saved:
+    get:
+      summary: List the caller's saved messages
+      description: >-
+        Member-readable list of messages the caller saved for later, with
+        live bodies joined. Session-ownership envelope included.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, viewerId, items: [{ messageId, authorId, body, createdAt, deleted }] }" }
+    post:
+      summary: Save or unsave a message
+      description: >-
+        Body: `{ messageId, saved: boolean }`. Idempotent. 404 when the
+        message does not exist.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, saved]
+              properties:
+                messageId: { type: string }
+                saved: { type: boolean }
+      responses:
+        '200': { description: "{ roomId, viewerId, messageId, saved }" }
+        '404': { description: message_not_found }
+    delete:
+      summary: Unsave a message (collection form)
+      description: >-
+        Body: `{ messageId }`. Prefer DELETE
+        /api/rooms/{roomId}/saved/{messageId}.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId]
+              properties:
+                messageId: { type: string }
+      responses:
+        '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
+  /api/rooms/{roomId}/saved/{messageId}:
+    delete:
+      summary: Unsave one message
+      description: >-
+        Removes the caller's save for the message named in the path.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
+  /api/rooms/{roomId}/thread-mutes:
+    post:
+      summary: Mute or unmute a thread
+      description: >-
+        Persists the caller's thread mute. Muted threads suppress only
+        thread_reply activity events; direct replies and mentions still
+        notify. Body: `{ threadId, muted: boolean }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, muted]
+              properties:
+                threadId: { type: string }
+                muted: { type: boolean }
+      responses:
+        '200': { description: "{ roomId, viewerId, threadId, muted }" }
   /api/rooms/{roomId}/guest-agent-links:
     post:
       summary: Mint a guest invite

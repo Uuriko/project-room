@@ -606,7 +606,7 @@ export class RoomClient {
     return this.roomWrite("/saved", { messageId, saved });
   }
   unsaveMessage(messageId) {
-    return this.roomWrite("/saved", { messageId }, "DELETE");
+    return this.roomWrite(`/saved/${encodeURIComponent(messageId)}`, {}, "DELETE");
   }
   async charter(revision) {
     if (!this.session) return null;

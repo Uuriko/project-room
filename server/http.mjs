@@ -2352,6 +2352,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const delegationGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/grant$/.exec(url.pathname);
       const delegationRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/revoke$/.exec(url.pathname);
       const delegationListMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation$/.exec(url.pathname);
+      // Attention: DELETE /api/rooms/:roomId/saved/:messageId unsaves one message.
+      const savedDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/saved\/([^/]{1,384})$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
       // Consent-bound DMs: list/request at the funnel root, decide/revoke/unblock below.
       const dmConsentDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/([^/]{1,64})\/decide$/.exec(url.pathname);
@@ -2453,20 +2455,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
-        && !mentionAckMatch && !mentionSettingsMatch) reject(404, "not_found", "Not found");
+        && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
-        ?? mentionAckMatch ?? mentionSettingsMatch)[1]);
+        ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
+      const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
-        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : "ownership-transfer";      const selected = roomCredentials(req, url);
+        : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete" : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
         : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -2931,6 +2934,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (req.method === "DELETE") return json(res, 200, setSaved(store, selected.token, roomId, { messageId: data.messageId, saved: false }, fence));
         return json(res, 200, setSaved(store, selected.token, roomId, data, fence));
+      }
+      if (route === "saved-delete" && req.method === "DELETE") {
+        // DELETE /api/rooms/:roomId/saved/:messageId — unsave one message.
+        return json(res, 200, setSaved(store, selected.token, roomId, { messageId: savedDeleteMessageId, saved: false }, fence));
       }
       if (route === "thread-mutes" && req.method === "POST") {
         return json(res, 200, setThreadMute(store, selected.token, roomId, await body(req), fence));

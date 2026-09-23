@@ -220,6 +220,10 @@ test("saved messages: save, list, unsave, ownership isolation", async t => {
   assert.equal((await f.call("/api/rooms/commons/saved", { token: f.ownerKey })).body.items.length, 0, "saves are per-member");
   assert.equal((await save(f.mayaKey, { messageId: "root" }, "DELETE")).status, 200);
   assert.equal((await f.call("/api/rooms/commons/saved", { token: f.mayaKey })).body.items.length, 0);
+  assert.equal((await save(f.mayaKey, { messageId: "root", saved: true })).status, 200);
+  assert.equal((await f.call("/api/rooms/commons/saved/root", { method: "DELETE", token: f.mayaKey })).status, 200,
+    "DELETE /saved/:messageId unsaves");
+  assert.equal((await f.call("/api/rooms/commons/saved", { token: f.mayaKey })).body.items.length, 0);
   assert.equal((await save(f.mayaKey, { messageId: "missing", saved: true })).status, 404);
   assert.equal((await save(f.mayaKey, { messageId: "root", saved: "yes" })).status, 422);
 });

@@ -205,6 +205,20 @@ test("online capture preserves all 98 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at)
     VALUES('commons',?,?)`)
     .run(30 * 60 * 1000, f.now());
+  // Seed one row per attention table so the capture comparison covers
+  // activity_events, read_horizons, saved_messages, and thread_mutes.
+  f.store.db.prepare(`INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
+    VALUES('commons','mention','agent','Recovery agent','recovery-reported','','owner',?,NULL)`)
+    .run(f.now());
+  f.store.db.prepare(`INSERT INTO read_horizons(room_id,member_id,thread_id,last_read_message_id,updated_at)
+    VALUES('commons','owner','','recovery-reported',?)`)
+    .run(f.now());
+  f.store.db.prepare(`INSERT INTO saved_messages(room_id,member_id,message_id,saved_at)
+    VALUES('commons','owner','recovery-reported',?)`)
+    .run(f.now());
+  f.store.db.prepare(`INSERT INTO thread_mutes(room_id,member_id,thread_id,created_at)
+    VALUES('commons','owner','recovery-thread',?)`)
+    .run(f.now());
   // A reservation is external-execution history: capture it with the room.
   f.store.dmConsents.request("commons", "owner", "agent", "recovery fixture");
   f.store.dmConsents.decide("commons", "agent", "owner", "approve");
@@ -224,8 +238,8 @@ test("online capture preserves all 98 tables, identity boundaries and exact retr
   gmail.begin(f.owner.token, f.owner.session.sessionBinding);
   gmail.save(gmail.auth(f.owner.token, f.owner.session.sessionBinding), { address: 'recovery@gmail.test', connectionId: 'recovery-gmail', refreshToken: 'invented-recovery-token', syncedAt: null });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 98,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 102,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +4: activity_events, read_horizons, saved_messages, thread_mutes (attention: activity feed, read horizons, saved messages, thread mutes)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
