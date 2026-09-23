@@ -2,6 +2,7 @@ import { clickChrome } from "./room-chrome.mjs";
 // Synthetic recovery regressions in disposable loopback rooms, not human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
@@ -66,6 +67,49 @@ async function capture(page, name) {
   await page.screenshot({ path: `test-results/invitation-recovery-${name}.png`,
     mask: [page.locator('#access-key'), page.locator('#share-link-url')] });
 }
+
+for (const maxJoins of [1, 10]) test(`two tabs joining an invitation (${maxJoins} places) review and reuse the winning guest`, { timeout: 45000 }, async t => {
+  const { fixture, origin, page, errors, releases } = await setup(t);
+  const token = randomBytes(32).toString('base64url');
+  const invitation = fixture.store.shareLinks.create(fixture.keys.owner, 'commons', {
+    requestId: randomUUID(), linkToken: token, expiresAt: Date.now() + 3600000,
+    maxJoins, expectedMemberRevision: 0
+  }, null);
+  const before = Object.keys(fixture.store.room('commons').state.members).length;
+  await page.goto(`${origin}/#join/${token}`);
+  await page.locator('#join-link-name').fill('Winning guest');
+  const other = await page.context().newPage();
+  other.on('pageerror', error => errors.push(error.message));
+  other.setDefaultTimeout(10000);
+  await other.goto(`${origin}/#join/${token}`);
+  await other.locator('#join-link-name').fill('Stale guest');
+  const pending = Promise.withResolvers(), release = Promise.withResolvers();
+  releases.push(release.resolve);
+  let requests = 0;
+  await other.route('**/api/share-links/join', async route => {
+    if (++requests === 1) { pending.resolve(); await release.promise; }
+    await route.continue();
+  });
+  await other.locator('#join-link-submit').click();
+  await pending.promise;
+  await page.locator('#join-link-submit').click();
+  await page.locator('#main').waitFor({ state: 'visible' });
+  release.resolve();
+  await other.locator('#join-link-retry').waitFor({ state: 'visible' });
+  assert.match(await other.locator('#join-link-status').textContent(), /another tab/);
+  assert.equal(await other.locator('#join-link-form').isVisible(), false);
+  await other.getByRole('button', { name: 'Review browser session', exact: true }).click();
+  await other.getByRole('button', { name: 'Confirm and continue', exact: true }).waitFor();
+  assert.equal(requests, 1, 'review cannot automatically join');
+  assert.match(await other.locator('#join-link-status').textContent(), /Current browser identity:/);
+  await other.locator('#join-link-name').fill('Stale guest');
+  await other.getByRole('button', { name: 'Confirm and continue', exact: true }).click();
+  await other.locator('#join-link-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await other.locator('#identity-label').textContent(), 'Winning guest');
+  assert.equal(Object.keys(fixture.store.room('commons').state.members).length, before + 1);
+  assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_joins WHERE link_id = ?').get(invitation.link.id).n, 1, 'only one invitation place is consumed');
+  assert.deepEqual(errors, []);
+});
 
 test('guest sign-out recovery locks the current invitation and can join after confirmation', { timeout: 45000 }, async t => {
   const { fixture, origin, page, errors, releases } = await setup(t);

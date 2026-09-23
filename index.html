@@ -334,6 +334,7 @@
           <div id="thread-bar" class="thread-bar" hidden>
             <button id="thread-back" class="button ghost" type="button">&larr; Back</button>
             <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
+            <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <div id="room-guide" class="room-guide" hidden>
@@ -365,6 +366,7 @@
               <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
               <button id="request-exit" class="button ghost" type="button">Back to chat</button>
             </div>
+            <label id="also-send-label" class="form-hint also-send-toggle" hidden><input id="also-send-to-channel" type="checkbox"> Also send to channel</label>
             <div class="composer-row">
               <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
               <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
