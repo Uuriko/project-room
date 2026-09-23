@@ -27,6 +27,10 @@ test("join.js renders the server-provided expiration on success", () => {
     joinJs.includes("This browser session expires"),
     "join.js writes a human-readable expiration line to the success screen"
   );
+  assert.ok(
+    joinJs.includes("expiryEl.hidden = false") && joinJs.includes("expiryEl.hidden = true"),
+    "join.js hides the expiry paragraph when there is no expiration to show"
+  );
 });
 
 test("session expiry formats like invite expiry", () => {

@@ -211,9 +211,13 @@ async function boot() {
     const expiryEl = $("join-session-expiry");
     if (expiryEl) {
       const when = Number(sessionExpiresAt);
-      expiryEl.textContent = Number.isFinite(when) && when > 0
-        ? `This browser session expires ${formatInviteExpiry(when)}.`
-        : "";
+      if (Number.isFinite(when) && when > 0) {
+        expiryEl.textContent = `This browser session expires ${formatInviteExpiry(when)}.`;
+        expiryEl.hidden = false;
+      } else {
+        expiryEl.textContent = "";
+        expiryEl.hidden = true;
+      }
     }
     const secretEl = $("join-secret");
     if (secretEl) secretEl.value = identitySecret;
