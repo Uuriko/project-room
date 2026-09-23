@@ -182,6 +182,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // activity_events + read_horizons + saved_messages
+  // (attention: activity feed, mark unread, save for later) are purely
+  // additive and intentionally NOT fenced: older writers have no code path
+  // to them, and the activity module owns its schema.
+  "activity_events",
+  "read_horizons",
+  "saved_messages",
   // web_fetch_cache + web_fetch_log (room-side web fetch, RC-2026-09-23-102):
   // page cache and the per-request fetch journal (no page content journaled).
   // Purely additive and intentionally NOT fenced — older writers have no
@@ -191,7 +198,8 @@ export const unfencedAdditiveTables = Object.freeze([
   // thread_mutes (per-thread mutes): one row per (room, member, thread
   // root). Purely additive and intentionally NOT fenced — older writers have
   // no code path to it, and muting is a private read-time filter, never a
-  // room-visible state change.
+  // room-visible state change. DDL is shared with server/thread-mutes.mjs
+  // (convergent).
   "thread_mutes",
   // referrals (referral attribution): one row per joined referee, the
   // queryable source of truth behind the referral board. Purely additive

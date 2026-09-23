@@ -210,6 +210,7 @@ const client = new RoomClient({
     shareLinksUI?.sync();
     remindersUI?.sync();
     syncNotifications();
+    syncAttention();
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     referralBoardUI?.sync();
@@ -217,6 +218,8 @@ const client = new RoomClient({
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
       void refreshDmConsents();
+      void refreshSavedIds();
+      void applyHorizonAnchor();
       void refreshMutedThreads();
       startPresencePoll();
     }
@@ -273,6 +276,7 @@ const client = new RoomClient({
     resultCopyUI?.reset();
     remindersUI?.reset();
     resetNotifications();
+    resetAttention();
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
@@ -1604,6 +1608,16 @@ function renderChannels() {
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
+  // The read-horizon anchor is recomputed when the view changes (room vs
+  // thread, channel switch); a cached horizon applies synchronously, a miss
+  // fetches and re-renders.
+  if (view !== lastHorizonView && state) {
+    lastHorizonView = view;
+    const threadKey = currentThreadId ?? "";
+    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+    if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
+    else { horizonAnchorId = null; void applyHorizonAnchor(); }
+  }
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
@@ -1629,6 +1643,8 @@ function renderMessages() {
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
+  // New arrivals while the user watches the bottom count as read (debounced).
+  if (sameView && nearBottom && newCount > 0) scheduleHorizonAdvance();
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
@@ -1656,7 +1672,7 @@ function renderMessages() {
     node.id = recordDomId("message", message.id); node.dataset.key = message.id; node.dataset.messageRecordId = message.id;
     const muted = isMutedBy(state, session?.member?.id, message.authorId);
     node.className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`; node.tabIndex = -1;
-    const html = messageContent(message, cluster, message.id === unreadAnchorId);
+    const html = messageContent(message, cluster, message.id === unreadAnchorId || message.id === horizonAnchorId);
     if (node._content !== html) {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
@@ -1768,12 +1784,16 @@ function messageLinksHTML(m, { linked, moderation, count, muted, reactionOptions
     ? `<button class="message-to-work" type="button" data-message-action="add-reaction" data-message-id="${esc(m.id)}">Add reaction</button>` : "";
   const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>`;
   const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
+  // Attention: mark-unread rewinds the read horizon; save/unsave toggles the
+  // per-member "later" list. Both ride the ⋯ overflow menu.
+  const markUnreadHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="mark-unread" data-message-id="${esc(m.id)}" type="button" title="Mark unread (u)">Mark unread</button>` : "";
+  const laterHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="save" data-message-id="${esc(m.id)}" type="button" aria-pressed="${savedMessageIds.has(m.id)}">${savedMessageIds.has(m.id) ? "Unsave" : "Save"}</button>` : "";
   const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : "";
   const workHtml = !m.deletedAt && can("steer") && !(m.proposal && m.workItemId)
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
   const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
-  const overflow = [reactHtml, saveHtml, pinHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
+  const overflow = [reactHtml, saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
@@ -2043,6 +2063,8 @@ function revealMessage(id) {
   if (!state || busy || !conversation.byId.has(id)) return;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
+  if ($("#activity-dialog")?.open) $("#activity-dialog").close();
+  if ($("#later-dialog")?.open) $("#later-dialog").close();
   inboxUI?.showRooms();
   const message = conversation.byId.get(id);
   if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
@@ -3036,6 +3058,8 @@ $("#message-list").addEventListener("click", e => {
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
   else if (button.dataset.messageAction === "add-reaction") openReactionSheet(id, button.closest("li.message"));
   else if (button.dataset.messageAction === "pin") setPinned(id);
+  else if (button.dataset.messageAction === "mark-unread") void markMessageUnread(id);
+  else if (button.dataset.messageAction === "save") void toggleSaved(id);
   else if (button.dataset.messageAction === "report") openReport(id);
   else if (["mute", "unmute"].includes(button.dataset.messageAction)) setMute(conversation.byId.get(id)?.authorId, button.dataset.messageAction === "mute");
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
@@ -3343,6 +3367,38 @@ document.addEventListener("keydown", event => {
   if ($("#main").hidden || event.target?.closest?.("dialog")) return;
   runEscapeChat(event);
 });
+// Attention: keyboard shortcuts. `g a` opens Activity, `g l` opens Later,
+// `u` marks the focused message unread. Skipped while typing, composing,
+// in dialogs, or with modifiers held.
+let attentionKeyPrefix = null;
+let attentionKeyTimer = 0;
+document.addEventListener("keydown", event => {
+  if ($("#main").hidden || event.target?.closest?.("dialog")) return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return;
+  if (event.target?.closest?.("input, textarea, select, [contenteditable]")) { attentionKeyPrefix = null; return; }
+  const key = event.key?.toLowerCase();
+  if (attentionKeyPrefix === "g") {
+    attentionKeyPrefix = null;
+    clearTimeout(attentionKeyTimer);
+    if (key === "a") { event.preventDefault(); openActivity(); }
+    else if (key === "l") { event.preventDefault(); openLater(); }
+    return;
+  }
+  if (key === "g") {
+    attentionKeyPrefix = "g";
+    clearTimeout(attentionKeyTimer);
+    attentionKeyTimer = setTimeout(() => { attentionKeyPrefix = null; }, 800);
+    return;
+  }
+  if (key === "u") {
+    const host = event.target?.closest?.("[data-message-id], [data-message-record-id]");
+    const messageId = host?.dataset?.messageId ?? host?.dataset?.messageRecordId;
+    if (messageId && !conversation.byId.get(messageId)?.deletedAt) {
+      event.preventDefault();
+      void markMessageUnread(messageId);
+    }
+  }
+});
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
 $("#search-mentions").addEventListener("click", () => {
@@ -3384,6 +3440,8 @@ function roomActionEntries() {
     { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
+    { id: "activity", label: "Activity", words: "activity mentions replies reactions feed unread", always: true },
+    { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
@@ -3455,6 +3513,8 @@ function chooseRoomAction(id) {
     return;
   }
   if (id === "catch-up") { openCatchUp(); return; }
+  if (id === "activity") { closeRoomActions(false); openActivity(); return; }
+  if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
   if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
   if (id === "usage") { openSettings("usage-panel"); return; }
@@ -3496,6 +3556,11 @@ new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) close
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
+// Attention: advancing the read horizon is scroll-driven (debounced). Both the
+// message list and the window can be the scroller depending on layout.
+for (const scroller of [$("#message-list"), window]) {
+  scroller.addEventListener("scroll", () => { if (nearBottomOfList()) scheduleHorizonAdvance(); }, { passive: true });
+}
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -4650,6 +4715,298 @@ function scheduleNotifications(delay) {
   clearTimeout(notificationTimer);
   notificationTimer = setTimeout(() => { notificationTimer = null; void loadNotifications(); }, delay);
 }
+// ---- Attention: activity feed, read horizons, saved messages ------------------
+// Write-time personal feed (server/activity.mjs): mentions, replies, thread
+// replies, and reactions fanned out per recipient with their own read state.
+// The Activity dialog pages newest-first with All/Mentions/Replies/Threads/
+// Reactions filters; opening an item jumps to the message and marks it read.
+let savedMessageIds = new Set(), savedIdsBusy = false;
+let activityFilter = "", activityItems = [], activityBefore = null, activityHasMore = false, activityBusy = false, activitySerial = 0;
+let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
+let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
+let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
+const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
+let horizonAdvanceTimer = null;
+function nearBottomOfList() {
+  const list = $("#message-list");
+  if (!list || !state) return false;
+  if (list.scrollHeight <= list.clientHeight) return list.getBoundingClientRect().bottom <= innerHeight + 80;
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+function scheduleHorizonAdvance() {
+  // Debounced per the spec: the client advances the read horizon as the user
+  // scrolls. Only fires while the user holds the bottom of the view, so an
+  // explicit Mark unread never gets wiped without a scroll.
+  clearTimeout(horizonAdvanceTimer);
+  horizonAdvanceTimer = setTimeout(() => { horizonAdvanceTimer = null; void advanceHorizon(); }, 1500);
+}
+async function advanceHorizon() {
+  if (!state || !session || !client.session || !nearBottomOfList()) return;
+  const threadKey = currentThreadId ?? "";
+  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const latest = messages.length ? messages[messages.length - 1].id : null;
+  if (!latest || horizonCache.get(threadKey) === latest) return;
+  try {
+    await client.setReadHorizon(threadKey, latest);
+    if (!state) return;
+    horizonCache.set(threadKey, latest);
+    horizonAnchorId = null; // everything in view is read; the divider clears
+    renderMessages();
+  } catch { /* best-effort; the next scroll retries */ }
+}
+function resetAttention() {
+  // Session/room teardown: drop every persisted-attention cache so the next
+  // session never sees the previous member's activity, saves, or horizons.
+  activitySerial++; activityFilter = ""; activityItems = []; activityBefore = null; activityHasMore = false; activityBusy = false;
+  clearTimeout(activityBadgeTimer); activityBadgeTimer = null; activityBadgeAt = 0; attentionBadgesBusy = false;
+  setText("#activity-count", ""); $("#activity-count").hidden = true;
+  setText("#later-count", ""); $("#later-count").hidden = true;
+  $("#activity-list").replaceChildren(); delete $("#activity-list")._content;
+  $("#activity-older").hidden = true; setText("#activity-status", "");
+  $("#later-list").replaceChildren(); delete $("#later-list")._content;
+  setText("#later-status", "");
+  savedMessageIds = new Set(); savedIdsBusy = false;
+  horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null;
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  previewItems = []; previewBusy = false;
+  const preview = $("#activity-preview"); if (preview) { $("#activity-preview-list")?.replaceChildren(); preview.hidden = true; }
+  for (const dialog of ["#activity-dialog", "#later-dialog"]) { const node = $(dialog); if (node?.open) node.close(); }
+}
+function horizonAnchorFor(messages, lastRead) {
+  if (lastRead === null || lastRead === undefined) return messages[0]?.id ?? null;
+  const index = messages.findIndex(m => m.id === lastRead);
+  if (index < 0) return null; // the horizon message is not in this view
+  return messages[index + 1]?.id ?? null;
+}
+async function refreshSavedIds() {
+  if (!state || !session || savedIdsBusy) return;
+  savedIdsBusy = true;
+  try {
+    const result = await client.savedList();
+    if (result) savedMessageIds = new Set(result.items.map(item => item.messageId));
+  } catch { /* the Save toggle reports loudly; the menu label just stays stale */ }
+  finally { savedIdsBusy = false; }
+}
+async function syncAttentionBadges() {
+  if (!state || !session || attentionBadgesBusy) return;
+  attentionBadgesBusy = true;
+  try {
+    const [count, saved] = await Promise.all([client.activityUnreadCount(), client.savedList()]);
+    if (!state || !session) return;
+    const unread = count?.total ?? 0;
+    setText("#activity-count", unread ? String(unread) : "");
+    $("#activity-count").hidden = !unread;
+    $("#topbar-activity").setAttribute("aria-label", unread ? `Activity, ${unread} unread` : "Activity");
+    const later = saved?.count ?? 0;
+    setText("#later-count", later ? String(later) : "");
+    $("#later-count").hidden = !later;
+    if (saved) savedMessageIds = new Set(saved.items.map(item => item.messageId));
+  } catch { /* badges are best-effort; the dialogs report loudly */ }
+  finally { attentionBadgesBusy = false; }
+  void refreshActivityPreview();
+}
+// Compact top-three unread preview at the needs-attention placement (below the
+// room topbar). The owner ops card keeps its own data source; this is the
+// personal activity view backed by activity_events.
+let previewItems = [], previewBusy = false;
+async function refreshActivityPreview() {
+  if (!state || !session || previewBusy) return;
+  previewBusy = true;
+  try {
+    const result = await client.activity({ limit: 20 });
+    if (!state || !session || !result) return;
+    previewItems = result.items.filter(item => !item.readAt).slice(0, 3);
+    $("#activity-preview").hidden = previewItems.length === 0;
+    setText("#activity-preview-count", String(previewItems.length));
+    renderBriefList("#activity-preview-list", previewItems.map(item => {
+      const detail = item.messageDeleted ? "Message deleted" : (item.messageBody ?? "").slice(0, 100);
+      const label = `${memberLabel(item.actorId)} ${ACTIVITY_LABELS[item.type] ?? item.type}`;
+      return `<li class="rb-event activity-item unread">`
+        + `<a class="rb-event-link" href="${esc(recordHref("message", item.messageId))}" data-open-message="${esc(item.messageId)}" data-preview-id="${item.id}" data-brief-key="preview:${item.id}" aria-label="${esc(label)}, unread">`
+        + `<span class="rb-actor">${esc(label)}</span><time datetime="${esc(String(item.createdAt))}">${esc(time(item.createdAt))}</time>`
+        + (detail ? `<span class="rb-detail">${esc(detail)}</span>` : "") + `</a></li>`;
+    }).join(""));
+  } catch { /* the preview is best-effort; the dialog reports loudly */ }
+  finally { previewBusy = false; }
+}
+$("#activity-preview-open").addEventListener("click", openActivity);
+function scheduleAttentionBadges() {
+  // Throttled: snapshots fire on every room event, badges need not.
+  const now = Date.now(), elapsed = now - activityBadgeAt;
+  if (elapsed < 15000) {
+    clearTimeout(activityBadgeTimer);
+    activityBadgeTimer = setTimeout(() => { activityBadgeAt = 0; scheduleAttentionBadges(); }, 15000 - elapsed);
+    return;
+  }
+  activityBadgeAt = now;
+  void syncAttentionBadges();
+}
+function syncAttention() {
+  if (!client.session || !client.ownsAccountSession() || !state) {
+    const preview = $("#activity-preview");
+    if (preview) preview.hidden = true;
+    return;
+  }
+  scheduleAttentionBadges();
+}
+async function applyHorizonAnchor() {
+  // Room-level horizon ("" thread) anchors the "New messages" divider on room
+  // open and after mark-unread; the thread view anchors on its own horizon.
+  if (!state || !session) return;
+  const threadKey = currentThreadId ?? "";
+  try {
+    const horizon = await client.readHorizon(threadKey);
+    const lastRead = horizon?.lastReadMessageId ?? null;
+    horizonCache.set(threadKey, lastRead);
+    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+    horizonAnchorId = horizonAnchorFor(messages, lastRead);
+  } catch { horizonAnchorId = null; }
+  if (state) renderMessages();
+}
+async function markMessageUnread(messageId) {
+  if (!state || !session || !conversation.byId.has(messageId)) return;
+  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const index = messages.findIndex(m => m.id === messageId);
+  if (index < 0) { notice("That message isn't in this view.", true); return; }
+  const previous = index > 0 ? messages[index - 1].id : null;
+  try {
+    await client.setReadHorizon(currentThreadId ?? "", previous);
+    horizonCache.set(currentThreadId ?? "", previous);
+    horizonAnchorId = messageId;
+    renderMessages();
+    notice(index === 0 ? "Marked everything unread." : "Marked unread from here.");
+  } catch (error) {
+    notice(`Couldn't mark unread: ${error.message}`, true);
+  }
+}
+async function toggleSaved(messageId) {
+  if (!state || !session || !conversation.byId.has(messageId)) return;
+  const saved = !savedMessageIds.has(messageId);
+  try {
+    await client.setSaved(messageId, saved);
+    if (saved) savedMessageIds.add(messageId); else savedMessageIds.delete(messageId);
+    notice(saved ? "Saved for later." : "Removed from saved.");
+    renderMessages();
+    void syncAttentionBadges();
+  } catch (error) {
+    notice(`Couldn't ${saved ? "save" : "unsave"}: ${error.message}`, true);
+  }
+}
+function openActivity() {
+  if (document.querySelector("dialog[open]")) return;
+  activityFilter = "";
+  for (const button of $("#activity-filters").querySelectorAll("[data-activity-filter]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.activityFilter === ""));
+  }
+  $("#activity-dialog").showModal();
+  void loadActivity(true);
+}
+async function loadActivity(reset) {
+  if (activityBusy) return;
+  const serial = ++activitySerial, generation = client.generation;
+  if (reset) { activityItems = []; activityBefore = null; }
+  activityBusy = true;
+  setText("#activity-status", "Loading…");
+  try {
+    const result = await client.activity({ before: activityBefore, limit: 50, type: activityFilter || null });
+    if (serial !== activitySerial || generation !== client.generation || !state) return;
+    activityItems = reset ? result.items : activityItems.concat(result.items);
+    activityBefore = activityItems.length ? activityItems[activityItems.length - 1].id : null;
+    activityHasMore = result.hasMore;
+    renderActivity();
+    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions, replies, and reactions will appear.");
+  } catch (error) {
+    if (serial === activitySerial && generation === client.generation) setText("#activity-status", `Couldn't load activity: ${error.message}`);
+  } finally {
+    if (serial === activitySerial) activityBusy = false;
+  }
+}
+function renderActivity() {
+  renderBriefList("#activity-list", activityItems.map(item => {
+    const detail = item.messageDeleted ? "Message deleted" : (item.messageBody ?? "").slice(0, 120);
+    const label = `${memberLabel(item.actorId)} ${ACTIVITY_LABELS[item.type] ?? item.type}`;
+    return `<li class="rb-event activity-item${item.readAt ? "" : " unread"}" data-activity-type="${esc(item.type)}">`
+      + `<a class="rb-event-link" href="${esc(recordHref("message", item.messageId))}" data-open-message="${esc(item.messageId)}" data-activity-id="${item.id}" data-brief-key="activity:${item.id}" aria-label="${esc(label)}${item.readAt ? "" : ", unread"}">`
+      + `<span class="rb-actor">${esc(label)}</span><time datetime="${esc(String(item.createdAt))}">${esc(time(item.createdAt))}</time>`
+      + (detail ? `<span class="rb-detail">${esc(detail)}</span>` : "") + `</a></li>`;
+  }).join("") || `<li class="rb-empty">Nothing here yet.</li>`);
+  $("#activity-older").hidden = !activityHasMore;
+}
+$("#topbar-activity").addEventListener("click", openActivity);
+$("#activity-close").addEventListener("click", () => $("#activity-dialog").close());
+$("#activity-filters").addEventListener("click", event => {
+  const button = event.target.closest("[data-activity-filter]");
+  if (!button || button.dataset.activityFilter === activityFilter) return;
+  activityFilter = button.dataset.activityFilter;
+  for (const sibling of $("#activity-filters").querySelectorAll("[data-activity-filter]")) {
+    sibling.setAttribute("aria-pressed", String(sibling === button));
+  }
+  void loadActivity(true);
+});
+$("#activity-older").addEventListener("click", () => void loadActivity(false));
+$("#activity-read-all").addEventListener("click", async () => {
+  try {
+    await client.markActivityReadAll(activityFilter || null);
+    for (const item of activityItems) item.readAt = Date.now();
+    renderActivity();
+    void syncAttentionBadges();
+    notice("All activity marked read.");
+  } catch (error) {
+    notice(`Couldn't mark read: ${error.message}`, true);
+  }
+});
+function openLater() {
+  if (document.querySelector("dialog[open]")) return;
+  $("#later-dialog").showModal();
+  void loadLater();
+}
+async function loadLater() {
+  setText("#later-status", "Loading…");
+  try {
+    const result = await client.savedList();
+    if (!state) return;
+    renderBriefList("#later-list", result.items.map(item => {
+      const detail = item.deleted ? "Message deleted" : (item.body ?? "").slice(0, 120);
+      return `<li class="rb-event later-item">`
+        + `<a class="rb-event-link" href="${esc(recordHref("message", item.messageId))}" data-open-message="${esc(item.messageId)}" data-brief-key="later:${esc(item.messageId)}">`
+        + `<span class="rb-actor">${esc(memberLabel(item.authorId))}</span><time datetime="${esc(String(item.createdAt))}">${esc(time(item.createdAt))}</time>`
+        + (detail ? `<span class="rb-detail">${esc(detail)}</span>` : "") + `</a>`
+        + `<button class="text-button" type="button" data-unsave-message="${esc(item.messageId)}">Unsave</button></li>`;
+    }).join("") || `<li class="rb-empty">Nothing saved yet. Use ⋯ → Save on any message.</li>`);
+    setText("#later-status", "");
+  } catch (error) {
+    setText("#later-status", `Couldn't load saved messages: ${error.message}`);
+  }
+}
+$("#topbar-later").addEventListener("click", openLater);
+$("#later-close").addEventListener("click", () => $("#later-dialog").close());
+$("#later-list").addEventListener("click", async event => {
+  const button = event.target.closest("[data-unsave-message]");
+  if (!button) return;
+  event.preventDefault();
+  try {
+    await client.unsaveMessage(button.dataset.unsaveMessage);
+    savedMessageIds.delete(button.dataset.unsaveMessage);
+    notice("Removed from saved.");
+    void loadLater();
+    void syncAttentionBadges();
+  } catch (error) {
+    notice(`Couldn't unsave: ${error.message}`, true);
+  }
+});
+// Opening an activity or preview item jumps to the message and marks the item read.
+document.addEventListener("click", event => {
+  const link = event.target.closest("[data-activity-id], [data-preview-id]");
+  if (!link) return;
+  const id = Number(link.dataset.activityId ?? link.dataset.previewId);
+  if (!Number.isInteger(id)) return;
+  const item = activityItems.find(entry => entry.id === id) ?? previewItems.find(entry => entry.id === id);
+  if (item && !item.readAt) {
+    item.readAt = Date.now();
+    renderActivity();
+    client.markActivityRead([id]).then(() => { void syncAttentionBadges(); void refreshActivityPreview(); }).catch(() => {});
+  }
+}, true);
 function syncNotifications() {
   if (!client.session || !client.ownsAccountSession() || !state) { resetNotifications(); return; }
   if (!ownsNotifications(notificationOwner)) { resetNotifications(); notificationOwner = { generation: client.generation, session: client.session, inputs: null, sequence: null }; }
