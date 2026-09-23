@@ -1,10 +1,11 @@
 // Manual acceptance runner, deliberately excluded from automatic test suites.
 // Uses existing subscription auth; never installs/configures a provider or host.
-import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { readFileSync, writeFileSync, openSync, closeSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
+import { resolveHostBinary } from "./native-host-binary.mjs";
 const [host, metadataPath, phase, outputPath] = process.argv.slice(2);
 if (process.argv.length !== 6 || !["codex", "claude"].includes(host) || !["clarify", "produce", "review"].includes(phase)) throw new Error("Choose host, fixture metadata, phase and a new evidence file");
 const fixture = JSON.parse(readFileSync(metadataPath, "utf8"));
@@ -24,16 +25,18 @@ const prompts = {
 const prompt = common + "\n\n" + prompts[phase];
 const env = { ...process.env };
 delete env.OPENAI_API_KEY; delete env.ANTHROPIC_API_KEY;
-let binary, args;
+let args;
+// The executable is resolved rather than named. A hardcoded install path
+// pinned this exercise to a single laptop and failed everywhere else with a
+// bare ENOENT out of spawn.
+const resolvedHost = resolveHostBinary(host);
 if (host === "codex") {
-  binary = "/Applications/ChatGPT.app/Contents/Resources/codex";
   const quote = JSON.stringify;
   const server = `{command=${quote(process.execPath)},args=[${quote(adapter)}],cwd=${quote(fileURLToPath(new URL("../", import.meta.url)))},env={${Object.entries(mcpEnvironment).map(([k,v]) => k + "=" + quote(v)).join(",")}},enabled_tools=${quote(names)},required=true,default_tools_approval_mode="approve"}`;
   args = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-C", fixture.directory,
     "-c", "features.shell_tool=false", "-c", "features.apps=false", "-c", "features.hooks=false", "-c", 'web_search="disabled"',
     "-c", 'approval_policy="never"', "-c", `mcp_servers={room=${server}}`, "-"];
 } else {
-  binary = "/Users/johnpotter/.local/bin/claude";
   args = ["--print", "--restricted", "--tools", "", "--strict-mcp-config", "--mcp-config",
     JSON.stringify({ mcpServers: { room: { command: process.execPath, args: [adapter], env: mcpEnvironment } } }),
     "--no-session-persistence", "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", names.map(n => "mcp__room__" + n).join(","),
@@ -43,7 +46,20 @@ if (host === "codex") {
 // Reserve evidence before any model calls. Existing evidence must never trigger
 // a duplicate exercise followed by a late file-exists failure.
 const output = openSync(resolve(outputPath), "wx", 0o600);
-const child = spawn(binary, args, { cwd: fixture.directory, env, stdio: ["pipe", "pipe", "pipe"] });
+// Evidence reservation stays first, so an already-used evidence path still
+// refuses ahead of everything else. Only then does an unresolved host matter,
+// and it is written down rather than thrown: a run that could not start is
+// still a result the operator needs recorded.
+if (!resolvedHost.binary) {
+  const at = new Date().toISOString();
+  writeFileSync(output, JSON.stringify({ host, phase, memberId, startedAt: at, finishedAt: at,
+    code: null, signal: null, timedOut: false, outputLimited: false, hostUnresolved: resolvedHost.reason,
+    boundary: "No native host was started. Nothing was sent to a model and no room operation was attempted." }, null, 2), { flag: "wx", mode: 0o600 });
+  closeSync(output);
+  writeSync(2, resolvedHost.reason + "\n");
+  process.exit(1);
+}
+const child = spawn(resolvedHost.binary, args, { cwd: fixture.directory, env, stdio: ["pipe", "pipe", "pipe"] });
 let stdout = "", stderr = "", buffer = "", timedOut = false, outputLimited = false, killTimer;
 const startedAt = new Date().toISOString();
 const terminate = () => { child.kill("SIGTERM"); killTimer ??= setTimeout(() => child.kill("SIGKILL"), 10000); };
