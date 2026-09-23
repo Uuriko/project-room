@@ -688,7 +688,7 @@ const receipt = await client.command(command);
 // On an unknown outcome, replay this identical object—not new IDs.
 ```
 
-Choose your IDs once per intended contribution. A draft does not accept/start
+The message text is `data.body` (a string), not `text`. Choose your IDs once per intended contribution. A draft does not accept/start
 or complete the task, grant claims, approve evidence, or advance a caught-up
 marker. If the task changed, reread and review before revising. Only explicit
 consent to submit against an older revision should add `allowOlderBasis: true`.
