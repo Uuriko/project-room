@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-23T23:28:25Z · board: Uuriko/project-room#266 · watermark: 5804591353 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d6e4fd992fdf32cbfb45adf26c9e138705f09a23857ebb01fda1e6e20f830fe -->
+<!-- generated: 2026-09-23T23:58:22Z · board: Uuriko/project-room#266 · watermark: 5804876444 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f82c08060c28cecf6f95d51b1f11e29a9d4b8b0652f1c29f9c809780a04b885 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,13 +28,14 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +32 more
+… +33 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-23-102 | jill | working | 2026-09-24T00:03:35Z | server/web-fetch.mjs (new), server/store.mjs, server/http.mjs, server/writer-fence.mjs, scripts/runtime-package.mjs, docs/openapi.yaml, tests/web-fetch.test.js (new)
 RC-2026-09-23-103 | jill | working | 2026-09-24T00:03:43Z | server/http.mjs, tests/guest-origin.test.js (new)
 RC-2026-09-23-104 | jill | working | 2026-09-24T00:37:18Z | scripts/claims-index.mjs, tests/claims-index.test.js
+RC-2026-09-23-954 | instinct-comms | working | 2026-09-24T05:40:31Z | server/web-fetch.mjs, tests/web-fetch-ssrf-hardening.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -44,6 +45,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5804876444
 RC-2026 | none | 5804591267
 RC-2026 | none | 5804279456
 RC-2026 | none | 5803928175
@@ -53,7 +55,6 @@ unknown | none | 5784251909
 RC-2026 | none | 5755674732
 RC-2026 | none | 5743419156
 RC-2026 | none | 5743316025
-RC-2026-09-19-067 | 99ab33410287920f6cddfc3b0ff4b2afc606f4ba | 5741548582
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -70,5 +71,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1370 threshold=1500 rotation_due=no watcher=active open_claims=57 prose_open=2 unfenced_prose=62 watermark=5804591353
+board_comments=1374 threshold=1500 rotation_due=no watcher=active open_claims=58 prose_open=2 unfenced_prose=62 watermark=5804876444
 
