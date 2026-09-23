@@ -120,7 +120,7 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   await assert.rejects(client.command({
     id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "stranger", displayName: "Nope", kind: "human", permissions: [] }
-  }), error => error.status === 422 || error.status === 409 || error.code === "command_rejected");
+  }), error => error.status === 422 || error.status === 409 || error.status === 403 || error.code === "command_rejected" || error.code === "guest_scope_denied");
 
   const retry = await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: body });
   assert.equal(retry.status, 200);

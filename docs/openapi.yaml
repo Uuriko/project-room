@@ -3429,6 +3429,24 @@ paths:
       security: []
       responses:
         '200': { description: Static contract document }
+  /api/guest-invites:
+    get:
+      summary: GX guest-invite contract document
+      description: >-
+        Open (also HEAD): the static contract for GX guest invites
+        (mint owner_only, observer/contributor tiers and scopes, credential
+        TTL default 72h within 1h-14d, redemption window default 24h within
+        1h-7d, 5 concurrent guests per room, the (guest) badge). Contains no
+        room data. Minting lives on POST /api/rooms/{roomId}/guest-invites.
+      security: []
+      responses:
+        '200': { description: Static contract document }
+    head:
+      summary: GX guest-invite contract document (headers only)
+      description: Same headers as GET, no body.
+      security: []
+      responses:
+        '200': { description: Static contract document }
   /api/account-session:
     get:
       summary: Browser account-session slot
@@ -4692,6 +4710,81 @@ paths:
         '200': { description: "{ ...preview, memberId, access: read_chat }" }
         '410': { description: link_unavailable }
         '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/guest-invites/preview:
+    post:
+      summary: Preview a GX guest invite
+      description: Open; the GX code is public-safe (single-use, hash-stored, grants nothing). Room id/title, tier, scopes and terms only — no people-data, no credential. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode]
+              properties:
+                inviteCode: { type: string, description: GX-… invite code }
+      responses:
+        '200': { description: Invite preview }
+        '410': { description: invite_unavailable }
+        '429': { description: rate_limited }
+  /api/guest-invites/redeem:
+    post:
+      summary: Redeem a GX guest invite
+      description: >-
+        Open; the ai_… identity secret rides the Authorization header (never
+        the body) and the signed agent card rides the body. The card's
+        Ed25519 signature must verify for the presenting identity; the card's
+        name becomes the room display name with a permanent (guest) suffix.
+        Issues the ga1. room credential (store it privately — never shown
+        again) and journals member.added with the minting owner as actor.
+        Single-use per code; one seat per identity per room (re-redeem
+        reuses the seat and returns a fresh credential). 10 per address per
+        minute, 5 per code per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode, card]
+              properties:
+                inviteCode: { type: string, description: GX-… invite code }
+                card:
+                  type: object
+                  description: Signed agent card (name, description, capabilities, publicKey, signature)
+      responses:
+        '201': { description: Guest credential issued }
+        '200': { description: Exact retry of a journaled redemption, or same-identity seat reuse }
+        '401': { description: unauthenticated — identity secret missing or unknown }
+        '410': { description: invite_unavailable }
+        '422': { description: card_invalid }
+        '429': { description: rate_limited }
+  /api/guest-invites/rotate:
+    post:
+      summary: Rotate a GX guest credential
+      description: >-
+        The guest rotates its own ga1. credential inside the TTL: same
+        member, same tier, same expiry. Authorization: Bearer <guest-credential>;
+        body is exactly { roomId }. 10 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId]
+              properties:
+                roomId: { type: string }
+      responses:
+        '200': { description: Fresh credential issued; the old one is revoked }
+        '401': { description: unauthenticated }
+        '403': { description: guest_only }
+        '410': { description: invite_unavailable }
         '429': { description: rate_limited }
   /api/session:
     post:
@@ -6676,6 +6769,120 @@ paths:
         '403': { description: owner_required or csrf_denied }
         '409': { description: stale_member_revision, membership_ended or pilot_limit }
         '422': { description: invalid_link }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites:
+    post:
+      summary: Mint a GX guest invite
+      description: >-
+        Owner by ID with `manage_members`: room Bearer <redacted>, or browser room or
+        account session with CSRF. Minting stays account-bound (403
+        account_session_required for an accountless owner). Body: `{
+        requestId, guestLabel, expectedOwnerRevision, tier? (observer |
+        contributor, default observer), credentialTtlMs? (default 72h,
+        1h-14d), redeemWindowMs? (default 24h, 1h-7d), roomId? }`. Returns
+        the public-safe GX-… code once — it is shown only here, stored as a
+        hash, and grants nothing by itself. 30 per address per minute. `GET`
+        on the top-level path is the open contract document.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, guestLabel, expectedOwnerRevision]
+              properties:
+                requestId: { type: string }
+                guestLabel: { type: string }
+                expectedOwnerRevision: { type: integer }
+                tier: { type: string, enum: [observer, contributor] }
+                credentialTtlMs: { type: integer }
+                redeemWindowMs: { type: integer }
+                roomId: { type: string }
+      responses:
+        '201': { description: GX invite minted; code shown once }
+        '200': { description: Exact retry of a journaled mint }
+        '403': { description: owner_required or account_session_required }
+        '409': { description: stale_member_revision or pilot_limit }
+        '422': { description: invalid_guest_invite }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites-list:
+    post:
+      summary: List GX guest invites
+      description: >-
+        Owner by ID with `manage_members`. Returns every invite for the room
+        (active, redeemed, revoked, expired-by-window) without code hashes
+        or plaintext codes. Empty body. 30 per address per minute.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Invite list }
+        '403': { description: owner_required }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites-revoke:
+    post:
+      summary: Revoke an unredeemed GX invite
+      description: >-
+        Owner by ID with `manage_members`. Body is exactly `{ inviteId }`;
+        only active (unredeemed) invites can be revoked. 30 per address per
+        minute.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteId]
+              properties:
+                inviteId: { type: string }
+      responses:
+        '200': { description: Invite revoked }
+        '403': { description: owner_required }
+        '404': { description: invite_not_found }
+        '409': { description: invite_not_active }
+        '422': { description: invalid_guest_invite }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites-disconnect:
+    post:
+      summary: Disconnect one GX guest
+      description: >-
+        Owner by ID with `manage_members`. Body is exactly `{ memberId }`;
+        the guest's credential is revoked, the member deactivated, the
+        deactivation journaled — the guest's badged messages stay in
+        history. 30 per address per minute.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memberId]
+              properties:
+                memberId: { type: string }
+      responses:
+        '200': { description: Guest disconnected }
+        '403': { description: owner_required }
+        '404': { description: guest_not_found }
+        '422': { description: invalid_guest_invite }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/guest-invites-revoke-all:
+    post:
+      summary: Disconnect every GX guest in the room
+      description: >-
+        Owner by ID with `manage_members`. Panic switch: every active
+        guest-agent-* member (GX-redeemed and legacy ga1.) is deactivated,
+        each deactivation journaled under the owner. Empty body. 30 per
+        address per minute.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ revoked: n }" }
+        '403': { description: owner_required }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/invitations/{invitationId}/revoke:
     post:
