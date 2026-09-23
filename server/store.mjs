@@ -51,11 +51,9 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIde
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
-import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
-import { extractAgentMentions } from "./inbox-agent-routing.mjs"; // #658: mention lifecycle tracking (pure parser).
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, resolveMentionTarget, mentionStateSchema,
+  assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
@@ -3106,21 +3104,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const members = state?.members ?? {};
     const targets = new Map(); // memberId -> "mention" | "dm"
-    let names = [];
-    try { names = extractMentions(typeof data.body === "string" ? data.body : ""); }
-    catch { names = []; }
-    const memberIdForName = name => {
-      const lower = name.toLowerCase();
-      for (const [memberId, member] of Object.entries(members)) {
-        if (!member || member.active === false || member.kind !== "agent" || memberId === senderMemberId) continue;
-        const display = typeof member.displayName === "string" ? member.displayName.toLowerCase() : "";
-        if (memberId.toLowerCase() === lower || (display !== "" && display === lower)) return memberId;
-      }
-      return null;
-    };
-    for (const name of names) {
-      const memberId = memberIdForName(name);
-      if (memberId && !targets.has(memberId)) targets.set(memberId, "mention");
+    // Whole display names, so a multi-word agent name ("@Claude (Cowork)")
+    // wakes its agent; the single-token parse only ever saw "@Claude".
+    const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
+    for (const memberId of resolveMentionTargetsInText(agents, {}, typeof data.body === "string" ? data.body : "", senderMemberId)) {
+      if (!targets.has(memberId)) targets.set(memberId, "mention");
     }
     const dm = typeof data.toMemberId === "string" ? members[data.toMemberId] : null;
     if (dm && dm.active !== false && dm.kind === "agent" && data.toMemberId !== senderMemberId
@@ -3150,10 +3138,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `UPDATE mention_states SET state='responded', decided_at=?
        WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
     ).run(nowMs, roomId, senderMemberId);
-    let names = [];
-    try { names = extractAgentMentions(typeof data.body === "string" ? data.body : ""); }
-    catch { names = []; }
-    if (names.length === 0) return;
+    const body = typeof data.body === "string" ? data.body : "";
+    if (!body.includes("@")) return;
     const members = state?.members ?? {};
     let identityNames = {};
     try {
@@ -3168,11 +3154,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
-    const seen = new Set();
-    for (const name of names) {
-      const memberId = resolveMentionTarget(members, identityNames, name, senderMemberId);
-      if (!memberId || seen.has(memberId)) continue;
-      seen.add(memberId);
+    for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
   }

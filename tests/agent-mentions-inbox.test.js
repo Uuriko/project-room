@@ -101,3 +101,28 @@ test("MCP inbox and message reads validate arguments before calling the client",
   await rpc("tools/call", { name: "room_read_messages", arguments: {} });
   assert.deepEqual(seen, [["inbox", undefined], ["messages", 7, 20], ["messages", 0, 50]]);
 });
+
+test("multi-word display names can be @mentioned: the whole name resolves, the longest match wins", async () => {
+  const { resolveMentionTargetsInText } = await import("../server/mention-lifecycle.mjs");
+  const members = { cowork: { displayName: "Claude (Cowork)" }, producer: { displayName: "Test producer" }, test: { displayName: "Test" },
+    scout: { displayName: "Scout" }, gone: { displayName: "Gone", active: false }, me: { displayName: "Me" } };
+  const resolve = text => resolveMentionTargetsInText(members, {}, text, "me");
+  assert.deepEqual(resolve("@Claude (Cowork) can you look?"), ["cowork"]);
+  assert.deepEqual(resolve("@test producer and @Test, then @Scout."), ["producer", "test", "scout"]);
+  assert.deepEqual(resolve("ping @scout's queue"), ["scout"]);
+  assert.deepEqual(resolve("no match: @Scouting, mail@Scout, @Gone, @Me"), []);
+  assert.deepEqual(resolve("@scout @Scout twice"), ["scout"]);
+  assert.deepEqual(resolveMentionTargetsInText(members, { helper: "Helper Bot" }, "@Helper Bot", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText({ ...members, helper: { displayName: "h1" } }, { helper: "Helper Bot" }, "@helper bot hi", "me"), ["helper"]);
+});
+
+test("a message naming a multi-word agent lands in that agent's inbox", t => {
+  const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "cowork-enroll", memberId: "cowork-agent", displayName: "Claude (Cowork)", access: "chat",
+    keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  say(f, f.keys.owner, { messageId: "ask-cowork", body: "@Claude (Cowork) which P0 are you taking?" });
+  const inbox = f.store.agentInbox(token, "commons");
+  assert.deepEqual(inbox.directMentions.map(m => m.messageId), ["ask-cowork"]);
+  assert.deepEqual(f.store.listMentions(token, "commons").mentions.map(m => m.memberId), ["cowork-agent"]);
+});
