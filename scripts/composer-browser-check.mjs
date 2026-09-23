@@ -131,7 +131,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await toast.getAttribute("role"), "status");
     await page.unroute("**/api/rooms/commons/commands");
     await page.locator('[data-message-record-id="topic"] button[data-reaction="like"]').click();
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="false"]'));
+    // A cleared reaction detaches its chip (only used reactions stay visible),
+    // so wait for detachment rather than an aria-pressed=false state that the
+    // new UI never renders.
+    await topic.locator('button[data-reaction="like"]').waitFor({ state: "detached" });
     await openSearch(page);
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
