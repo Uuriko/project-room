@@ -73,7 +73,9 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.getByLabel("Room key", { exact: true }).press("Enter");
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
+    await page.locator("#session-menu-button").click();
     assert.equal(await page.locator("#identity-label").isVisible(), true);
+    await page.keyboard.press("Escape");
     assert.equal(await page.locator("#status").textContent(), "", "entering the room is its own success feedback");
     assert.equal(await page.locator(".connection-bar").isVisible(), true);
     assert.equal(await page.locator("#draft-hint").isVisible(), false);
@@ -81,7 +83,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#draft-hint").isVisible(), true);
     await page.locator("#composer-options > summary").click();
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
-    assert.equal(await page.evaluate(() => document.activeElement.id), "connection-status");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
     await clickChrome(page, "#invite-people-button");
     assert.equal(await page.locator("#share-local-note").isVisible(), true);

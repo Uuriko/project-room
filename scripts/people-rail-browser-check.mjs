@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import { openSettings, closeSettings } from "./room-chrome.mjs";
 // People-rail: presence dots, one-line status, loud @agent handles, Done chips.
 // Also checks tip #11 Done-chip spring is instant under prefers-reduced-motion.
@@ -88,9 +89,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   mkdirSync("test-results", { recursive: true });
   await closeSettings(page);
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });
-  const inviteButton = page.locator("#invite-agents-button");
-  await inviteButton.waitFor({ state: "visible" });
-  await inviteButton.click();
+  await clickChrome(page, "#invite-agents-button");
   await page.locator("#agent-invite-dialog").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-invite-dialog").innerText(), /Choose what it can do/);
   await page.locator("#agent-invite-mint").click();

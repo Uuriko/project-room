@@ -58,8 +58,10 @@ test("magic link: fresh visit with ?magic= signs straight in", { timeout: 60000 
   const page = await freshPage(t, browser, origin);
   await page.goto(`${origin}/?magic=${encodeURIComponent(code)}&email=${encodeURIComponent(email)}`,
     { waitUntil: "networkidle" });
-  // Zero typing: the auth panel hides and the identity label shows the account.
+  // Zero typing signs in; the account menu exposes the authenticated identity.
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
+  if (await page.locator("#account-setup-dialog").isVisible()) await page.keyboard.press("Escape");
+  await page.locator("#session-menu-button").click();
   await page.locator("#identity-label", { hasText: "Personal account" }).waitFor({ state: "visible" });
   // The one-tap token is stripped from the URL so it cannot leak via referrers.
   assert.doesNotMatch(page.url(), /magic=/, "magic param is removed from the URL");

@@ -32,6 +32,20 @@ export function installRoomLayout() {
   refresh.classList.remove('icon-button');
   refresh.textContent = 'Refresh connection';
   panel.append(refresh);
+  const connection = get('#connection-status');
+  const details = get('#connection-details');
+  const syncRecovery = () => {
+    const destination = connection.dataset.state === 'connected' ? panel
+      : connection.dataset.state === 'other' ? get('.connection-bar') : get('.app-shell > .topbar .topbar-actions');
+    const detailHome = connection.dataset.state === 'connected' ? panel : get('.connection-bar');
+    if (details.parentNode !== detailHome) detailHome.append(details);
+    if (refresh.parentNode === destination) return;
+    const focused = document.activeElement === refresh;
+    destination.append(refresh);
+    if (focused) (destination === panel ? get('#session-menu-button') : refresh).focus({ preventScroll: true });
+  };
+  new MutationObserver(syncRecovery).observe(connection, { attributes: true, attributeFilter: ['data-state'] });
+  syncRecovery();
   const compact = matchMedia("(max-width: 940px)");
   let layout;
   const sync = () => {

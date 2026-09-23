@@ -34,9 +34,11 @@ for (const touch of [false, true]) {
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#connection-status').textContent === 'Connected');
     assert.equal(await page.locator('#connection-details').evaluate(el => el.open), false);
+    await page.locator('#session-menu-button').click();
     await page.locator('#connection-details > summary').click();
     assert.match(await page.locator('#connection-explanation').textContent(), /no peer read or processing receipt/);
     await page.locator('#connection-details > summary').click();
+    await page.keyboard.press('Escape');
 
     let firstGet = true, loseCreate = true;
     const creates = [];

@@ -1331,3 +1331,8 @@ summary { overflow-wrap: anywhere; }
   }
   .app-shell > #workspace-nav button { flex: 1; min-height: 44px; }
 }
+
+/* Keep contextual controls within the conversation rather than above its header. */
+.reaction-options { top: calc(100% + .25rem); bottom: auto; z-index: 45; }
+#session-menu-panel #connection-details { margin: 0; padding: .4rem .6rem; }
+#session-menu-panel #connection-details > summary { min-height: 32px; font-size: .875rem; }

@@ -3215,13 +3215,18 @@ function chatEscapeState() {
   };
 }
 document.addEventListener("click", event => {
-  for (const picker of document.querySelectorAll(".reaction-picker[open]")) {
+  for (const picker of document.querySelectorAll(".reaction-picker[open], .message-more[open]")) {
     if (!picker.contains(event.target)) picker.open = false;
+  }
+});
+document.addEventListener("focusin", event => {
+  for (const menu of document.querySelectorAll(".message-more[open]")) {
+    if (!menu.contains(event.target)) menu.open = false;
   }
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
-  const picker = event.target.closest(".reaction-picker[open]");
+  const picker = event.target.closest(".reaction-picker[open], .message-more[open]");
   if (!picker) return;
   event.preventDefault(); event.stopImmediatePropagation();
   picker.open = false; picker.querySelector("summary").focus();
@@ -3898,7 +3903,10 @@ $("#room-overview-open").addEventListener("click", () => {
   $("#room-overview-dialog").showModal();
   renderRoomOverview();
 });
-$("#room-overview-close").addEventListener("click", () => $("#room-overview-dialog").close());
+$("#room-overview-close").addEventListener("click", () => {
+  $("#room-overview-dialog").close();
+  $("#room-overview-open").focus({ preventScroll: true });
+});
 $("#room-overview-dialog").addEventListener("click", event => {
   // Close before the existing source-link handler moves focus to the timeline.
   if (!busy && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey

@@ -151,6 +151,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => location.hash.startsWith("#pr-record/message/"));
 
     // Unpin the last one from the message row: the section hides again.
+    await openPinMenu(f.row("Meeting room is B-204"));
     await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).click();
     await f.panel.waitFor({ state: "hidden" });
     assert.deepEqual(f.pins(), []);
