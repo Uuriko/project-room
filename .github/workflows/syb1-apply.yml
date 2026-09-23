@@ -1,0 +1,26 @@
+name: syb1-apply
+on:
+  push:
+    branches: [instinct/sybil-resolver-owner-only]
+    paths: ['.github/workflows/syb1-apply.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: instinct/sybil-resolver-owner-only
+          fetch-depth: 2
+      - name: Apply SYB1 patch and remove this workflow
+        run: |
+          set -euo pipefail
+          echo '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' | base64 -d | gunzip > /tmp/syb1.patch
+          echo "$(sha256sum /tmp/syb1.patch)"
+          git apply --index /tmp/syb1.patch
+          git rm -q .github/workflows/syb1-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Bounty: sybil confirm/dismiss are owner-only (follow-up to #800)" -m "POST /api/rooms/{room}/bounties/sybil-flags/{id}/confirm|dismiss now return 403 owner_required unless the caller is the room owner (fresh roomAuthority read), before the body is read or anything is written. Reputation projector unchanged. Tests: flagged lanes and a guest get 403 on both routes; the flag stays open; the owner confirms with 200. Claim RC-2026-09-23-SYB1 (#266)."
+          git push origin "HEAD:instinct/sybil-resolver-owner-only"
