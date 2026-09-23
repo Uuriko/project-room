@@ -61,13 +61,8 @@ export const activitySchema = `
     saved_at INTEGER NOT NULL,
     PRIMARY KEY(room_id, member_id, message_id)
   );
-  CREATE TABLE IF NOT EXISTS thread_mutes (
-    room_id TEXT NOT NULL REFERENCES rooms(id),
-    member_id TEXT NOT NULL,
-    thread_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    PRIMARY KEY(room_id, member_id, thread_id)
-  );
+  -- thread_mutes lives in server/thread-mutes.mjs (canonical schema); do not
+  -- duplicate it here.
 `;
 
 // A DM message is visible only to its author and its recipient.
