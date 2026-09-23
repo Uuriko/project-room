@@ -19,11 +19,15 @@ const startServer = async (t, f) => {
   return `http://127.0.0.1:${server.address().port}`;
 };
 
-const post = (origin, path, body) => fetch(`${origin}${path}`, {
-  method: "POST",
-  headers: { "content-type": "application/json", "origin": origin },
-  body: JSON.stringify(body ?? {}),
-});
+const post = (origin, path, body, secret = null) => {
+  const headers = { "content-type": "application/json", "origin": origin };
+  if (secret) headers["authorization"] = `Bearer ${secret}`;
+  return fetch(`${origin}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body ?? {}),
+  });
+};
 
 function linkToCommons(f, identityId) {
   const ownerKey = f.store.issueAccessKey("commons", "owner");
@@ -37,9 +41,8 @@ test("POST /api/auth/agent/rooms verifies secret and lists linked rooms", async 
   linkToCommons(f, agent.identityId);
 
   const res = await post(origin, "/api/auth/agent/rooms", {
-    identityId: agent.identityId,
-    secret: agent.secret
-  });
+    identityId: agent.identityId
+  }, agent.secret);
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.equal(data.identityId, agent.identityId);
@@ -55,8 +58,18 @@ test("POST /api/auth/agent/rooms rejects bad secret", async t => {
   const agent = f.store.identities.create("Test Agent");
 
   const res = await post(origin, "/api/auth/agent/rooms", {
-    identityId: agent.identityId,
-    secret: "pri_invalidsecret12345678901234567890123456789012"
+    identityId: agent.identityId
+  }, "pri_invalidsecret12345678901234567890123456789012");
+  assert.equal(res.status, 401);
+});
+
+test("POST /api/auth/agent/rooms rejects missing Authorization header", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+
+  const res = await post(origin, "/api/auth/agent/rooms", {
+    identityId: agent.identityId
   });
   assert.equal(res.status, 401);
 });
@@ -68,9 +81,8 @@ test("POST /api/auth/agent/rooms returns empty rooms for unlinked identity", asy
   // Not linked to any room
 
   const res = await post(origin, "/api/auth/agent/rooms", {
-    identityId: agent.identityId,
-    secret: agent.secret
-  });
+    identityId: agent.identityId
+  }, agent.secret);
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.deepEqual(data.rooms, []);
@@ -84,9 +96,8 @@ test("POST /api/auth/agent/session creates browser session for linked agent", as
 
   const res = await post(origin, "/api/auth/agent/session", {
     identityId: agent.identityId,
-    secret: agent.secret,
     roomId: "commons"
-  });
+  }, agent.secret);
   assert.equal(res.status, 201);
   const session = await res.json();
   assert.ok(session.roomId === "commons" || session.room?.id === "commons");
@@ -103,9 +114,8 @@ test("POST /api/auth/agent/session rejects unlinked room", async t => {
 
   const res = await post(origin, "/api/auth/agent/session", {
     identityId: agent.identityId,
-    secret: agent.secret,
     roomId: "commons"
-  });
+  }, agent.secret);
   assert.equal(res.status, 403);
 });
 
@@ -117,8 +127,75 @@ test("POST /api/auth/agent/session rejects bad secret", async t => {
 
   const res = await post(origin, "/api/auth/agent/session", {
     identityId: agent.identityId,
-    secret: "pri_invalidsecret12345678901234567890123456789012",
     roomId: "commons"
-  });
+  }, "pri_invalidsecret12345678901234567890123456789012");
   assert.equal(res.status, 401);
+});
+
+test("POST /api/auth/agent/session rejects secret in JSON body (must use Bearer header)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+  linkToCommons(f, agent.identityId);
+
+  // Secret in body should be rejected by exact-field validation
+  const res = await post(origin, "/api/auth/agent/session", {
+    identityId: agent.identityId,
+    secret: agent.secret,
+    roomId: "commons"
+  }, agent.secret);
+  assert.equal(res.status, 422);
+});
+
+test("Agent browser session is invalidated when secret is rotated", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Rotate Agent");
+  linkToCommons(f, agent.identityId);
+
+  // Create a session with the original secret
+  const res = await post(origin, "/api/auth/agent/session", {
+    identityId: agent.identityId,
+    roomId: "commons"
+  }, agent.secret);
+  assert.equal(res.status, 201);
+  const cookie = res.headers.get("set-cookie");
+  const token = cookie.match(/room_session=([^;]+)/)?.[1];
+  assert.ok(token, "Session cookie should be set");
+
+  // Rotate the secret
+  const rotated = f.store.identities.rotate(agent.identityId, agent.secret);
+  assert.ok(rotated.secret, "Rotation should return new secret");
+
+  // The old session should now be rejected
+  const checkRes = await fetch(`${origin}/api/session`, {
+    headers: { "cookie": `room_session=${token}`, "origin": origin }
+  });
+  assert.equal(checkRes.status, 401);
+});
+
+test("Agent browser session is invalidated when secret is revoked", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Revoke Agent");
+  linkToCommons(f, agent.identityId);
+
+  // Create a session with the original secret
+  const res = await post(origin, "/api/auth/agent/session", {
+    identityId: agent.identityId,
+    roomId: "commons"
+  }, agent.secret);
+  assert.equal(res.status, 201);
+  const cookie = res.headers.get("set-cookie");
+  const token = cookie.match(/room_session=([^;]+)/)?.[1];
+  assert.ok(token, "Session cookie should be set");
+
+  // Revoke the secret (owner-only; use the store directly)
+  f.store.identities.revoke(agent.identityId, agent.secret);
+
+  // The session should now be rejected
+  const checkRes = await fetch(`${origin}/api/session`, {
+    headers: { "cookie": `room_session=${token}`, "origin": origin }
+  });
+  assert.equal(checkRes.status, 401);
 });
