@@ -8,6 +8,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
+import { setTier } from '../server/autonomy-tiers.mjs';
 
 const command = (type, data) => ({ id: crypto.randomUUID(), type, data });
 function fixture(t) {
@@ -22,6 +23,9 @@ function fixture(t) {
       permissions: id === 'viewer' ? [] : ['accept_work', 'complete_work', 'write_external'] }));
     keys[id] = store.issueAccessKey('commons', id);
   }
+  // #953: new agent members default to t1_readonly; a and b need write access
+  for (const id of ['a', 'b'])
+    setTier(store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   const item = id => store.room('commons').state.workItems[id];
   const mutate = (actor, type, id, data = {}) => store.command(keys[actor], 'commons', command(type, { workItemId: id, expectedRevision: item(id).revision, ...data }));
   const propose = (id, actor = 'a', mode = 'write') => {
