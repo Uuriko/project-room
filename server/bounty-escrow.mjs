@@ -128,13 +128,20 @@ const AWARD_KINDS = new Set(["escrow-lock", "attribute", "approve", "payout", "r
 export const TRACK_ACCEPTANCE = "acceptance";
 export const TRACK_FINALITY = "finality";
 
+// Free-miss settlement vocabulary (docs/FREE-MISS-SETTLEMENT.md): the
+// verdict stamped onto every terminal settlement. verified-complete is the
+// only settlement that pays the worker; partial is the dispute-split
+// exception; failed and unverified settle the worker at zero and return
+// the escrow to the poster.
+export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverified", "partial"]);
+
 // Acceptance track: verdict transitions on the bounty record (from-state ->
 // legal to-states). Terminal verdicts: accepted (work approved) or rejected
 // (work judged bad — the dispute-upheld refund; the display label stays
 // "refunded"). Every acceptance transition is evidence-cited.
 const ACCEPTANCE_TRACK = new Map([
   ["claimed", new Set(["submitted"])],              // work enters review
-  ["submitted", new Set(["accepted", "disputed"])], // verdict | challenge
+  ["submitted", new Set(["accepted", "disputed", "refunded"])], // verdict | challenge | reject
   ["accepted", new Set(["disputed"])],              // challenge within the window
   ["disputed", new Set(["approved", "refunded"])], // release: verdict affirmed; cancel: verdict rejected
 ]);
@@ -145,7 +152,8 @@ const STATE_TRANSITION_TRACK = new Map([
   ["proposed", new Map([["funded", null], ["cancelled", null]])],
   ["funded", new Map([["claimed", null], ["refunded", TRACK_FINALITY]])],
   ["claimed", new Map([["submitted", TRACK_ACCEPTANCE], ["refunded", TRACK_FINALITY]])],
-  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["disputed", TRACK_ACCEPTANCE]])],
+  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["disputed", TRACK_ACCEPTANCE],
+    ["refunded", TRACK_ACCEPTANCE]])], // reject: the verdict failed the work (free-miss settlement)
   ["accepted", new Map([["approved", TRACK_FINALITY], ["disputed", TRACK_ACCEPTANCE]])],
   ["disputed", new Map([["approved", TRACK_ACCEPTANCE], ["refunded", TRACK_ACCEPTANCE]])],
   ["approved", new Map([["paid", TRACK_FINALITY]])],
@@ -1122,7 +1130,7 @@ export class BountyEscrow {
         case "attribute": return bounty.state === "submitted" || this._disputeSettling === bounty.bountyId;
         case "approve": return bounty.state === "accepted" || this._disputeSettling === bounty.bountyId;
         case "payout": case "fee": return bounty.state === "approved";
-        case "refund": return bounty.state === "funded" || bounty.state === "claimed"
+        case "refund": return bounty.state === "funded" || bounty.state === "claimed" || bounty.state === "submitted"
           || this._disputeSettling === bounty.bountyId;
         default: return false;
       }
@@ -1842,6 +1850,132 @@ export class BountyEscrow {
     });
   }
 
+  // --- free-miss settlement (docs/FREE-MISS-SETTLEMENT.md) -----------------------------
+  // Failed or unverified work settles at zero; agents earn only on verified
+  // completion. A settlement is recorded once per escrow lock: the monetary
+  // legs move through bounty_journal with the existing kinds
+  // (refund/payout/fee/bond-*), and the verdict itself is stamped onto
+  // resolution_json plus an immutable bounty.settled event. "Settles at
+  // zero" is the absence of a worker payout leg — the journal forbids
+  // zero-amount rows by construction, so no zero-amount journal kind is
+  // introduced.
+  _settledVerdict(bounty) {
+    return bounty.resolution?.settlement ?? null;
+  }
+
+  // Idempotent settlement record: stamps the verdict onto resolution_json
+  // (preserving any existing resolution fields) and emits the immutable
+  // bounty.settled event. A second call on an already-settled bounty is a
+  // no-op returning the stored verdict with alreadySettled: true.
+  _recordSettlement(bounty, { kind, workerMillis, refundMillis, reason, actor }) {
+    check(SETTLEMENT_KINDS.has(kind), "invalid_input", `unknown settlement kind "${kind}"`);
+    check(Number.isSafeInteger(workerMillis) && workerMillis >= 0, "invalid_amount",
+      "settlement workerMillis must be a non-negative integer");
+    check(Number.isSafeInteger(refundMillis) && refundMillis >= 0, "invalid_amount",
+      "settlement refundMillis must be a non-negative integer");
+    check(typeof reason === "string" && reason.length >= 1 && reason.length <= 500, "invalid_input",
+      "settlement reason must be 1..500 characters");
+    const existing = this._settledVerdict(bounty);
+    if (existing) return { settlement: existing, event: null, alreadySettled: true };
+    const at = isoNow(this.nowMs());
+    const settlement = Object.freeze({ kind,
+      workerMillis, workerCredits: toCredits(workerMillis),
+      refundMillis, refundCredits: toCredits(refundMillis),
+      reason, settledAt: at,
+      settledBy: actor ? Object.freeze({ kind: actor.kind, id: actor.id }) : null });
+    bounty.resolution = Object.freeze({ ...(bounty.resolution ?? {}), settlement });
+    this._saveBounty(bounty);
+    const event = this._event(bounty.roomId, "bounty.settled",
+      { bountyId: bounty.bountyId, actor, data: { settlement: { ...settlement } } });
+    return { settlement, event, alreadySettled: false };
+  }
+
+  // Reject submitted work (failed verification): a first-party verdict by
+  // the poster or the designated verifier, distinct from the claimant. The
+  // award — still locked with the poster, never attributed — refunds to the
+  // poster in full with no fee; the worker settles at zero. "Work judged
+  // bad" forfeits the claim bond to the pool and records a flake strike, the
+  // same treatment as a dispute-upheld cancel. Idempotent: a second call
+  // replays the stored verdict without new journal movement.
+  rejectWork(roomId, bountyId, { rejector, reason, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      const lane = canonicalLane(rejector);
+      const act = normalizeActor(actor, lane);
+      const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
+      if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
+      const bounty = this._mutable(row);
+      // Authorization precedes the idempotency replay: only the poster or
+      // the designated verifier (never the claimant) may settle a
+      // rejection — including a replayed one.
+      check(lane === bounty.poster || lane === bounty.verifier, "not_authorized",
+        "only the poster or the designated verifier may reject");
+      check(lane !== bounty.claimant, "not_authorized",
+        "rejection must come from an identity distinct from the claimant");
+      const settled = this._settledVerdict(bounty);
+      if (settled) {
+        return { bounty: this._getBounty(roomId, bountyId), settlement: settled, alreadySettled: true,
+          receipt: { kind: "reject", bountyId, at: isoNow(this.nowMs()), actor: act, replayed: true } };
+      }
+      check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting verification`);
+      check(typeof reason === "string" && reason.length >= 1 && reason.length <= 500, "invalid_input",
+        "reason must be 1..500 characters");
+      const at = isoNow(this.nowMs());
+      // 1. Acceptance track: record the rejection verdict first (evidence = the reason).
+      this._acceptanceTransition(bounty, "refunded",
+        { evidence: { decision: "rejected", reason, rejectedBy: lane } });
+      const rejectEvent = this._event(roomId, "bounty.rejected",
+        { bountyId, actor: act, before: "submitted", after: "refunded", data: { reason, rejectedBy: lane } });
+      // 2. Finality: the award was never attributed — refund the poster's
+      // lock to the poster (never to the worker, never burned), no fee.
+      this._requireFinalityMove(bounty, "refund");
+      const lotId = newId("lot_");
+      const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
+        amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
+        memo: `free-miss: verification rejected by ${lane} — escrow returned to poster, worker settles 0`, actor: act,
+        receipt: { type: "refund-issued", payload: { reason: "verification-rejected", refundTo: bounty.poster } } });
+      // 3. Anti-flake: work judged bad forfeits the claim bond to the pool
+      // and records a strike — the same treatment as a dispute-upheld cancel.
+      const flake = this._recordFlake(roomId, bounty.claimant, bountyId, "verification-rejected");
+      this._settleClaimBond(bounty, at, { forfeit: true, actor: act });
+      this._transition(bounty, "refunded");
+      bounty.resolution = Object.freeze({ kind: "rejected", rejectedBy: lane, rejectedAt: at, reason,
+        flake: { strikes: flake.strikes, rung: flake.rung } });
+      this._saveBounty(bounty);
+      // 4. The immutable settlement record: failed, worker 0, escrow to poster.
+      const { settlement } = this._recordSettlement(bounty, { kind: "failed", workerMillis: 0,
+        refundMillis: bounty.amountMillis, reason: `verification rejected by ${lane}: ${reason}`, actor: act });
+      return { bounty: this._getBounty(roomId, bountyId), settlement, alreadySettled: false, flake,
+        receipt: { kind: "reject", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId],
+          at, actor: act, event: rejectEvent, ...this._signed(movement) } };
+    });
+  }
+
+  // Keeper settlement for submitted work the reviewer never verified: past
+  // the deadline with no verdict, the work settles at zero and the escrow
+  // returns to the poster. The worker submitted on time, so unlike a failed
+  // verification the claim bond RETURNS and no flake strike is recorded —
+  // the miss is on the reviewer, not the worker.
+  _settleUnverified(bounty, at, actor) {
+    const roomId = bounty.roomId, bountyId = bounty.bountyId;
+    this._requireFinalityMove(bounty, "refund");
+    const lotId = newId("lot_");
+    const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
+      amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
+      memo: "free-miss: submitted work never verified — escrow returned to poster, worker settles 0", actor,
+      receipt: { type: "refund-issued", payload: { reason: "unverified", refundTo: bounty.poster } } });
+    this._settleClaimBond(bounty, at, { forfeit: false, actor });
+    this._transition(bounty, "refunded");
+    bounty.resolution = Object.freeze({ kind: "unverified", settledAt: at });
+    this._saveBounty(bounty);
+    this._event(roomId, "bounty.refunded",
+      { bountyId, actor, before: "submitted", after: "refunded",
+        data: { reason: "unverified", resolution: bounty.resolution, claimant: bounty.claimant } });
+    this._recordSettlement(bounty, { kind: "unverified", workerMillis: 0,
+      refundMillis: bounty.amountMillis, reason: "submitted work never received a verification verdict", actor });
+    return movement.receipt ? [movement.receipt] : [];
+  }
+
   // --- disputes -------------------------------------------------------------------
   _persistDispute(roomId, dispute) {
     const at = isoNow(this.nowMs());
@@ -2014,6 +2148,7 @@ export class BountyEscrow {
     const forfeited = typeof bondSnapshot === "number" && forfeitedBond >= bondSnapshot;
     const signed = [];
     const collect = movement => { if (movement.receipt) signed.push(movement.receipt); };
+    let splitWorkerMillis = 0, splitRefundMillis = 0; // free-miss record inputs, assigned in the split branch
 
     // Phase 1 — acceptance track: record the verdict first (evidence = the
     // dispute resolution). Finality stays frozen until this lands.
@@ -2047,6 +2182,7 @@ export class BountyEscrow {
         // SPLIT: half the award vests with the worker (fee at sweep), half
         // refunds to the poster, bond returned.
         const workerHalf = Math.floor(amount / 2), posterHalf = amount - workerHalf;
+        splitWorkerMillis = workerHalf; splitRefundMillis = posterHalf;
         if (awardFrom.state === "locked") {
           this._requireFinalityMove(bounty, "attribute");
           collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
@@ -2094,6 +2230,19 @@ export class BountyEscrow {
       decidedAt: at, bondForfeited: forfeited,
       ...(this._rubricCheckTransient ? { rubricCheck: this._rubricCheckTransient } : {}) });
     this._saveBounty(bounty);
+    // Free-miss settlement record: the dispute's own verdict is the
+    // settlement verdict — cancel = failed (worker 0, escrow to poster),
+    // split = partial (the one explicit exception), release =
+    // verified-complete (the award vests with the worker).
+    this._recordSettlement(bounty, {
+      kind: settleKind === "cancel" ? "failed" : settleKind === "split" ? "partial" : "verified-complete",
+      workerMillis: settleKind === "split" ? splitWorkerMillis : settleKind === "cancel" ? 0 : amount,
+      refundMillis: settleKind === "split" ? splitRefundMillis : settleKind === "cancel" ? amount : 0,
+      reason: `dispute ${outcome}: ${
+        settleKind === "cancel" ? "work judged bad — escrow returned to poster, worker settles 0"
+        : settleKind === "split" ? "half the award vests with the worker, half refunds to the poster"
+        : "award vests with the worker"}`,
+      actor });
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });
     return signed;
@@ -2154,6 +2303,13 @@ export class BountyEscrow {
     bounty.resolution = Object.freeze({ kind: "timeout", refundedAt: at,
       flake: flake === null ? null : { strikes: flake.strikes, rung: flake.rung } });
     this._saveBounty(bounty);
+    // Free-miss settlement record: unverified — the work never received a
+    // verdict, so the worker settles at zero and the escrow returns to the
+    // poster. (A timeout-no-submit flake strike, when recorded above, is the
+    // anti-flake ladder's business; the settlement verdict stays unverified.)
+    this._recordSettlement(bounty, { kind: "unverified", workerMillis: 0, refundMillis: bounty.amountMillis,
+      reason: flake === null ? "timeout: work never completed — escrow returned to poster"
+        : `timeout: no submission by the deadline — escrow returned to poster (flake rung ${flake.rung})`, actor });
     this._event(roomId, "bounty.refunded",
       { bountyId, actor, before: "claimed", after: "refunded",
         data: { reason: "timeout", resolution: bounty.resolution, claimant: bounty.claimant,
@@ -2214,6 +2370,10 @@ export class BountyEscrow {
     }
     // The claim bond was an anti-flake lock, not a fee: it comes home now.
     this._settleClaimBond(bounty, at, { forfeit: false, actor });
+    // Free-miss settlement record: verified-complete — the only settlement
+    // that pays the worker (net of the 1% room-pool fee on released payout).
+    this._recordSettlement(bounty, { kind: "verified-complete", workerMillis: earner, refundMillis: 0,
+      reason: `verified work paid out: ${toCredits(earner)} to ${bounty.claimant}, ${toCredits(fee)} room-pool fee`, actor });
     this._transition(bounty, "paid");
     this._saveBounty(bounty);
     this._event(roomId, "bounty.paid",
@@ -2230,6 +2390,11 @@ export class BountyEscrow {
     }
     if (bounty.state === "accepted" && bounty.challengeEndsMs !== null && now >= bounty.challengeEndsMs) {
       this._approve(bounty, at, actor); return { action: "approved", signed: [] };
+    }
+    // Free-miss: submitted work the reviewer never verified settles at zero —
+    // the escrow returns to the poster, the worker earns nothing.
+    if (bounty.state === "submitted" && now >= bounty.deadlineMs) {
+      const signed = this._settleUnverified(bounty, at, actor); return { action: "refunded", signed };
     }
     if ((bounty.state === "funded" || bounty.state === "claimed") && now >= bounty.deadlineMs) {
       const signed = this._timeoutRefund(bounty, at, actor); return { action: "refunded", signed };
