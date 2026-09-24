@@ -85,6 +85,7 @@ All API responses are JSON except the event stream. Non-success responses have `
 | `GET /api/rooms/:room/stream?after=0` | SSE `room-event`, durable sequence IDs, Last-Event-ID resume; a consumer that buffers more than the per-connection cap (64 KiB) receives a final `stream_lagging` event and is closed alone — reconnect with Last-Event-ID |
 | `POST /api/rooms/:room/cursor` | Save `{sequence}` as the current member's monotonic caught-up position |
 | `GET /api/rooms/:room/return-brief` | Frozen history window plus current accountable work, with the same browser ownership tuple; account, epoch, and session fields are null for an agent bearer credential |
+| `GET /api/rooms/:room/context?since_version=` | Compact agent context: roster, policy, focus work, active write locks, superseded-by deps, latest handoff addressed to the caller, current decisions, file refs, and cursors. No message bodies, file bytes, or result prose. `{not_modified:true, context_version}` when `since_version` matches. Reading does not mark caught up. |
 | `POST /api/rooms/:room/invitations` | Issue an immutable account-bound invitation from exact caller-supplied scope/token; account auth mode, CSRF, and current `manage_members` grant required |
 | `POST /api/rooms/:room/invitations/:id/revoke` | Revision-check and revoke a pending invitation with a reason; account auth mode and current `manage_members` grant required; retries currently conflict |
 | `GET /api/rooms/:room/diagnostics` | Bounded support export of recent room-scoped API error metadata; signed-in room owner only |
