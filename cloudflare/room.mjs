@@ -23,6 +23,7 @@ import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connecti
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { scheduledRetentionTick } from '../server/retention-run.mjs';
+import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -98,8 +99,22 @@ export class ProjectRoom extends DurableObject {
   fetch(request) { return this.paused ? maintenanceResponse(request) : this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
 
   async syncGmailMailboxes() {
-    if (this.paused || !this.gmailSync) return { completed: 0 };
+    if (this.paused) return { completed: 0 };
+    // Unconfigured Gmail is visible in /api/health/jobs instead of looking like a quiet success.
+    if (!this.gmailSync) return { completed: 0, configured: false };
     return this.gmailSync.tick();
+  }
+
+  // Cron heartbeat: the Worker records each tick's per-job outcome here after
+  // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
+  async recordCronTick(outcomes) {
+    const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+    const next = applyOutcomes(previous, outcomes);
+    await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+    return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+  }
+  async readJobHealth() {
+    return jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now());
   }
 
   // E1 — RPC: active email connections whose identity or alias lists this
@@ -192,6 +207,13 @@ export default {
     // Never derive the trusted origin from a caller-controlled Host header.
     if (url.origin !== roomOrigin(env).origin) return new Response('Unexpected host', { status: 403 });
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return maintenanceResponse(request);
+    // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
+    // job is stale or failing, so a plain status check catches dead crons.
+    if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
+      const head = request.method === 'HEAD';
+      try { return jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }); }
+      catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return jobHealthUnavailable({ head }); }
+    }
     const address = request.headers.get('CF-Connecting-IP');
     if (!address || !isIP(address)) return new Response('Visitor address unavailable', { status: 403 });
     const headers = new Headers(request.headers);
@@ -237,17 +259,22 @@ export default {
   // Object via RPC; a failing tick is logged, never retried by the cron.
   // RC-2026-09-19-064: the same tick also sweeps due signed-webhook
   // deliveries (pending -> delivered | failed -> dead_letter).
+  // Every job's outcome is recorded as a heartbeat (GET /api/health/jobs), and
+  // any failed job makes the scheduled invocation itself fail so Cron Events and
+  // tail show an exception instead of a green "ok" over swallowed warnings.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
     const room = env.ROOM.getByName('invite-only-pilot');
-    ctx.waitUntil(room.syncGmailMailboxes().catch(() => console.warn('[gmail-sync] tick delayed')));
-    ctx.waitUntil(room.drainChannelBacklog()
-      .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
-    ctx.waitUntil(room.drainWebhookDeliveries()
-      .catch(error => console.warn(`[webhook-dispatch] cron tick failed: ${error?.message ?? error}`)));
-    ctx.waitUntil(room.refreshLandQueue()
-      .catch(error => console.warn(`[land-queue] cron tick failed: ${error?.message ?? error}`)));
-    ctx.waitUntil(Promise.resolve().then(() => room.planRetention())
-      .catch(error => console.warn(`[retention] plan failed: ${error?.message ?? error}`)));
+    const outcomes = await runCronJobs({
+      'gmail-sync': () => room.syncGmailMailboxes(),
+      'channel-drain': () => room.drainChannelBacklog(),
+      'webhook-dispatch': () => room.drainWebhookDeliveries(),
+      'land-queue': () => room.refreshLandQueue(),
+      'retention': () => room.planRetention()
+    });
+    try { await room.recordCronTick(outcomes); }
+    catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+    const failed = outcomes.filter(outcome => !outcome.ok).map(outcome => outcome.job);
+    if (failed.length) throw new Error(`cron jobs failed: ${failed.join(', ')}`);
   }
 };
