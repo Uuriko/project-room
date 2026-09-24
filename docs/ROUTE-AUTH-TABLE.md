@@ -98,7 +98,7 @@ server request timeout.
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, pins, presence, capabilities, provider-heartbeats,
 usage, reminders, notifications, agent-invites, agent-pause, spend-allowance, work-*, reply-*, charter, return-brief, thread)
-require a room credential with member visibility; `dm-consents` (own pairs; the owner additionally sees pair metadata, never DM contents) and `public-face` (status only; toggle/rotate are owner-only) included; `agent-connections`,
+require a room credential with member visibility; `dm-consents` (own pairs; the owner additionally sees pair metadata, never DM contents), `bonds` (the caller's agent bonds; the owner also sees bonds proposed in this room), `peer-dms` (the caller's peer DM threads and, at `peer-dms/:threadId`, that pair's history — other members get 404) and `public-face` (status only; toggle/rotate are owner-only) included; `agent-connections`,
 `diagnostics` and `agent-connections` admit the room owner by ID on any
 credential (mutations on `agent-connections` stay account-bound);
 `invitations` additionally require the room owner's or an administrator's

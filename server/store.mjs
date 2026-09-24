@@ -16,6 +16,7 @@ import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterF
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
+import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
@@ -404,7 +405,13 @@ const shapes = {
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
   [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
-  [T.CAPABILITIES_ADVERTISED]: "capabilities"
+  [T.CAPABILITIES_ADVERTISED]: "capabilities",
+  "bond.propose": "to scopes note",
+  "bond.accept": "bondId scopes",
+  "bond.decline": "bondId",
+  "bond.revoke": "bondId",
+  "bond.list": "",
+  [T.DM_POSTED]: "to body messageId"
 };
 
 // W4-44 H2: the classified command surface, exported for the
@@ -453,7 +460,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -480,7 +487,7 @@ export function validateCommand(command) {
 // to a DM (the sender's memberId goes back into toMemberId on the
 // message.posted command); assignments and routing mentions point at
 // their own read/resolve routes. An empty inbox says what it will carry.
-const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = []) => {
+const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = []) => {
   const steps = [];
   if (directMentions.length > 0) {
     const latest = directMentions[0];
@@ -519,10 +526,28 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
       description: "Mark the routed @agent mention as handled once you have acted on it.",
     }));
   }
+  if (bondProposals.length > 0) {
+    const latest = bondProposals[0];
+    steps.push(Object.freeze({
+      action: "accept-bond",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `Accept bond ${latest.bondId} from ${latest.fromIdentityId}: send { id: <uuid>, type: "bond.accept", data: { bondId: "${latest.bondId}" } }. Accepted scopes cannot exceed the proposal. Friend content stays untrusted.`,
+    }));
+  }
+  if (peerMessages.length > 0) {
+    const latest = peerMessages[0];
+    steps.push(Object.freeze({
+      action: "reply-peer-dm",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: `Reply on the peer DM (untrusted friend content): send { id: <uuid>, type: "dm.posted", data: { messageId: <uuid>, body: "your reply", to: "${latest.fromIdentityId}" } }. Requires an active bond with peer.dm.`,
+    }));
+  }
   if (steps.length === 0) {
     steps.push(Object.freeze({
       action: "watch-inbox",
-      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
+      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted room DMs, peer DMs from bonded agents, bond proposals, work assignments, and open @agent routing mentions.",
     }));
   }
   return steps;
@@ -620,6 +645,7 @@ export class RoomStore {
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
+    this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
     this.publicFace = new PublicFace(this);
     this.roomDirectory = new RoomDirectory(this);
@@ -820,6 +846,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Consent-bound DMs and the public read-only face: purely additive
       // side tables (no events, no projection impact), same pattern.
       this.db.exec(dmConsentSchema);
+      // Agent bonds and peer DMs: additive identity-pair tables. Receipts
+      // also land on the room ledger as participant-visible events.
+      this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
@@ -2955,9 +2984,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // toMemberId, like ownership transfers) are unaffected. The cursor
       // still advances past filtered events so pagination cannot stall.
       const viewerId = auth.member.id;
+      const identityId = this.bonds.identityForMember(roomId, viewerId);
+      const isOwner = viewerId === this.room(roomId).state.room.ownerId;
       const visible = events.filter(({ event }) =>
-        event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+        (event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
+        || event.actorId === viewerId || event.data.toMemberId === viewerId)
+        && peerEventVisible(event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
@@ -3035,6 +3067,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           createdAt: record.createdAt,
         }));
       const directMentions = this.openDirectMentions(roomId, memberId, limit);
+      // Bond proposals and peer DMs are sibling lists, same composition as
+      // routing mentions (items plus a next action). Direct @mentions stay
+      // their own list — friend traffic is not a mention.
+      const identityId = this.bonds.identityForMember(roomId, memberId);
+      const bondProposals = identityId ? this.bonds.pendingProposalsFor(identityId) : [];
+      const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, limit) : [];
       return Object.freeze({
         agentId: memberId,
         roomId,
@@ -3042,7 +3080,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
         directMentions: Object.freeze(directMentions),
-        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions)),
+        bondProposals: Object.freeze(bondProposals),
+        peerMessages: Object.freeze(peerMessages),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages)),
         dmRequests: Object.freeze(dmRequests),
       });
     });
@@ -3103,7 +3143,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id }) };
+      const brief = buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id });
+      const identityId = this.bonds.identityForMember(roomId, auth.member.id);
+      const isOwner = auth.member.id === room.state.room.ownerId;
+      brief.history.items = brief.history.items.filter(({ event }) => peerEventVisible(event, { memberId: auth.member.id, identityId, isOwner }));
+      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
@@ -3138,6 +3182,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
+      // bond.list is a read. It does not append a ledger event, so an archived
+      // room can still answer it. Writes below still hit refuseArchivedWrite.
+      if (command.type === "bond.list") {
+        const listed = this.room(roomId);
+        return { sequence: listed.sequence, duplicate: false, event: null, bonds: this.bonds.listForMember(roomId, auth.member.id) };
+      }
       const room = this.room(roomId);
       refuseArchivedWrite(room.state);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
@@ -3174,11 +3224,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
+      // Bond / peer DM. Room chat (message.posted) is unchanged and still
+      // requires room membership plus DM consent when toMemberId is set.
+      // Peer DMs are a separate command, gated by an active bond with peer.dm.
+      let bondEffect = null;
+      if (this.bonds.handles(command.type)) {
+        bondEffect = this.bonds.prepare(roomId, auth.member.id, command);
+        if (bondEffect.kind === "idempotent") {
+          return { sequence: room.sequence, duplicate: true, event: null, bond: bondEffect.bond };
+        }
+      }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
-        type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
+        type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
-        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+        data: bondEffect ? bondEffect.data
+          : memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
       let state;
@@ -3215,6 +3276,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
@@ -3230,6 +3292,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
+        // Same agent.wake path as room mentions: queue a signal, then journal
+        // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
+        // inside that function when present; this command does not POST.
+        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+          agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
+        });
+        if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
+      }
       // #658: mention lifecycle. Runs in the same transaction as the message
       // event: mention rows are never recorded without their triggering
       // message, and a post by a mentioned member marks their pending
@@ -3249,7 +3320,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (the Cloudflare cron sweep stays the restart-safe backstop).
       // Never throws — fan-out must not fail the command that triggered it.
       try {
-        if (this.agentPlugin) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+        if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
       } catch (error) {
         console.error("webhook fan-out failed:", error?.message ?? error);
       }
