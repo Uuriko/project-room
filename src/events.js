@@ -44,6 +44,7 @@ export const EVENT_TYPES = Object.freeze({
   WORK_HALT_CLEARED: "work.halt_cleared",
   CLAIM_ACQUIRED: "claim.acquired",
   CLAIM_RELEASED: "claim.released",
+  CLAIM_RENEWED: "claim.renewed",
   VERIFICATION_RECORDED: "verification.recorded",
   OWNER_DECISION_RECORDED: "owner.decision_recorded",
   DECISION_RECORDED: "decision.recorded",
@@ -273,7 +274,7 @@ export function canInviteMembers(state, memberId) {
 export const WORK_REVISION_TYPES = Object.freeze([
   EVENT_TYPES.WORK_ACCEPTED, EVENT_TYPES.WORK_STARTED, EVENT_TYPES.WORK_BLOCKED, EVENT_TYPES.WORK_BLOCKER_RESOLVED,
   EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
-  EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED,
+  EVENT_TYPES.CLAIM_RENEWED, EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED,
   EVENT_TYPES.SESSION_STARTED, EVENT_TYPES.SESSION_STATUS_CHANGED, EVENT_TYPES.SESSION_STOP_REQUESTED,
   EVENT_TYPES.SESSION_STOPPED, EVENT_TYPES.WORK_HANDOFF_RECORDED
 ]);
@@ -399,6 +400,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.WORK_SUPERSEDED]: supersedeWork,
     [EVENT_TYPES.CLAIM_ACQUIRED]: acquireClaim,
     [EVENT_TYPES.CLAIM_RELEASED]: releaseClaim,
+    [EVENT_TYPES.CLAIM_RENEWED]: renewClaim,
     [EVENT_TYPES.VERIFICATION_RECORDED]: recordVerification,
     [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision,
     [EVENT_TYPES.DECISION_RECORDED]: recordDecision,
@@ -1426,6 +1428,46 @@ function releaseClaim(state, incoming) {
   item.claim.status = "released";
   item.claim.releasedAt = incoming.at;
   commitMutation(item, incoming);
+}
+
+// Lease-renewal check-ins: a claim's lease is extended only when the holder
+// posts a public progress update in the room after the current lease window
+// began. Renewals are discussed in the channel — never silent extensions —
+// so a stale holder can't hold scope indefinitely without showing work.
+function renewClaim(state, incoming) {
+  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
+  if (!item.claim || !claimIsActive(item.claim, incoming.at)) throw new Error("No active claim to renew — acquire a fresh claim instead");
+  if (incoming.actorId !== item.claim.holderId) throw new Error("Only the claim holder may renew this claim");
+  requireFields(incoming.data, ["progressMessageId", "expiresAt"]);
+  if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
+  requireProgressCheckin(state, item.claim, incoming.actorId, incoming.data.progressMessageId);
+  item.claim.expiresAt = incoming.data.expiresAt;
+  item.claim.renewedAt = incoming.at;
+  item.claim.renewals = (item.claim.renewals ?? 0) + 1;
+  item.claim.progressMessageId = incoming.data.progressMessageId;
+  commitMutation(item, incoming);
+}
+
+// The cited progress check-in must be a live public message in this room,
+// authored by the claim holder, and newer than the current lease window's
+// start (the acquisition, or the previous renewal). The same room's
+// projection is the lookup, so a cross-room id never resolves, and a DM
+// (toMemberId) can never serve as the public check-in.
+function requireProgressCheckin(state, claim, holderId, progressMessageId) {
+  const message = state.messages.find(m => m.id === progressMessageId);
+  if (!message || message.deletedAt) {
+    throw new Error("Renewal needs a progress message in this room — post a progress update in the room first");
+  }
+  if (message.toMemberId) {
+    throw new Error("Renewal needs a public progress message — post the update in the room, not as a DM");
+  }
+  if (message.authorId !== holderId) {
+    throw new Error("Renewal needs the claim holder's own progress message");
+  }
+  const leaseStart = claim.renewedAt ?? claim.acquiredAt;
+  if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
+    throw new Error("Renewal needs a progress message newer than the current lease start");
+  }
 }
 
 function recordVerification(state, incoming) {

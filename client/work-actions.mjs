@@ -49,6 +49,10 @@ const definitions = [
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." }
   }],
   ["release_claim", "Release work scope", T.CLAIM_RELEASED, "Release an active claim you hold (or manage with manage_claims). Does not stop an outside worker. A duplicate receipt does not describe the current reservation.", {}],
+  ["renew_claim", "Renew work scope", T.CLAIM_RENEWED, "Extend the lease on an active claim you hold by citing your public progress message, posted in this room after the current lease window began. Renewals are discussed in the channel, never silent extensions. Refused on leaseless claims and on lapsed leases (claim again instead).", {
+    progressMessageId: { ...id, description: "Your public progress message in this room, posted after the current lease window began." },
+    expiresAt: { ...text, description: "New explicit ISO expiry timestamp. The service checks that it is in the future." }
+  }],
   ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Requires steer, not granted by enrollment presets. Retires the original work's active reservation/approval; does not transfer them to its replacement.", { supersededByWorkItemId: id, reason: text }],
   ["record_handoff", "Record handoff receipt", T.WORK_HANDOFF_RECORDED, "Record a handoff receipt when you cannot continue your assigned task: what is actually done against the done criteria, an optional partial-evidence reference, the exact next action, and why you are stopping. This never closes, completes or reassigns the work; the state and review gates stay with the room. haltAll=true also stops all your further work mutations until a steer/decide member clears the exact halt.", {
     doneSummary: { ...text, description: "What is actually done against the definition of done; partial is expected, state it exactly." },

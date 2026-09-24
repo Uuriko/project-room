@@ -34,7 +34,7 @@
 // path — never wrapped, so no internal detail leaks.
 import {
   createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
-  roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
+  renewWork, roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
@@ -384,6 +384,41 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     const reassigned = runPure(reject, () => reassignWork(item, caller, data.newOwner, { note: data.note, now: nowMs }));
     registry.set(roomId, reassigned);
     return json(res, 200, reassigned);
+  }
+  if (workClaimRoute === "renew" && req.method === "POST") {
+    // Lease-renewal check-ins: the owner extends their claim's lease only by
+    // citing their own public progress message, posted in this room after
+    // the current lease window began. Renewals are discussed in the channel —
+    // a stale holder can't hold work indefinitely without showing progress.
+    const data = await body(req);
+    if (!shape(data, { required: ["progressMessageId"], optional: ["note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    own(item);
+    const progressId = data.progressMessageId;
+    if (typeof progressId !== "string" || !progressId.trim()) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
+    const messages = store.room(roomId).state.messages ?? [];
+    const message = messages.find(entry => entry.id === progressId);
+    if (!message || message.deletedAt) {
+      reject(422, "claim_renewal_source_required",
+        "Post a progress update in the room first, then renew the claim with its message id");
+    }
+    if (message.toMemberId) {
+      reject(422, "claim_renewal_source_required",
+        "The progress update must be a public room message, not a DM — post it in the room first");
+    }
+    if (message.authorId !== caller) {
+      reject(403, "claim_renewal_source_foreign",
+        "The progress update must be your own message — only the claim holder's check-in renews the lease");
+    }
+    const leaseStart = item.leaseStartAt ?? item.claimedAt;
+    if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
+      reject(422, "claim_renewal_source_stale",
+        "The progress update must be newer than the current lease start — post a fresh update in the room first");
+    }
+    const renewed = runPure(reject, () => renewWork(item, caller,
+      { note: data.note, leaseHours: data.leaseHours ?? undefined, room: roomLike, now: nowMs }));
+    registry.set(roomId, renewed);
+    return json(res, 200, renewed);
   }
   reject(405, "method_not_allowed", "Method not allowed");
 }

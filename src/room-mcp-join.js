@@ -46,6 +46,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_record_verification",
   "room_acquire_claim",
   "room_release_claim",
+  "room_renew_claim",
   "room_supersede_work",
   "room_record_handoff",
   "room_clear_halt",

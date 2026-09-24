@@ -54,7 +54,10 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
     assert.equal(cold.status, 0, cold.stderr);
     const packagedTools = readFileSync(join(destination, "client/mcp-stdio.mjs"), "utf8");
+    const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
+      ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : packagedWorkActions.includes('"renew_claim"') ? 36
       : packagedTools.includes('"get_room_context"') && packagedTools.includes('"room_read_inbox"') ? 35
       : packagedTools.includes('"room_read_inbox"') ? 34
       : packagedTools.includes('"get_room_context"') ? 33

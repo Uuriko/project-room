@@ -2769,6 +2769,46 @@ paths:
         '403': { description: not_member }
         '405': { description: method_not_allowed }
         '422': { description: invalid_receipt_query }
+  /api/rooms/{roomId}/work-claims/{claimId}/renew:
+    post:
+      summary: Renew a work claim's lease
+      description: |
+        Owner-only; starts a fresh lease window from now, extending
+        leaseExpiresAt by the lease duration (explicit leaseHours, else the
+        room's default). Lease-renewal check-in: the owner must cite their
+        own public progress message (progressMessageId), posted in this room
+        after the current lease window began — renewals are discussed in the
+        channel, never silent extensions. Refused on claims without a lease
+        and on lapsed leases (claim again instead). API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [progressMessageId]
+              properties:
+                progressMessageId: { type: string }
+                leaseHours: { type: number }
+                note: { type: string }
+      responses:
+        '200':
+          description: The renewed item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
   /api/rooms/{roomId}/bounties:
     get:
       summary: List bounties by semantic group
@@ -9114,8 +9154,10 @@ components:
     WorkClaim:
       description: |
         A work-claim registry item. Claims carry a lease (`claimedAt` +
-        `leaseExpiresAt`; null `leaseExpiresAt` means no lease and the claim
-        never expires). The `done` transition records `deliveryMode` (how
+        `leaseStartAt` + `leaseExpiresAt`; null `leaseExpiresAt` means no
+        lease and the claim never expires). `leaseStartAt` marks the current
+        lease window's start — a renewal requires the owner's public
+        progress message posted after it. The `done` transition records `deliveryMode` (how
         the work was delivered) and `reviewedBy` (the attesting member, per
         the item's `reviewPolicy`). For the `distinct_member` and
         `independent_principal` policies the attestation must be recorded
@@ -9128,6 +9170,7 @@ components:
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
+        leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }
         deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
         reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }

@@ -412,6 +412,7 @@ const shapes = {
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
+  [T.CLAIM_RENEWED]: `${work} progressMessageId expiresAt`,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
@@ -489,6 +490,13 @@ export function validateCommand(command) {
   if (command.type === T.OWNER_DECISION_RECORDED
     && (typeof command.data.sourceMessageId !== "string" || !command.data.sourceMessageId.trim())) {
     fail(422, "decision_source_required", "Post the rationale in the room first, then record the decision with its message id");
+  }
+  // Lease-renewal check-ins: every renewal must cite the holder's public
+  // progress message. The reducer validates the cited message when present;
+  // the command gate below is what makes the citation mandatory going forward.
+  if (command.type === T.CLAIM_RENEWED
+    && (typeof command.data.progressMessageId !== "string" || !command.data.progressMessageId.trim())) {
+    fail(422, "claim_renewal_source_required", "Post a progress update in the room first, then renew the claim with its message id");
   }
   if (command.type === T.WORK_HELP_UPDATED) {
     try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
@@ -3295,7 +3303,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const HALT_GATED = [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
-        T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
+        T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
       if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])
         fail(409, "halt_active", "This member recorded halt-all; a steer/decide member must clear the exact halt before further work mutations");
       const workItem = room.state.workItems[command.data.workItemId];
