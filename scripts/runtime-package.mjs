@@ -174,6 +174,7 @@ optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
+optional.push("server/receipts-page.mjs", "server/receipts-data.mjs"); // public run-receipts page + generated board snapshot (imported by server/http.mjs)
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/pins.mjs");

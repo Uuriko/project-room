@@ -100,6 +100,8 @@ paths.add('server/attachment-schema.mjs');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
+  paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
+  paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

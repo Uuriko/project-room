@@ -865,6 +865,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/receipts:
+    get:
+      summary: Public run-receipts aggregate
+      description: >-
+        Measured work from the Project Room, no login. Aggregates real
+        receipt posts from the room's coordination board
+        (Uuriko/project-room#266): per-receipt date, lane, task, result,
+        and links to the board post, the PR, and the merge commit. Result
+        meanings: verified = the receipt's merge SHA (or its PR's merge
+        commit) exists in the upstream repo; failed = a merge was claimed
+        but no merge commit could be confirmed; open = an opened PR with no
+        merge claimed yet; reported = the run was reported complete with no
+        merge artifact to check. Served from a checked-in snapshot
+        (server/receipts-data.mjs, regenerated with
+        `node scripts/receipts-snapshot.mjs`), so no live board data ever
+        leaves per request — only dates, lane handles, task ids, PR numbers,
+        merge SHAs, and the public board comment links. The same aggregate
+        is served as HTML at /receipts (outside the /api/ inventory by
+        design). Cacheable; X-Robots-Tag: all.
+      security: []
+      responses:
+        '200':
+          description: Receipt aggregate (totals, per-lane counts, receipts newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string }
+                  board: { type: string }
+                  boardUrl: { type: string }
+                  commentsScanned: { type: integer }
+                  totals:
+                    type: object
+                    properties:
+                      receipts: { type: integer }
+                      verified: { type: integer }
+                      failed: { type: integer }
+                      open: { type: integer }
+                      reported: { type: integer }
+                  perLane:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lane: { type: string }
+                        receipts: { type: integer }
+                        verified: { type: integer }
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        task: { type: [string, 'null'] }
+                        lane: { type: [string, 'null'] }
+                        date: { type: [string, 'null'] }
+                        pr: { type: [integer, 'null'] }
+                        prUrl: { type: [string, 'null'] }
+                        sha: { type: [string, 'null'] }
+                        shaUrl: { type: [string, 'null'] }
+                        result: { type: string, enum: [verified, failed, open, reported] }
+                        commentUrl: { type: [string, 'null'] }
+                        summary: { type: string }
+        '429':
+          description: Per-address receipts rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/public/rooms/directory:
     get:
       summary: Public room directory
