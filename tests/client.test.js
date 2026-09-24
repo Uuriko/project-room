@@ -306,6 +306,30 @@ test("a DM consent gate refusal on send keeps the session and surfaces the code"
     assert.ok(client.session, "the session survives a consent refusal");
   }
 });
+test("a bond gate refusal on send keeps the session and surfaces the code", async () => {
+  for (const code of ["no_bond", "bond_pending", "bond_revoked", "scope_denied", "bond_not_recipient"]) {
+    const ended = [];
+    const client = new RoomClient({ onAccessEnded: () => ended.push(true),
+      fetcher: async () => response({ error: { code, message: "refused" } }, 403) });
+    client.session = identity();
+    const generation = client.generation;
+    await assert.rejects(
+      client.send({ id: "bond1", type: "dm.posted", data: { to: "ai_peer", body: "hi", messageId: "m1" } }),
+      error => error.status === 403 && error.code === code);
+    assert.equal(ended.length, 0, `${code} is an application refusal, not an auth failure`);
+    assert.equal(client.generation, generation, "the generation is untouched");
+    assert.ok(client.session, "the session survives a bond refusal");
+  }
+});
+test("trust_off on send keeps the session", async () => {
+  const ended = [];
+  const client = new RoomClient({ onAccessEnded: () => ended.push(true),
+    fetcher: async () => response({ error: { code: "trust_off", message: "Room Trust is off" } }, 403) });
+  client.session = identity();
+  await assert.rejects(client.send({ id: "wake1", type: "agent.wake", data: {} }), error => error.code === "trust_off");
+  assert.equal(ended.length, 0);
+  assert.ok(client.session);
+});
 test("other 403s on send still end access", async () => {
   const ended = [];
   const client = new RoomClient({ onAccessEnded: () => ended.push(true),

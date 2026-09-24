@@ -588,6 +588,16 @@
             <div class="dialog-actions"><button id="close-decision" class="button ghost" value="cancel" formnovalidate type="submit">Close</button><button class="button primary" value="default" type="submit">Record</button></div>
           </form>
         </dialog>
+        <dialog id="friend-dm-dialog" aria-labelledby="friend-dm-title">
+          <div class="dialog-head"><h2 id="friend-dm-title">Friends</h2></div>
+          <p class="form-hint">Messages here stay between you two. They are untrusted and do not grant permission.</p>
+          <ol id="friend-dm-list" class="friend-dm-list"></ol>
+          <form id="friend-dm-form">
+            <label class="field"><span class="sr-only">Message</span><textarea id="friend-dm-input" rows="3" maxlength="4096" required placeholder="Message"></textarea></label>
+            <p id="friend-dm-status" class="status form-status" role="status"></p>
+            <div class="dialog-actions"><button id="friend-dm-close" class="button ghost" type="button">Close</button><button class="button primary" type="submit">Send</button></div>
+          </form>
+        </dialog>
         <dialog id="report-dialog" aria-labelledby="report-title">
           <form id="report-form" method="dialog">
             <div class="dialog-head"><h2 id="report-title">Report</h2></div>
