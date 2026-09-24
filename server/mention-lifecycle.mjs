@@ -103,3 +103,40 @@ export const mentionStateSchema = `
     updated_at INTEGER NOT NULL
   );
 `;
+
+// Resolve every @mention in a message body to member ids, matching whole
+// display names that contain spaces or punctuation ("@Test producer",
+// "@Claude (Cowork)"). The single-token parse could only ever see "@Test",
+// so members with multi-word names were never mentioned at all. At each "@"
+// (not glued to a preceding word, email or handle) the longest member id,
+// display name or linked identity name that matches case-insensitively and
+// ends at a word boundary wins; ties keep resolveMentionTarget's order
+// (member id, then display name, then identity name). Skips the sender and
+// inactive members, never invents a recipient, and returns ids in first
+// appearance order without duplicates.
+export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
+  if (typeof text !== "string" || text.length === 0 || text.length > 20000) return [];
+  const candidates = [];
+  for (const [memberId, member] of Object.entries(members ?? {})) {
+    if (!member || member.active === false || memberId === senderMemberId) continue;
+    const names = [memberId, member.displayName, identityNames?.[memberId]];
+    names.forEach((name, rank) => {
+      if (typeof name === "string" && name.trim().length > 0) candidates.push({ memberId, lower: name.toLowerCase(), rank });
+    });
+  }
+  if (candidates.length === 0) return [];
+  const lowerText = text.toLowerCase(), found = [];
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+    if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
+    let best = null;
+    for (const candidate of candidates) {
+      const end = at + 1 + candidate.lower.length;
+      if (lowerText.slice(at + 1, end) !== candidate.lower) continue;
+      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (!best || candidate.lower.length > best.lower.length
+        || (candidate.lower.length === best.lower.length && candidate.rank < best.rank)) best = candidate;
+    }
+    if (best && !found.includes(best.memberId)) found.push(best.memberId);
+  }
+  return found;
+}
