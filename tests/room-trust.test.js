@@ -11,6 +11,7 @@ import {
   EVENT_TYPES as T, replay, roomTrust, distinctMemberOwnerIds, isCrossOwnerAgentAction
 } from "../src/events.js";
 import { agentErrorBody } from "../src/agent-error.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
@@ -23,6 +24,8 @@ function fixture(t) {
     accountableHumanId: "guest", permissions: ["accept_work", "steer"]
   });
   f.keys.foreign = f.store.issueAccessKey("commons", "foreign");
+  // #953: new agent members default to t1_readonly; foreign needs write access for work.proposed
+  setTier(f.store.db, "commons", "foreign", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   send("owner", T.MEMBER_ACCESS_CHANGED, {
     memberId: "producer", expectedMemberRevision: 0,
     permissions: ["accept_work", "complete_work", "steer"], active: true

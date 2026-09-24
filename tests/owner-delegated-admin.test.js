@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const command = (type, data, id = randomUUID()) => ({ id, type, data });
 
@@ -20,6 +21,9 @@ function fixture(t) {
   // A non-owner agent and a non-owner human, both without admin bits.
   store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work"] }));
   store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "human", displayName: "Human", kind: "human", permissions: ["accept_work"] }));
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // delegation tests exercise the delegation rules, not the tier gate.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agent = store.issueAccessKey("commons", "agent");
   const human = store.issueAccessKey("commons", "human");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });

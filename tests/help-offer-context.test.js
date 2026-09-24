@@ -6,6 +6,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { workOffersContext } from "../src/help-offers.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const task = "test-handoff";
 function setup(t) {
@@ -120,6 +121,8 @@ test("historical helper participants may exceed ten without broadening ordinary 
     const memberId = `helper-${i}`;
     f.send("owner", "member.added", { memberId, displayName: memberId, kind: "agent", permissions: [] });
     f.keys[memberId] = f.store.issueAccessKey("commons", memberId);
+    // #953: new agent members default to t1_readonly; helpers need write access for offer updates
+    setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
     f.change(f.offer(memberId), "withdrawn", memberId);
   }
   const result = await f.client("producer").workContext(task, { includeOffers: true });

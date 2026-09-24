@@ -15,6 +15,7 @@ import {
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
 import { agentCard } from "../deploy/agent-discovery.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const T0 = 1_750_000_000_000;
 const PUSH_URL = "https://push.example.test/hooks/room";
@@ -475,6 +476,8 @@ test("trigger: bond proposal POSTs bond.proposed to the offline party", async t 
     identityId: proposer.identityId, memberId: "proposer",
     displayName: "Proposer", permissions: ["accept_work"],
   });
+  // #953: new agent members default to t1_readonly; proposer needs write access for bond.propose
+  setTier(f.store.db, "commons", "proposer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const proposed = f.store.command(proposer.secret, "commons", {
     id: randomUUID(), type: "bond.propose", data: { to: identity.identityId, scopes: ["peer.dm"] },
   });

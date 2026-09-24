@@ -6,6 +6,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Independent protocol processes with separate private credentials, not LLM actors.
 test("two helper MCP clients coordinate with one accountable agent through races, restart and explicit release", { timeout: 30000 }, async t => {
@@ -16,6 +17,9 @@ test("two helper MCP clients coordinate with one accountable agent through races
     send("owner", "member.added", { memberId, displayName: memberId, kind: "agent", permissions: [], accountableHumanId: "owner" });
     f.keys[memberId] = f.store.issueAccessKey("commons", memberId);
   }
+  // #953: new agent members default to t1_readonly; helpers need write access for MCP coordination
+  for (const memberId of ["helper-a", "helper-b"])
+    setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
   send("producer", "work.accepted", { workItemId, expectedRevision: 0 });
   const help = send("producer", "work.help_updated", { workItemId, expectedRevision: 1, expectedHelpRevision: 0,
     status: "open", scope: "Suggest two agenda items only", expiresAt: new Date(now + 3600000).toISOString() });

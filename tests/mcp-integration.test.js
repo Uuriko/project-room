@@ -7,11 +7,14 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 test("real stdio process uses owner enrollment, selected work and stable draft retries across restart", { timeout: 20000 }, async t => {
   const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
   f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "mcp-enroll", memberId: "mcp-agent", displayName: "MCP agent", access: "chat",
     keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  // #953: new agent members default to t1_readonly; the MCP agent needs write access for room_post_draft
+  setTier(f.store.db, "commons", "mcp-agent", "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
   const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const directory = join(f.directory, "mcp"); saveAgentConnection(directory, { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "mcp-agent", token });
   let mcp;

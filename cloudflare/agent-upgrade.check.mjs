@@ -135,6 +135,10 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             const replyKeys={owner:store.issueAccessKey('commons','owner')};
             for(const memberId of ['producer','reviewer']) {
               store.command(f.token,'commons',{id:'reply-member-'+memberId,type:'member.added',data:{memberId,displayName:'Synthetic '+memberId,kind:'agent',permissions:memberId==='producer'?['accept_work','complete_work']:['verify']}},f.session.sessionBinding);
+              // #953: new members default to t1_readonly; producer and reviewer
+              // need write access (work.accepted, verification.recorded).
+              // Direct SQL upsert (avoids importing server modules into the check bundle).
+              store.db.prepare("INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by) VALUES('commons',?,'t2_standard',?,'owner') ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier='t2_standard',updated_at=excluded.updated_at,updated_by='owner'").run(memberId, store.now());
               replyKeys[memberId]=store.issueAccessKey('commons',memberId);
             }
             const reply=prepareInboxResult({store,keys:replyKeys},f.token,f.session.sessionBinding,{sourceId:'private-source'});

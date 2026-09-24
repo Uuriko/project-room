@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 export async function startWorkLifecycleFixture() {
   const directory = mkdtempSync(join(tmpdir(), "room-work-lifecycle-"));
@@ -32,6 +33,10 @@ export async function startWorkLifecycleFixture() {
       send(T.MEMBER_ADDED, { memberId: participant.memberId, displayName: participant.memberId === "agent-a" ? "Welcome writer" : "Guide writer",
         kind: "agent", accountableHumanId: "owner", permissions: ["accept_work", "complete_work", "write_external", "verify"] });
       keys.set(participant.memberId, store.issueAccessKey("commons", participant.memberId));
+      // Graduated autonomy tiers: new agents enroll at t1_readonly; the
+      // fixture's participants are operator-promoted so the exercise runs
+      // them as working agents.
+      setTier(store.db, "commons", participant.memberId, "t2_standard", { updatedBy: "owner", nowMs: store.now() });
     }
     for (const [index, participant] of participants.entries()) send(T.WORK_PROPOSED, {
       workItemId: participant.workItemId, title: index === 0 ? "Write a warm welcome" : "Write three contribution tips",

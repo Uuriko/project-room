@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-public-dm-"));
@@ -16,6 +17,9 @@ async function serve(t) {
   for (const [id, name] of [["alice", "Alice"], ["bob", "Bob"]]) {
     store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
       data: { memberId: id, displayName: name, kind: "agent", permissions: ["steer", "accept_work"] } });
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // DM tests exercise them as working agents.
+    setTier(store.db, "commons", id, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const aliceKey = store.issueAccessKey("commons", "alice");
   const bobKey = store.issueAccessKey("commons", "bob");

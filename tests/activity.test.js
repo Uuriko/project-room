@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Attention: activity feed fan-out, read horizons, saved messages, thread mutes.
 function setup(t) {
@@ -20,6 +21,9 @@ function setup(t) {
   send("owner", T.MEMBER_ADDED, { memberId: "agent", displayName: "Agent", kind: "agent", permissions: [] });
   keys.maya = store.issueAccessKey("commons", "maya");
   keys.agent = store.issueAccessKey("commons", "agent");
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // activity tests exercise it as a posting member.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, keys, send };
 }

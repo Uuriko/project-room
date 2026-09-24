@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { foldSessionEvents, parseUsageDays, USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS } from "../server/usage-summary.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // F5: read-only usage summary per room.
 const DAY = 86400000;
@@ -86,6 +87,9 @@ test("caps match the store's pilot limits and headroom is what the store still a
 test("sessions and spend follow the period; unreported spend is unknown, not zero", async t => {
   const { ownerKey, store, cmd, usage, clock } = await serve(t);
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // usage test exercises it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agentKey = store.issueAccessKey("commons", "agent");
   const propose = title => {
     const workItemId = `w-${randomUUID()}`;
@@ -160,6 +164,7 @@ test("sessions and spend follow the period; unreported spend is unknown, not zer
 test("the spend allowance ledger rides along so allowance, spent, reserved and headroom read in one place", async t => {
   const { ownerKey, store, cmd, usage, get } = await serve(t);
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agentKey = store.issueAccessKey("commons", "agent");
   const none = (await usage()).body.spendAllowance;
   assert.deepEqual([none.allowance, none.headroomCents, none.period.days, none.spentCents], [null, null, 30, 0], "no allowance: null, never zero headroom");

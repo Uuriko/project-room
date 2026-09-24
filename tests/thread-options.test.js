@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { deriveNotifications } from "../server/notifications.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Thread options: "also send to channel" on thread replies, and per-thread
 // mutes (private side table suppressing a thread's activity from the
@@ -21,6 +22,9 @@ async function serve(t) {
   const send = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["steer", "accept_work", "complete_work", "verify"] });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // thread-options tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const mayaKey = store.issueAccessKey("commons", "maya"), agentKey = store.issueAccessKey("commons", "agent");
   store.dmConsents.request("commons", "owner", "agent", "test fixture");
   store.dmConsents.decide("commons", "agent", "owner", "approve");

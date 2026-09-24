@@ -11,6 +11,7 @@ import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { expandSigninMore } from "./auth-signin.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
   method: "POST",
@@ -47,6 +48,9 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
   }, muse.secret);
   assert.equal(decided.status, 200);
   const quillMemberId = (await decided.json()).memberId;
+  // Graduated autonomy tiers: Quill is operator-promoted so the browser check
+  // exercises it as a working agent, not t1_readonly.
+  setTier(store.db, roomId, quillMemberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const memberIdFor = identityId => store.db.prepare(
     "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
   ).get(roomId, identityId).memberId;
@@ -189,6 +193,9 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   const quillMemberId = store.db.prepare(
     "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
   ).get(roomId, quill.identityId).memberId;
+  // Graduated autonomy tiers: Quill is operator-promoted so the browser check
+  // exercises it as a working agent, not t1_readonly.
+  setTier(store.db, roomId, quillMemberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   let browser;
   t.after(async () => {

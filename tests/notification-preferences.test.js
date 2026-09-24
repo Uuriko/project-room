@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-notifications-"));
@@ -16,6 +17,9 @@ function fixture(t) {
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work"] } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // preference tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agentKey = store.issueAccessKey("commons", "agent");
   const set = (token, preferences) => store.command(token, "commons",
     { id: randomUUID(), type: T.NOTIFICATION_PREFERENCES_SET, data: { preferences } });

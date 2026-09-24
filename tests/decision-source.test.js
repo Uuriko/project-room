@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -19,6 +20,8 @@ function fixture(t) {
   for (const [id, kind] of [['human', 'human'], ['agent', 'agent']]) {
     store.command(owner, 'commons', command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ['accept_work', 'complete_work', 'verify'] }));
   }
+  // #953: new agent members default to t1_readonly; the agent fixture needs write access
+  setTier(store.db, 'commons', 'agent', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   const human = store.issueAccessKey('commons', 'human');
   const agent = store.issueAccessKey('commons', 'agent');
   const signEvidence = makeTestSigner(store);

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { MAX_INCOMING_PROPOSALS } from "../server/bonds.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -90,9 +91,11 @@ test("incoming pending proposals are capped per recipient", async t => {
   let lastStatus = 201;
   for (let i = 0; i < MAX_INCOMING_PROPOSALS + 2 && lastStatus === 201; i++) {
     const proposer = fixture.store.identities.create(`m3 proposer ${i}`);
-    fixture.store.identities.link(owner.secret, roomId, {
+    const linked = fixture.store.identities.link(owner.secret, roomId, {
       identityId: proposer.identityId, displayName: `P${i}`, permissions: ["accept_work"]
     });
+    // #953: new members default to t1_readonly; proposers need write access for bond.propose
+    setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
     const res = await jsonOf(await command(proposer.secret, "bond.propose", { to: target.identityId }));
     lastStatus = res.status;
     if (res.status !== 201) assert.equal(res.body.error.code, "bond_rate_limited");
