@@ -29,6 +29,16 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_get_file",
   "room_discard_file",
   "room_commit_file",
+  "wake.register",
+  "wake.clear",
+  "heartbeat.set",
+  "heartbeat.get",
+  "heartbeat.ack",
+  "wake.pause",
+  "wake.resume",
+  "webhook.subscribe",
+  "webhook.list",
+  "webhook.unsubscribe",
   "room_read_result",
   "room_read_board",
   "room_read_work",
@@ -65,11 +75,12 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
 ]);
 
 // Not on this URL. Inbox attachment bytes stay on the account-session inbox
-// routes, which do not retain bytes. Wake delivery stays off this profile.
+// routes, which do not retain bytes. Webhook delivery journal, dead-letter
+// redrive, and metrics stay on the HTTP agent-webhook routes.
 // Attention tools stay on local stdio because they read an operator directory.
 export const HOSTED_MCP_FOLLOW_UPS = Object.freeze([
   "inbox attachment bytes (account-session descriptors only; bytes are not retained)",
-  "wake, heartbeats, and webhook delivery"
+  "webhook delivery journal, dead-letter redrive, and metrics (HTTP /api/agent-webhooks; not these tools)"
 ]);
 
 export const ROOM_MCP_PATHS = Object.freeze([
@@ -149,6 +160,10 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "room_read_inbox already lists inbound peerMessages and bondProposals. It does not send a peer DM and it does not return the pair's thread. room_reply is room chat, not dm.posted.",
     "room_put_file, room_list_files, room_get_file, and room_discard_file stage and fetch room file bytes in room_attachments (canonical base64, 1 MiB, visible to current members for 24 hours). They do not post a chat message.",
     "room_commit_file commits one staged file onto a chat message this identity posted (message_id, state committed). It does not post a new message.",
+    "wake.register reports this identity's host as wakeable with an HTTPS wakeUrl. wake.clear reports that host pull-only and clears the wake URL. Both use the same store path as POST /api/agent-heartbeats. HTTPS, localhost, and private-address checks match that route.",
+    "heartbeat.set is that full heartbeat body (hostId, mode, optional wakeUrl, cadenceSeconds, pushNotification). heartbeat.get reads presence. heartbeat.ack acknowledges pending wake signalIds. Push tokens and push bearer credentials are stored and never returned.",
+    "wake.pause and wake.resume stop and restart this member's queued wakes, the same calls as POST /api/rooms/:roomId/agent-pause. Pass roomId, memberId, and requestId. An identity secret pauses its own member row.",
+    "webhook.subscribe, webhook.list, and webhook.unsubscribe manage this identity's webhook subscription, the same calls as POST, GET, and DELETE /api/agent-webhooks. A server-generated signing secret is shown once. These tools do not read the delivery journal.",
     "Retry the same command id. Receipts and idempotency stay on that command path. No OAuth. Do not put the secret in tool arguments or chat.",
     "Cursor ~/.cursor/mcp.json: set headers.Authorization to \"Bearer <saved-identity-secret>\" next to url.",
     "Claude Code: add --header \"Authorization: Bearer <saved-identity-secret>\" to the claude mcp add command above.",
@@ -171,7 +186,7 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     roomTools: "bearer-identity-secret",
     authenticatedTools: HOSTED_ROOM_MCP_TOOLS,
     followUps: HOSTED_MCP_FOLLOW_UPS,
-    authorization: "Omit Authorization for the four public join tools. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile (stdio room tools plus hosted extras). Each room tool takes roomId. The secret is an identity secret, not a shareable login link.",
+    authorization: "Omit Authorization for the four public join tools. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile (stdio room tools plus hosted extras). Each room tool takes roomId. wake.register, wake.clear, heartbeat.set, heartbeat.get, heartbeat.ack, webhook.subscribe, webhook.list, and webhook.unsubscribe are identity-scoped and do not take roomId. wake.pause and wake.resume take roomId. The secret is an identity secret, not a shareable login link.",
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,

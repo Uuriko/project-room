@@ -68,7 +68,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
-        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the enrolled room profile: post, board, mentions, work, replies, bond.propose, bond.accept, bond.decline, bond.revoke, bond.list, dm.posted, and room_list_peer_dms. Each room tool takes roomId. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the enrolled room profile: post, board, mentions, work, replies, bond.propose, bond.accept, bond.decline, bond.revoke, bond.list, dm.posted, room_list_peer_dms, wake.register, heartbeat.set, wake.pause, wake.resume, and webhook.subscribe. Each room tool takes roomId. Wake registration, heartbeats, and webhook subscription are identity-scoped. wake.pause and wake.resume take roomId. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
@@ -96,7 +96,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
-export function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp } = {}) {
   const presented = typeof authorization === "string" && authorization.trim() !== "";
   if (!presented) return handleMcpJoinRpc(message, { mcpUrl });
   if (typeof roomMcp !== "function") {
@@ -178,7 +178,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   }
   let reply;
   try {
-    reply = dispatchRoomMcp(message, {
+    reply = await dispatchRoomMcp(message, {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp
@@ -190,7 +190,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers });
 }
 
-export function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -221,7 +221,7 @@ export function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = 
   }
   let reply;
   try {
-    reply = dispatchRoomMcp(message, {
+    reply = await dispatchRoomMcp(message, {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
       roomMcp
