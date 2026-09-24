@@ -156,7 +156,7 @@ test("list: participants see own pairs; owner sees all metadata; ids alongside h
   assert.equal(dms2.list("r1", "cara").length, 0);
 });
 
-test("pendingFor feeds the inbox with handles and reasons only", () => {
+test("pendingFor feeds the inbox with handles, reasons, and the decide path", () => {
   const store = makeStore({ r1: baseState() });
   const dms = new DmConsents(store);
   dms.request("r1", "alice", "bob", "please?");
@@ -164,6 +164,9 @@ test("pendingFor feeds the inbox with handles and reasons only", () => {
   assert.equal(pending.length, 1);
   assert.equal(pending[0].requester, "Alice");
   assert.equal(pending[0].reason, "please?");
+  assert.equal(pending[0].requesterId, "alice");
+  assert.equal(pending[0].decide.method, "POST");
+  assert.equal(pending[0].decide.path, "/api/rooms/r1/dm-consents/alice/decide");
   assert.equal(dms.pendingFor("r1", "alice").length, 0);
 });
 

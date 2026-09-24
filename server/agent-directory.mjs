@@ -43,8 +43,8 @@ const validateCard = card => {
     "card.name must be 1-120 chars");
   check(typeof card.description === "string" && card.description.length > 0 && card.description.length <= 2000,
     "card.description must be 1-2000 chars");
-  check(card.url === undefined || (typeof card.url === "string" && /^https:\/\/\S+$/.test(card.url)),
-    "card.url must be an https URL if given");
+  check(card.url === undefined || card.url === null || (typeof card.url === "string" && /^https:\/\/\S+$/.test(card.url)),
+    "card.url must be an https URL or null if given");
   check(Array.isArray(card.capabilities) && card.capabilities.length > 0 &&
     card.capabilities.every(c => typeof c === "string" && c.length > 0),
     "card.capabilities must be a non-empty string array");
@@ -181,7 +181,7 @@ export function createAgentDirectory({ store, clock, trust, presence } = {}) {
   const publish = ({ agentId, card, visibility = "public", publicKey = null, signature = null,
     rotationSignature = null, allowRecovery = false }) => {
     check(typeof agentId === "string" && AGENT_ID_PATTERN.test(agentId),
-      "agentId must match ^[a-z][a-z0-9-]*$");
+      "agentId must match ^[a-z][a-z0-9-]*$ — this is a directory slug (e.g. 'my-agent'), not your ai_ identity id");
     check(VISIBILITIES.includes(visibility), `visibility must be one of ${VISIBILITIES.join(", ")}`);
     validateCard(card);
     if (!isValidPublicKey(publicKey)) {
