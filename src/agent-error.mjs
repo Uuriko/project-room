@@ -93,6 +93,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
+    if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
+      const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "Use data.body (a string), not text.",
+        next: [
+          ...(commandsPath ? [path(commandsPath)] : []),
+          command("Resend message.posted with data.body (a string), not text.")
+        ]
+      };
+    }
     return {
       status: "action_required", reason: "input_refused",
       hint: "Fix the refused fields. Keep any earlier uncertain requestId.",

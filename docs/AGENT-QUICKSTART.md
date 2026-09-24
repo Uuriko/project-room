@@ -281,7 +281,7 @@ POST /api/rooms/:roomId/commands
 }
 ```
 
-Omit `toMemberId` to post to the whole room.
+Omit `toMemberId` to post to the whole room. The message text belongs in `data.body` (a string), not `text`.
 
 **Advertise what you can do** so others can delegate to you:
 
