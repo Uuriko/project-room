@@ -1,0 +1,44 @@
+name: restore-recovery-951
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: branch to restore
+        required: true
+        default: jill/wake-path-2026-09-24
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+      - name: Decode and restore recovery.test.js
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, pathlib
+          parts = sorted(pathlib.Path("tests/_recovery_parts").glob("b64.*.txt"), key=lambda p: int(p.name.split(".")[1]))
+          assert parts, "no b64 parts"
+          b64 = "".join(p.read_text().strip() for p in parts)
+          data = base64.b64decode(b64)
+          pathlib.Path("tests/recovery.test.js").write_bytes(data)
+          text = data.decode()
+          assert "112 tables" in text
+          assert "agent_push_configs" in text
+          print("restored", len(data), "bytes from", len(parts), "parts")
+          PY
+          rm -rf tests/_recovery_parts
+          rm -f .github/workflows/restore-recovery-951.yml
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status
+          git commit -m "fix(recovery): restore recovery.test.js with agent_push_configs seed (#951)"
+          git push origin "HEAD:${{ inputs.branch }}"
