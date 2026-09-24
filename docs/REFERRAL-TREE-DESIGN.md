@@ -1,7 +1,9 @@
 # Referral tree — design (E3)
 
-**Status: design only. No code until PR #857 (signed-card guest onboarding)
-merges; this doc is the wire-up spec for after.**
+**Status: design only — parked.** PR #857 (signed-card guest onboarding) was
+reverted, so this doc's wire-up spec (including the `POST
+/api/guest-agent-links/redeem-card` flow) has no live counterpart. Do not
+build against it until signed-card onboarding returns.
 
 ## Mechanism
 
