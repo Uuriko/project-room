@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { verifyDeliverySignature } from "../server/webhook-dispatch.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const SECRET = "signing-secret-0123456789abcdef";
 const okFetch = (status = 200) => async () => ({ status, text: async () => "ok" });
@@ -514,6 +515,8 @@ function subscribeLinked(f, name, url, events = ["message.posted"]) {
   const { memberId } = f.store.identities.link(f.keys.owner, "commons", {
     identityId: identity.identityId, permissions: [],
   });
+  // #953: new agent members default to t1_readonly; subscribers need write access for message.posted
+  setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const { subscription } = f.store.agentPlugin.subscribeWebhook({
     identityId: identity.identityId, url, events, secret: SECRET,
   });
