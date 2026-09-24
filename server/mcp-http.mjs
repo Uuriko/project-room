@@ -1,5 +1,7 @@
-// Streamable HTTP MCP join surface. Public packets / kits / snippets only.
-// Room mutation tools stay on local stdio (scripts/agent-mcp.mjs).
+// Streamable HTTP MCP. Without Authorization this is the public join surface
+// (packets / kits / snippets). With Authorization: Bearer pri_… the Room
+// Worker (server/mcp-room-profile.mjs) adds the authenticated room tools.
+// Writes from those tools go through RoomStore.command.
 
 import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
@@ -10,7 +12,8 @@ import {
 export { isRoomMcpPath, MCP_VERSION };
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
-const JOIN_TOOLS = Object.freeze([
+export const MCP_AUTH_REQUIRED = -32001;
+export const MCP_JOIN_TOOLS = Object.freeze([
   Object.freeze({
     name: "room_join_packet",
     description: "Read the public Project Room llms.txt packet. No Room key. Not agent auth.",
@@ -65,7 +68,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
-        instructions: "Public join MCP. Read packets and kits here. Room tools need local stdio plus an enrolled key or guest invite token. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for room_check_access, the activation pack, context, events, message.posted, the work list, and bond.propose. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
@@ -73,10 +76,10 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     if (message.params?.cursor !== undefined) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }
-    return { jsonrpc: "2.0", id: requestId, result: { tools: JOIN_TOOLS } };
+    return { jsonrpc: "2.0", id: requestId, result: { tools: MCP_JOIN_TOOLS } };
   }
   if (message.method === "tools/call") {
-    const selected = JOIN_TOOLS.find(tool => tool.name === message.params?.name);
+    const selected = MCP_JOIN_TOOLS.find(tool => tool.name === message.params?.name);
     const args = message.params?.arguments ?? {};
     if (!selected || !object(args) || Object.keys(args).length) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Unknown tool or invalid arguments" } };
@@ -91,6 +94,24 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: `Method not found; this server supports MCP ${MCP_SUPPORTED_VERSIONS.join(" and ")}` } };
   }
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
+}
+
+export function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp } = {}) {
+  const presented = typeof authorization === "string" && authorization.trim() !== "";
+  if (!presented) return handleMcpJoinRpc(message, { mcpUrl });
+  if (typeof roomMcp !== "function") {
+    const requestId = message?.id;
+    const id = object(message) && Object.hasOwn(message, "id")
+      && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
+      ? requestId : null;
+    return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service" } };
+  }
+  return roomMcp(message, { authorization, mcpUrl });
+}
+
+export function mcpRpcStatus(reply) {
+  if (!reply) return 202;
+  return reply.error?.code === MCP_AUTH_REQUIRED ? 401 : 200;
 }
 
 export function mcpJoinCorsHeaders() {
@@ -138,7 +159,7 @@ export function roomMcpFetchResponse(request) {
   return null;
 }
 
-export async function roomMcpFetchPost(request) {
+export async function roomMcpFetchPost(request, options = {}) {
   const url = new URL(request.url);
   const cors = mcpJoinCorsHeaders();
   const headers = {
@@ -155,12 +176,21 @@ export async function roomMcpFetchPost(request) {
       status: 400, headers
     });
   }
-  const reply = handleMcpJoinRpc(message, { mcpUrl: roomMcpUrlForHost(url) });
+  let reply;
+  try {
+    reply = dispatchRoomMcp(message, {
+      mcpUrl: roomMcpUrlForHost(url),
+      authorization: request.headers.get("authorization"),
+      roomMcp: options.roomMcp
+    });
+  } catch {
+    reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };
+  }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { headers });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers });
 }
 
-export function writeRoomMcpNode(req, res, url, { bodyText, accept } = {}) {
+export function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -189,13 +219,22 @@ export function writeRoomMcpNode(req, res, url, { bodyText, accept } = {}) {
     res.writeHead(400, { ...cors, "Content-Type": "application/json; charset=utf-8" });
     return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON" } }));
   }
-  const reply = handleMcpJoinRpc(message, { mcpUrl: roomMcpUrlForHost(url) });
+  let reply;
+  try {
+    reply = dispatchRoomMcp(message, {
+      mcpUrl: roomMcpUrlForHost(url),
+      authorization: req.headers.authorization,
+      roomMcp
+    });
+  } catch {
+    reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };
+  }
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();
   }
   const bytes = Buffer.from(JSON.stringify(reply));
-  res.writeHead(200, {
+  res.writeHead(mcpRpcStatus(reply), {
     ...cors,
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
