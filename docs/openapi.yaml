@@ -252,6 +252,12 @@ paths:
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
+      description: |
+        Ordered events strictly after the `after` sequence. The cursor query
+        parameter is `after`, not `afterSequence`. Sending `afterSequence`
+        (alone or with `after`) is 422 `invalid_event_cursor`: it is not
+        applied as a filter, and it does not mean the caller is caught up.
+        Pass the previous response's `next` back as `after`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: after
@@ -291,7 +297,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed" }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
