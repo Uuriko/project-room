@@ -924,8 +924,10 @@ function proposeWork(state, incoming) {
   if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
   // RC-2026-09-23: optional machine-readable labels (e.g. "friction" for
   // friction reports from agent feedback). Validated as an array of short
-  // slugs; stored on the projection for filtering and digests.
-  let labels = [];
+  // slugs; stored on the projection for filtering and digests. The field is
+  // omitted entirely when the event lacks it, so pre-label legacy rows replay
+  // to a projection without the key (recovery audit byte-compatibility).
+  let labels;
   if (incoming.data.labels !== undefined) {
     if (!Array.isArray(incoming.data.labels) || incoming.data.labels.length > 10
       || incoming.data.labels.some(l => typeof l !== "string" || !/^[a-z0-9-]{1,32}$/.test(l)))
@@ -967,7 +969,7 @@ function proposeWork(state, incoming) {
     humanDecisionMakerId,
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
-    labels,
+    ...(labels !== undefined ? { labels } : {}),
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
     // wherever the envelope exists; it is never read from data and never inferred from the
     // source message's author. Pre-field legacy rows simply lack the key and render unknown.
