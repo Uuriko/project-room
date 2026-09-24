@@ -75,7 +75,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     assert.equal(await f.title.evaluate(node => document.activeElement === node), true);
     assert.equal(await page.locator("#assignee-select").inputValue(), ""); assert.equal(await page.locator("#verifier-select").inputValue(), "");
     assert.equal(await page.locator("#work-mode-select").inputValue(), "read");
-    assert.equal(await page.locator("#require-verification").isChecked(), false); assert.equal(await page.locator("#require-decision").isChecked(), false);
+    assert.equal(await page.locator("#require-verification").isChecked(), true); assert.equal(await page.locator("#require-decision").isChecked(), true);
     assert.equal(await page.locator("#work-options").evaluate(node => node.open), false);
     assert.equal(await page.locator("#source-message-id").inputValue(), "");
     assert.equal(await page.locator("#source-context").isVisible(), false);
@@ -241,6 +241,9 @@ test("reuse keyboard cycle and CR line endings stay usable without changing the 
   for (const id of ["work-done-input", "assignee-select"]) {
     await page.keyboard.press("Tab"); assert.equal(await page.evaluate(() => document.activeElement.id), id);
   }
+  // Checked-by-default policy: the verifier field is visible on open and its
+  // select is an enabled tab stop before the options summary.
+  await page.keyboard.press("Tab"); assert.equal(await page.evaluate(() => document.activeElement.id), "verifier-select");
   await page.keyboard.press("Tab"); assert.equal(await page.locator("#work-options > summary").evaluate(node => document.activeElement === node), true);
   await page.keyboard.press("Enter");
   for (const id of ["work-mode-select", "require-verification", "require-decision", "cancel-work-button"]) {

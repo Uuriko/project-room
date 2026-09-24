@@ -51,8 +51,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       const title = `Finding — review ${needsReview}, decision ${needsDecision}`;
       await page.locator("#new-work-button").click();
       await page.locator("#work-options > summary").click();
-      assert.equal(await review.isChecked(), false, "new proposals leave review optional");
-      assert.equal(await decision.isChecked(), false);
+      assert.equal(await review.isChecked(), true, "new proposals carry review by default");
+      assert.equal(await decision.isChecked(), true);
       await page.locator("#work-title-input").fill(title);
       await page.locator("#work-done-input").fill("A source-linked finding with an exact version.");
       await page.locator("#assignee-select").selectOption("producer");
