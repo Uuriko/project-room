@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 112 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 113 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -102,6 +102,11 @@ test("online capture preserves all 112 tables, identity boundaries and exact ret
     .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
   f.store.db.prepare(`INSERT INTO agent_wake_signals(signal_id,agent_id,kind,room_id,message_id,created_at,delivered_at) VALUES(?,?,?,?,?,?,?)`)
     .run("recovery-signal", identityId, "mention", "commons", "recovery-message", f.now(), null);
+  // Seed a push-subscription row so the capture covers agent_push_configs
+  // (push wake path RC-2026-09-24-203). Written directly: the subscribe path
+  // needs a public-resolving push url the fixture has no reason to own.
+  f.store.db.prepare(`INSERT INTO agent_push_configs(agent_id,host_id,cadence_seconds,push_url,push_token,push_auth_json,push_failures,push_suspended,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(identityId, "recovery-host", 30, "https://recovery.example.test/push", "recovery-push-token", null, 0, 0, f.now());
   // Seed one GX guest invite + its redeemed seat so the capture covers
   // guest_invites and guest_members (RC-2026-09-23-100). Written directly:
   // the mint path needs a live owner account session the fixture has no
@@ -273,8 +278,8 @@ test("online capture preserves all 112 tables, identity boundaries and exact ret
     VALUES ('recovery-peer-dm','dm:ai_recovery_a:ai_recovery_b','commons','recovery-peer-event','ai_recovery_a','ai_recovery_b','Synthetic peer DM',?)`)
     .run(bondAt);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 112,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_operator_controls (operator prerequisites slice 1/3, PR #928); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 113,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_operator_controls (operator prerequisites slice 1/3, PR #928); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
