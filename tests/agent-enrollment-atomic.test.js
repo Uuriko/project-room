@@ -104,8 +104,11 @@ test("wrong-bound code fails: minted for A, presented for B", t => {
   const f = fixture(t);
   const a = f.store.identities.create("Agent A"), b = f.store.identities.create("Agent B");
   const minted = f.store.identities.mintLinkCode(a.identityId, a.secret);
-  expectProofFailure(t, () => f.apply(f.createRequest({ identityId: b.identityId, identityLinkCode: minted.linkCode })));
+  const req = f.createRequest({ identityId: b.identityId, identityLinkCode: minted.linkCode });
+  expectProofFailure(t, () => f.apply(req));
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_links").get().n, 0, "nothing linked");
+  assert.equal(f.store.room("commons").state.members[req.memberId], undefined, "failed consume rolls back the member");
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connection_operations").get().n, 0, "failed consume writes no operation");
   // The unconsumed code is NOT burned by the failed attempt — holder retries still work.
   const result = f.apply(f.createRequest({ identityId: a.identityId, identityLinkCode: minted.linkCode }));
   assert.equal(result.receipt.identityId, a.identityId);
