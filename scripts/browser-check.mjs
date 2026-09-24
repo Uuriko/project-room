@@ -64,6 +64,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     };
     await login(page, owner); await login(other, human);
     const input = page.locator("#message-input");
+    const unicodeBody = "Ready 👍🏽 👨‍👩‍👧‍👦 🇺🇸";
+    await input.fill(unicodeBody);
+    await page.locator('#message-form button[type="submit"]').click();
+    await page.getByText(unicodeBody, { exact: true }).waitFor();
+    assert.equal(store.snapshot(owner, "commons").state.messages.find(message => message.body === unicodeBody)?.body, unicodeBody);
     await input.fill("Keep my room thought");
     await page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "maya");
     assert.equal(await page.locator("#composer-toolbar").isVisible(), true, "addressing reveals the talking-to toolbar");
@@ -114,24 +119,38 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(posted[0].toMemberId, "room-agent");
 
     await page.locator("#thread-back").click();
-    const heart = p => p.locator('[data-message-record-id="book-club"] [data-reaction="heart"]');
+    const HEART = "\u2764\uFE0F";
+    const heart = p => p.locator(`[data-message-record-id="book-club"] [data-reaction="${HEART}"]`);
     // Add Reaction lives in the ⋯ overflow menu and opens the reaction sheet.
     await page.locator('[data-message-record-id="book-club"] summary[aria-label="More actions for this message"]').click();
     await page.locator('[data-message-record-id="book-club"] button[data-message-action="add-reaction"]').click();
-    await page.locator('#reaction-sheet [data-reaction="heart"]').click();
+    assert.equal(await page.evaluate(() => document.activeElement.id), "reaction-search");
+    await page.locator(`#reaction-sheet [data-reaction="${HEART}"]`).first().click();
     await page.locator('#reaction-sheet').waitFor({ state: "hidden" });
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
+    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="book-club"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "true", HEART);
     const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
       const range = document.createRange(); range.selectNodeContents(e);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       return selection.toString();
     });
     await heart(other).click();
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-label").includes(", 2"));
+    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="book-club"] [data-reaction="${glyph}"]`).getAttribute("aria-label").includes(", 2"), HEART);
     assert.equal(await page.evaluate(() => window.getSelection().toString()), selectedBody);
     await heart(page).click();
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "false");
-    assert.deepEqual(store.snapshot(owner, "commons").state.messages[0].reactions.heart, ["maya"]);
+    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="book-club"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "false", HEART);
+    assert.deepEqual(store.snapshot(owner, "commons").state.messages.find(message => message.id === "book-club").reactions[HEART], ["maya"]);
+
+    const addFire = page.locator('[data-message-record-id="book-club"] button[data-message-action="add-reaction"]');
+    if (!await addFire.isVisible()) await page.locator('[data-message-record-id="book-club"] summary[aria-label="More actions for this message"]').click();
+    await addFire.click();
+    await page.locator("#reaction-search").fill("fire");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await page.locator("#reaction-sheet").waitFor({ state: "hidden" });
+    const FIRE = "\u{1F525}";
+    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="book-club"] [data-reaction="${glyph}"]`)?.getAttribute("aria-pressed") === "true", FIRE);
+    await page.locator(`[data-message-record-id="book-club"] [data-reaction="${FIRE}"]`).click();
+    await page.locator(`[data-message-record-id="book-club"] [data-reaction="${FIRE}"]`).waitFor({ state: "detached" });
 
     // Unrelated live traffic retains the exact message DOM node and focused control.
     const focusedReply = page.locator('[data-message-record-id="book-club"] [data-message-action="reply"]');

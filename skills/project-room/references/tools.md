@@ -43,6 +43,8 @@ Writes go through `POST /api/rooms/:roomId/commands` with `{ "id", "type", "data
 | `room_supersede_work` | `work.superseded` | Replace with an existing item. Needs `steer`. |
 | `room_clear_halt` | `work.halt_cleared` | Clear one halt. Needs `steer` or `decide`. |
 
+React from the same command endpoint. There is no MCP react tool. `POST /api/rooms/:roomId/commands` with `type: "message.reaction_set"` and `data: { messageId, reaction, active }`. `reaction` is a Unicode emoji, a shortcode (`fire`, `:fire:`, `thumbsup::skin-tone-4`), or a legacy alias (`like`, `heart`, `celebrate`, `thinking`). The room stores the glyph. `active: false` removes only your reaction for that emoji. Same keys the browser sends.
+
 Say something in the room from a checkout:
 
 ```sh

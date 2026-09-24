@@ -83,6 +83,18 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#message-to-select").inputValue(), "", "an inserted @mention is text-only and never selects a DM recipient");
     assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
     await input.fill("");
+    await input.click();
+    await page.keyboard.type(":fire");
+    const emojiList = page.locator("#emoji-list");
+    await emojiList.waitFor({ state: "visible" });
+    assert.equal(await emojiList.getAttribute("role"), "listbox");
+    assert.equal(await emojiList.locator('[role="option"]').first().getAttribute("aria-selected"), "true");
+    await page.keyboard.press("Enter");
+    assert.equal(await input.inputValue(), "🔥 ");
+    assert.equal((await input.inputValue()).includes(":fire"), false);
+    assert.equal(await emojiList.isHidden(), true);
+    assert.equal(await mentionList.isHidden(), true);
+    await input.fill("");
     const topic = page.locator('[data-message-record-id="topic"]');
     assert.equal(await topic.locator('.reactions button').count(), 0, "no unused reaction pills beneath messages");
     assert.equal(await topic.locator('.reaction-options').count(), 0, "no always-visible reaction picker");
@@ -93,23 +105,26 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.keyboard.press("Enter");
     await topic.locator('button[data-message-action="add-reaction"]').click();
     const sheet = page.locator("#reaction-sheet");
+    const THINKING = "\u{1F914}";
+    const LIKE = "\u{1F44D}";
     await sheet.waitFor({ state: "visible" });
+    assert.equal(await page.evaluate(() => document.activeElement.id), "reaction-search");
     send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: true });
-    await topic.locator('.reactions [data-reaction="thinking"]').waitFor();
+    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor();
     assert.equal(await sheet.isVisible(), true, "live changes keep the open sheet");
     send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: false });
-    await topic.locator('.reactions [data-reaction="thinking"]').waitFor({ state: "detached" });
-    const sheetLike = sheet.locator('[data-reaction="like"]');
+    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor({ state: "detached" });
+    const sheetLike = sheet.locator(`[data-reaction="${LIKE}"]`).first();
     assert.equal(await sheetLike.isVisible(), true);
     const sheetBounds = await sheet.boundingBox();
     assert.ok(sheetBounds.x >= 0 && sheetBounds.x + sheetBounds.width <= viewport.width, "sheet fits narrow and desktop screens");
     await sheetLike.click();
     await sheet.waitFor({ state: "hidden" });
-    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] [data-reaction="like"]').getAttribute("aria-pressed") === "true");
+    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="topic"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "true", "\u{1F44D}");
 
     assert.equal(await topic.locator('.reactions button').count(), 1, "only the used reaction remains visible");
     assert.equal(await page.evaluate(() => document.activeElement.closest("li.message")?.dataset.messageRecordId), "topic", "closing the sheet returns focus to the message");
-    const like = topic.locator('[data-reaction="like"]');
+    const like = topic.locator('[data-reaction="\u{1F44D}"]');
 
     // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
     await page.route("**/api/rooms/commons/commands", route => route.fulfill({
@@ -130,11 +145,11 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await toast.evaluate(node => node.classList.contains("visible")), false);
     assert.equal(await toast.getAttribute("role"), "status");
     await page.unroute("**/api/rooms/commons/commands");
-    await page.locator('[data-message-record-id="topic"] button[data-reaction="like"]').click();
+    await page.locator('[data-message-record-id="topic"] button[data-reaction="\u{1F44D}"]').click();
     // A cleared reaction detaches its chip (only used reactions stay visible),
     // so wait for detachment rather than an aria-pressed=false state that the
     // new UI never renders.
-    await topic.locator('button[data-reaction="like"]').waitFor({ state: "detached" });
+    await topic.locator('button[data-reaction="\u{1F44D}"]').waitFor({ state: "detached" });
     await openSearch(page);
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");

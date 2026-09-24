@@ -14,6 +14,7 @@ relicense dependencies, quoted source material or third-party artwork.
   them as Project Room product assets or imply endorsement.
 - **Quotations, product names and logos:** third-party rights remain with their
   owners. Source links in research documents are attribution, not a license grant.
+- **Emoji shortcodes:** `src/emoji-catalog.js` vendors names, descriptions, and tags from [github/gemoji](https://github.com/github/gemoji) `db/emoji.json` (MIT). Modifier-base code points are from Unicode Emoji 16.0 `emoji-data.txt` (© 2024 Unicode®, Inc., [Unicode terms of use](https://www.unicode.org/terms_of_use.html)). The glyphs themselves are Unicode characters, not copied artwork.
 - **Dependencies:** Node.js and npm/pnpm dependencies retain their own licenses.
   Root and nested manifests/lockfiles identify exact packages. The Node service
   currently has no npm runtime dependencies; development and Workers build tools
