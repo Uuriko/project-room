@@ -7006,7 +7006,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ roomId, viewerId, unread }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, total, byType: { mention, reply, thread_reply, reaction } }" }
   /api/rooms/{roomId}/activity-read:
     post:
       summary: Mark activity events read
