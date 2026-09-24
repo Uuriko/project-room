@@ -173,3 +173,28 @@ test("malformed trust records are rejected; non-function trust option throws", t
   assert.throws(() => publishSigned(dir3, { agentId: "x" }), DirectoryError);
   assert.throws(() => createAgentDirectory({ trust: 42 }), DirectoryError);
 });
+
+test("publish accepts a null card url (matches the signing guide default)", t => {
+  // RC-2026-09-24-001 (dogfood F-10): docs/SIGNED-AGENT-CARDS.md says url
+  // defaults to null — the canonicalizer already treats null as absent, so
+  // validation must not reject it.
+  const dir = fresh();
+  const { doc } = publishSigned(dir, { agentId: "null-url-agent", card: { ...CARD, url: null } });
+  assert.equal(doc.url, null);
+});
+
+test("publish rejects ai_ identity ids with a slug-teaching error", t => {
+  // RC-2026-09-24-001 (dogfood F-10): agents try their ai_ identity id as
+  // the card agentId. The error must name the directory-slug distinction.
+  const dir = fresh();
+  const keyPair = generateKeyPair();
+  const signature = signCard({ agentId: "ai_abc123", card: CARD, privateKey: keyPair.privateKey });
+  let error = null;
+  try {
+    dir.publish({ agentId: "ai_abc123", card: CARD, publicKey: keyPair.publicKey, signature });
+  } catch (err) {
+    error = err;
+  }
+  assert.ok(error instanceof DirectoryError, "rejects the ai_ identity id");
+  assert.ok(error.message.includes("ai_ identity id"), "error teaches the slug distinction");
+});

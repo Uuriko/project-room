@@ -40,7 +40,9 @@ async function ownerRoom(origin, fixture) {
   return { ownerSecret: owner.secret, roomId };
 }
 
-test("work-sessions next[] names start-session when none are open", async t => {
+test("work-sessions next[] teaches register-work-item when none are open", async t => {
+  // RC-2026-09-24-001 (dogfood F-07): the empty state must name the creation
+  // path — POST a work claim — not an undefined "session.start command".
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const { ownerSecret, roomId } = await ownerRoom(origin, fixture);
@@ -48,7 +50,11 @@ test("work-sessions next[] names start-session when none are open", async t => {
   assert.equal(res.status, 200);
   const json = await res.json();
   assert.deepEqual(json.sessions, []);
-  assert.deepEqual(json.next.map(n => n.action), ["start-session"]);
+  assert.deepEqual(json.next.map(n => n.action), ["register-work-item"]);
+  const step = json.next[0];
+  assert.equal(step.method, "POST");
+  assert.equal(step.path, `/api/rooms/${roomId}/work-claims`);
+  assert.ok(step.description.includes("id"), "names the claim id field");
 });
 
 test("work-sessions next[] teaches claim-session for an open session", async t => {

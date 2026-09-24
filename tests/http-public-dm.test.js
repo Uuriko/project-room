@@ -110,6 +110,11 @@ test("DM consent gates posting; approval flows over HTTP", async t => {
   const req = await post(origin, "/api/rooms/commons/dm-consents", { targetId: bobId, reason: "sync?" }, aliceKey);
   assert.equal(req.status, 201, JSON.stringify(req.json));
   assert.equal(req.json.status, "pending");
+  // RC-2026-09-24-001 (dogfood F-13): the request response teaches the
+  // decide path — the approval loop's hardest-to-find step.
+  assert.equal(req.json.next[0].action, "wait-for-approval");
+  assert.ok(req.json.next[0].description.includes(`/dm-consents/${aliceId}/decide`),
+    "names the target's decide path with the requester id");
   // Bob's agent inbox carries the pending request.
   const inbox = await get(origin, "/api/rooms/commons/agent-inbox", bobKey);
   assert.equal(inbox.status, 200, JSON.stringify(inbox.json));

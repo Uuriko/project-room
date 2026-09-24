@@ -271,8 +271,17 @@ export class DmConsents {
     ).all(roomId, memberId);
     return Object.freeze(rows.map(row => Object.freeze({
       requester: this._handleOf(state, row.requester_id),
+      requesterId: row.requester_id,
       reason: row.reason,
-      at: row.created_at
+      at: row.created_at,
+      // RC-2026-09-24-001: the approver needs the authoritative requester id
+      // and the decide path — display handles are not unique per room and the
+      // decide endpoint is otherwise undiscoverable (F-13 dogfood).
+      decide: Object.freeze({
+        method: "POST",
+        path: `/api/rooms/${roomId}/dm-consents/${row.requester_id}/decide`,
+        description: "Approve, reject, or block this request: send { decision: \"approve\" } (or \"reject\" / \"block\"). Only the target decides; a reverse POST creates a duplicate pending row instead of approving."
+      })
     })));
   }
 

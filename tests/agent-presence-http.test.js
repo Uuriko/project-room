@@ -90,3 +90,27 @@ test("presence next[] teaches dm-member for a listed member", async t => {
     await streamPromise;
   }
 });
+
+test("presence next[] counts a heartbeating pull-only agent as around", async t => {
+  // RC-2026-09-24-001 (dogfood F-06): a pull-only host that heartbeated
+  // recently is listening — next[] must not say "nobody is online" while
+  // the roster shows it online.
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const identity = fixture.store.identities.create("pull-agent");
+  fixture.store.identities.link(fixture.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "pullagent",
+    displayName: "Pull Agent", permissions: ["accept_work"],
+  });
+  const beat = await post(origin, "/api/agent-heartbeats",
+    { hostId: "h1", mode: "pull-only" }, identity.secret);
+  assert.equal(beat.status, 200);
+  const res = await get(origin, "/api/rooms/commons/presence", fixture.keys.owner);
+  assert.equal(res.status, 200);
+  const json = await res.json();
+  const agent = json.members.find(m => m.memberId === "pullagent");
+  assert.ok(agent, "linked agent is listed");
+  assert.equal(agent.state, "listening");
+  assert.deepEqual(json.next.map(n => n.action), ["dm-member"],
+    "heartbeating agent counts as online even with no stream watcher");
+});

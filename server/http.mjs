@@ -3489,7 +3489,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!(exact(data, ["targetId"]) || exact(data, ["targetId", "reason"]))) {
           reject(422, "invalid_dm_request", "targetId and an optional reason are the accepted fields");
         }
-        return json(res, 201, store.dmConsents.request(roomId, auth.member.id, data.targetId, data.reason));
+        const pair = store.dmConsents.request(roomId, auth.member.id, data.targetId, data.reason);
+        // RC-2026-09-24-001: teach the consent loop at the source. The target
+        // approves at the decide path (their own call — not a reverse POST,
+        // which creates a duplicate pending row); the requester waits.
+        return json(res, 201, {
+          ...pair,
+          next: Object.freeze([Object.freeze({
+            action: "wait-for-approval",
+            description: `The target (${data.targetId}) approves at POST /api/rooms/${roomId}/dm-consents/${auth.member.id}/decide with { decision: "approve" | "reject" | "block" }. Only they can decide — your reverse POST would create a duplicate pending row, not an approval.`,
+          })]),
+        });
       }
       if (route === "dm-consent-decide" && req.method === "POST") {
         const data = await body(req);

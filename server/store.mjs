@@ -620,8 +620,10 @@ const workSessionsNext = (roomId, sessions) => {
     })];
   }
   return [Object.freeze({
-    action: "start-session",
-    description: "No work sessions are open. Start one with the session.start command on a work item.",
+    action: "register-work-item",
+    method: "POST",
+    path: `/api/rooms/${roomId}/work-claims`,
+    description: "No work sessions are open. Register a work item first: POST { id: \"<slug>\", title: \"<task>\", note: \"<context>\" } to this path, then claim it with the claim-session action above.",
   })];
 };
 
@@ -2723,9 +2725,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
-      // RC-2026-09-18-054: next[] follows who is actually around (watching
-      // or holding work), not the idle roster Muse lists for honesty.
-      const onlineIds = listed.filter(m => m.watching || m.workingOn.length > 0).map(m => m.memberId);
+      // RC-2026-09-18-054: next[] follows who is actually around — watching,
+      // holding work, or in a live presence state (a host heartbeat inside
+      // the live window) — not the idle roster. A pull-only agent that
+      // heartbeated a minute ago is around even when nobody is watching
+      // its stream; the old filter called that "nobody online".
+      const onlineIds = listed.filter(m => m.watching || m.workingOn.length > 0
+        || m.state === "listening" || m.state === "working").map(m => m.memberId);
       return {
         members: listed,
         next: Object.freeze(presenceNext(roomId, onlineIds)),
