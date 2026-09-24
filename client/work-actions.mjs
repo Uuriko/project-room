@@ -113,11 +113,7 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
     && entry.causationId === (command.causationId ?? null) && typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at))
     && isDeepStrictEqual(entry.data, data);
 }
-export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
-  if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
-  const command = buildWorkCommand(name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
-    message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
+export function recordedWorkAction(name, command, receipt) {
   return { contractVersion: 1, status: "recorded", requestId: command.id, workItemId: command.data.workItemId,
     action: name, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
     appliedRevision: command.type === T.WORK_PROPOSED ? 0 : command.data.expectedRevision === undefined ? null : command.data.expectedRevision + 1,
@@ -127,6 +123,13 @@ export async function submitWorkAction(client, identity, name, args, { signal } 
     ...(command.data.evidenceKind === "room_text" ? { result: { completionEventId: receipt.event.id, evidenceVersion: command.data.evidenceVersion,
       read: { tool: "room_read_result", arguments: { workItemId: command.data.workItemId, completionEventId: receipt.event.id } } } } : {}),
     message: "This original operation was recorded. Read current work before another action; this receipt does not prove current ownership, review or human approval." };
+}
+export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
+  if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
+  const command = buildWorkCommand(name, args), receipt = await client.command(command, { signal });
+  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+    message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
+  return recordedWorkAction(name, command, receipt);
 }
 
 const refusals = {

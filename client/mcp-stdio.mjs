@@ -39,6 +39,19 @@ export const roomTools = [
   ...helpTools,
   ...replyTools
 ];
+export function validRoomToolArguments(name, args) {
+  const selected = roomTools.find(tool => tool.name === name);
+  if (!selected) return false;
+  return validArguments(selected, args);
+}
+export function buildDraftCommand(identity, args) {
+  return { id: args.requestId, type: "message.posted", data: {
+    messageId: `mcp-${createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, args.requestId])).digest("hex")}`,
+    body: args.body, workItemId: args.workItemId, packetId: args.packetId, basisRevision: args.basisRevision,
+    ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
+    ...(args.allowOlderBasis ? { allowOlderBasis: true } : {})
+  } };
+}
 export const attentionTools = [
   tool("room_read_attention", "Pull up to 20 current work/instruction notices from this operator-configured local inbox; request notices require explicit operator v3 opt-in. Remains pending until explicitly acknowledged. May coalesce intermediate changes; not an event archive or cross-device inbox. Read nextRead to refresh context. No work, approval or human read marker changes; no model is started. Updates only private local observer state.", schema(), false),
   tool("room_acknowledge_attention", "Acknowledge one exact local notice ID after recording it. Rechecks access and current conditions first; an obsolete ID cannot dismiss its replacement. Retry the same ID if the outcome is unknown. Not proof of understanding, accepted work, completion, human approval or a human read marker. Updates only private local observer state.", schema({ noticeId: id }, ["noticeId"]), false)
@@ -85,12 +98,7 @@ async function callTool(client, identity, name, args, signal) {
   if (name === "room_read_work_discussion") {
     const { workItemId, ...options } = args; return client.workDiscussion(workItemId, { ...options, signal });
   }
-  const command = { id: args.requestId, type: "message.posted", data: {
-    messageId: `mcp-${createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, args.requestId])).digest("hex")}`,
-    body: args.body, workItemId: args.workItemId, packetId: args.packetId, basisRevision: args.basisRevision,
-    ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
-    ...(args.allowOlderBasis ? { allowOlderBasis: true } : {})
-  } };
+  const command = buildDraftCommand(identity, args);
   const result = await client.command(command, { signal });
   if (!confirmsWorkReturn(result, command, identity.roomId, identity.memberId)) {
     return { status: "unconfirmed", message: "Draft outcome is unknown. Retry the exact original input; do not generate a new requestId." };

@@ -1,5 +1,6 @@
-// Hosted MCP join surface (Steal A). Pasteable URL + host-exact snippets.
-// No keys. Room tools stay on local stdio + enrolled credentials.
+// Hosted MCP join surface. Pasteable URL + host-exact snippets.
+// No keys for the four public join tools. Authorization: Bearer pri_…
+// unlocks the enrolled room profile (stdio room tools plus the hosted extras).
 
 export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
@@ -7,6 +8,8 @@ export const ROOM_MCP_SERVER_NAME = "project-room";
 // Authenticated hosted MCP profile (Authorization: Bearer pri_…).
 // Unauthenticated tools/list stays the four join tools. Names are the
 // contract shared by the join document, OpenAPI, and the Room Worker handler.
+// Order: the original hosted extras, then local stdio room tools that were
+// not already in that set (room_check_access, get_room_context, room_list_work).
 export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_check_access",
   "room_activation_pack",
@@ -14,7 +17,48 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_list_events",
   "room_post_message",
   "room_list_work",
-  "bond.propose"
+  "bond.propose",
+  "room_read_result",
+  "room_read_board",
+  "room_read_work",
+  "room_read_work_discussion",
+  "room_post_draft",
+  "room_read_inbox",
+  "room_read_messages",
+  "room_submit_text_result",
+  "room_propose_work",
+  "room_accept_work",
+  "room_start_work",
+  "room_block_work",
+  "room_resolve_blocker",
+  "room_record_completion",
+  "room_record_verification",
+  "room_acquire_claim",
+  "room_release_claim",
+  "room_supersede_work",
+  "room_record_handoff",
+  "room_clear_halt",
+  "room_offer_help",
+  "room_select_help_offer",
+  "room_decline_help_offer",
+  "room_withdraw_help_offer",
+  "room_release_help_offer",
+  "room_list_requests",
+  "room_read_request",
+  "room_request_history",
+  "room_request_reply",
+  "room_reply",
+  "room_respond_to_request",
+  "room_cancel_request"
+]);
+
+// Not on this URL. File bytes, wake delivery, and Bond verbs other than
+// bond.propose stay on their HTTP routes. Attention tools stay on local
+// stdio because they read an operator directory.
+export const HOSTED_MCP_FOLLOW_UPS = Object.freeze([
+  "file bytes and inbox attachments",
+  "wake, heartbeats, and webhook delivery",
+  "Bond beyond bond.propose (accept, decline, revoke, peer DM)"
 ]);
 
 export const ROOM_MCP_PATHS = Object.freeze([
@@ -80,12 +124,18 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "",
     "This endpoint speaks MCP (initialize, tools/list, tools/call).",
     "Without an Authorization header, tools/list is the four public join tools (packets, kits, and these snippets).",
-    "With Authorization: Bearer <saved-identity-secret> on POST, the same URL adds room tools:",
-    HOSTED_ROOM_MCP_TOOLS.join(", ") + ".",
+    "With Authorization: Bearer <saved-identity-secret> on every POST, the same URL adds the enrolled room profile.",
+    "Every room tool takes roomId. Start with room_check_access, then room_read_inbox (mentions and DMs) or room_read_board.",
     "room_post_message submits { id, type: \"message.posted\", data: { messageId, body } } through the room command path.",
+    "room_post_draft, room_reply, work tools, and help tools use the same command builders as local stdio.",
     "bond.propose submits { id, type: \"bond.propose\", data: { to } }.",
     "Receipts and idempotency stay on that command path. No OAuth. Do not put the secret in tool arguments or chat.",
-    "Local stdio remains the full tool set. Shared #join/ links enroll an identity; they are not this bearer credential.",
+    "Cursor ~/.cursor/mcp.json: set headers.Authorization to \"Bearer <saved-identity-secret>\" next to url.",
+    "Claude Code: add --header \"Authorization: Bearer <saved-identity-secret>\" to the claude mcp add command above.",
+    "Codex: set http_headers.Authorization to \"Bearer <saved-identity-secret>\" on the mcp_servers.project-room table.",
+    "Follow-ups, not on this URL yet: " + HOSTED_MCP_FOLLOW_UPS.join("; ") + ".",
+    "room_read_attention stays on local stdio; it reads an operator directory, not the room.",
+    "Shared #join/ links enroll an identity; they are not this bearer credential.",
     ""
   ].join("\n");
 }
@@ -98,9 +148,10 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     protocol: "mcp",
     transport: "streamable-http",
     oauth: false,
-    roomTools: "bearer-identity-secret-or-local-stdio",
+    roomTools: "bearer-identity-secret",
     authenticatedTools: HOSTED_ROOM_MCP_TOOLS,
-    authorization: "Omit Authorization for the four public join tools. POST with Authorization: Bearer <saved-identity-secret> adds the authenticated room tools. The secret is an identity secret, not a shareable login link.",
+    followUps: HOSTED_MCP_FOLLOW_UPS,
+    authorization: "Omit Authorization for the four public join tools. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile (stdio room tools plus hosted extras). Each room tool takes roomId. The secret is an identity secret, not a shareable login link.",
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,

@@ -51,10 +51,7 @@ export function buildReplyCommand(identity, name, args) {
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
   return command;
 }
-export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
-  const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
-    message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
+export function recordedReplyAction(name, args, command, receipt) {
   const requestMessageId = name === "room_request_reply" ? command.data.messageId
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
   return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,
@@ -62,6 +59,12 @@ export async function submitReplyAction(client, identity, name, args, { signal }
     appliedRequestRevision: name === "room_request_reply" ? 0 : name === "room_reply" ? null : args.expectedRequestRevision + 1,
     currentStateVerified: false, workStateChanged: false,
     next: requestMessageId ? { tool: "room_read_request", arguments: { requestMessageId } } : null };
+}
+export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
+  const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
+  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+    message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
+  return recordedReplyAction(name, args, command, receipt);
 }
 export function replyRefusal(cause) {
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found", "reply_context_unavailable",

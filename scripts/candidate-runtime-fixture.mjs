@@ -40,6 +40,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
+  paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
   paths.add('deploy/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by deploy/agent-discovery.mjs)

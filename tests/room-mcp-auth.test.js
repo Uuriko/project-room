@@ -50,6 +50,10 @@ test("unauthenticated hosted MCP stays the four join tools", async t => {
   const denied = await call(origin, "room_check_access", {});
   assert.equal(denied.status, 200);
   assert.equal(denied.body.error.code, -32602);
+  const board = await call(origin, "room_read_board", { roomId: "mcp-den" });
+  assert.equal(board.body.error.code, -32602);
+  const inbox = await call(origin, "room_read_inbox", { roomId: "mcp-den" });
+  assert.equal(inbox.body.error.code, -32602);
   const onShortPath = await fetch(`${origin}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -182,6 +186,67 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const get = await fetch(`${origin}/room/mcp`, { headers: { Authorization: `Bearer ${owner.secret}` } });
   const page = await get.text();
   assert.match(page, /four public join tools/);
+  assert.match(page, /room_read_board/);
+  assert.match(page, /room_read_inbox/);
+  assert.match(page, /Bearer <saved-identity-secret>/);
   assert.doesNotMatch(page, /hello from hosted MCP/);
   assert.equal(page.includes(owner.secret), false);
+
+  const board = await call(origin, "room_read_board", { roomId: created.roomId }, owner.secret);
+  assert.equal(board.status, 200);
+  assert.equal(board.body.error, undefined);
+  assert.equal(board.value.columns.proposed.some(card => card.id === "agenda"), true);
+  assert.equal(board.value.roomId, created.roomId);
+
+  const mentioned = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-mention", messageId: "msg-mention", body: "@MCP stranger what is on the board?"
+  }, owner.secret);
+  assert.equal(mentioned.value.status, "posted");
+  const strangerInbox = await call(origin, "room_read_inbox", { roomId: created.roomId }, stranger.secret);
+  assert.equal(strangerInbox.value.directMentions[0].replyToId, "msg-mention");
+  assert.equal(strangerInbox.value.directMentions[0].body, "@MCP stranger what is on the board?");
+  const messages = await call(origin, "room_read_messages", { roomId: created.roomId, after: 0, limit: 100 }, stranger.secret);
+  const asked = messages.value.messages.find(message => message.messageId === "msg-mention");
+  assert.equal(asked.body, "@MCP stranger what is on the board?");
+  assert.deepEqual(asked.mentions.map(mention => mention.memberId), [stranger.identityId]);
+
+  const answered = await call(origin, "room_reply", {
+    roomId: created.roomId, requestId: "reply-mention", replyToId: "msg-mention", body: "The agenda card is in proposed."
+  }, stranger.secret);
+  assert.equal(answered.value.status, "recorded");
+  assert.equal(answered.value.workStateChanged, false);
+  assert.equal(answered.body.result.isError, undefined);
+  const cleared = await call(origin, "room_read_inbox", { roomId: created.roomId }, stranger.secret);
+  assert.deepEqual(cleared.value.directMentions, []);
+
+  const drafted = await call(origin, "room_post_draft", {
+    roomId: created.roomId, requestId: "draft-agenda", workItemId: "agenda", packetId: "agenda-draft",
+    basisRevision: 0, body: "Hosted draft of the agenda"
+  }, owner.secret);
+  assert.equal(drafted.value.status, "draft_posted");
+  assert.equal(drafted.value.duplicate, false);
+  const draftAgain = await call(origin, "room_post_draft", {
+    roomId: created.roomId, requestId: "draft-agenda", workItemId: "agenda", packetId: "agenda-draft",
+    basisRevision: 0, body: "Hosted draft of the agenda"
+  }, owner.secret);
+  assert.equal(draftAgain.value.duplicate, true);
+  assert.equal(draftAgain.value.sequence, drafted.value.sequence);
+
+  const proposedWork = await call(origin, "room_propose_work", {
+    roomId: created.roomId, requestId: "propose-notes", workItemId: "notes",
+    title: "Write the notes", definitionOfDone: "Notes posted", accountableMemberId: created.ownerMemberId,
+    mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  }, owner.secret);
+  assert.equal(proposedWork.value.status, "recorded");
+  assert.equal(proposedWork.value.action, "room_propose_work");
+  assert.equal(proposedWork.value.next.arguments.roomId, created.roomId);
+  const boardAfter = await call(origin, "room_read_board", { roomId: created.roomId }, owner.secret);
+  assert.equal(boardAfter.value.columns.proposed.some(card => card.id === "notes"), true);
+
+  const hiddenBoard = await call(origin, "room_read_board", { roomId: created.roomId }, peer.secret);
+  assert.equal(hiddenBoard.body.result.isError, true);
+  assert.equal(JSON.stringify(hiddenBoard.body).includes("Hosted draft of the agenda"), false);
+  assert.equal(JSON.stringify(hiddenBoard.body).includes("@MCP stranger"), false);
+  const missingRoom = await call(origin, "room_read_inbox", {}, owner.secret);
+  assert.equal(missingRoom.body.error.code, -32602);
 });
