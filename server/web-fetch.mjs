@@ -341,13 +341,32 @@ export function pinnedLookup(addresses) {
 export async function pinnedRequest(href, addresses, { signal, headers }) {
   const url = new URL(href);
   const mod = url.protocol === "https:" ? await import("node:https") : await import("node:http");
-  const { Readable } = await import("node:stream");
+  const { Readable, pipeline } = await import("node:stream");
+  const { createGunzip, createInflate, createBrotliDecompress } = await import("node:zlib");
   return new Promise((resolve, reject) => {
     const req = mod.request(url, { method: "GET", headers, signal, agent: false, lookup: pinnedLookup(addresses) }, res => {
+      // Unlike fetch(), node:http exposes encoded bytes. Decode before
+      // readCapped so the same 2MB limit applies to expanded HTML. pipeline
+      // propagates cancellation/errors both ways, including the request timeout.
+      const encoding = String(res.headers["content-encoding"] || "identity").trim().toLowerCase();
+      const decoders = { gzip: createGunzip, deflate: createInflate, br: createBrotliDecompress };
+      let body = res;
+      // Redirect/error bodies are discarded by fetchPage, so do not reject
+      // their encodings before the existing status/redirect handling runs.
+      if (res.statusCode === 200 && encoding !== "identity") {
+        const createDecoder = Object.hasOwn(decoders, encoding) ? decoders[encoding] : null;
+        if (!createDecoder) {
+          res.destroy();
+          reject(new WebFetchError(415, "unsupported_content", "Unsupported response content encoding"));
+          return;
+        }
+        body = createDecoder();
+        pipeline(res, body, () => { /* body reader receives stream errors */ });
+      }
       resolve({
         status: res.statusCode,
         headers: { get: name => { const v = res.headers[String(name).toLowerCase()]; return Array.isArray(v) ? v.join(", ") : (v ?? null); } },
-        body: Readable.toWeb(res),
+        body: Readable.toWeb(body),
       });
     });
     req.on("error", reject);
@@ -404,6 +423,7 @@ export async function fetchPage(startUrl, options = {}) {
         ? await fetch(current, { redirect: "manual", signal, headers })
         : await pinnedRequest(current, target.addresses, { signal, headers });
     } catch (error) {
+      if (error instanceof WebFetchError) throw error;
       if (error?.name === "TimeoutError" || signal.aborted)
         fail(504, "timeout", "Fetching the page exceeded the 15 second limit");
       fail(502, "fetch_failed", "Could not fetch the page");
