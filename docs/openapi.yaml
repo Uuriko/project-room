@@ -6981,7 +6981,8 @@ paths:
         skips the manage_members gate). The room owner cannot self-deactivate
         (403 owner_cannot_deactivate — transfer ownership first). The identity
         link is kept: identity is not deleted, only the membership becomes
-        inactive. 409 already_inactive when the membership is already inactive.
+        inactive. After deactivation the credential no longer authenticates:
+        a second DELETE with the same credential is 401, not 409.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
@@ -6991,8 +6992,8 @@ paths:
           description: The caller's own member id.
       responses:
         '200': { description: "{ roomId, memberId, active:false, sequence }" }
+        '401': { description: "Credential no longer authenticates (already deactivated)" }
         '403': { description: "access_denied when naming another member; owner_cannot_deactivate for the owner" }
-        '409': { description: already_inactive }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads

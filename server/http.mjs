@@ -3097,6 +3097,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // membership becomes inactive.
         if (deactivateMemberId !== auth.member.id) reject(403, "access_denied", "You can only deactivate your own membership");
         const member = auth.member;
+        // Note: a second DELETE never reaches here — after deactivation the
+        // credential no longer authenticates (401). The active check below
+        // is defensive only.
         if (member.active === false) reject(409, "already_inactive", "Membership is already inactive");
         if (store.roomAuthority(roomId).ownerId === member.id)
           reject(403, "owner_cannot_deactivate", "The room owner cannot deactivate its own membership; transfer ownership first");
