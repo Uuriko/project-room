@@ -138,10 +138,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   magicLinkMailer = null,
   githubAuth = null,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
+  if (deployment !== undefined && deployment !== "production" && deployment !== "staging") throw new Error("deployment must be production or staging");
+  const deploymentField = deployment ? { deployment } : {};
   // Google sign-in is off unless the caller passes googleConfig(env, origin).
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
@@ -617,10 +619,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       url.pathname = rewriteRoomApiPrefix(inboundPath);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
+        return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, req.method === "HEAD");
+        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
       }
       // Google sign-in (Clerk-free). The start route begins the PKCE flow bound
       // to the browser's account session slot; the callback verifies state and
@@ -3041,7 +3043,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(403, "owner_required", "Only the room owner can export diagnostics");
         }
         const bundle = supportExportBundle({ roomId, roomTitle: store.room(roomId).state.room.title,
-          service: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, mode: serviceMode },
+          service: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, mode: serviceMode, ...deploymentField },
           diagnostics: diagnostics.list(roomId) });
         res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
         return json(res, 200, bundle);
