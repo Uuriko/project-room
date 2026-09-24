@@ -109,7 +109,7 @@ test("bare `lease: 6h` is unregistered with the exact enforcer error", () => {
   const idx = run(fixture);
   const u = idx.unregistered.find((x) => x.comment_id === 1003);
   assert.ok(u, "unregistered entry present");
-  assert.ok(u.errors.includes("lease must be lease=<N>h"), `errors: ${u.errors}`);
+  assert.ok(u.errors.some(error => error.includes("did you mean lease=6h?")), `errors: ${u.errors}`);
   assert.ok(!idx.claims.some((x) => x.task_id === "RC-2026-09-23-102"));
 });
 
