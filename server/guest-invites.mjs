@@ -134,31 +134,6 @@ export function guestInviteContract() {
 const newInviteCode = () => GUEST_INVITE_CODE_PREFIX + randomBytes(24).toString("base64url");
 const newGuestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 
-// Card-admission pass duration: requestedPass may be a whole number of
-// milliseconds or { ttlMs }. Defaults to the 3-day guest credential TTL;
-// anything outside 1 hour .. 14 days (or any other shape) is rejected
-// with 422.
-function resolveCardCredentialTtl(requestedPass) {
-  if (requestedPass == null) return GUEST_CREDENTIAL_TTL_DEFAULT_MS;
-  const raw = typeof requestedPass === "number" ? requestedPass
-    : (requestedPass !== null && typeof requestedPass === "object" ? requestedPass.ttlMs : Number.NaN);
-  if (raw == null) return GUEST_CREDENTIAL_TTL_DEFAULT_MS;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < GUEST_CREDENTIAL_TTL_MIN_MS || n > GUEST_CREDENTIAL_TTL_MAX_MS) {
-    fail(422, "invalid_pass_duration", "requestedPass must be a whole number of milliseconds from 1 hour to 14 days");
-  }
-  return n;
-}
-
-function assertDisplayNameOverride(displayName) {
-  if (displayName == null) return null;
-  if (typeof displayName !== "string" || !displayName.trim()
-    || displayName.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(displayName)) {
-    fail(422, "card_invalid", "displayName must be a short display name (1-80 chars, no control characters)");
-  }
-  return displayName.trim();
-}
-
 function assertCardShape(card) {
   if (!card || Array.isArray(card) || typeof card !== "object") fail(422, "card_invalid", "Supply a signed agent card");
   const { name, description, capabilities, publicKey, signature, url, skills, version } = card;
@@ -527,157 +502,6 @@ export class GuestInvites {
     });
   }
 
-  // Signed-card onboarding: an outside agent presents its signed directory
-  // card (agentId + publicKey + signature) as its identity, and the room
-  // mints a guest pass without a prior owner-issued GX invite code.
-  //
-  // Admission is tied to the owner's public-directory opt-in for the room:
-  // a room id alone never becomes a self-serve door into a private room.
-  // The admission is recorded as a synthetic redeemed invite row sponsored
-  // by the room owner, so the owner's guest list and the journal always
-  // show who vouched even though no human clicked anything at redemption
-  // time.
-  //
-  // Replay semantics: a card whose agentId already holds a live pass is
-  // refused with 409 card_already_redeemed instead of minting a second
-  // pass. Re-presenting the card after expiry (or after an owner
-  // disconnect) reissues a fresh pass on the same deterministic seat —
-  // never a duplicate member — and the journal records the reactivation.
-  // Card passes start at the observer tier (read + chat); upgrading to
-  // contributor stays an explicit owner action through setTier.
-  redeemCard(cardInput, roomId, { requestedPass = null, displayName = null } = {}) {
-    if (!validId(roomId)) fail(404, "room_not_found", "No such room");
-    // Verify the signature against the exact card bytes the guest signed —
-    // same ordering as redeem(): the raw input is verified before
-    // normalization. The agentId is read from the raw envelope (the
-    // normalized card drops it) and is bound into the signed bytes, so a
-    // card can never be replayed under another identity.
-    const rawPublicKey = cardInput?.publicKey, rawSignature = cardInput?.signature;
-    const agentId = cardInput?.agentId;
-    if (!validId(agentId)) fail(422, "card_invalid", "The signed card must carry a valid agentId");
-    const { card } = assertCardShape(cardInput);
-    const verified = typeof rawPublicKey === "string" && typeof rawSignature === "string"
-      && verifyCardSignature({ agentId, card: cardInput, publicKey: rawPublicKey, signature: rawSignature });
-    if (!verified) fail(422, "card_invalid", "The agent card signature does not verify for this card's agentId");
-    const credentialTtlMs = resolveCardCredentialTtl(requestedPass);
-    return this.store.transaction(() => {
-      let room = this.store.room(roomId);
-      if (!room) fail(404, "room_not_found", "No such room");
-      refuseArchivedWrite(room.state);
-      const ownerMemberId = room.state?.room?.ownerId;
-      if (!validId(ownerMemberId)) fail(500, "room_owner_missing", "Room owner could not be resolved");
-      const listed = this.db.prepare("SELECT discoverable FROM room_directory_settings WHERE room_id=?").get(roomId);
-      if (!listed || listed.discoverable !== 1) fail(404, "room_not_found", "No such room");
-      // Sweep expired guest seats before any capacity decision, same as
-      // redeem(): an expired membership must not consume the guest cap.
-      room = this.sweepExpiredGuests(roomId, room, ownerMemberId);
-      const now = this.store.now();
-      // One seat per agentId per room: a live pass is a conflict, not a
-      // second pass.
-      const seat = this.seatOf(roomId, agentId);
-      const existingMember = seat && room.state.members[seat.member_id];
-      if (existingMember && existingMember.active !== false && isGuestAgentMemberId(existingMember.id)) {
-        const liveCred = this.db.prepare(
-          "SELECT 1 FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0 AND expires_at > ? LIMIT 1")
-          .get(roomId, existingMember.id, now);
-        if (liveCred) {
-          fail(409, "card_already_redeemed",
-            "This agent card already holds a live guest pass in this room; present it again after the pass expires or the owner disconnects it");
-        }
-      }
-      let memberId;
-      let duplicate = false;
-      // Random entropy per admission: a disconnect followed by an
-      // immediate re-redemption can otherwise share the same
-      // (roomId, agentId, ms) hash input.
-      const admissionEntropy = randomBytes(8).toString("hex");
-      if (existingMember && existingMember.active !== false && isGuestAgentMemberId(existingMember.id)) {
-        // Active seat but no live credential (the sweep should have caught
-        // it; stay consistent rather than minting a second seat).
-        memberId = existingMember.id;
-        duplicate = true;
-      } else if (existingMember && existingMember.kind === "agent" && isGuestAgentMemberId(existingMember.id)) {
-        // The same agentId's seat was deactivated (owner disconnect or
-        // expiry). Reactivate it identity-bound; the tier stays owner-set
-        // and is never escalated by redemption.
-        memberId = existingMember.id;
-        duplicate = true;
-      } else {
-        const name = this.checkedGuestName(room.state, assertDisplayNameOverride(displayName) ?? card.name);
-        if (this.activeGuestCount(roomId) >= GUEST_INVITE_MAX_ACTIVE_PER_ROOM) {
-          fail(429, "rate_limited", "This room is at its concurrent external-guest limit; ask the owner to disconnect a guest");
-        }
-        const guestSeats = Object.values(room.state.members).filter(m => isGuestAgentMemberId(m.id)).length;
-        if (guestSeats >= GUEST_AGENT_MAX_JOINS) {
-          fail(429, "rate_limited", "This room is at its absolute external-guest seat limit; ask the owner to disconnect a guest");
-        }
-        memberId = guestAgentMemberId(agentId, roomId);
-        if (room.state.members[memberId]) fail(409, "seat_taken", "This agent already holds a guest seat in this room");
-        const eventId = `guest-card-${hash(`${roomId}:${agentId}:${now}:${admissionEntropy}`).slice(0, 40)}`;
-        const incoming = event({
-          id: eventId, idempotencyKey: eventId, roomId, actorId: ownerMemberId,
-          type: T.MEMBER_ADDED, at: new Date(now).toISOString(),
-          data: {
-            memberId,
-            displayName: `${name}${GUEST_BADGE_SUFFIX}`,
-            kind: "agent",
-            permissions: [],
-            identityId: agentId,
-            accountableHumanId: ownerMemberId,
-            authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-          },
-        });
-        let state;
-        try {
-          state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-        } catch (error) { fail(422, "command_rejected", error.message); }
-        const projection = JSON.stringify(state), sequence = room.sequence + 1;
-        if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room storage limit reached");
-        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
-        this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
-        room = { sequence, state };
-      }
-      // The synthetic admission row: guest_members.invite_id is FK-bound,
-      // so a card admission gets a redeemed owner-sponsored row. Owners
-      // see it in their invite list; disconnect / revoke-all / upgrade
-      // keep working because the seat carries a guest_members row.
-      const admissionId = `gcard-${hash(`${roomId}:${agentId}:${now}:${admissionEntropy}`).slice(0, 40)}`;
-      this.db.prepare(`INSERT INTO guest_invites(id, code_hash, room_id, tier, credential_ttl_ms, guest_label,
-          minted_by_member_id, minted_by_account_id, issue_request_id, created_at, redeem_by, status,
-          redeemed_at, redeemed_by_identity_id, redeemed_member_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(admissionId, hash(`card-admission:${roomId}:${agentId}:${now}:${admissionEntropy}`), roomId, "observer", credentialTtlMs,
-          card.name, ownerMemberId, null, `card-admission:${agentId}:${now}:${admissionEntropy}`, now, now + 1,
-          "redeemed", now, agentId, memberId);
-      if (duplicate) {
-        room = this.reactivateGuestSeat(roomId, room, ownerMemberId, admissionId, existingMember);
-      } else {
-        this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
-          .run(memberId, roomId, agentId, "observer", admissionId, now);
-      }
-      const token = newGuestToken();
-      this.store.guestAgentLinks.conflict(hash(token));
-      const expiresAt = this.store.now() + credentialTtlMs;
-      this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
-        .run(hash(token), roomId, memberId, expiresAt);
-      const member = this.store.room(roomId).state.members[memberId];
-      const tier = seat?.tier ?? "observer";
-      const scopes = [...(GUEST_INVITE_TIERS[tier] ?? GUEST_INVITE_TIERS.observer)];
-      return {
-        token,
-        member: { id: member.id, kind: member.kind, permissions: [...member.permissions], displayName: member.displayName, expiresAt },
-        room: { id: roomId },
-        tier,
-        scopes,
-        expiresAt,
-        admission: "signed_card",
-        hashPath: GUEST_INVITE_HASH_PATH,
-        account: false,
-        duplicate,
-      };
-    });
-  }
-
   checkedGuestName(state, name) {
     if (name.toLowerCase().endsWith(GUEST_BADGE_SUFFIX.trim().toLowerCase())) {
       fail(422, "card_invalid", "Guest names may not carry the (guest) badge themselves");
@@ -709,10 +533,6 @@ export class GuestInvites {
           void code_hash; void minted_by_account_id;
           return {
             inviteId: row.id,
-            // Card admissions ride the same guest_invites table as a
-            // synthetic redeemed row; the kind tells the owner which
-            // handoff the guest came through.
-            kind: row.issue_request_id?.startsWith("card-admission:") ? "card" : "invite",
             tier: row.tier,
             credentialTtlMs: row.credential_ttl_ms,
             guestLabel: row.guest_label,

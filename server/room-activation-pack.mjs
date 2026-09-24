@@ -9,7 +9,9 @@
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
-import { pinnedMessages, roomKind, roomPolicy, WORK_STATES } from "../src/events.js";
+import { workProgress } from "../src/work-packet.js";
+import { pinnedMessages, roomKind, roomPolicy } from "../src/events.js";
+import { terminalWork, nextWorkStep } from "../src/workflow.js";
 
 /**
  * Activation pack schema (returned by buildActivationPack).
@@ -35,11 +37,11 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES } from "../src/events
  *       permissions: string[]  // granted permission tokens
  *     }
  *   ],
- *   openWork: [                // work items not completed/superseded, oldest first
+ *   openWork: [                // nonterminal work, including pending review, oldest first
  *     {
  *       id: string,
  *       title: string,
- *       state: "proposed"|"accepted"|"working"|"blocked",
+ *       state: "proposed"|"accepted"|"working"|"blocked"|"completed",
  *       claimant: string|null, // member id holding the write claim, else null
  *       claimStatus: "active"|"released"|"expired"|null,
  *       deliveryMode: "read"|"write",
@@ -73,11 +75,8 @@ import { pinnedMessages, roomKind, roomPolicy, WORK_STATES } from "../src/events
  * }
  */
 
-// Work states that count as open; completed and superseded work is history,
-// not something an arriving agent should pick up.
-const OPEN_WORK_STATES = new Set([
-  WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED
-]);
+// A submitted result with an outstanding review/decision is still open work.
+// Use the same exact-result terminality as the browser rather than state alone.
 
 // Coordination norms: the room's standing defaults. Frozen so callers cannot
 // mutate the shared reference; buildActivationPack copies them per pack.
@@ -112,6 +111,11 @@ const workOf = (item, nowIso) => ({
   id: item.id,
   title: item.title,
   state: item.state,
+  accountableMemberId: item.accountableMemberId,
+  definitionOfDone: item.definitionOfDone,
+  progress: workProgress(item, Date.parse(nowIso)),
+  next: nextWorkStep(item, Date.parse(nowIso)),
+  readContext: { tool: "room_read_work", arguments: { workItemId: item.id, includeDiscussion: true, includeSource: true } },
   claimant: item.claim?.holderId ?? null,
   claimStatus: claimStatusOf(item.claim, nowIso),
   deliveryMode: item.mode,
@@ -139,7 +143,7 @@ export function buildActivationPack(store, roomSlug) {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map(memberOf);
   const openWork = Object.values(state.workItems ?? {})
-    .filter(item => item && OPEN_WORK_STATES.has(item.state))
+    .filter(item => item && !terminalWork(item))
     .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
     .map(item => workOf(item, now));
   return {

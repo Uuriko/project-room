@@ -10,9 +10,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { validateSessionBudget, budgetCard, budgetLimitExceeded } from "../src/work-item-session.js";
 
-async function serve(t) {
+async function serve(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-session-budget-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  const store = new RoomStore(join(directory, "room.sqlite"), options);
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
@@ -74,10 +74,12 @@ test("a claimed budget is visible on the card; undeclared quotas read 'unknown'"
 });
 
 test("a runaway session is stopped by its runtime limit on the next interaction", async t => {
-  const { propose, claim, mutate, card, request, agentKey } = await serve(t);
+  let now = Date.now();
+  const { propose, claim, mutate, card, request, agentKey } = await serve(t, { now: () => now });
   const workItemId = propose("runaway run");
   assert.equal((await claim(workItemId, { budget: { maxRuntimeMs: 1 } })).status, 201);
-  // The 1ms budget has elapsed by the time the worker heartbeats again.
+  // Advance the store clock explicitly; a local round trip can take under 1ms.
+  now += 2;
   const beat = await mutate(workItemId, 1, { status: "active" });
   assert.equal(beat.status, 409);
   assert.equal(beat.json?.error?.code, "budget_exceeded");

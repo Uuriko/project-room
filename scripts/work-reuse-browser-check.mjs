@@ -50,7 +50,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
     await card.locator("[data-reuse-work]").click();
     await form.waitFor({ state: "visible" });
   };
-  const people = async () => { await page.locator("#assignee-select").selectOption("producer"); await page.locator("#verifier-select").selectOption("reviewer"); };
+  const people = async () => { await page.locator("#assignee-select").selectOption("producer"); await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator("#verifier-select").selectOption("reviewer"); };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/reuse-${name}.png`, fullPage: true }); };
   return { ...f, page, errors, login, snapshot, send: sendWithEvidence, form, title, done, open, people, capture };
 }
@@ -75,7 +75,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     assert.equal(await f.title.evaluate(node => document.activeElement === node), true);
     assert.equal(await page.locator("#assignee-select").inputValue(), ""); assert.equal(await page.locator("#verifier-select").inputValue(), "");
     assert.equal(await page.locator("#work-mode-select").inputValue(), "read");
-    assert.equal(await page.locator("#require-verification").isChecked(), true); assert.equal(await page.locator("#require-decision").isChecked(), true);
+    assert.equal(await page.locator("#require-verification").isChecked(), false); assert.equal(await page.locator("#require-decision").isChecked(), false);
     assert.equal(await page.locator("#work-options").evaluate(node => node.open), false);
     assert.equal(await page.locator("#source-message-id").inputValue(), "");
     assert.equal(await page.locator("#source-context").isVisible(), false);
@@ -216,7 +216,7 @@ test("uncommitted original retry rejection unlocks correction without creating a
   await page.locator("#retry-work-button").click(); await f.form.locator('button[type="submit"]').waitFor({ state: "visible" });
   assert.equal(await f.title.isDisabled(), false);
   assert.equal(await page.locator("#verifier-select").evaluate(node => node.checkValidity()), false);
-  await page.locator("#verifier-select").selectOption("owner"); await f.title.fill("Corrected after original refusal");
+  await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator("#verifier-select").selectOption("owner"); await f.title.fill("Corrected after original refusal");
   await f.form.locator('button[type="submit"]').click(); await f.form.waitFor({ state: "hidden" });
   assert.deepEqual(attempts[0], attempts[1]); assert.notEqual(attempts[1].id, attempts[2].id);
   assert.equal(attempts[0].data.workItemId, attempts[2].data.workItemId);
@@ -238,7 +238,7 @@ test("reuse keyboard cycle and CR line endings stay usable without changing the 
   assert.equal(await f.form.locator('button[type="submit"]').evaluate(node => document.activeElement === node), true);
   await page.keyboard.press("Tab");
   assert.equal(await f.title.evaluate(node => document.activeElement === node), true);
-  for (const id of ["work-done-input", "assignee-select", "verifier-select"]) {
+  for (const id of ["work-done-input", "assignee-select"]) {
     await page.keyboard.press("Tab"); assert.equal(await page.evaluate(() => document.activeElement.id), id);
   }
   await page.keyboard.press("Tab"); assert.equal(await page.locator("#work-options > summary").evaluate(node => document.activeElement === node), true);

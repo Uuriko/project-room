@@ -63,7 +63,7 @@ test("clearBrowserSessionHints removes last-room, account hint, auth-kind, and g
 test("session hint copy never names a secret and explains cookie vs localStorage", () => {
   assert.match(SESSION_HINT_COPY, /HttpOnly session cookie/);
   assert.match(SESSION_HINT_COPY, /not localStorage/);
-  assert.match(SESSION_HINT_COPY, /8 hours/);
+  assert.match(SESSION_HINT_COPY, /Room-key sessions and account sessions each stay signed in for up to 8 hours/);
   assert.match(SESSION_HINT_COPY, /Sign out/);
   assert.doesNotMatch(SESSION_HINT_COPY, /pri_|ga1\.|ROOM_AGENT_TOKEN|sk-/);
 });

@@ -92,3 +92,27 @@ test("prose-terminal DONE resolves the task-id from the marker line, not the who
   assert.equal(byId[102].ref, "RC-2026-09-19-071");
   assert.equal(byId[102].via, "prose-terminal");
 });
+
+test("[lane][receipt] with an RC-style task-id keeps the full id (no truncation)", () => {
+  // Regression: first_task ("[A-Z]+[0-9]*-[0-9]+") truncated
+  // RC-2026-09-23-103 to "RC-2026", so prose receipts never matched
+  // their task. The parser must prefer the full RC id.
+  const fixture = JSON.stringify([
+    {
+      id: 201, created_at: "2026-09-24T00:59:41Z",
+      body: "[jill][receipt] RC-2026-09-23-103 — guest bearer-Origin defect repaired.\n\n- PR: #801\n- Merge SHA: 4c75f034f320e533f3c814808a4c5b7e866e3357"
+    },
+    {
+      id: 202, created_at: "2026-09-24T01:00:00Z",
+      body: "[jill][receipt] A012-2 still works — old-style ids fall back to first_task.\n\n- PR: #392\n- Merge SHA: 681f7359e22caaf4c94c4be9a8b2561546cebcb0"
+    }
+  ]);
+  const events = run(["_parse"], fixture);
+  const byId = Object.fromEntries(events.map(e => [e.id, e]));
+  assert.equal(byId[201].kind, "receipt");
+  assert.equal(byId[201].task, "RC-2026-09-23-103");
+  assert.equal(byId[201].ref, "RC-2026-09-23-103");
+  assert.equal(byId[201].pr, "801");
+  assert.equal(byId[202].kind, "receipt");
+  assert.equal(byId[202].task, "A012-2");
+});
