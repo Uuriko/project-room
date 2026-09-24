@@ -116,6 +116,58 @@ test("multi-word display names can be @mentioned: the whole name resolves, the l
   assert.deepEqual(resolveMentionTargetsInText({ ...members, helper: { displayName: "h1" } }, { helper: "Helper Bot" }, "@helper bot hi", "me"), ["helper"]);
 });
 
+test("a private mention keeps its audience, and only the answered mention is resolved", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  f.store.dmConsents.request("commons", "owner", "mention-agent", "test");
+  f.store.dmConsents.decide("commons", "mention-agent", "owner", "approve");
+  say(f, f.keys.owner, { messageId: "public-ask", body: "@Scout what is public?" });
+  say(f, f.keys.owner, { messageId: "private-ask", body: "@Scout what is private?", toMemberId: "mention-agent" });
+
+  const inbox = f.store.agentInbox(token, "commons");
+  const privateMention = inbox.directMentions.find(mention => mention.messageId === "private-ask");
+  assert.equal(privateMention.toMemberId, "mention-agent");
+  assert.equal(inbox.next[0].action, "reply-mention");
+  assert.match(inbox.next[0].description, /toMemberId: "mention-agent"/);
+  assert.match(inbox.next[0].description, /original private audience/);
+
+  say(f, token, { messageId: "online", body: "I am online" });
+  assert.deepEqual(f.store.agentInbox(token, "commons").directMentions.map(mention => mention.messageId).sort(), ["private-ask", "public-ask"]);
+
+  say(f, token, { messageId: "private-answer", body: "Only you should see this.", replyToId: "private-ask", toMemberId: "mention-agent" });
+  const afterPrivate = f.store.agentInbox(token, "commons");
+  assert.deepEqual(afterPrivate.directMentions.map(mention => mention.messageId), ["public-ask"]);
+  const guest = f.store.eventsAfter(f.keys.guest, "commons", 0);
+  assert.equal(JSON.stringify(guest).includes("Only you should see this."), false);
+  assert.equal(JSON.stringify(guest).includes("what is private?"), false);
+  assert.equal(JSON.stringify(guest).includes("what is public?"), true);
+
+  f.store.db.prepare("UPDATE mention_states SET state='timed_out' WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')").run("commons", "mention-agent");
+  const timedOut = f.store.agentInbox(token, "commons");
+  assert.deepEqual(timedOut.directMentions.map(mention => [mention.messageId, mention.state]), [["public-ask", "timed_out"]]);
+  say(f, token, { messageId: "public-answer", body: "The public answer.", replyToId: "public-ask" });
+  assert.deepEqual(f.store.agentInbox(token, "commons").directMentions, []);
+});
+
+test("MCP inbox guidance for a private mention keeps the audience from a third-party reader", { timeout: 20000 }, async t => {
+  const { f, token } = enrolledAgent(t);
+  f.store.dmConsents.request("commons", "owner", "mention-agent", "test");
+  f.store.dmConsents.decide("commons", "mention-agent", "owner", "approve");
+  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const directory = join(f.directory, "mcp"); saveAgentConnection(directory, { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "mention-agent", token });
+  let mcp;
+  t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  say(f, f.keys.owner, { messageId: "private-ask", body: "@Scout the private figure is 41", toMemberId: "mention-agent" });
+  mcp = await openMcpTestClient(directory);
+  const inbox = (await mcp.call("room_read_inbox", {})).result.structuredContent;
+  assert.equal(inbox.directMentions[0].toMemberId, "mention-agent");
+  assert.match(inbox.next[0].description, /toMemberId: "mention-agent"/);
+  say(f, token, { messageId: "private-answer", body: "41 stays private.", replyToId: "private-ask", toMemberId: inbox.directMentions[0].toMemberId });
+  const guest = f.store.eventsAfter(f.keys.guest, "commons", 0);
+  assert.equal(JSON.stringify(guest).includes("41 stays private."), false);
+  assert.equal(JSON.stringify(guest).includes("private figure is 41"), false);
+});
+
 test("a message naming a multi-word agent lands in that agent's inbox", t => {
   const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });

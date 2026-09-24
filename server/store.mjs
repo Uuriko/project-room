@@ -454,7 +454,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
       action: "reply-mention",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. Any post by you marks your pending mentions responded; reply under the message so the asker sees the answer in context. Send your identity secret as the Bearer token.`,
+      description: `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}"${latest.toMemberId ? `, toMemberId: "${latest.toMemberId}"` : ""} } }. ${latest.toMemberId ? "Include toMemberId so the answer stays in the original private audience." : "This mention was public, so the reply is public."} Only a reply to this message marks it responded. Send your identity secret as the Bearer token.`,
     }));
   }
   if (directMessages.length > 0) {
@@ -2925,6 +2925,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         eventId: row.eventId,
         messageId: event.data.messageId ?? null,
         replyToId: event.data.messageId ?? row.eventId,
+        toMemberId: event.data.toMemberId ?? null,
         from: event.actorId,
         body: event.data.body,
         at: event.at,
@@ -3126,18 +3127,32 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // #658: mention lifecycle tracking. Called inside command()'s transaction
   // for every message.posted. Two jobs:
-  //   1. A post by a mentioned member marks their pending (delivered or
-  //      acknowledged) mentions in this room responded — a reply is
-  //      stronger than a read, so it skips acknowledged.
+  //   1. A reply to one mention marks that mention responded, including a
+  //      timed-out row. An unrelated post leaves the other mentions waiting.
   //   2. @names in the body resolve to room members (never the sender);
   //      each resolved member gets one delivered row for this message event.
   // Unresolved names get no row — never invent a recipient.
   trackMentions(roomId, state, senderMemberId, data, eventId) {
     const nowMs = this.now();
-    this.db.prepare(
-      `UPDATE mention_states SET state='responded', decided_at=?
-       WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
-    ).run(nowMs, roomId, senderMemberId);
+    const replyToId = typeof data.replyToId === "string" ? data.replyToId : "";
+    if (replyToId) {
+      const pending = this.db.prepare(
+        `SELECT m.message_event_id AS eventId, e.body
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')`
+      ).all(roomId, senderMemberId);
+      const resolve = this.db.prepare(
+        `UPDATE mention_states SET state='responded', decided_at=?
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged','timed_out')`
+      );
+      for (const row of pending) {
+        let event = null;
+        try { event = JSON.parse(row.body); } catch { event = null; }
+        if (event?.data?.messageId === replyToId || row.eventId === replyToId) {
+          resolve.run(nowMs, roomId, row.eventId, senderMemberId);
+        }
+      }
+    }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return;
     const members = state?.members ?? {};
