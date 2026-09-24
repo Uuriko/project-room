@@ -71,7 +71,10 @@ export const EVENT_TYPES = Object.freeze({
   BOND_PROPOSED: "bond.proposed",
   BOND_ACTIVATED: "bond.activated",
   BOND_REVOKED: "bond.revoked",
-  DM_POSTED: "dm.posted"
+  DM_POSTED: "dm.posted",
+  // Land queue receipt. The land_queue table is the source of truth; this
+  // event is the thin wake record (pr, head, state, what changed).
+  LAND_UPDATED: "land.updated"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -414,7 +417,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.BOND_PROPOSED]: recordBond,
     [EVENT_TYPES.BOND_ACTIVATED]: recordBond,
     [EVENT_TYPES.BOND_REVOKED]: recordBond,
-    [EVENT_TYPES.DM_POSTED]: recordPeerDm
+    [EVENT_TYPES.DM_POSTED]: recordPeerDm,
+    [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -463,7 +467,16 @@ function validateEnvelope(incoming) {
     if (key === "segments" && (!Array.isArray(value) || value.length === 0 || value.length > 20
       || value.some(segment => !segment || typeof segment !== "object" || Array.isArray(segment)
         || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes"].includes(key)) throw new Error(`Invalid ${key}`);
+    // land.updated carries a thin wake payload: state is the check/behind
+    // rollup and changed is which of green, red, behind, merged, or tip flipped.
+    if (key === "changed" && (!Array.isArray(value) || value.length < 1 || value.length > 5
+      || value.some(change => typeof change !== "string" || !["green", "red", "behind", "merged", "tip"].includes(change)))) throw new Error(`Invalid ${key}`);
+    if (key === "state" && (!value || typeof value !== "object" || Array.isArray(value)
+      || !["pending", "green", "red"].includes(value.checks)
+      || typeof value.behind !== "boolean"
+      || !["mergeable", "behind", "conflict", "unknown", "merged"].includes(value.mergeable)
+      || typeof value.merged !== "boolean")) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1243,6 +1256,28 @@ function recordPeerDm(state, incoming) {
   requireFields(incoming.data, ["messageId", "threadId", "bondId", "body", "fromIdentityId", "toIdentityId"]);
   if (incoming.data.fromIdentityId === incoming.data.toIdentityId) throw new Error("Cannot DM yourself");
   // Receipt only. Peer DM bodies stay out of room chat (state.messages).
+}
+
+// Land-queue wake receipt. The land_queue table is the source of truth, so
+// this records nothing on the projection. It validates the thin payload the
+// claimant is woken with: pr, head, state, and what changed.
+function recordLandUpdate(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  if (typeof data.itemId !== "string" || !validId(data.itemId)) throw new Error("Event data missing itemId");
+  if (typeof data.repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(data.repo)) throw new Error("Event data missing repo");
+  if (!Number.isSafeInteger(data.pr) || data.pr < 1) throw new Error("Event data missing pr");
+  if (!(data.head === null || (typeof data.head === "string" && /^[0-9a-f]{40}$/.test(data.head)))) throw new Error("Event data missing head");
+  const stateFields = data.state;
+  if (!stateFields || typeof stateFields !== "object") throw new Error("Event data missing state");
+  if (!["pending", "green", "red"].includes(stateFields.checks)) throw new Error("Event data missing state");
+  if (typeof stateFields.behind !== "boolean") throw new Error("Event data missing state");
+  if (!["mergeable", "behind", "conflict", "unknown", "merged"].includes(stateFields.mergeable)) throw new Error("Event data missing state");
+  if (typeof stateFields.merged !== "boolean") throw new Error("Event data missing state");
+  if (!Array.isArray(data.changed) || data.changed.length === 0
+    || data.changed.some(change => !["green", "red", "behind", "merged", "tip"].includes(change))) {
+    throw new Error("Event data missing changed");
+  }
 }
 
 function recordReferral(state, incoming) {

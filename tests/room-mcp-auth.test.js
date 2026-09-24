@@ -101,6 +101,9 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const names = (await listed.json()).result.tools.map(tool => tool.name);
   assert.deepEqual(names.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
   assert.deepEqual(names.slice(HOSTED_ROOM_MCP_TOOLS.length), JOIN_TOOLS);
+  for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
+    assert.equal(names.includes(name), true, name);
+  }
 
   const access = await call(origin, "room_check_access", { roomId: created.roomId }, owner.secret);
   assert.equal(access.status, 200);
@@ -408,6 +411,7 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /room_put_file, room_list_files, room_get_file, and room_discard_file/);
   assert.match(page, /room_commit_file commits/);
   assert.doesNotMatch(page, /committing a staged room file onto a message/);
+  assert.match(page, /add_land_item, list_land_queue, remove_land_item, and report_tip/);
   assert.match(page, /inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment/);
   assert.match(page, /inbox attachment bytes/);
   assert.doesNotMatch(page, /account-session descriptors only; bytes are not retained/);

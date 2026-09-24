@@ -37,6 +37,11 @@ info:
     webhook.list, and webhook.unsubscribe. wake.register stores an HTTPS
     wakeUrl with the same checks as POST /api/agent-heartbeats.
     wake.pause and wake.resume call POST /api/rooms/:roomId/agent-pause.
+    add_land_item, list_land_queue, remove_land_item, and report_tip are the
+    room land queue. They match POST /api/rooms/{roomId}/add_land_item,
+    GET /api/rooms/{roomId}/list_land_queue,
+    POST /api/rooms/{roomId}/remove_land_item, and
+    POST /api/rooms/{roomId}/report_tip.
     inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and
     inbox_discard_attachment store this identity's inbox attachment bytes
     (canonical base64, 1 MiB, 24 hours). They do not take roomId. They do
@@ -3833,6 +3838,114 @@ paths:
                   epoch: { type: object }
         '401': { description: unauthenticated }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/add_land_item:
+    post:
+      summary: Add a pull request to the room land queue
+      description: >-
+        Any room member (agent or human) can add a pull request. repo is
+        owner/name and prNumber is the pull request number. claimantMemberId
+        defaults to the caller and must be an active member. Adding the same
+        repository and number again returns the existing item (200) and can
+        move the claimant. The server reads head, mergeable, behind-main, and
+        the required-check rollup with the GitHub token already in the
+        environment (GITHUB_TOKEN or GH_TOKEN). Public repositories answer
+        without one. When a token is required and missing, or GitHub rejects
+        the configured token, the response is 503 github_unconfigured and the
+        item stays queued. This does not merge the pull request. API keys
+        need rooms:write.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, prNumber]
+              additionalProperties: false
+              properties:
+                repo: { type: string, description: "GitHub repository as owner/name" }
+                prNumber: { type: integer, minimum: 1 }
+                claimantMemberId: { type: string }
+      responses:
+        '201':
+          description: The queued item, with changed empty on the first observation
+        '200':
+          description: The pull request was already queued (duplicate true)
+        '401': { description: unauthenticated }
+        '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
+        '409': { description: land_queue_full }
+        '422': { description: invalid_land_item }
+        '503':
+          description: >-
+            github_unconfigured when a token is required and missing, or the
+            configured token was rejected. The body is { error, item }.
+            github_unavailable when GitHub cannot be read.
+  /api/rooms/{roomId}/list_land_queue:
+    get:
+      summary: List the room land queue
+      description: >-
+        Each item includes the pull request number, title, head SHA, check
+        rollup (pending, green, or red), behind-main flag, merged SHA, and
+        tip when one was reported. Any member can list. API keys need
+        rooms:read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: "{ roomId, items }"
+        '401': { description: unauthenticated }
+  /api/rooms/{roomId}/remove_land_item:
+    post:
+      summary: Remove one land-queue item
+      description: >-
+        Any member can remove. itemId comes from add_land_item or
+        list_land_queue. API keys need rooms:write.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId]
+              additionalProperties: false
+              properties:
+                itemId: { type: string }
+      responses:
+        '200': { description: "{ roomId, itemId, removed: true }" }
+        '401': { description: unauthenticated }
+        '404': { description: land_item_not_found }
+        '422': { description: invalid_land_item }
+  /api/rooms/{roomId}/report_tip:
+    post:
+      summary: Report the tip being landed
+      description: >-
+        Records sourceRevision, buildId, or both on a queued item. A change,
+        including the first report, emits land.updated and wakes the claimant
+        through the existing event-push path. The payload is the pull request
+        number, head SHA, check/behind/merged state, and what changed. API
+        keys need rooms:write.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId]
+              additionalProperties: false
+              properties:
+                itemId: { type: string }
+                sourceRevision: { type: string, maxLength: 200 }
+                buildId: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: "{ item, changed }" }
+        '401': { description: unauthenticated }
+        '404': { description: land_item_not_found }
+        '422': { description: invalid_land_tip }
   /api/rooms/{roomId}/bonds:
     get:
       summary: List agent bonds for the caller
@@ -8895,7 +9008,11 @@ paths:
         heartbeat.ack, wake.pause, wake.resume (POST
         /api/rooms/:roomId/agent-pause), webhook.subscribe, webhook.list,
         and webhook.unsubscribe. Identity-scoped tools do not take roomId.
-        wake.pause and wake.resume do.         inbox_put_attachment, inbox_list_attachments, inbox_get_attachment,
+        wake.pause and wake.resume do. add_land_item, list_land_queue,
+        remove_land_item, and report_tip are the room land queue (repo and
+        prNumber; report_tip records sourceRevision and buildId) and match
+        POST/GET /api/rooms/{roomId}/add_land_item, list_land_queue,
+        remove_land_item, and report_tip. inbox_put_attachment, inbox_list_attachments, inbox_get_attachment,
         and inbox_discard_attachment store this identity's bytes (canonical
         base64, 1 MiB, 24 hours) and do not take roomId. They do not call
         GET /api/inbox/sources/:sourceId/attachments or

@@ -30,6 +30,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { installReferralBoard } from "./referral-board.js";
+import { installLandQueueBoard } from "./land-queue-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
@@ -138,6 +139,7 @@ let remindersUI = null;
 let agentConnectionsUI = null;
 let agentInvitesUI = null;
 let referralBoardUI = null;
+let landQueueUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -220,6 +222,7 @@ const client = new RoomClient({
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     referralBoardUI?.sync();
+    landQueueUI?.sync();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
@@ -287,6 +290,7 @@ const client = new RoomClient({
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
+    landQueueUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) {
       clearPrivateWorkspace({ preservePending: leavingPage });
@@ -388,6 +392,7 @@ remindersUI = installReminders({ client, getState: () => state, onSaved: text =>
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 referralBoardUI = installReferralBoard({ client, getState: () => state, getSession: () => session });
+landQueueUI = installLandQueueBoard({ client, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
@@ -5647,6 +5652,7 @@ function describeBriefEvent({ sequence, event }) {
     detail = esc(`${title} · producer ${producer}`);
   }
   else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
+  else if (event.type === "land.updated") detail = esc(`#${event.data.pr ?? ""} ${(event.data.changed || []).join(", ")}`.trim());
   const target = briefEventTarget(event);
   const href = esc(recordHref(target.kind, target.id));
   const attribute = target.kind === "room" ? `data-open-room="${esc(target.id)}"`
