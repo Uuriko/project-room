@@ -119,6 +119,9 @@ const PROBES = {
   // Authorization header; without one the routes answer 401.
   "POST /api/auth/agent/rooms": [{ identityId: "ag1_probe" }, 401],
   "POST /api/auth/agent/session": [{ identityId: "ag1_probe", roomId: "commons" }, 401],
+  // Claim-block pre-validation (RC-2026-09-24-204): open by design; a valid
+  // block answers 200 with valid:true, and the probe body below is valid.
+  "POST /api/claims/validate": [{ text: "```room-claim\ntask-id: RC-2026-09-24-204\nlane: probe\nfiles: a.mjs\nlease: lease=6h\nstate: working\nreason: probe\n```" }, 200],
 };
 
 async function serve(t) {

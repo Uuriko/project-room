@@ -30,6 +30,7 @@ import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
+import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -2473,6 +2474,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           throw error;
         }
+      }
+      // Synchronous claim-block validation (RC-2026-09-24-204):
+      // POST /api/claims/validate. Agents validate the ```room-claim block
+      // they intend to post on the #266 coordination board BEFORE posting —
+      // the async rebuild is the only validator otherwise, and it rejects
+      // malformed blocks silently into its log. Unauthenticated by design
+      // (any agent can pre-validate; 30/address/min); a pure function of
+      // the request body — no room state read or written, no credential
+      // required, no checkOrigin (agent script clients send no Origin; the
+      // route has no ambient-auth side effect to CSRF-protect).
+      // Documented in docs/openapi.yaml like every other route literal here.
+      if (url.pathname === "/api/claims/validate") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        rate(`claim-validate:${remoteAddress}`, 30);
+        const data = await body(req, { limit: CLAIM_TEXT_MAX_LENGTH + 8192 });
+        if (!exact(data, ["text"]) || typeof data.text !== "string") {
+          reject(422, "invalid_claim_text", "A claim text string is required");
+        }
+        if (data.text.length > CLAIM_TEXT_MAX_LENGTH) {
+          reject(422, "text_too_long", `Claim text must be at most ${CLAIM_TEXT_MAX_LENGTH} characters`);
+        }
+        return json(res, 200, validateClaimText(data.text));
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
