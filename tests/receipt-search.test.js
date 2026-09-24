@@ -149,7 +149,7 @@ test("receipts: tag is exact and repeatable with AND semantics", async t => {
 });
 
 test("receipts: limit default and max", async t => {
-  const { origin, ownerKey, ids, p } = await seed(t);
+  const { origin, ownerKey, ids: _ids, p } = await seed(t);
   const def = await getJson(origin, `/api/rooms/commons/receipts?q=${p}`, ownerKey);
   assert.equal(def.res.status, 200);
   assert.equal(def.json.receipts.length, 3); // default 20 covers all three
