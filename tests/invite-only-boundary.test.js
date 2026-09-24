@@ -50,6 +50,9 @@ const PROBES = {
   "GET /api/agent-directory": [undefined, 200],
   "GET /api/agents/directory": [undefined, 200],
   "GET /api/agents/directory/{}": [undefined, 404],
+  // Skill card (RC-2026-09-24-202): public document without a credential;
+  // an identity that never published a card reads as 404 (never an oracle).
+  "GET /api/agents/{}/card": [undefined, 404],
   // Plug-in manifest: public discovery document, no room data.
   "GET /api/agent-manifest": [undefined, 200],
   "GET /api/guest-agent-links": [undefined, 200],
