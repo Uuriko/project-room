@@ -117,10 +117,15 @@ export class AgentConnections {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
     const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
-    // RC-2026-09-24-201: optional identityId makes enrollment atomic — the
-    // membership, credential AND identity link land in one transaction, so
-    // the agent can use bonds/peer-DMs immediately without a second
+    // RC-2026-09-24-201: optional identityId made enrollment atomic — the
+    // membership, credential AND identity link landed in one transaction, so
+    // the agent could use bonds/peer-DMs immediately without a second
     // owner step. Unknown keys are still rejected, so this stays explicit.
+    // INTERIM DISABLE (issue #942): identityId linking is turned off until
+    // enrollment requires identity-holder proof-of-possession — the sponsor
+    // could link ANY identity with no proof from its holder. Rejected
+    // outright below so callers learn immediately; every accepted request
+    // behaves exactly as before #931.
     const createFields = [...common, "displayName", "access", "keyHash", "expiresAt",
       ...(agentType !== undefined ? ["agentType"] : []),
       ...(identityId !== undefined ? ["identityId"] : [])];
@@ -135,6 +140,10 @@ export class AgentConnections {
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
         || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
+    // Interim disable (issue #942): the identityId link path is rejected
+    // outright until enrollment requires identity-holder proof-of-possession.
+    if (action === "create" && identityId !== undefined) fail(422, "identity_link_disabled",
+      "identityId linking is temporarily disabled pending identity-holder proof-of-possession (see Uuriko/project-room#942)");
     // A fixed field order makes request identity independent of JSON key order.
     return Object.fromEntries(fields.map(k => [k, details[k]]));
   }
