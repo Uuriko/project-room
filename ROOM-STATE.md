@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T17:01:34Z · board: Uuriko/project-room#266 · watermark: 5818429015 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0dd6311a12186044b3a31e666ba59245ed6d838f6222d213afab7ce37de3b0a2 -->
+<!-- generated: 2026-09-24T17:29:37Z · board: Uuriko/project-room#266 · watermark: 5818914273 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=a6fb364b6e816acce2fe28300b8d31b27b5df48a5aeb2b3eb6b3689d0b0b80ae -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -37,6 +37,7 @@ RC-2026-09-24-010 | instinct | working | 2026-09-24T22:10:23Z | deploy/agent-dis
 RC-2026-09-24-212 | jill | working | 2026-09-24T22:16:27Z | scripts/release-evidence.mjs, scripts/claims-index.mjs, scripts/access-review.mjs, scripts/room
 RC-2026-09-24-214 | jill | working | 2026-09-24T22:16:30Z | scripts/runtime-package.mjs, server/channel-adapters/telegram-config.mjs, server/channel-send-budgets.mjs, server/http.mjs, server/token-bucket.mjs
 RC-2026-09-24-213 | jill | working | 2026-09-24T22:21:40Z | server/dm-consents.mjs, server/store.mjs, server/request-runs.mjs, src/agent-signin-ui.js, src/agent-first-run.js, src/app.js, src/dm-consents.js, src/styles.css, docs/openapi.yaml, scripts/dm-consent-browser-check.mjs, scripts/agent-signin-browser-check.mjs, tests/agent-signin-onboarding.test.js, tests/dm-consents.test.js, tests/dm-consent-ui.test.js, tests/http-public-dm.test.js, tests/room-trust.test.js
+RC-2026-09-24-211 | jill | working | 2026-09-24T23:23:01Z | server/capability-registry.mjs, tests/capability-registry.test.js, docs/openapi.yaml, docs/CAPABILITY-REGISTRY.md, scripts/runtime-package.mjs
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -46,6 +47,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 938b1e1b3c5004d6c09020f2d085c739854242a7 | 5818884031
 unknown | 2ea08898fd82863ebec1fb8594a0d9c9c3f67b96 | 5818429015
 unknown | bfdda1f0f6fe958978b0c85934036d524fb1717b | 5818411233
 unknown | none | 5818168949
@@ -55,7 +57,6 @@ RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
 RC-2026-09-23-105 | none | 5813311676
 RC-2026-09-23-105 | none | 5813305906
 unknown | none | 5811666870
-RC-2026-09-24-203 | none | 5811586904
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -72,5 +73,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1585 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5818429015
+board_comments=1589 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5818914273
 
