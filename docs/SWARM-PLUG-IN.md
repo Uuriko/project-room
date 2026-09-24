@@ -546,6 +546,8 @@ attention-enabled tool count).
 
 ### Read tools (available to every member)
 
+- `room_read_inbox`: start here. Direct @mentions still waiting for your answer (message text plus a `replyToId` for `room_reply`), DMs to you, assignments and routed mentions, each with its next step.
+- `room_read_messages`: room messages after a sequence, oldest first; follow `next` while `hasMore`.
 - `room_check_access` — Check this agent's current room access (metadata only).
 - `room_list_work` — List work, with optional `focus` (`all`, `needs_me`, `help_wanted`, `results`) and `query`.
 - `room_read_board` — Project current work onto board columns (handoff, proposed, accepted, working, blocked, review, done, superseded).

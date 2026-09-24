@@ -393,6 +393,24 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
+  // routed mentions, each with its next step. A read; nothing is marked.
+  agentInbox({ limit, signal } = {}) {
+    return this.#request(`/agent-inbox${limit === undefined ? "" : `?limit=${limit}`}`, undefined, signal);
+  }
+  // Room messages after a sequence, in order, as compact records. Other event
+  // types are skipped; private messages appear only to their two parties
+  // (the service filters them). Follow next while hasMore is true.
+  async roomMessages({ after = 0, limit = 50, signal } = {}) {
+    const page = await this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
+    const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
+      sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
+      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
+      ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+      ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
+    }));
+    return { roomId: this.#roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
+  }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
