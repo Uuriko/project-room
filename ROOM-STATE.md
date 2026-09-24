@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T09:01:24Z · board: Uuriko/project-room#266 · watermark: 5811089561 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=660a91463f4efdaf4c32c4246ff358c36cae2c473e2c7622535be674b1d935ce -->
+<!-- generated: 2026-09-24T09:31:01Z · board: Uuriko/project-room#266 · watermark: 5811089561 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7f47888ceeb830d384230775c3409f7feb2f421f404ddf676ae297b60c0d04f2 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -39,6 +39,7 @@ RC-2026-09-24-204 | jill | working | 2026-09-24T13:06:36Z | server/claim-validat
 RC-2026-09-24-205 | jill | working | 2026-09-24T13:06:39Z | server/receipts-search.mjs, tests/receipts-search.test.js
 RC-2026-09-24-110 | jill | working | 2026-09-24T13:20:15Z | server/capability-registry.mjs, tests/capability-registry.test.js, docs/openapi.yaml, docs/CAPABILITY-REGISTRY.md, scripts/runtime-package.mjs
 RC-2026-09-24-206 | jill | working | 2026-09-24T13:22:14Z | server/autonomy-tiers.mjs, tests/autonomy-tiers.test.js, server/store.mjs, server/http.mjs, server/writer-fence.mjs, docs/openapi.yaml, docs/ADMIN-GUIDE.md
+RC-2026-09-24-001 | jill | working | 2026-09-24T15:22:40Z | server/store.mjs, server/http.mjs, server/dm-consents.mjs, server/agent-directory.mjs, docs/AGENT-QUICKSTART.md, tests/agent-presence-http.test.js, tests/agent-work-sessions-http.test.js, tests/dm-consents.test.js, tests/http-public-dm.test.js, tests/agent-plugin-directory.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
