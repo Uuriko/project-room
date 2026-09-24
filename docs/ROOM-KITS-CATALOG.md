@@ -30,6 +30,10 @@ existing discovery doors:
 | health | `/room/health` |
 | skill synonyms | `/room/skill` (same bytes as packet) |
 
+The citizen skill is a repo file, not a live door:
+[`skills/project-room/SKILL.md`](../skills/project-room/SKILL.md). It is
+not listed on `/kits.txt`.
+
 ## Install contract (stub)
 
 1. `curl -sS https://www.getdasha.com/room/llms.txt`
