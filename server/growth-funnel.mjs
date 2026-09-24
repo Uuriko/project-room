@@ -1,10 +1,13 @@
-// Growth funnel (G008): invite → join → first work item. A pure funnel
-// analysis over a supplied list of room events: for each agent it finds the
-// first invite, the first join, and the first work event (claim/update/post),
+// Growth funnel (G008): invite → join → first work item → first completion →
+// second contribution. A pure funnel analysis over a supplied list of room
+// events: for each agent it finds the first invite, the first join, the first
+// work event (claim/update/post), the first completion (work.completed), and
+// the second distinct work event (the retention signal — the agent came back),
 // then reports stage counts, conversion rates, and median time-to-stage.
 // The caller supplies the events — no store reads. Pure, dependency-free,
 // deterministic; frozen outputs. Funnel UI is a later slice.
 const WORK_TYPES = ["work.claim", "work.update", "room.post"];
+const COMPLETION_TYPES = ["work.completed"];
 class FunnelError extends Error { constructor(code, message) { super(message); this.name = "FunnelError"; this.code = code; } }
 const fail = (code, message) => { throw new FunnelError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_funnel_input", message); };
@@ -22,20 +25,25 @@ const median = values => {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 };
-// Analyze the funnel. Stages: invited → joined → first_work.
+// Analyze the funnel. Stages: invited → joined → first_work → completed → second_contribution.
 export function funnelAnalysis(events) {
   check(Array.isArray(events) && events.length <= 200000, "events must be a list of at most 200000");
   const agents = new Map();
   events.forEach((event, index) => {
     const { type, actorId, at } = eventOf(event, index);
-    if (!agents.has(actorId)) agents.set(actorId, { invitedAt: null, joinedAt: null, firstWorkAt: null });
+    if (!agents.has(actorId)) agents.set(actorId, { invitedAt: null, joinedAt: null, firstWorkAt: null, completedAt: null, secondWorkAt: null, workCount: 0 });
     const agent = agents.get(actorId);
     if (type === "member.invited" && !agent.invitedAt) agent.invitedAt = at;
     if ((type === "member.joined" || type === "member.joined_via_invitation") && !agent.joinedAt) agent.joinedAt = at;
-    if (WORK_TYPES.includes(type) && !agent.firstWorkAt) agent.firstWorkAt = at;
+    if (WORK_TYPES.includes(type)) {
+      agent.workCount += 1;
+      if (!agent.firstWorkAt) agent.firstWorkAt = at;
+      else if (!agent.secondWorkAt && at >= agent.firstWorkAt) agent.secondWorkAt = at;
+    }
+    if (COMPLETION_TYPES.includes(type) && !agent.completedAt) agent.completedAt = at;
   });
-  const invited = [], joined = [], worked = [];
-  const inviteToJoin = [], joinToWork = [];
+  const invited = [], joined = [], worked = [], completed = [], returned = [];
+  const inviteToJoin = [], joinToWork = [], workToCompleted = [], completedToSecond = [];
   for (const [actorId, agent] of agents) {
     if (agent.invitedAt) {
       invited.push(actorId);
@@ -49,17 +57,30 @@ export function funnelAnalysis(events) {
     if (agent.firstWorkAt && agent.joinedAt && agent.firstWorkAt >= agent.joinedAt) {
       worked.push(actorId);
       joinToWork.push(new Date(agent.firstWorkAt) - new Date(agent.joinedAt));
+      if (agent.completedAt && agent.completedAt >= agent.firstWorkAt) {
+        completed.push(actorId);
+        workToCompleted.push(new Date(agent.completedAt) - new Date(agent.firstWorkAt));
+      }
+      if (agent.secondWorkAt && agent.secondWorkAt >= agent.firstWorkAt) {
+        returned.push(actorId);
+        completedToSecond.push(new Date(agent.secondWorkAt) - new Date(agent.completedAt ?? agent.firstWorkAt));
+      }
     }
   }
   const rate = (part, whole) => whole === 0 ? null : Math.round((part / whole) * 1000) / 10;
   return Object.freeze({
     invited: invited.length, joined: joined.length, firstWork: worked.length,
+    completed: completed.length, secondContribution: returned.length,
     inviteToJoinRate: rate(joined.filter(id => invited.includes(id)).length, invited.length),
     joinToWorkRate: rate(worked.length, joined.length),
+    workToCompletedRate: rate(completed.length, worked.length),
+    completedToSecondRate: rate(returned.filter(id => completed.includes(id)).length, completed.length),
     medianInviteToJoinMs: median(inviteToJoin),
     medianJoinToWorkMs: median(joinToWork),
+    medianWorkToCompletedMs: median(workToCompleted),
+    medianCompletedToSecondMs: median(completedToSecond),
     agents: Object.freeze(Object.fromEntries([...agents.entries()].map(([actorId, agent]) =>
       [actorId, Object.freeze({ ...agent })]))),
   });
 }
-export { FunnelError, WORK_TYPES };
+export { FunnelError, WORK_TYPES, COMPLETION_TYPES };
