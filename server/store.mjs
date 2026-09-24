@@ -3288,7 +3288,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
-      // Chat posts only. A replay returned above, so that command id costs nothing.
+      // Live chat posts and replies only. The replay above, importEvents,
+      // initialize, and projection replay do not reach this line.
       this.roomFlood.consume(roomId, auth.member.id, command.type);
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived

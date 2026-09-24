@@ -40,7 +40,7 @@ function assertLimited(error) {
   assert.equal(error.code, "rate_limited");
   assert.equal(error.retryAfterMs, 2000);
   assert.equal(error.headers["Retry-After"], "2");
-  assert.equal(error.message, "This member is posting faster than the room allows; retry after 2 s");
+  assert.equal(error.message, "on 429, wait Retry-After and retry");
   return true;
 }
 
@@ -74,26 +74,59 @@ test("replaying a command id does not count, including while limited", t => {
   assert.equal(f.send("owner", T.MESSAGE_POSTED, data, "c-owner-0").duplicate, true);
 });
 
-test("dm.posted counts and bond or work commands do not", t => {
+function notLimited(error) {
+  assert.notEqual(error.status, 429);
+  assert.notEqual(error.code, "rate_limited");
+  return true;
+}
+
+test("only chat posts and replies count; reactions, edits, deletes, reads, work, and claims do not", t => {
   const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
   const f = openStore(t, () => clock.now);
-  for (let i = 0; i < 29; i++) post(f, "owner", i);
+  post(f, "owner", 0);
+  f.send("owner", T.MESSAGE_EDITED, { messageId: "m-owner-0", body: "edited", expectedMessageRevision: 0 }, "edit-1");
+  f.send("owner", T.MESSAGE_REACTION_SET, { messageId: "m-owner-0", reaction: "like", active: true }, "react-1");
+  f.send("owner", T.MESSAGE_DELETED, { messageId: "m-owner-0", expectedMessageRevision: 1, reason: "cleanup" }, "delete-1");
+  for (let i = 1; i < 29; i++) post(f, "owner", i);
   try {
     f.send("owner", T.DM_POSTED, { to: "ai_nobody", body: "ping", messageId: "dm-1" }, "dm-1");
-  } catch (error) {
-    assert.notEqual(error.status, 429);
-    assert.notEqual(error.code, "rate_limited");
-  }
+  } catch (error) { assert.ok(notLimited(error)); }
   assert.throws(() => post(f, "owner", 29), assertLimited);
   f.send("owner", T.WORK_PROPOSED, {
     workItemId: "w1", title: "Help", definitionOfDone: "Done", accountableMemberId: "owner",
   }, "work-1");
   try {
-    f.send("owner", "bond.propose", { to: "ai_nobody" }, "bond-1");
-  } catch (error) {
-    assert.notEqual(error.status, 429);
-    assert.notEqual(error.code, "rate_limited");
+    f.send("owner", T.CLAIM_ACQUIRED, {
+      workItemId: "w1", expectedRevision: 0, repository: "https://example.test/agenda",
+      ref: "draft", paths: ["agenda.md"], expiresAt: "2030-01-01T00:00:00.000Z",
+    }, "claim-1");
+  } catch (error) { assert.ok(notLimited(error)); }
+  f.send("owner", "bond.list", {}, "bond-list-1");
+  for (let i = 0; i < 5; i++) {
+    f.store.snapshot(f.keys.owner, "commons");
+    f.store.search(f.keys.owner, "commons", "hello");
   }
+  assert.throws(() => post(f, "owner", 30), assertLimited);
+});
+
+test("importing chat history does not spend the live budget", t => {
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const f = openStore(t, () => clock.now);
+  const exported = [...f.store.exportEvents(f.keys.owner, "commons")];
+  const imported = exported.map(line => ({ ...line }));
+  for (let i = 0; i < 40; i++) {
+    imported.push({
+      sequence: exported.length + i + 1,
+      event: {
+        id: `imp-${i}`, idempotencyKey: `imp-key-${i}`, roomId: "commons",
+        type: T.MESSAGE_POSTED, actorId: "owner", at: "2026-09-24T12:00:00.000Z",
+        causationId: null, data: { messageId: `imp-m-${i}`, body: `imported ${i}` },
+      },
+    });
+  }
+  f.store.importEvents(f.keys.owner, "commons", imported);
+  for (let i = 0; i < 30; i++) post(f, "owner", i);
+  assert.throws(() => post(f, "owner", 30), assertLimited);
 });
 
 test("room_post_message surfaces 429 rate_limited and a replay does not", async t => {
@@ -122,7 +155,7 @@ test("room_post_message surfaces 429 rate_limited and a replay does not", async 
   const value = limited.result.structuredContent;
   assert.equal(value.status, 429);
   assert.equal(value.code, "rate_limited");
-  assert.equal(value.message, "This member is posting faster than the room allows; retry after 2 s");
+  assert.equal(value.message, "on 429, wait Retry-After and retry");
   const replay = await call("hello 0", "post-0");
   assert.notEqual(replay.result.isError, true);
   assert.equal(replay.result.structuredContent.status, "duplicate");
