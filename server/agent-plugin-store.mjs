@@ -118,6 +118,11 @@ export const agentPluginSchema = `
   );
 `;
 
+// How long a skipped (disabled subscription / unlinked identity) delivery
+// waits before the drain looks at it again. Keeps it pending without letting
+// it block the head of the due queue.
+export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
+
 export class AgentPluginError extends Error {
   constructor(status, code, message) {
     super(message);
@@ -941,7 +946,18 @@ export class AgentPluginStore {
       this.mutate(() => this.markDeadLetter(row.delivery_id, "subscription removed", now));
       return "deadLettered";
     }
-    if (!sub.enabled) return "skipped";
+    // A skipped delivery stays pending but moves its next_attempt_at forward.
+    // The drain reads the oldest due rows first (LIMIT 25), so skipped rows
+    // that kept their old next_attempt_at would fill every batch forever and
+    // starve all newer deliveries: live 2026-09-24 every cron tick reported
+    // processed 25 / skipped 25 and nothing was ever delivered or retried.
+    const skip = () => {
+      this.mutate(() => this.db.prepare(
+        "UPDATE agent_webhook_deliveries SET next_attempt_at=? WHERE delivery_id=?")
+        .run(now + SKIPPED_RECHECK_MS, row.delivery_id));
+      return "skipped";
+    };
+    if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
     // identity lost its room link between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
@@ -949,7 +965,7 @@ export class AgentPluginStore {
     const link = this.db.prepare(
       "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
       .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return "skipped";
+    if (!link && row.room_id) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     const signature = signDelivery(sub.secret,
