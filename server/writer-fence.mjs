@@ -162,6 +162,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // NOT fenced: older writers have no code path to them, and each module
   // verifies its own schema on open.
   "dm_consents",
+  // agent_bonds + peer_dm_threads + peer_dm_messages (mutual agent bond and
+  // the peer DM channel it gates). Purely additive and intentionally NOT
+  // fenced: older writers have no code path to them. The bond state machine
+  // and participant-only reads are the integrity gate; room events are receipts.
+  "agent_bonds",
+  "peer_dm_threads",
+  "peer_dm_messages",
   "room_public_settings",
   // room_directory_settings (#605 opt-in public room directory) is purely
   // additive and intentionally NOT fenced, same as room_public_settings.

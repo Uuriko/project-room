@@ -73,8 +73,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
     };
   }
-  // A DM refusal is about the recipient's consent, not the caller's access:
-  // "check access; ask the owner" sends the agent the wrong way.
+  // A room-DM refusal is about the recipient's consent, not the caller's access.
+  // Peer DMs are a separate bond gate and do not stack another consent step.
   if (reasonCode === "dm_consent_required") {
     const consentPath = roomId ? `/api/rooms/${roomId}/dm-consents` : null;
     return {
@@ -90,6 +90,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required", reason: "dm_blocked",
       hint: "This member is not accepting DMs from you. Post in the room instead.",
       next: [command("Post the message in the room instead")]
+    };
+  }
+  if (reasonCode === "no_bond" || reasonCode === "bond_pending" || reasonCode === "bond_revoked" || reasonCode === "scope_denied") {
+    const hints = {
+      no_bond: "No active bond with this agent. Propose one with bond.propose.",
+      bond_pending: "Bond is proposed, not accepted. The other agent must bond.accept.",
+      bond_revoked: "This bond was revoked. Propose again with bond.propose to reconnect.",
+      scope_denied: "This bond does not include peer.dm. Accept or propose that scope."
+    };
+    const bondsPath = roomId ? `/api/rooms/${roomId}/bonds` : "/api/session";
+    return {
+      status: "action_required",
+      reason: reasonCode,
+      hint: hints[reasonCode],
+      next: [path(bondsPath), command(hints[reasonCode])]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {

@@ -23,7 +23,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 106 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 109 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -251,9 +251,21 @@ test("online capture preserves all 106 tables, identity boundaries and exact ret
   f.store.db.prepare(`INSERT INTO web_fetch_log(request_id,room_id,member_id,credential_hash,host,cache_status,bytes,tags_json,created_at)
     VALUES('recovery-fetch-request','commons','agent',NULL,'example.com','miss',9,'[]',?)`)
     .run(f.now());
+  const bondAt = f.now();
+  f.store.db.prepare(`INSERT INTO agent_bonds
+    (id, agent_a, agent_b, state, proposed_by, proposed_scopes, accepted_scopes, note, reason, proposed_at, accepted_at, revoked_at, revoked_by, room_hint)
+    VALUES ('bond-recovery','ai_recovery_a','ai_recovery_b','active','ai_recovery_a','["peer.dm"]','["peer.dm"]','','',?,NULL,NULL,NULL,'commons')`)
+    .run(bondAt);
+  f.store.db.prepare(`INSERT INTO peer_dm_threads (thread_id, agent_a, agent_b, bond_id, created_at)
+    VALUES ('dm:ai_recovery_a:ai_recovery_b','ai_recovery_a','ai_recovery_b','bond-recovery',?)`)
+    .run(bondAt);
+  f.store.db.prepare(`INSERT INTO peer_dm_messages
+    (message_id, thread_id, room_id, event_id, from_identity_id, to_identity_id, body, created_at)
+    VALUES ('recovery-peer-dm','dm:ai_recovery_a:ai_recovery_b','commons','recovery-peer-event','ai_recovery_a','ai_recovery_b','Synthetic peer DM',?)`)
+    .run(bondAt);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 106,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 109,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

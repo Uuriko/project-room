@@ -62,7 +62,13 @@ export const EVENT_TYPES = Object.freeze({
   // board/leaderboard); this event is the timeline-visible audit record.
   // The handler validates the envelope and records nothing in the
   // projection.
-  REFERRAL_COMPLETED: "referral.completed"
+  REFERRAL_COMPLETED: "referral.completed",
+  // Agent Bond receipts. Authorization lives in agent_bonds; these events
+  // are the participant-visible ledger (not room chat, not a room broadcast).
+  BOND_PROPOSED: "bond.proposed",
+  BOND_ACTIVATED: "bond.activated",
+  BOND_REVOKED: "bond.revoked",
+  DM_POSTED: "dm.posted"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -327,7 +333,11 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.SESSION_STOPPED]: applySession,
     [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities,
     [EVENT_TYPES.ACCESS_REQUESTED]: recordAccessRequest,
-    [EVENT_TYPES.REFERRAL_COMPLETED]: recordReferral
+    [EVENT_TYPES.REFERRAL_COMPLETED]: recordReferral,
+    [EVENT_TYPES.BOND_PROPOSED]: recordBond,
+    [EVENT_TYPES.BOND_ACTIVATED]: recordBond,
+    [EVENT_TYPES.BOND_REVOKED]: recordBond,
+    [EVENT_TYPES.DM_POSTED]: recordPeerDm
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -367,7 +377,7 @@ function validateEnvelope(incoming) {
     if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
-    if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (["permissions", "paths", "checksClaimed", "capabilities", "scopes", "acceptedScopes"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
@@ -376,7 +386,7 @@ function validateEnvelope(incoming) {
     if (key === "segments" && (!Array.isArray(value) || value.length === 0 || value.length > 20
       || value.some(segment => !segment || typeof segment !== "object" || Array.isArray(segment)
         || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1069,6 +1079,69 @@ function recordAccessRequest(state, incoming) {
 // Referral attribution audit record. The referrals table is the queryable
 // source of truth; this event is the timeline-visible proof that a join was
 // attributed. Validates the envelope and records nothing in the projection.
+// Bond receipts mirror the agent_bonds row onto the room projection for the
+// room where the command was issued. They do not grant membership, and
+// dm.posted does not enter state.messages (that array is room chat).
+function recordBond(state, incoming) {
+  requireMember(state, incoming.actorId);
+  requireFields(incoming.data, ["bondId", "agentAId", "agentBId"]);
+  state.bonds ??= {};
+  const id = incoming.data.bondId;
+  const prior = state.bonds[id] ?? {};
+  if (incoming.type === EVENT_TYPES.BOND_PROPOSED) {
+    requireFields(incoming.data, ["proposerIdentityId", "scopes"]);
+    state.bonds[id] = {
+      id,
+      agentAId: incoming.data.agentAId,
+      agentBId: incoming.data.agentBId,
+      state: "proposed",
+      proposedById: incoming.data.proposerIdentityId,
+      proposedScopes: incoming.data.scopes,
+      acceptedScopes: [],
+      note: incoming.data.note ?? null,
+      proposedAt: incoming.at,
+      acceptedAt: null,
+      revokedAt: null,
+      revokedById: null
+    };
+    return;
+  }
+  if (incoming.type === EVENT_TYPES.BOND_ACTIVATED) {
+    requireFields(incoming.data, ["acceptedScopes", "proposerIdentityId"]);
+    state.bonds[id] = {
+      ...prior,
+      id,
+      agentAId: incoming.data.agentAId,
+      agentBId: incoming.data.agentBId,
+      state: "active",
+      proposedById: incoming.data.proposerIdentityId,
+      acceptedScopes: incoming.data.acceptedScopes,
+      acceptedAt: incoming.at,
+      revokedAt: null,
+      revokedById: null
+    };
+    return;
+  }
+  requireFields(incoming.data, ["revokedById", "reason"]);
+  state.bonds[id] = {
+    ...prior,
+    id,
+    agentAId: incoming.data.agentAId,
+    agentBId: incoming.data.agentBId,
+    state: "revoked",
+    revokedAt: incoming.at,
+    revokedById: incoming.data.revokedById,
+    reason: incoming.data.reason
+  };
+}
+
+function recordPeerDm(state, incoming) {
+  requireMember(state, incoming.actorId);
+  requireFields(incoming.data, ["messageId", "threadId", "bondId", "body", "fromIdentityId", "toIdentityId"]);
+  if (incoming.data.fromIdentityId === incoming.data.toIdentityId) throw new Error("Cannot DM yourself");
+  // Receipt only. Peer DM bodies stay out of room chat (state.messages).
+}
+
 function recordReferral(state, incoming) {
   requireFields(incoming.data, ["referrerMemberId", "refereeMemberId", "via", "completedAt"]);
   const { referrerMemberId, refereeMemberId, via } = incoming.data;

@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId, memberCan } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
@@ -2488,7 +2489,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|directory|public-face|needs-attention|mentions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|mentions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -2507,6 +2508,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const dmConsentBlockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/block$/.exec(url.pathname);
       const dmConsentRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/revoke$/.exec(url.pathname);
       const dmConsentUnblockMatch = /^\/api\/rooms\/([^/]{1,384})\/dm-consents\/unblock$/.exec(url.pathname);
+      const peerDmThreadMatch = /^\/api\/rooms\/([^/]{1,384})\/peer-dms\/([^/]{1,160})$/.exec(url.pathname);
       // #658: mention lifecycle. The ack template names the message event;
       // settings is a literal segment and is tested first so it is never
       // mistaken for a message event id.
@@ -2614,21 +2616,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
+        && !peerDmThreadMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
+        ?? peerDmThreadMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
       const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
+      const peerDmThreadId = peerDmThreadMatch ? pathId(peerDmThreadMatch[2]) : null;
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
       const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
+        : peerDmThreadMatch ? "peer-dm-thread"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
@@ -2663,6 +2669,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const dmEventVisible = event =>
         event?.type !== "message.posted" || !event?.data?.toMemberId
         || event.actorId === viewerId || event.data.toMemberId === viewerId;
+      // Bond receipts and peer DMs are ledger events, visible to the two
+      // identities (bond metadata also to the room owner). Not room chat.
+      const peerContext = {
+        memberId: viewerId,
+        identityId: store.bonds.identityForMember(roomId, viewerId),
+        isOwner: viewerId === store.room(roomId).state.room.ownerId
+      };
+      const roomEventVisible = event => dmEventVisible(event) && peerEventVisible(event, peerContext);
       // RC-2026-09-23-101: guest-agent scope gate, HTTP-layer half. The
       // store.command() gate (RC-2026-09-23-100) covers the event-sourced
       // command path, but the bounty-escrow, work-claim and inbox-collab
@@ -2784,10 +2798,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // existence. The work view carries none of these.
           const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
           const visibleIds = new Set(visibleMessages.map(message => message.id));
-          snapshot.state = { ...snapshot.state,
+          const nextState = { ...snapshot.state,
             messages: visibleMessages,
-            eventLog: (snapshot.state.eventLog ?? []).filter(dmEventVisible),
+            eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+          if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
+          snapshot.state = nextState;
         }
         return json(res, 200, snapshot);
       }
@@ -2977,7 +2993,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => dmEventVisible(event));
+          const rows = [...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
             "Content-Security-Policy": EXPORT_HTML_CSP,
@@ -2986,7 +3002,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const lines = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) {
-          if (dmEventVisible(line.event)) lines.push(JSON.stringify(line) + "\n");
+          if (roomEventVisible(line.event)) lines.push(JSON.stringify(line) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
@@ -3412,6 +3428,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.roomContext(selected.token, roomId, {
           sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
         }));
+      }
+      if (route === "bonds" && req.method === "GET") {
+        return json(res, 200, { bonds: store.bonds.listForMember(roomId, auth.member.id) });
+      }
+      if (route === "peer-dms" && req.method === "GET") {
+        return json(res, 200, { threads: store.bonds.listThreads(roomId, auth.member.id) });
+      }
+      if (route === "peer-dm-thread" && req.method === "GET") {
+        return json(res, 200, store.bonds.readThread(roomId, auth.member.id, peerDmThreadId));
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;
