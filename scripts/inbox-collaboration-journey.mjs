@@ -149,10 +149,12 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
         assert.equal(await page.locator("[data-inbox-result]").count(), 0);
         await page.locator("#nav-rooms").click();
       } else if (name === "finish") {
+        store.command(ownerKey, roomId, { id: randomUUID(), type: "message.posted", data: { messageId: "rationale-journey", body: "Rationale: simulated owner checked this exact draft." } });
         await action(page, "decide");
         await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, input.expectedBody);
         await page.locator("#action-fields [name=decision]").selectOption("approved");
         await page.locator("#action-fields [name=reason]").fill("Simulated owner checked this exact draft. Approval is not sending.");
+        await page.locator("#action-fields [name=sourceMessageId]").fill("rationale-journey");
         await submit(page); assert.equal(provider.count(), 0);
         await inbox(); await page.locator(`[data-inbox-result="${workItemId}"]`).click();
         await page.waitForFunction(body => document.querySelector("#inbox-result-body").textContent === body, input.expectedBody);
