@@ -34,3 +34,35 @@ test("malformed inputs are refused", () => {
   throwsCode(() => funnelAnalysis("nope"), "invalid_funnel_input");
   throwsCode(() => funnelAnalysis([{ type: "x", actorId: "a", at: "bad" }]), "invalid_funnel_input");
 });
+
+test("funnelAnalysis tracks completion and second-contribution stages", () => {
+  const funnel = funnelAnalysis([
+    { type: "member.joined", actorId: "a", at: "2026-09-10T10:00:00Z" },
+    { type: "work.claim", actorId: "a", at: "2026-09-11T10:00:00Z" },
+    { type: "work.completed", actorId: "a", at: "2026-09-12T10:00:00Z" },
+    { type: "work.claim", actorId: "a", at: "2026-09-13T10:00:00Z" },
+    { type: "member.joined", actorId: "b", at: "2026-09-10T10:00:00Z" },
+    { type: "work.claim", actorId: "b", at: "2026-09-11T10:00:00Z" },
+    { type: "member.joined", actorId: "c", at: "2026-09-10T10:00:00Z" },
+  ]);
+  assert.equal(funnel.joined, 3);
+  assert.equal(funnel.firstWork, 2);
+  assert.equal(funnel.completed, 1);
+  assert.equal(funnel.secondContribution, 1);
+  assert.equal(funnel.workToCompletedRate, 50);
+  assert.equal(funnel.completedToSecondRate, 100);
+  assert.equal(funnel.medianWorkToCompletedMs, 24 * 3600 * 1000);
+  assert.equal(funnel.medianCompletedToSecondMs, 24 * 3600 * 1000);
+});
+
+test("completion before first work is ignored; empty funnel stays null", () => {
+  const funnel = funnelAnalysis([
+    { type: "member.joined", actorId: "a", at: "2026-09-10T10:00:00Z" },
+    { type: "work.completed", actorId: "a", at: "2026-09-09T10:00:00Z" },
+  ]);
+  assert.equal(funnel.firstWork, 0);
+  assert.equal(funnel.completed, 0);
+  assert.equal(funnel.secondContribution, 0);
+  assert.equal(funnel.workToCompletedRate, null);
+  assert.equal(funnel.medianWorkToCompletedMs, null);
+});
