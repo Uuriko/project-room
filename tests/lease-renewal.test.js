@@ -13,7 +13,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { changeDescription } from '../src/workflow.js';
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { createWork, claimWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
+import { claimWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
 
 const H = 3600 * 1000;
 const T0 = Date.parse("2026-09-24T07:00:00.000Z");
