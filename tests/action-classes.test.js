@@ -39,7 +39,7 @@ test("done-when: enabling a reminder posts no message and launches no session or
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const before = f.store.snapshot(f.keys.owner, "commons");
-  const actCount = () => f.store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE room_id='commons' AND json_extract(body,'$.type') IN (?,?,?)")
+  const actCount = () => f.store.db.prepare(`SELECT COUNT(*) AS n FROM events WHERE room_id='commons' AND json_extract(body,'$.type') IN (${ACT_ONLY_EFFECTS.map(() => "?").join(",")})`)
     .all(...ACT_ONLY_EFFECTS)[0].n;
   const actBefore = actCount();
   const enable = f.store.reminders.mutate(f.keys.owner, "commons", {

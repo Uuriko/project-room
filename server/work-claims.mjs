@@ -110,6 +110,7 @@ const workOf = value => {
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
   if (value.claimedAt !== undefined && value.claimedAt !== null) check(typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "claimedAt must be an ISO timestamp");
+  if (value.leaseStartAt !== undefined && value.leaseStartAt !== null) check(typeof value.leaseStartAt === "string" && Number.isFinite(Date.parse(value.leaseStartAt)), "leaseStartAt must be an ISO timestamp");
   if (value.leaseExpiresAt !== undefined && value.leaseExpiresAt !== null) check(typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)), "leaseExpiresAt must be an ISO timestamp");
   if (value.deliveryMode !== undefined && value.deliveryMode !== null) check(DELIVERY_MODES.includes(value.deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
   if (value.reviewPolicy !== undefined && value.reviewPolicy !== null) check(REVIEW_POLICIES.includes(value.reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
@@ -119,7 +120,7 @@ const workOf = value => {
   const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
-    claimedAt: value.claimedAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
+    claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, blobs };
@@ -155,7 +156,7 @@ export function createWork({ id, title, reviewPolicy, note, tags } = {}, { now }
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
-    claimedAt: null, leaseExpiresAt: null, deliveryMode: null,
+    claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
     blobs: Object.freeze([]) };
@@ -170,9 +171,30 @@ export function claimWork(work, agentId, { note, leaseHours, room, now } = {}) {
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+    leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
+}
+// Renew a claim's lease: starts a fresh lease window from now, extending
+// leaseExpiresAt by the lease duration (explicit leaseHours, else the
+// room's default). Only the owner may renew, only while the claim is
+// active, and only when the claim carries a lease (claims that opted out
+// of leases have nothing to renew; lapsed leases must be claimed again).
+// The route layer requires the owner's public progress message — posted
+// in the room after the prior lease start — before calling this; the pure
+// machine records the renewal, never the message check.
+export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
+  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
+  check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
+  check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  const wanted = leaseHoursOf(leaseHours);
+  const effective = wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const renewed = { ...item, leaseStartAt: isoOf(atMs),
+    leaseExpiresAt: isoOf(atMs + effective * 3600 * 1000) };
+  return withHistory(renewed, atMs, agent, "renewed", note ?? `lease: ${effective}h`);
 }
 // Update claimed work: move state or add a note. Only the owner may update.
 // The done transition accepts deliveryMode (how the work was delivered),
@@ -208,6 +230,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   const released = state === "unclaimed";
   const next = state === undefined ? item : { ...item, state,
     owner: released ? null : item.owner,
+    leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
     // lapsed owner's round of work, never to whoever claims next
