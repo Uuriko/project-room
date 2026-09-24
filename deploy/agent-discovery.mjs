@@ -133,7 +133,7 @@ export const KITS_CATALOG_SYNONYMS = Object.freeze([
   "/room/kit", "/room/kits", "/room/apps", "/room/tools"
 ]);
 export const KITS_CATALOG_FILES = Object.freeze([
-  "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
+  "kits.json", "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
 ]);
 
 // Live health JSON lives in http.mjs. These are twins of /api/health — not
