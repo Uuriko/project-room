@@ -21,16 +21,15 @@
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { EVENT_TYPES } from "../src/events.js";
+import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
-// Derived from EVENT_TYPES so the taught list can never drift from what the
-// dispatcher actually emits; "*" subscribes to every event type.
-// RC-2026-09-18-051: "agent.wake" is not a room event — it is the
-// identity-scoped wake ping journaled when an offline agent is mentioned or
-// DM'd. Listed here so an agent can subscribe to its own wake pings.
-const WAKE_PING_EVENT = "agent.wake";
-const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT, "*"]);
+// Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
+// from EVENT_TYPES so the taught list can never drift from what the room
+// actually emits); the HTTP layer adds "*" (every event type). agent.wake
+// is not a room event — it is the identity-scoped wake ping journaled when
+// an offline agent is mentioned or DM'd.
+const WEBHOOK_EVENTS = Object.freeze([...EVENT_CATALOG, "*"]);
 
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below

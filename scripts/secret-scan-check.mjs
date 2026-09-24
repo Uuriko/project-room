@@ -64,7 +64,7 @@ export const ALLOWLIST = [
   /DUMMY_PASSWORD_VERIFIER/, // slice 2: public placeholder scrypt verifier (hash of a known
     // placeholder password); used only so unknown-email logins cost one scrypt
     // derivation. Not a credential — it is deliberately published in source.
-  /AGENT_CARD_PUBLIC_KEY = "3KN\/0siMyeyxKIVwNdp2eYAAhG81ikY9y9W\+ZaLF968="/, // RC-2026-09-23-105: room Agent Card
+  /AGENT_CARD_PUBLIC_KEY = "e74i9XPv8I1hIhTsVztVupDr6moyCfL\+nGr1HDoOpTc="/, // Owner recovery 2026-09-24: room Agent Card
     // signing PUBLIC key — intentionally committed and published inside the card itself.
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
 ];

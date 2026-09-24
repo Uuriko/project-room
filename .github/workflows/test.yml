@@ -95,7 +95,7 @@ jobs:
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --dry-run --outdir dist
+        run: node ../scripts/worker-ci-build.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
