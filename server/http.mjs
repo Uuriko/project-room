@@ -489,7 +489,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     return binding;
   }
   function checkOrigin(req, required = false) {
-    if ((required || req.headers.origin) && req.headers.origin !== expectedOrigin()) reject(403, "origin_denied", "Request origin is not allowed");
+    const origin = req.headers.origin;
+    if ((required || origin) && origin !== expectedOrigin()) {
+      reject(403, "origin_denied", required ? "Origin header is required" : "Request origin is not allowed");
+    }
   }
   // Origin checks are a CSRF defense for cookie/browser sessions. A request
   // presenting an Authorization: Bearer credential is not an ambient-auth
