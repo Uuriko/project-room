@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T06:29:21Z · board: Uuriko/project-room#266 · watermark: 5808948205 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=9de87208708996ffa0f83f89b6ee2d4e3f9b915b61c77c87c5d878c8c55cf27f -->
+<!-- generated: 2026-09-24T06:59:34Z · board: Uuriko/project-room#266 · watermark: 5809333755 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=4221682218599383e95f3d9784e0e1d98589c4edf2cbe798b9224c88cbb3f642 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,8 +32,7 @@ RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-23-105 | jill | working | 2026-09-24T06:43:40Z | deploy/agent-discovery.mjs, deploy/agent-card-key.mjs, deploy/agent-card-signed.mjs, scripts/sign-agent-card.mjs, scripts/runtime-package.mjs, scripts/candidate-runtime-fixture.mjs, tests/agent-card-wellknown.test.js, tests/agent-discovery.test.js, docs/AGENT-CARD-CUSTODY.md, cloudflare/wrangler.jsonc, cloudflare/http.check.mjs
-RC-2026-09-23-100 | jill | working | 2026-09-24T06:43:52Z | server/guest-agent-links.mjs, docs/GUEST-AGENT-LINKS.md, tests/guest-invite-flow.test.js
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -69,5 +68,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1440 threshold=1500 rotation_due=no watcher=active open_claims=52 prose_open=2 unfenced_prose=62 watermark=5808948205
+board_comments=1453 threshold=1500 rotation_due=no watcher=active open_claims=52 prose_open=2 unfenced_prose=62 watermark=5809333755
 
