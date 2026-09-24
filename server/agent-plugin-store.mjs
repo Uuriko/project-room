@@ -1025,11 +1025,21 @@ export class AgentPluginStore {
   // real resolver and every target is re-validated before its POST
   // (dispatch-time SSRF guard, QA-Sec 2026-09-19).
   async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+    // Only rows that can actually be attempted fill the batch. Deliveries of a
+    // disabled subscription or of an identity no longer linked to the event's
+    // room stay pending but are left out here; otherwise a large skipped
+    // backlog occupies every LIMIT-sized batch and live deliveries wait behind
+    // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
+    // subscription was removed (s is NULL) are still selected so they
+    // dead-letter as before.
     const due = this.db.prepare(
-      `SELECT * FROM agent_webhook_deliveries
-       WHERE state IN ('pending','failed') AND next_attempt_at <= ?
-       ${agentId ? "AND agent_id = ?" : ""}
-       ORDER BY next_attempt_at ASC LIMIT ?`)
+      `SELECT d.* FROM agent_webhook_deliveries d
+       LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
+       WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
+       ${agentId ? "AND d.agent_id = ?" : ""}
+       AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+       ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {

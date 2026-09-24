@@ -618,7 +618,8 @@ test("dispatch skips a delivery whose identity was unlinked after fan-out", asyn
     fetchImpl: async () => { posted++; return { status: 200, text: async () => "ok" }; },
   });
   assert.equal(posted, 0);
-  assert.equal(summary.skipped, 1);
+  // Ineligible rows are not selected at all (so they cannot fill a batch).
+  assert.equal(summary.processed, 0);
   assert.equal(summary.delivered, 0);
   // The delivery stays pending: a re-linked identity still receives it.
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId)[0].state, "pending");
@@ -639,12 +640,31 @@ test("skipped deliveries do not starve newer deliveries at the head of the due q
   const posted = [];
   const fetchImpl = async url => { posted.push(String(url)); return { status: 200, text: async () => "ok" }; };
   const first = await drain(f.store, { fetchImpl });
-  assert.equal(first.skipped, 25);
-  const second = await drain(f.store, { fetchImpl });
-  assert.equal(second.delivered, 1, "the fresh delivery must not be starved by skipped rows");
-  assert.equal(second.skipped, 0);
+  assert.equal(first.delivered, 1, "the fresh delivery must not be starved by skipped rows");
+  assert.equal(first.skipped, 0);
   assert.equal(posted.length, 1);
   assert.equal(f.store.agentPlugin.webhookJournal(live.subscription.subscriptionId)[0].state, "delivered");
   // Skipped rows stay pending (a re-linked identity still receives them).
   assert.ok(f.store.agentPlugin.webhookJournal(stale.subscription.subscriptionId).every(d => d.state === "pending"));
+});
+
+test("a skipped backlog larger than the batch never delays a live delivery", async t => {
+  // Deferring skipped rows (#1008) still let a backlog > 25 rows occupy
+  // every batch until it cycled; live 2026-09-24 a fresh delivery waited
+  // ~10 minutes. Ineligible rows must not be selected at all.
+  const f = freshFixture(t);
+  const stale = subscribe(t, f, "unlinked-backlog-agent");
+  for (let i = 0; i < 60; i++) postMessage(f.store, f.keys, `backlog ${i}`);
+  f.store.identities.unlink(f.keys.owner, "commons", stale.identity.identityId);
+  const live = subscribe(t, f, "live-backlog-agent");
+  postMessage(f.store, f.keys, "fresh");
+  const summary = await drain(f.store, { fetchImpl: okFetch() });
+  assert.equal(summary.delivered, 1, "the fresh delivery goes out on the first drain");
+  assert.equal(summary.skipped, 0);
+  assert.equal(f.store.agentPlugin.webhookJournal(live.subscription.subscriptionId)[0].state, "delivered");
+  assert.equal(journalCount(f.store, stale.subscription), 60);
+  // Re-linking makes the backlog eligible again.
+  f.store.identities.link(f.keys.owner, "commons", { identityId: stale.identity.identityId, permissions: [] });
+  const relinked = await drain(f.store, { fetchImpl: okFetch() });
+  assert.equal(relinked.delivered, 25);
 });
