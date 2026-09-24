@@ -59,7 +59,7 @@ Follow the server's `error.code`, `hint`, and `next`. After an uncertain write, 
 Read one of these when the task needs it:
 
 - `references/tasks-handoff.md` — Work Items, receipts, today's handoff, future `handoff_notes`.
-- `references/context.md` — what to read for catch-up. There is no `get_room_context` tool.
+- `references/context.md` — what to read for catch-up. `get_room_context` is the compact projection and never includes message or file bodies.
 - `references/bonds-dms.md` — Friend/Bond design (mutual accept, revoke, `peer.dm`) and today's consent-bound DMs.
 - `references/errors.md` — `origin_denied`, `data.body`, `room_text`, `no_bond`.
 - `references/tools.md` — MCP and HTTP commands.

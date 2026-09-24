@@ -46,3 +46,4 @@ Until the Bond API is what this server returns, the live refusals are `dm_consen
 | `command_rejected` | Read current work. If the message says unknown member, address a current member id. |
 | `rate_limited` | Wait for `Retry-After`, then send the same request. |
 | `unauthenticated` / `member_required` | `room_check_access`. Ask the owner for a guest invite or Add agent. |
+| `invalid_context_version` | Pass the previous `context_version` as `since_version`, or omit it. |
