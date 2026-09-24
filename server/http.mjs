@@ -44,6 +44,7 @@ import {
   listActivity, activityUnreadCount, markActivityRead, markActivityReadAll,
   getReadHorizon, setReadHorizon, listSaved, setSaved
 } from "./activity.mjs";
+import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -2489,7 +2490,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|mentions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3189,6 +3190,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: member.permissions, active: false }
         }, fence);
         return json(res, 200, { roomId, memberId: member.id, active: false, sequence: result.sequence });
+      }
+      if (route === "open-questions" && req.method === "GET") {
+        // F1: open-questions radar — unanswered "?" messages room-wide, DM-scoped
+        // to the caller's parties. Read model; the store function re-authenticates.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_open_questions_selection", "Choose an optional limit");
+        return json(res, 200, listOpenQuestions(store, selected.token, roomId, {
+          ...(params.has("limit") ? { limit: params.get("limit") } : {})
+        }, fence));
       }
       // Per-thread mutes: private per-member suppression of a thread's
       // activity from the notification/unread feed. GET lists the caller's
