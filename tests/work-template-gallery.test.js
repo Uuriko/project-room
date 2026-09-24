@@ -5,9 +5,9 @@ import { listTemplates, getTemplate, instantiate, TemplateError } from "../serve
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof TemplateError && error.code === code);
 
-test("listTemplates returns all four", () => {
+test("listTemplates returns all five", () => {
   const templates = listTemplates();
-  assert.deepEqual(templates.map(t => t.templateId).sort(), ["bounty", "bug", "feature", "research"]);
+  assert.deepEqual(templates.map(t => t.templateId).sort(), ["bounty", "bug", "feature", "friction", "research"]);
   assert.ok(Object.isFrozen(templates));
 });
 test("instantiate fills the title pattern", () => {
