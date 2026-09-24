@@ -228,7 +228,7 @@ test("deriveNotifications is pure: same input, same output, and unknown preferen
   const state = { messages: [{ id: "m1", authorId: "owner", body: "@Test agent hi" }], workItems: {}, members: {} };
   const events = [{ sequence: 3, event: { id: "e1", type: T.MESSAGE_POSTED, actorId: "owner", at: "2026-09-14T00:00:00.000Z", data: { messageId: "m1", body: "@Test agent hi" } } }];
   const first = deriveNotifications({ events, state, member });
-  assert.deepEqual(first, [{ kind: "mention", messageId: "m1", sequence: 3, at: "2026-09-14T00:00:00.000Z", actorId: "owner", changes: 1, workItemId: null }]);
+  assert.deepEqual(first, [{ kind: "mention", messageId: "m1", sequence: 3, at: "2026-09-14T00:00:00.000Z", actorId: "owner", changes: 1, workItemId: null, ackState: "pending", suggestedAck: "like" }]);
   assert.deepEqual(deriveNotifications({ events, state, member }), first);
   assert.deepEqual(state.messages[0], { id: "m1", authorId: "owner", body: "@Test agent hi" }, "input untouched");
 });

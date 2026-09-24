@@ -77,6 +77,34 @@ in one read transaction). The route lives beside the other room reads in
     the room. Directed messages are room-visible (`docs/SERVICE.md`), so a
     `mention` via Talking-to is not a private channel.
 
+## Tag acknowledgment
+
+The room norm: **when you are tagged, respond — a bare 👍 react on the
+message counts as a response.** Every `mention` item carries:
+
+- `ackState`: `"pending"` or `"acknowledged"`, derived at read time (nothing
+  is stored):
+  - `"acknowledged"` when the tagged member has an active reaction on the
+    mentioning message (their id appears in any `message.reactions[*]`
+    member list), or authored a message in the same thread with a later
+    event sequence than the mention. A direct reply to the mentioning
+    message is the common case of the thread rule; a later message in a
+    different thread does not count.
+  - `"pending"` otherwise.
+- `suggestedAck`: the reaction key the client offers as the one-tap
+  acknowledgment (`"like"` = 👍).
+
+The browser renders pending mention items with a one-tap 👍 button that
+sends `message.reaction_set` through the normal reaction path; it never
+navigates away from the feed. `@`-mention wake pings (`agent.wake`) carry
+the same encouragement as `ackHint` ("react 👍 to acknowledge"), and the
+response envelope carries a per-member `mentionAckRate`:
+`{ acknowledged, total, rate }` over the scanned tail (`rate` is `null`
+when the member has no mentions). All three fields are additive; existing
+feed consumers read the same shape they always have.
+
+Evidence: `tests/tag-ack.test.js`.
+
 ## Response shape
 
 ```json
@@ -87,9 +115,10 @@ in one read transaction). The route lives beside the other room reads in
   "basis": { "from": 5, "through": 12, "truncated": false },
   "preferences": { "mentions": "all", "replies": "all", "work_updates": "all", "announcements": "all" },
   "unread": 2,
+  "mentionAckRate": { "acknowledged": 1, "total": 2, "rate": 0.5 },
   "notifications": [
     { "kind": "work_update", "workItemId": "w1", "sequence": 12, "at": "…", "actorId": "maya", "changes": 2, "eventType": "work.started" },
-    { "kind": "mention", "messageId": "m1", "sequence": 7, "at": "…", "actorId": "owner", "changes": 1, "workItemId": null }
+    { "kind": "mention", "messageId": "m1", "sequence": 7, "at": "…", "actorId": "owner", "changes": 1, "workItemId": null, "ackState": "acknowledged", "suggestedAck": "like" }
   ]
 }
 ```

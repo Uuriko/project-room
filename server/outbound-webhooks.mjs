@@ -169,11 +169,16 @@ export async function assertWebhookHostDnsPublic(url, { resolve4 = dns.resolve4,
 // payload shape is returned on the agent's next heartbeat and is the shape
 // a future HTTP dispatch would POST to the host's registered wake URL.
 export const WAKE_PING_EVENT = "agent.wake";
+// Tag acknowledgment (2026-09-23): one-tap ack copy carried on every
+// agent.wake payload (and on the journaled pending-wake signal), so a woken
+// agent knows a bare 👍 react on the mentioning message counts as a
+// response. Additive — the signal shape is untouched.
+export const WAKE_ACK_HINT = "react \u{1F44D} to acknowledge";
 export function buildWakePing({ agentId, signal }) {
   check(typeof agentId === "string" && agentId.length > 0, "agentId must be a non-empty string");
   check(signal !== null && typeof signal === "object", "signal must be an object");
   check(typeof signal.signalId === "string" && signal.signalId.length > 0, "signal.signalId must be a non-empty string");
-  return Object.freeze({ event: WAKE_PING_EVENT, agentId, signal: Object.freeze({ ...signal }) });
+  return Object.freeze({ event: WAKE_PING_EVENT, agentId, signal: Object.freeze({ ...signal }), ackHint: WAKE_ACK_HINT });
 }
 // Create a webhook manager. store is a caller-owned Map (webhookId -> webhook).
 export function createWebhooks({ store } = {}) {
