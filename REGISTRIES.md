@@ -1,5 +1,8 @@
 # Project Room — Directory & Registry Listings
 
+Historical listing and submission report supplied with PR #876; this
+release does not perform any external submissions or account connections.
+
 Where Project Room is listed (or submitted) across MCP/agent directories,
 curated awesome-lists, and registries. Observed 2026-09-24 unless noted.
 
@@ -29,7 +32,7 @@ Canonical facts used in every listing:
 
 | Directory | Status | Cost | Notes |
 |---|---|---|---|
-| PulseMCP | Manual submissions **paused** (observed 2026-09-24 at pulsemcp.com/submit — page says it is not accepting submissions or listing changes). Will ingest the official MCP Registry once its pipeline returns. | Free | Nothing to do; Project Room is live in the official registry, so it should be picked up automatically. |
+| PulseMCP | Manual submissions **paused** (observed 2026-09-24 at pulsemcp.com/submit — page says it is not accepting submissions or listing changes). Automatic ingestion has not been confirmed. | Free | Recheck the listing before claiming ingestion. |
 
 ## Ready to submit — needs a browser-run form fill
 
@@ -46,7 +49,7 @@ once with these values:
 | Official MCP Registry Name (optional) | `io.github.Uuriko/project-room` |
 | This server supports remote connections | yes (checked) |
 | Contact Email | maintainer's contact |
-| Submission plan | **Free** ($0, review within 2 weeks) — do NOT select Premium ($39) |
+| Submission plan | **Free** ($0; provider review time is not a project commitment) — do NOT select Premium ($39) |
 
 Form: https://mcpservers.org/submit — observed 2026-09-24. Free listings confirmed;
 premium is optional and skipped.
