@@ -30,6 +30,7 @@ optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
+optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
 optional.push("src/room-layout.js");

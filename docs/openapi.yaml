@@ -994,6 +994,81 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '405':
           description: Method not allowed
+  /api/opportunities.json:
+    get:
+      summary: Public opportunity feed
+      description: >-
+        Read-only discovery of open work across owner opt-in directory-listed
+        rooms (no login): open help-wanted invitations on non-terminal work
+        items, and proposed/funded bounties with live deadlines. Decoupled
+        from admission — reading the feed grants nothing; acting on an
+        opportunity uses the normal invite/join flow. Rebuilt field-by-field
+        in the module; member ids, identity data, invite codes, and admission
+        URLs never leave. Archived and non-listed rooms never appear. Sort is
+        recency-only, never popularity/engagement. `since` is an ISO timestamp
+        or epoch-ms cursor: only items opened/created after it are returned,
+        and `generatedAt` is the cursor for the next poll (cheap resume for
+        agents). `limit` is capped at 100 (default 50).
+      security: []
+      parameters:
+        - name: room
+          in: query
+          required: false
+          schema: { type: string }
+          description: Restrict the feed to one directory-listed room id
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: since
+          in: query
+          required: false
+          schema: { type: string }
+          description: ISO timestamp or epoch milliseconds; only items opened/created after the cursor are returned
+      responses:
+        '200':
+          description: Feed snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  opportunities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string, enum: [help-wanted, bounty] }
+                        workItemId: { type: [string, 'null'] }
+                        bountyId: { type: [string, 'null'] }
+                        roomId: { type: string }
+                        roomTitle: { type: string }
+                        roomPath: { type: string }
+                        title: { type: string }
+                        definitionOfDone: { type: [string, 'null'] }
+                        helpScope: { type: [string, 'null'] }
+                        helpExpiresAt: { type: [string, 'null'] }
+                        workState: { type: [string, 'null'] }
+                        mode: { type: [string, 'null'] }
+                        openedAt: { type: [string, 'null'] }
+                        labels: { type: [array, 'null'], items: { type: string } }
+                        criteria: { type: [string, 'null'] }
+                        amountMillis: { type: [integer, 'null'] }
+                        state: { type: [string, 'null'] }
+                        deadlineMs: { type: [integer, 'null'] }
+                        label: { type: [string, 'null'] }
+                        createdAt: { type: [string, 'null'] }
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address opportunities rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '405':
+          description: Method not allowed
   /api/public/rooms/{code}:
     get:
       summary: Public read-only room face
