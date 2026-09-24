@@ -21,7 +21,7 @@
 // snapshot reflects the upstream repo, not whatever the local clone has.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
