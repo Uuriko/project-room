@@ -167,7 +167,14 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), expected.type);
     assert.equal(get.headers.get("x-robots-tag"), "all");
-    assert.equal(await get.text(), expected.body);
+    // RC-2026-09-24-202: the node server injects the live `members` array
+    // (opted-in skill cards) into the /skills catalog and its aliases. The
+    // scratch server has no published cards, so the served body is the
+    // static doc plus `"members": []`.
+    const expectedBody = discoveryDoc(path) === discoveryDoc("/skills")
+      ? JSON.stringify({ ...JSON.parse(expected.body), members: [] }, null, 2) + "\n"
+      : expected.body;
+    assert.equal(await get.text(), expectedBody, path);
     const head = await fetch(origin + path, { method: "HEAD" });
     assert.equal(head.status, 200, path);
     assert.equal(await head.text(), "");
