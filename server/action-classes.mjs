@@ -18,7 +18,9 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED } from "../src/help-offers.js";
 
 export const ACTION_CLASSES = Object.freeze({
-  observe: Object.freeze([]),
+  observe: Object.freeze([
+    "bond.list", // read of the caller's bonds; records nothing
+  ]),
   draft: Object.freeze([
     T.NOTIFICATION_PREFERENCES_SET, // personal delivery preferences, viewer-only
     T.MEMBER_MUTE_SET, // E4: hides an author for the muter alone; grants or removes nothing
@@ -34,6 +36,8 @@ export const ACTION_CLASSES = Object.freeze({
     T.OWNER_DECISION_RECORDED, T.DECISION_RECORDED,
     T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED,
     T.CAPABILITIES_ADVERTISED, T.OWNERSHIP_TRANSFERRED, // changes who may act as owner
+    "bond.propose", "bond.accept", "bond.decline", "bond.revoke", // mutual agent bond
+    T.DM_POSTED, // peer DM; participant-visible receipt, not room chat
   ]),
 });
 
