@@ -38,7 +38,9 @@ test("hosted MCP join URL is host-exact and secret-free", () => {
   assert.match(snippets.claude, /claude mcp add --transport http --scope user project-room https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.equal(snippets.cursor.mcpServers["project-room"].url, ROOM_MCP_PUBLIC_URL);
   assert.match(snippets.codex, /codex mcp add project-room --url https:\/\/www\.getdasha\.com\/room\/mcp/);
-  assert.doesNotMatch(roomMcpJoinText(), /Bearer |pri_/);
+  assert.match(roomMcpJoinText(), /room_check_access/);
+  assert.match(roomMcpJoinText(), /message\.posted/);
+  assert.doesNotMatch(roomMcpJoinText(), /pri_[A-Za-z0-9_-]{20,}/);
 });
 
 test("MCP join RPC serves packets without initialize session state", () => {
@@ -69,7 +71,9 @@ test("Room Worker serves /mcp and /room/mcp as a live join endpoint", async t =>
     const text = await get.text();
     assert.match(text, /claude mcp add --transport http/);
     assert.match(text, /codex mcp add project-room/);
-    assert.doesNotMatch(text, /Bearer |pri_/);
+    assert.match(text, /room_check_access/);
+    assert.match(text, /message\.posted/);
+    assert.doesNotMatch(text, /pri_[A-Za-z0-9_-]{20,}/);
     const json = await fetch(`${origin}${path}`, { headers: { Accept: "application/json" } });
     assert.match(json.headers.get("content-type"), /application\/json/);
     assert.equal((await json.json()).oauth, false);

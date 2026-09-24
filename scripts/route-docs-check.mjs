@@ -63,7 +63,12 @@ export function routeDocsDrift({ http, pluginRoutes, openapi }) {
   }
   const operations = openapiOperations(openapi);
   const documented = new Map();
-  for (const { path } of operations) if (!documented.has(templateKey(path))) documented.set(templateKey(path), path);
+  // /api templates are the gate. Hosted MCP (/mcp, /room/mcp) is documented
+  // in the spec and probed on its own; it is not an /api route template.
+  for (const { path } of operations) {
+    if (!path.startsWith("/api/")) continue;
+    if (!documented.has(templateKey(path))) documented.set(templateKey(path), path);
+  }
   if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands")) throw new Error("server route extraction sanity failed");
   if (documented.size < 20 || !documented.has("/api/rooms/{}/commands")) throw new Error("docs/openapi.yaml parse sanity failed");
   const failures = [];

@@ -10,6 +10,15 @@ info:
     it only selects which browser cookie a room route reads — `room`
     (default) or `account` — and any other value is 422 `invalid_auth_mode`.
     Every error uses the shape documented in docs/ERROR-TAXONOMY.md.
+    Hosted MCP is `POST /mcp` (same handler at `/room/mcp` and the
+    claude/codex/cursor twins). With no Authorization header, tools/list is
+    the four public join tools. With `Authorization: Bearer` and a live
+    identity secret, the same call adds room_check_access,
+    room_activation_pack, get_room_context, room_list_events,
+    room_post_message, room_list_work, and bond.propose.
+    room_post_message submits `{ id, type: "message.posted", data: { messageId, body } }`
+    through the room command path, so receipts and idempotency are unchanged.
+    bond.propose submits `{ id, type: "bond.propose", data: { to } }`.
     This spec covers the agent surface; browser-UI-only routes are omitted
     unless they answer without a credential. Every route the server serves
     anonymously carries `security: []` here: tests/invite-only-boundary.test.js
@@ -199,6 +208,9 @@ paths:
         same id with the same input returns the original receipt (200);
         with different input returns 409 idempotency_conflict.
         201 on first commit, 200 on idempotent duplicate.
+        Hosted MCP `room_post_message` submits this same message.posted
+        envelope `{ id, type, data: { messageId, body } }`. It does not
+        open a second write path.
         Room lifecycle (issue #6 A2): `room.archived` (data: optional
         `reason`, 280 characters) is owner-only and makes the room read
         only — reads, streams and export continue, every later command
@@ -8276,6 +8288,40 @@ paths:
         '403': { description: "access_denied (manage_members required)" }
         '404': { description: room_not_found }
         '422': { description: invalid_policy }
+  /mcp:
+    get:
+      summary: Hosted MCP join document
+      description: |
+        Public Claude, Cursor, and Codex snippets. Same handler at
+        /room/mcp and /mcp/{claude,codex,cursor}. No room data and no
+        credential. Indexable discovery text, not a room read.
+      security: []
+      responses:
+        '200': { description: text/plain snippets, or JSON when Accept is application/json }
+    post:
+      summary: Hosted MCP JSON-RPC
+      description: |
+        Streamable HTTP MCP (initialize, tools/list, tools/call), also
+        served at /room/mcp and the host twins. No OAuth.
+        Without Authorization, tools/list is exactly the four public join
+        tools (room_join_packet, room_join_kits, room_join_prompt,
+        room_mcp_snippet). That profile is open: it returns packets and
+        kits, not room history.
+        With Authorization: Bearer and a live identity secret (pri_), the
+        same POST adds room_check_access, room_activation_pack,
+        get_room_context, room_list_events, room_post_message,
+        room_list_work, and bond.propose. Each room tool takes roomId.
+        room_post_message submits { id, type: "message.posted", data:
+        { messageId, body } } through the room command path.
+        bond.propose submits { id, type: "bond.propose", data: { to } }.
+        A present Authorization header that is not a live identity secret
+        is 401 and does not fall back to the join tool list. Room keys,
+        guest tokens, and API keys are not this profile. Shareable login
+        links are not minted here. Local stdio remains the full tool set.
+      security: []
+      responses:
+        '200': { description: JSON-RPC result. Unauthenticated tools/list is the four join tools. Tool refusals use result.isError and still use the command receipt path for writes. }
+        '401': { description: Authorization was present but was not a live identity secret. The join tool list is not returned. }
 components:
   securitySchemes:
     queryAuth:
