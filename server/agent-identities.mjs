@@ -243,6 +243,10 @@ export class AgentIdentities {
   // Conditional on the exact legacy value just verified, so a concurrent
   // rotate/revoke that lands first wins and is never clobbered.
   upgradeLegacyHash(identityId, secret) {
+    // Legacy credentials remain valid on read-only paths. Defer this
+    // opportunistic migration until a later write-capable authentication;
+    // no success on a read requires changing persisted authentication state.
+    if (this.store.readOnly || this.store.readTransactionDepth > 0) return;
     const [v2, legacy] = hashCandidates(secret);
     this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
       .run(v2, identityId, legacy);

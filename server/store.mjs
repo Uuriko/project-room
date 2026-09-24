@@ -1383,8 +1383,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   readTransaction(fn) {
     const outermost = !this.db.isTransaction;
+    // Shared across storage platforms: opportunistic auth migrations must
+    // not turn a read into a write (including nested read transactions).
+    this.readTransactionDepth = (this.readTransactionDepth ?? 0) + 1;
     try { return this.storagePlatform.transaction(this.db, fn, true); }
     catch (error) { throw this.storageFailure(error, outermost); }
+    finally { this.readTransactionDepth -= 1; }
   }
   // Maps one storage failure to the typed refusal and counts it. Only the
   // outermost transaction counts, so one nested failure is one refusal;

@@ -631,3 +631,31 @@ test("legacy sha256 identity hashes upgrade to v2 scrypt on successful verificat
   // A wrong secret still fails and does not trigger an upgrade.
   assert.equal(store.identities.resolveGlobalIdentitySecret(secret.slice(0, -1) + (secret.endsWith("A") ? "B" : "A")), null);
 });
+
+test("legacy identity first reads authenticate without writing or degrading storage", async t => {
+  const { store, ownerCommons } = await serve(t);
+  const { createHash } = await import("node:crypto");
+  const identity = store.identities.create("Legacy Reader");
+  store.identities.link(ownerCommons, "commons", { identityId: identity.identityId, permissions: [] });
+  const legacy = createHash("sha256").update(identity.secret).digest("hex");
+  store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identity.identityId);
+  const storedHash = () => store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identity.identityId).secret_hash;
+  const changes = store.db.prepare("SELECT total_changes() AS n").get().n;
+  assert.equal(store.snapshot(identity.secret, "commons").viewerId, identity.identityId);
+  store.readTransaction(() => store.readTransaction(() => {
+    assert.equal(store.identities.authenticateIdentitySecret(identity.identityId, identity.secret).identityId, identity.identityId);
+    assert.equal(store.identities.resolveGlobalIdentitySecret(identity.secret).identityId, identity.identityId);
+  }));
+  assert.equal(storedHash(), legacy, "read transactions defer hash migration");
+  assert.equal(store.db.prepare("SELECT total_changes() AS n").get().n, changes, "no persistent side effects");
+  assert.equal(store.readTransactionDepth, 0);
+  assert.equal(store.storageStatus().failures, 0);
+  // Exceptions restore the depth too; subsequent writable authentication
+  // still upgrades the verified secret, preserving the existing migration.
+  assert.throws(() => store.readTransaction(() => { throw new Error("read failed"); }), /read failed/);
+  assert.equal(store.readTransactionDepth, 0);
+  store.identities.authenticateIdentitySecret(identity.identityId, identity.secret);
+  assert.match(storedHash(), /^v2:[a-f0-9]{64}$/);
+  store.identities.revoke(identity.identityId, identity.secret);
+  assert.throws(() => store.snapshot(identity.secret, "commons"), error => error.status === 401);
+});
