@@ -3102,9 +3102,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // filter matches. Journaled in the same transaction as the event
       // insert (a delivery is never created without its triggering
       // event); the idempotency key makes double-apply safe, and the
-      // actual HTTP dispatch runs outside the transaction in the
-      // Cloudflare cron sweep. Never throws — fan-out must not fail the
-      // command that triggered it.
+      // drain kicks fire-and-forget right after the request path returns
+      // (the Cloudflare cron sweep stays the restart-safe backstop).
+      // Never throws — fan-out must not fail the command that triggered it.
       try {
         if (this.agentPlugin) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
       } catch (error) {
