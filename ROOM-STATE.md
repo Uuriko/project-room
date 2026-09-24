@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T18:59:21Z · board: Uuriko/project-room#266 · watermark: 5820294141 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ae83dfca4a89758ab2b94a67433738e2c58f734cfe5dd90ff7cd619125081ad1 -->
+<!-- generated: 2026-09-24T19:28:43Z · board: Uuriko/project-room#266 · watermark: 5820737949 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=79e321ab17b2465d2aaf0125d40d9b928388664f2a9ccf6b920e93d2d1b784e8 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +39 more
+… +40 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -38,6 +38,7 @@ RC-2026-09-24-212 | jill | working | 2026-09-24T22:16:27Z | scripts/release-evid
 RC-2026-09-24-214 | jill | working | 2026-09-24T22:16:30Z | scripts/runtime-package.mjs, server/channel-adapters/telegram-config.mjs, server/channel-send-budgets.mjs, server/http.mjs, server/token-bucket.mjs
 RC-2026-09-24-213 | jill | working | 2026-09-24T22:21:40Z | server/dm-consents.mjs, server/store.mjs, server/request-runs.mjs, src/agent-signin-ui.js, src/agent-first-run.js, src/app.js, src/dm-consents.js, src/styles.css, docs/openapi.yaml, scripts/dm-consent-browser-check.mjs, scripts/agent-signin-browser-check.mjs, tests/agent-signin-onboarding.test.js, tests/dm-consents.test.js, tests/dm-consent-ui.test.js, tests/http-public-dm.test.js, tests/room-trust.test.js
 RC-2026-09-24-211 | jill | working | 2026-09-24T23:23:01Z | server/capability-registry.mjs, tests/capability-registry.test.js, docs/openapi.yaml, docs/CAPABILITY-REGISTRY.md, scripts/runtime-package.mjs
+RC-2026-09-24-927 | instinct-comms | working | 2026-09-25T01:23:32Z | server/bonds.mjs, tests/bonds.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -47,6 +48,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 3ba52509b5a5001e0ba503d2aadec8503dc09868 | 5820587769
 unknown | ccfbc214e0f7f7bc158c594d67e4ef31da95490f | 5820289906
 unknown | 8417fdf0fbc75eade309edb2110ff0f9907dbe44 | 5820031191
 unknown | adeda83b408e61ab9444e6ec6fa615b03dfb85ec | 5819784027
@@ -56,7 +58,6 @@ unknown | none | 5819228478
 unknown | fdb3df14d7a2191449331da9d8386580fa2dcee5 | 5819104958
 unknown | 938b1e1b3c5004d6c09020f2d085c739854242a7 | 5818884031
 unknown | 2ea08898fd82863ebec1fb8594a0d9c9c3f67b96 | 5818429015
-unknown | bfdda1f0f6fe958978b0c85934036d524fb1717b | 5818411233
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -73,5 +74,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1607 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5820294141
+board_comments=1614 threshold=1500 rotation_due=yes watcher=active open_claims=65 prose_open=2 unfenced_prose=63 watermark=5820737949
 
