@@ -104,11 +104,16 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   }, "DurableObjectNamespace");
   const pending = [];
   const warnings = [];
+  const errors = [];
   const original = console.warn;
+  const originalError = console.error;
   console.warn = (...args) => { warnings.push(args.join(" ")); };
+  console.error = (...args) => { errors.push(args.join(" ")); };
+  // #992: the room instance is paused, so the two drain jobs throw.
+  // runCronJobs warns and continues; scheduled() records the tick (that
+  // write fails because paused startup must not open storage), then
+  // rejects so Cron Events show channel-drain and webhook-dispatch.
   try {
-    // #992: a failing job is recorded in the heartbeat and then rethrown so
-    // the scheduled event reports an exception instead of a silent "ok".
     await assert.rejects(worker.scheduled({ cron: "* * * * *" }, {
       ROOM_MAINTENANCE: "0",
       ROOM_ORIGIN: "https://room.example.test",
@@ -117,6 +122,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     await Promise.all(pending);
   } finally {
     console.warn = original;
+    console.error = originalError;
   }
   assert.deepEqual(names, ["invite-only-pilot"]);
   assert.deepEqual(invoked, [
@@ -132,6 +138,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "[webhook-dispatch"
   ]);
   assert.ok(warnings.every(line => /Room paused/.test(line)), warnings.join("\n"));
+  assert.deepEqual(errors, ["[job-heartbeat] record failed: paused startup must not open storage"]);
   assert.throws(() => stub.notARealCronMethod(), /does not implement the method "notARealCronMethod"/);
   assert.equal((await stub.syncGmailMailboxes()).completed, 0);
 });
