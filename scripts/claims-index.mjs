@@ -209,8 +209,12 @@ function validateClaim(block) {
   if (!lease) errs.push("missing lease");
   else {
     const m = lease.match(LEASE_RE);
-    if (!m) errs.push("lease must be lease=<N>h");
-    else if (+m[1] < 1 || +m[1] > 72) errs.push("lease out of range 1-72h");
+    if (!m) {
+      const bare = lease.match(/^([0-9]+)h$/);
+      errs.push(bare
+        ? `lease must be lease=<N>h (1-72h); did you mean lease=${bare[1]}h?`
+        : "lease must be lease=<N>h (1-72h)");
+    } else if (+m[1] < 1 || +m[1] > 72) errs.push("lease out of range 1-72h");
   }
   const state = block.state || "";
   if (!state) errs.push("missing state");
