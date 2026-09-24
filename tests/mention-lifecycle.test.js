@@ -134,12 +134,16 @@ test("ack: member-only, idempotent, 403 for another member's row, 404 for none",
 
 // --- Store: auto-response ---------------------------------------------------
 
-test("a later post by the mentioned member implies responded", t => {
+test("a reply to the mentioning message implies responded; an unrelated post does not", t => {
   const f = setup(t);
   const eventId = post(f, "owner", "@alice your turn");
+  const other = post(f, "owner", "@alice and this one");
   assert.equal(f.store.mentionView("commons", eventId, "alice").state, "delivered");
-  post(f, "alice", "on it");
+  post(f, "alice", "I'm online");
+  assert.equal(f.store.mentionView("commons", eventId, "alice").state, "delivered", "an unrelated post answers nothing");
+  f.send("alice", T.MESSAGE_POSTED, { body: "on it", replyToId: eventId }, randomUUID());
   assert.equal(f.store.mentionView("commons", eventId, "alice").state, "responded");
+  assert.equal(f.store.mentionView("commons", other, "alice").state, "delivered", "only the answered mention resolves");
   // Ack after responding is a no-op view of the terminal state.
   const view = f.store.acknowledgeMention(f.keys.alice, "commons", eventId, null);
   assert.equal(view.state, "responded");

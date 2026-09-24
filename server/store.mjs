@@ -51,11 +51,9 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIde
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
-import { extractMentions } from "./mentions.mjs"; // RC-2026-09-18-051: wake-on-mention.
-import { extractAgentMentions } from "./inbox-agent-routing.mjs"; // #658: mention lifecycle tracking (pure parser).
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, resolveMentionTarget, mentionStateSchema,
+  assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
@@ -481,8 +479,19 @@ export function validateCommand(command) {
 // to a DM (the sender's memberId goes back into toMemberId on the
 // message.posted command); assignments and routing mentions point at
 // their own read/resolve routes. An empty inbox says what it will carry.
-const inboxNext = (roomId, directMessages, assignments, mentions) => {
+const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = []) => {
   const steps = [];
+  if (directMentions.length > 0) {
+    const latest = directMentions[0];
+    steps.push(Object.freeze({
+      action: "reply-mention",
+      method: "POST",
+      path: `/api/rooms/${roomId}/commands`,
+      description: latest.private
+        ? `Answer the private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. Replying to that message marks the mention responded. Send your identity secret as the Bearer token.`
+        : `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. Replying to that message marks the mention responded; an unrelated post does not. Send your identity secret as the Bearer token.`,
+    }));
+  }
   if (directMessages.length > 0) {
     const latest = directMessages[0];
     steps.push(Object.freeze({
@@ -512,7 +521,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions) => {
   if (steps.length === 0) {
     steps.push(Object.freeze({
       action: "watch-inbox",
-      description: "Your inbox is empty. It will carry targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
+      description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted DMs addressed to you, work assignments, and open @agent routing mentions.",
     }));
   }
   return steps;
@@ -2850,7 +2859,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // member reads its own items only:
   //   - targeted DMs addressed to it (message.posted with toMemberId = me),
   //   - collab threads currently assigned to it,
-  //   - open @agent routing mentions naming it.
+  //   - open @agent routing mentions naming it,
+  //   - direct @mentions of it that are still waiting for an answer
+  //     (mention_states delivered/acknowledged/timed_out), with the message
+  //     text, so an agent that only polls its inbox never misses a question.
   // Additive and room-scoped; the human /api/inbox/* account-session gate
   // is untouched. The HTTP layer additionally requires agent membership
   // and, for API-key callers, the inbox:read scope.
@@ -2908,16 +2920,63 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
+      const directMentions = this.openDirectMentions(roomId, memberId, limit);
       return Object.freeze({
         agentId: memberId,
         roomId,
         directMessages: Object.freeze(directMessages),
         assignments: Object.freeze(assignments),
         mentions: Object.freeze(mentions),
-        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions)),
+        directMentions: Object.freeze(directMentions),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions)),
         dmRequests: Object.freeze(dmRequests),
       });
     });
+  }
+  // Direct @mentions of this member that nobody has answered yet, newest
+  // first, joined to the message that carried them. Pure read: expiry is
+  // derived from timeout_at here rather than flipped, because this runs
+  // inside a read-only transaction. A mention inside a private message is
+  // shown only to that message's two parties. A database from before the
+  // #658 schema has no mention_states table and simply has no mentions.
+  openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now()) {
+    let rows;
+    try {
+      rows = this.db.prepare(
+        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
+         ORDER BY e.sequence DESC LIMIT ?`
+      ).all(roomId, memberId, limit);
+    } catch (error) {
+      if (/no such table/i.test(error?.message ?? "")) return [];
+      throw error;
+    }
+    // timed_out is terminal, so a late reply does not flip the row. Once this
+    // member has replied to that message, it is no longer waiting in the inbox.
+    const answeredBy = new Map();
+    if (rows.some(row => row.state === "timed_out")) {
+      for (const message of this.room(roomId).state.messages ?? []) {
+        if (message.authorId === memberId && message.replyToId) answeredBy.set(message.replyToId, true);
+      }
+    }
+    return rows.map(row => ({ row, event: JSON.parse(row.body) }))
+      .filter(({ event }) => event?.type === T.MESSAGE_POSTED
+        && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
+      .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
+      .map(({ row, event }) => Object.freeze({
+        sequence: row.sequence,
+        eventId: row.eventId,
+        messageId: event.data.messageId ?? null,
+        replyToId: event.data.messageId ?? row.eventId,
+        from: event.actorId,
+        body: event.data.body,
+        at: event.at,
+        state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
+        channel: event.data.channelId ?? "general",
+        private: Boolean(event.data.toMemberId),
+        ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
+      }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
   // horizon, the cursor, the paged events, and the live projection at the same commit.
@@ -3091,21 +3150,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const members = state?.members ?? {};
     const targets = new Map(); // memberId -> "mention" | "dm"
-    let names = [];
-    try { names = extractMentions(typeof data.body === "string" ? data.body : ""); }
-    catch { names = []; }
-    const memberIdForName = name => {
-      const lower = name.toLowerCase();
-      for (const [memberId, member] of Object.entries(members)) {
-        if (!member || member.active === false || member.kind !== "agent" || memberId === senderMemberId) continue;
-        const display = typeof member.displayName === "string" ? member.displayName.toLowerCase() : "";
-        if (memberId.toLowerCase() === lower || (display !== "" && display === lower)) return memberId;
-      }
-      return null;
-    };
-    for (const name of names) {
-      const memberId = memberIdForName(name);
-      if (memberId && !targets.has(memberId)) targets.set(memberId, "mention");
+    // Whole display names, so a multi-word agent name ("@Claude (Cowork)")
+    // wakes its agent; the single-token parse only ever saw "@Claude".
+    const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
+    for (const memberId of resolveMentionTargetsInText(agents, {}, typeof data.body === "string" ? data.body : "", senderMemberId)) {
+      if (!targets.has(memberId)) targets.set(memberId, "mention");
     }
     const dm = typeof data.toMemberId === "string" ? members[data.toMemberId] : null;
     if (dm && dm.active !== false && dm.kind === "agent" && data.toMemberId !== senderMemberId
@@ -3123,22 +3172,33 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // #658: mention lifecycle tracking. Called inside command()'s transaction
   // for every message.posted. Two jobs:
-  //   1. A post by a mentioned member marks their pending (delivered or
-  //      acknowledged) mentions in this room responded — a reply is
-  //      stronger than a read, so it skips acknowledged.
+  //   1. A reply to one mention marks that mention responded. An unrelated
+  //      post leaves the others waiting. timed_out stays terminal; a late
+  //      reply only removes it from the waiting inbox.
   //   2. @names in the body resolve to room members (never the sender);
   //      each resolved member gets one delivered row for this message event.
   // Unresolved names get no row — never invent a recipient.
   trackMentions(roomId, state, senderMemberId, data, eventId) {
     const nowMs = this.now();
-    this.db.prepare(
-      `UPDATE mention_states SET state='responded', decided_at=?
-       WHERE room_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
-    ).run(nowMs, roomId, senderMemberId);
-    let names = [];
-    try { names = extractAgentMentions(typeof data.body === "string" ? data.body : ""); }
-    catch { names = []; }
-    if (names.length === 0) return;
+    const replyToId = typeof data.replyToId === "string" ? data.replyToId : "";
+    if (replyToId) {
+      const pending = this.db.prepare(
+        `SELECT m.message_event_id AS eventId, e.body
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
+      ).all(roomId, senderMemberId);
+      const answered = pending.find(row => {
+        let parsed = null;
+        try { parsed = JSON.parse(row.body); } catch { parsed = null; }
+        return (parsed?.data?.messageId || row.eventId) === replyToId;
+      });
+      if (answered) this.db.prepare(
+        `UPDATE mention_states SET state='responded', decided_at=?
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
+      ).run(nowMs, roomId, answered.eventId, senderMemberId);
+    }
+    const body = typeof data.body === "string" ? data.body : "";
+    if (!body.includes("@")) return;
     const members = state?.members ?? {};
     let identityNames = {};
     try {
@@ -3153,11 +3213,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       `INSERT OR IGNORE INTO mention_states
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
-    const seen = new Set();
-    for (const name of names) {
-      const memberId = resolveMentionTarget(members, identityNames, name, senderMemberId);
-      if (!memberId || seen.has(memberId)) continue;
-      seen.add(memberId);
+    for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
   }
