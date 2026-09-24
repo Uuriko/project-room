@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T00:29:10Z · board: Uuriko/project-room#266 · watermark: 5805172361 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=87961da8b5189ea184fdfe193227d2c608139066e500cf951144bb069ffe5331 -->
+<!-- generated: 2026-09-24T00:59:58Z · board: Uuriko/project-room#266 · watermark: 5805540410 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=b7a19ff70f806c065908cba82e07e40e281a351acac53bbd69e432575eff6159 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,12 +28,13 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +33 more
+… +32 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-23-104 | jill | working | 2026-09-24T00:37:18Z | scripts/claims-index.mjs, tests/claims-index.test.js
 RC-2026-09-23-954 | instinct-comms | working | 2026-09-24T05:40:31Z | server/web-fetch.mjs, tests/web-fetch-ssrf-hardening.test.js
+RC-2026-09-23-105 | jill | working | 2026-09-24T06:43:40Z | deploy/agent-discovery.mjs, deploy/agent-card-key.mjs, deploy/agent-card-signed.mjs, scripts/sign-agent-card.mjs, scripts/runtime-package.mjs, scripts/candidate-runtime-fixture.mjs, tests/agent-card-wellknown.test.js, tests/agent-discovery.test.js, docs/AGENT-CARD-CUSTODY.md, cloudflare/wrangler.jsonc, cloudflare/http.check.mjs
+RC-2026-09-23-100 | jill | working | 2026-09-24T06:43:52Z | server/guest-agent-links.mjs, docs/GUEST-AGENT-LINKS.md, tests/guest-invite-flow.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -43,6 +44,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-23-103 | none | 5805539631
+RC-2026 | none | 5805464939
 RC-2026 | none | 5805172361
 RC-2026 | none | 5805162286
 RC-2026 | none | 5804876444
@@ -51,8 +54,6 @@ RC-2026 | none | 5804279456
 RC-2026 | none | 5803928175
 RC-2026 | none | 5803709894
 RC-2026-09-23-106 | none | 5801273424
-unknown | none | 5784251909
-RC-2026 | none | 5755674732
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -69,5 +70,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1377 threshold=1500 rotation_due=no watcher=active open_claims=58 prose_open=2 unfenced_prose=62 watermark=5805172361
+board_comments=1390 threshold=1500 rotation_due=no watcher=active open_claims=57 prose_open=2 unfenced_prose=62 watermark=5805540410
 
