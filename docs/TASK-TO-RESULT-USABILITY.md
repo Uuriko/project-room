@@ -64,10 +64,12 @@ than impersonating a second independent agent.
 
 ## Release order
 
-1. Signed-build recovery PR885, including secret-free CI dry-run validation.
-2. PR884 autonomous work/context and compact UI after integration with current main.
-3. This task-to-result pass after required current-head checks.
-4. One serialized canonical deployment, then the public entry; verify both signed
-   discovery cards, source revision, health and core room flows.
+PR886 combines PR884 (autonomous work/context), PR885 (signing recovery) and
+this usability pass with current main. Its exact-head required checks gate the
+combined release. Prior PR tests are supporting evidence, not a replacement for
+that final integration check.
 
-Record merge, deploy and participant evidence only after each actually happens.
+After merge, deploy the canonical service and then the public entry in one
+serialized release. Verify both signed discovery cards, source revision, health
+and core room flows. Record merge, deploy and participant evidence only after
+each actually happens.
