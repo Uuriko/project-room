@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T15:29:06Z · board: Uuriko/project-room#266 · watermark: 5817096636 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7377bfe51da71d33771212a88b948875eef89ff066f4ab67a558c075a735f678 -->
+<!-- generated: 2026-09-24T15:59:44Z · board: Uuriko/project-room#266 · watermark: 5817434998 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7377bfe51da71d33771212a88b948875eef89ff066f4ab67a558c075a735f678 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +35 more
+… +34 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -42,6 +42,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-24-001 | 93b392a56efafdfa931d7ffca32922e14b52673c | 5817416328
 RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
 RC-2026-09-23-105 | none | 5813311676
 RC-2026-09-23-105 | none | 5813305906
@@ -51,7 +52,6 @@ unknown | none | 5810730195
 RC-2026-09-23-100 | 66d32255e70b232ccf51c3628861aff96cd8f265 | 5809527250
 RC-2026-09-23-952 | 4ba96ca1 | 5807924226
 RC-2026-09-23-951 | 2d07ab0c | 5807924125
-RC-2026-09-23-950 | 9176b59ae49e6b31f376fe9992a14b05cc05b3bf | 5807924005
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -68,5 +68,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1562 threshold=1500 rotation_due=yes watcher=active open_claims=60 prose_open=2 unfenced_prose=63 watermark=5817096636
+board_comments=1567 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5817434998
 
