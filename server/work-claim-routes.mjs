@@ -1,10 +1,12 @@
-// Work-claim HTTP routes (task RC-2026-09-18-041).
+// Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
 // Room-scoped handlers mounted by server/http.mjs inside the authenticated
 // room block, after the shared credential, fence and rate-limit checks — the
-// same mounting pattern as server/inbox-collab-routes.mjs. All operations
-// live under /api/rooms/{roomId}/work-claims/* and are documented in
-// docs/openapi.yaml (the route-docs gate requires it).
+// same mounting pattern as server/inbox-collab-routes.mjs. Claim operations
+// live under /api/rooms/{roomId}/work-claims/*; the receipts search surface
+// (done work items projected as receipts) lives at
+// /api/rooms/{roomId}/receipts. All are documented in docs/openapi.yaml
+// (the route-docs gate requires it).
 //
 // Identity: the caller is the authenticated room member (auth.member.id).
 // Claim/update/release/reassign are owner-gated by the pure state machine;
@@ -32,7 +34,7 @@
 // path — never wrapped, so no internal detail leaks.
 import {
   createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
-  roomWorkClaimConfig, ClaimError, REVIEW_POLICIES,
+  roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
@@ -111,6 +113,71 @@ const runPure = (reject, fn) => {
   }
 };
 
+// Receipts (RC-2026-09-24-205): the "what has this room already solved"
+// surface. Done work items projected as receipts — `receiptId` is the
+// stable projection `"rc_" + workItemId` — searchable by exact tag (AND)
+// and case-insensitive substring over title + history notes. Summaries +
+// blob pointers only; full bodies stay on the existing work-item read
+// route. Sorted most-recently-completed first, offset-paginated with an
+// opaque base64url cursor.
+const RECEIPT_QUERY_PARAMS = ["q", "tag", "limit", "cursor"];
+const RECEIPTS_DEFAULT_LIMIT = 20;
+const RECEIPTS_MAX_LIMIT = 50;
+const RECEIPT_SUMMARY_CHARS = 240;
+const RECEIPT_MAX_Q = 500;
+
+// The done transition stamps action "state:done" (see withHistory in
+// server/work-claims.mjs); its `at` is the completion timestamp and its
+// `note` is the completion note. Done is immutable, so there is exactly one.
+const doneStampOf = item => [...item.history].reverse().find(entry => entry.action === "state:done") ?? null;
+const doneAtMsOf = item => { const stamp = doneStampOf(item); return stamp ? Date.parse(stamp.at) : 0; };
+
+const receiptOf = item => {
+  const stamp = doneStampOf(item);
+  const note = stamp?.note;
+  const text = typeof note === "string" && note.trim().length > 0 ? note : (item.title ?? item.id);
+  return Object.freeze({
+    receiptId: `rc_${item.id}`,
+    workItemId: item.id,
+    tags: Object.freeze([...(item.tags ?? [])]),
+    summary: text.slice(0, RECEIPT_SUMMARY_CHARS),
+    createdBy: item.owner,
+    createdAt: doneAtMsOf(item),
+    blobs: Object.freeze([...(item.blobs ?? [])]),
+  });
+};
+
+const receiptsQueryOf = (reject, params) => {
+  if ([...params.keys()].some(key => !RECEIPT_QUERY_PARAMS.includes(key))) {
+    reject(422, "invalid_receipt_query", "q, tag, limit and cursor are the accepted query parameters");
+  }
+  for (const key of ["q", "limit", "cursor"]) {
+    if (params.getAll(key).length > 1) reject(422, "invalid_receipt_query", `${key} must appear at most once`);
+  }
+  const q = params.get("q");
+  if (q !== null && q.length > RECEIPT_MAX_Q) reject(422, "invalid_receipt_query", `q must be at most ${RECEIPT_MAX_Q} characters`);
+  const tags = params.getAll("tag");
+  for (const tag of tags) {
+    if (!isReceiptTag(tag)) reject(422, "invalid_receipt_query", `tag "${tag}" must match [A-Za-z0-9_-]{1,32}`);
+  }
+  const limitParam = params.get("limit");
+  const limit = limitParam === null ? RECEIPTS_DEFAULT_LIMIT : Number(limitParam);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > RECEIPTS_MAX_LIMIT) {
+    reject(422, "invalid_receipt_query", `limit must be 1..${RECEIPTS_MAX_LIMIT}`);
+  }
+  return { q, tags, limit, cursor: params.get("cursor") };
+};
+
+const cursorEncode = offset => Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
+const cursorDecode = (reject, value) => {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      && Number.isSafeInteger(parsed.offset) && parsed.offset >= 0) return parsed.offset;
+  } catch { /* fall through to the rejection below */ }
+  reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
+};
+
 export async function handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry = defaultRegistry }) {
   const { json, reject, body } = helpers;
   const nowMs = Date.now();
@@ -130,6 +197,39 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
 
   if (workClaimRoute === "list" && req.method === "GET") {
     return json(res, 200, { roomId, swept: sweptIds, claims: registry.list(roomId) });
+  }
+  if (workClaimRoute === "receipts" && req.method === "GET") {
+    // RC-2026-09-24-205: receipts search. The room block already rejected
+    // unauthenticated callers (401); this names the member contract —
+    // authenticated non-members get 403 not_member. Reads stay open to
+    // guest agents, like every other GET on this family.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = members[caller];
+    if (!member || member.active === false) {
+      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
+    }
+    const { q, tags, limit, cursor } = receiptsQueryOf(reject, url.searchParams);
+    const offset = cursor === null ? 0 : cursorDecode(reject, cursor);
+    const needle = q === null ? null : q.toLowerCase();
+    const matches = item => {
+      if (tags.length > 0 && !tags.every(tag => (item.tags ?? []).includes(tag))) return false;
+      if (needle !== null) {
+        const haystack = [item.title ?? "", ...item.history.map(entry => entry.note ?? "")]
+          .join("\n").toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
+    };
+    const ranked = registry.list(roomId)
+      .filter(item => item.state === "done")
+      .filter(matches)
+      .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const page = ranked.slice(offset, offset + limit);
+    const nextOffset = offset + limit;
+    return json(res, 200, {
+      receipts: page.map(receiptOf),
+      nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
+    });
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     const data = await body(req);
@@ -166,11 +266,11 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = await body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?}");
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note }, { now: nowMs }));
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags }, { now: nowMs }));
     registry.set(roomId, item);
     return json(res, 201, item);
   }
@@ -188,7 +288,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = await body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
@@ -226,7 +326,8 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
       }
     }
     const updated = runPure(reject, () => updateWork(item, caller,
-      { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy, now: nowMs }));
+      { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
+        tags: data.tags, blobs: data.blobs, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging

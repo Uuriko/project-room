@@ -21,6 +21,12 @@
 // { result, merged, production } — how the work was delivered — persisted on
 // the item and stamped into history.
 //
+// Receipt tags and blobs (RC-2026-09-24-205): the done transition also
+// accepts free-form { tags } (labels that converge from real use, no fixed
+// taxonomy) and { blobs } (sha256:<hex> content pointers for evidence).
+// Both are recorded on the item and frozen with the done state; the
+// GET /api/rooms/{roomId}/receipts route searches them.
+//
 // Review policies: work items (or the room config) carry reviewPolicy in
 // { self_attested, distinct_member, independent_principal }. canCloseWork
 // enforces the policy for the done transition: self_attested lets the
@@ -46,6 +52,30 @@ const TRANSITIONS = {
 };
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
+// Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
+// completed — no fixed taxonomy; tags converge from real use. Blob pointers
+// are content-addressed evidence references (sha256:<64 hex>).
+const TAG_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+const BLOB_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const MAX_RECEIPT_TAGS = 10;
+const MAX_RECEIPT_BLOBS = 10;
+const tagsOf = value => {
+  check(Array.isArray(value), "tags must be an array");
+  check(value.length <= MAX_RECEIPT_TAGS, `tags must hold at most ${MAX_RECEIPT_TAGS} tags`);
+  value.forEach(tag => check(typeof tag === "string" && TAG_PATTERN.test(tag),
+    "each tag must be 1..32 characters matching [A-Za-z0-9_-]"));
+  return Object.freeze([...value]);
+};
+const blobsOf = value => {
+  check(Array.isArray(value), "blobs must be an array");
+  check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
+  value.forEach(blob => check(typeof blob === "string" && BLOB_PATTERN.test(blob),
+    "each blob must match sha256:<64 lowercase hex characters>"));
+  return Object.freeze([...value]);
+};
+// Predicate for query-time tag filters (the route validates `tag=` params
+// against the same shape stored tags must have).
+export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
 const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 720;
 const DEFAULT_REVIEW_POLICY = "self_attested";
@@ -85,11 +115,14 @@ const workOf = value => {
   if (value.reviewPolicy !== undefined && value.reviewPolicy !== null) check(REVIEW_POLICIES.includes(value.reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   if (value.reviewedBy !== undefined && value.reviewedBy !== null) check(typeof value.reviewedBy === "string" && value.reviewedBy.length > 0 && value.reviewedBy.length <= 128, "reviewedBy must be 1..128 characters");
   const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
+  const tags = value.tags === undefined || value.tags === null ? Object.freeze([]) : tagsOf(value.tags);
+  const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     claimedAt: value.claimedAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
-    reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations) };
+    reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
+    tags, blobs };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -114,14 +147,18 @@ const leaseHoursOf = value => {
 };
 // Create a work item (unclaimed). Items usually enter the registry here;
 // claiming an unknown id is refused so claims always reference real work.
-export function createWork({ id, title, reviewPolicy, note } = {}, { now } = {}) {
+// `tags` may be supplied up front (free-form, recorded on the item); blobs
+// are evidence pointers and are only recorded on the done transition.
+export function createWork({ id, title, reviewPolicy, note, tags } = {}, { now } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
     claimedAt: null, leaseExpiresAt: null, deliveryMode: null,
-    reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]) };
+    reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
+    tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
+    blobs: Object.freeze([]) };
   return withHistory(item, atMs, "system", "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
@@ -138,9 +175,13 @@ export function claimWork(work, agentId, { note, leaseHours, room, now } = {}) {
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
 // Update claimed work: move state or add a note. Only the owner may update.
-// The done transition accepts deliveryMode (how the work was delivered) and
-// reviewedBy (the attesting member, per the item's review policy).
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, now } = {}) {
+// The done transition accepts deliveryMode (how the work was delivered),
+// reviewedBy (the attesting member, per the item's review policy), tags
+// (free-form receipt labels) and blobs (sha256 evidence pointers) — all
+// four are recorded on the item and then frozen with the done state. tags
+// and blobs are only meaningful on the done transition and are refused
+// anywhere else.
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
@@ -156,6 +197,14 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     check(state === "done", "reviewedBy is only recorded on the done transition");
     agentOf(reviewedBy);
   }
+  if (tags !== undefined && tags !== null) {
+    check(state === "done", "tags are only recorded on the done transition");
+    tagsOf(tags);
+  }
+  if (blobs !== undefined && blobs !== null) {
+    check(state === "done", "blobs are only recorded on the done transition");
+    blobsOf(blobs);
+  }
   const released = state === "unclaimed";
   const next = state === undefined ? item : { ...item, state,
     owner: released ? null : item.owner,
@@ -164,7 +213,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // lapsed owner's round of work, never to whoever claims next
     attestations: released ? Object.freeze([]) : item.attestations,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
-    reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy };
+    reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
+    tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
+    blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
 // Record a review attestation from the caller's own authenticated session.

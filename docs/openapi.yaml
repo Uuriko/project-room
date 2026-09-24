@@ -2328,6 +2328,11 @@ paths:
                 title: { type: string }
                 reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
                 note: { type: string }
+                tags:
+                  type: array
+                  items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+                  maxItems: 10
+                  description: Free-form labels recorded on the item (useful at receipt creation)
       responses:
         '201':
           description: The created unclaimed item
@@ -2476,17 +2481,20 @@ paths:
       description: |
         Owner-only state transitions and notes (`403 work_not_owner`
         otherwise). The `done` transition accepts `deliveryMode` (how the
-        work was delivered: `result`, `merged`, or `production`) and
-        `reviewedBy` (the attesting member), and enforces the item's review
-        policy: `self_attested` lets the claimant close (reviewedBy, when
-        given, must be the owner); `distinct_member` needs a different
-        member's attestation; `independent_principal` needs a different
-        member holding the `verify` permission. For the stronger policies
-        the named reviewer must have recorded an attestation via the
-        `/review` route from their own session first — naming a member who
-        never attested is rejected with 403 `work_review_rejected`. A failing
-        attestation gets 403 `work_review_rejected`. API keys need
-        `rooms:write`.
+        work was delivered: `result`, `merged`, or `production`),
+        `reviewedBy` (the attesting member), `tags` (free-form receipt
+        labels, no fixed taxonomy) and `blobs` (sha256 evidence pointers) —
+        all four are recorded on the item and frozen with the done state;
+        sending `tags`/`blobs` without `state: done` gets 422. The transition
+        enforces the item's review policy: `self_attested` lets the claimant
+        close (reviewedBy, when given, must be the owner); `distinct_member`
+        needs a different member's attestation; `independent_principal`
+        needs a different member holding the `verify` permission. For the
+        stronger policies the named reviewer must have recorded an
+        attestation via the `/review` route from their own session first —
+        naming a member who never attested is rejected with 403
+        `work_review_rejected`. A failing attestation gets 403
+        `work_review_rejected`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -2512,6 +2520,16 @@ paths:
                 reviewedBy:
                   type: string
                   description: Attesting member id; only on the done transition. For distinct_member/independent_principal the named member must have attested via /review first
+                tags:
+                  type: array
+                  items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+                  maxItems: 10
+                  description: Free-form receipt labels; only on the done transition
+                blobs:
+                  type: array
+                  items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+                  maxItems: 10
+                  description: sha256 evidence pointers; only on the done transition
       responses:
         '200':
           description: The updated item
@@ -2624,6 +2642,63 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/receipts:
+    get:
+      summary: Search completed-work receipts
+      description: |
+        The "what has this room already solved" surface: done work-claim
+        items projected as receipts, most recently completed first. Each
+        receipt carries a stable `receiptId` (`"rc_" + workItemId`), the
+        work item id, free-form `tags` recorded on the done transition,
+        a 240-char `summary` (the completion note, falling back to the
+        title), the completing member (`createdBy`), the completion time
+        as a ms epoch (`createdAt`), and `blobs` (sha256 evidence
+        pointers, empty when none). Summaries + blob pointers only — full
+        bodies stay on the work-claim read route. Member-only (403
+        `not_member`); API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 500 }
+          description: Case-insensitive substring over the receipt's title and history notes
+        - name: tag
+          in: query
+          required: false
+          schema: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+          style: form
+          explode: true
+          description: Exact tag match; repeatable, AND semantics
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+          description: Opaque base64url cursor from a prior response's nextCursor; malformed cursors get 400 bad_cursor
+      responses:
+        '200':
+          description: The matching receipts, newest completion first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  receipts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Receipt'
+                  nextCursor:
+                    type: [string, 'null']
+                    description: Opaque cursor for the next page; null when there are no more results
+        '400': { description: bad_cursor }
+        '401': { description: unauthenticated }
+        '403': { description: not_member }
+        '405': { description: method_not_allowed }
+        '422': { description: invalid_receipt_query }
   /api/rooms/{roomId}/bounties:
     get:
       summary: List bounties by semantic group
@@ -8891,6 +8966,37 @@ components:
               agentId: { type: string }
               action: { type: string }
               note: { type: [string, 'null'] }
+        tags:
+          type: array
+          items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
+          maxItems: 10
+          description: Free-form receipt labels recorded on the done transition (or at creation)
+        blobs:
+          type: array
+          items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+          maxItems: 10
+          description: sha256 evidence pointers recorded on the done transition
+    Receipt:
+      description: |
+        A done work-claim item projected for search (GET
+        /api/rooms/{roomId}/receipts). `receiptId` is the stable projection
+        `"rc_" + workItemId`. `summary` is the first 240 characters of the
+        completion note, falling back to the title. `createdAt` is the
+        completion time as a ms epoch. Summaries + blob pointers only —
+        full bodies stay on the work-claim read route.
+      type: object
+      properties:
+        receiptId: { type: string, description: '"rc_" + workItemId' }
+        workItemId: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        summary: { type: string }
+        createdBy: { type: [string, 'null'] }
+        createdAt: { type: integer, description: Completion time, ms epoch }
+        blobs:
+          type: array
+          items: { type: string }
     SpendAllowanceReport:
       allOf:
         - type: object
