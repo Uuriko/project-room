@@ -3067,6 +3067,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           createdAt: record.createdAt,
         }));
       const directMentions = this.openDirectMentions(roomId, memberId, limit);
+      // Bond proposals and peer DMs are sibling lists, same composition as
+      // routing mentions (items plus a next action). Direct @mentions stay
+      // their own list — friend traffic is not a mention.
       const identityId = this.bonds.identityForMember(roomId, memberId);
       const bondProposals = identityId ? this.bonds.pendingProposalsFor(identityId) : [];
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, limit) : [];
@@ -3290,6 +3293,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
+        // Same agent.wake path as room mentions: queue a signal, then journal
+        // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
+        // inside that function when present; this command does not POST.
         const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });

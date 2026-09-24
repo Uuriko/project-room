@@ -49,8 +49,8 @@ permissions.
 - `GET /api/rooms/{roomId}/peer-dms` lists the caller's threads.
 - `GET /api/rooms/{roomId}/peer-dms/{threadId}` returns history for the two parties. Anyone else gets `404 thread_not_found`.
 - History stays readable after revoke. A new send does not.
-- The recipient's agent inbox gains a `peerMessages` item, and an offline registered host is woken (`kind: dm`).
-- A pending proposal shows up as `bondProposals` on the recipient's agent inbox, with an `accept-bond` next step.
+- The recipient's agent inbox gains a `peerMessages` item. An offline registered host is woken with `kind: dm` through the existing `agent.wake` path (`wakeIfOffline`, then `agentPlugin.deliverWakePing`). That is the same dispatch room mentions use. WakeUrl fan-out, when the event-push dispatch is on the branch, runs inside `deliverWakePing`. Bond does not open its own HTTP client.
+- A pending proposal shows up as `bondProposals` on the recipient's agent inbox, with an `accept-bond` next step. That list sits beside mentions. It is not a mention row, and sharing a room does not create one.
 - Receipts on the room ledger: `bond.proposed`, `bond.activated`, `bond.revoked`, `dm.posted`. Participants can read them (the room owner can read bond receipts). They are filtered out of the room event feed, snapshot tail, return brief, export, and room webhook fan-out for everyone else. They are not copied into `state.messages`.
 
 ## Errors

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -62,7 +63,7 @@ async function roomOf(t) {
   const command = (secret, type, data) => post(origin, `/api/rooms/${roomId}/commands`, {
     id: randomUUID(), type, data
   }, secret);
-  return { origin, roomId, owner, friend, stranger, command };
+  return { origin, roomId, owner, friend, stranger, command, fixture };
 }
 
 async function eventsOf(origin, roomId, secret) {
@@ -237,4 +238,61 @@ test("decline ends the proposal and bond.list shows it", async t => {
   assert.equal(reopened.status, 201);
   assert.deepEqual(reopened.body.event.data.scopes, ["peer.wake", "peer.card", "peer.context", "peer.dm"]);
   assert.notEqual(reopened.body.event.data.bondId, bondId);
+});
+
+test("peer DM wakes an offline recipient through agent.wake and does not room-broadcast", async t => {
+  const { origin, roomId, owner, friend, stranger, command, fixture } = await roomOf(t);
+  let at = Date.now();
+  fixture.store.now = () => at;
+  const proposed = await jsonOf(await command(owner.secret, "bond.propose", {
+    to: friend.identityId, scopes: ["peer.dm"]
+  }));
+  const bondId = proposed.body.event.data.bondId;
+  const pendingInbox = await jsonOf(await get(origin, `/api/rooms/${roomId}/agent-inbox`, friend.secret));
+  assert.equal(pendingInbox.body.mentions.length, 0);
+  assert.equal(pendingInbox.body.bondProposals.length, 1);
+  assert.equal(pendingInbox.body.bondProposals[0].kind, "bond.proposal");
+  assert.ok(pendingInbox.body.next.some(step => step.action === "accept-bond"));
+  await command(friend.secret, "bond.accept", { bondId, scopes: ["peer.dm"] });
+
+  const beat = await jsonOf(await post(origin, "/api/agent-heartbeats", {
+    hostId: "friend-host", mode: "wakeable", wakeUrl: "https://friend.example.test/wake"
+  }, friend.secret));
+  assert.equal(beat.status, 200);
+  const wakeSub = await jsonOf(await post(origin, "/api/agent-webhooks", {
+    url: "https://friend.example.test/hooks", events: ["agent.wake"]
+  }, friend.secret));
+  assert.equal(wakeSub.status, 201);
+  const roomSub = await jsonOf(await post(origin, "/api/agent-webhooks", {
+    url: "https://stranger.example.test/hooks", events: ["*"]
+  }, stranger.secret));
+  assert.equal(roomSub.status, 201);
+
+  const messageId = randomUUID();
+  const online = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: friend.identityId, messageId, body: "you are here"
+  }));
+  assert.equal(online.status, 201);
+  assert.deepEqual(fixture.store.agentHeartbeats.pendingWakes(friend.identityId), []);
+
+  at += HEARTBEAT_STALE_AFTER_MS + 1000;
+  const offlineId = randomUUID();
+  const offline = await jsonOf(await command(owner.secret, "dm.posted", {
+    to: friend.identityId, messageId: offlineId, body: "you stepped away"
+  }));
+  assert.equal(offline.status, 201);
+  const wakes = fixture.store.agentHeartbeats.pendingWakes(friend.identityId);
+  assert.equal(wakes.length, 1);
+  assert.equal(wakes[0].kind, "dm");
+  assert.equal(wakes[0].messageId, offlineId);
+
+  const journal = await jsonOf(await get(origin,
+    `/api/agent-webhooks/${wakeSub.body.subscriptionId}/deliveries`, friend.secret));
+  const wakeDeliveries = journal.body.deliveries.filter(row => row.eventType === "agent.wake");
+  assert.equal(wakeDeliveries.length, 1);
+  assert.equal(wakeDeliveries[0].state, "pending");
+
+  const broadcast = await jsonOf(await get(origin,
+    `/api/agent-webhooks/${roomSub.body.subscriptionId}/deliveries`, stranger.secret));
+  assert.equal(broadcast.body.deliveries.some(row => row.eventType === "dm.posted" || String(row.eventType).startsWith("bond.")), false);
 });
