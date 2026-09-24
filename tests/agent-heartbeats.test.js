@@ -245,8 +245,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
   const journal = f.store.agentPlugin.webhookJournalFor({ identityId: identity.identityId, subscriptionId: sub.subscriptionId });
   const wakeDeliveries = journal.filter(d => d.eventType === "agent.wake");
-  assert.equal(wakeDeliveries.length, 1, "the wake ping is journaled pending for the subscriber");
-  assert.equal(wakeDeliveries[0].state, "pending");
+  // Subscription URL + the registered wakeUrl (same ping, same sender).
+  assert.equal(wakeDeliveries.length, 2, "the wake ping is journaled pending for the subscriber and its wakeUrl");
+  assert.ok(wakeDeliveries.every(d => d.state === "pending"));
   assert.equal(wakeDeliveries[0].attempts, 0, "journal entries are secret-safe and carry no payload data");
   assert.equal(wakeDeliveries[0].data, undefined);
 
