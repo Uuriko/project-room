@@ -383,7 +383,7 @@ const shapes = {
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
   [T.CHANNEL_ARCHIVED]: "channelId",
-  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
+  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId labels",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
   [HELP_OFFER_OPENED]: `${work} offerId expectedHelpRevision helpEventId plan`,
@@ -453,7 +453,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1224,6 +1224,56 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
     }
   }
+  // RC-2026-09-23: stale-member listing for the zombie-member cleanup.
+  // Token-free and read-only: for the trusted local operator
+  // (scripts/room-hygiene.mjs member-sweep), like verifyInvitationAudit.
+  // Lists ACTIVE members whose last observed activity (last command `at`,
+  // work-session heartbeat, or member.added) is older than `days` (default
+  // 30), or never observed. Read-only: the operator reviews the list and
+  // deactivates via the owner path; nothing here writes.
+  staleMembers(roomId, { days = 30, now = null } = {}) {
+    return this.readTransaction(() => {
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const nowMs = now ?? this.now();
+      const cutoff = nowMs - days * 24 * 60 * 60 * 1000;
+      // Event `at` values are ISO strings; parse to ms for comparison.
+      const asMs = value => {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        if (typeof value === "string") { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : 0; }
+        return 0;
+      };
+      const heartbeats = new Map();
+      for (const item of Object.values(room.state.workItems ?? {})) {
+        const session = sessionRecord(item);
+        if (session.worker_member_id && session.heartbeat_at) {
+          const ms = asMs(session.heartbeat_at);
+          const prev = heartbeats.get(session.worker_member_id) ?? 0;
+          if (ms > prev) heartbeats.set(session.worker_member_id, ms);
+        }
+      }
+      const lastCommandAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? GROUP BY actor`
+      ).all(roomId).filter(row => row.actor).map(row => [row.actor, asMs(row.at)]));
+      const addedAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+      ).all(roomId).filter(row => row.member).map(row => [row.member, asMs(row.at)]));
+      const stale = [];
+      for (const [memberId, member] of Object.entries(members)) {
+        if (member.active === false) continue;
+        const lastSeenAt = Math.max(lastCommandAt.get(memberId) ?? 0, heartbeats.get(memberId) ?? 0, addedAt.get(memberId) ?? 0) || null;
+        if (lastSeenAt === null || lastSeenAt < cutoff) {
+          stale.push({ memberId, displayName: member.displayName ?? memberId, kind: member.kind ?? "unknown",
+            lastSeenAt, daysSinceSeen: lastSeenAt === null ? null : Math.floor((nowMs - lastSeenAt) / 86400000) });
+        }
+      }
+      stale.sort((a, b) => (a.lastSeenAt ?? 0) - (b.lastSeenAt ?? 0));
+      return { roomId, days, cutoff, now: nowMs, stale,
+        activeCount: Object.values(members).filter(m => m.active !== false).length };
+    });
+  }
   // Deterministic upgrade repair: persisted projections are not replayed on startup. Recover
   // proposers and authenticated completion reporters from their own authoritative envelopes,
   // then backfill verification independence only where explicit producer attribution proves it.
@@ -1376,8 +1426,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   readTransaction(fn) {
     const outermost = !this.db.isTransaction;
+    // Shared across storage platforms: opportunistic auth migrations must
+    // not turn a read into a write (including nested read transactions).
+    this.readTransactionDepth = (this.readTransactionDepth ?? 0) + 1;
     try { return this.storagePlatform.transaction(this.db, fn, true); }
     catch (error) { throw this.storageFailure(error, outermost); }
+    finally { this.readTransactionDepth -= 1; }
   }
   // Maps one storage failure to the typed refusal and counts it. Only the
   // outermost transaction counts, so one nested failure is one refusal;

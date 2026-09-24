@@ -723,6 +723,13 @@ export class RoomAgentClient {
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
   }
+  // Self-deactivation: the caller deactivates its own membership.
+  // memberId must be the caller's own member id; the server rejects anyone
+  // else with 403. The identity link is kept — only the membership goes inactive.
+  deactivateMembership({ signal } = {}) {
+    if (!this.#memberId) throw new Error("A pinned memberId is required to deactivate your own membership");
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/members/${encodeURIComponent(this.#memberId)}`, undefined, signal);
+  }
   // One-time agent invite codes. Issuance is owner, manage_members, or
   // invite_member (agents may hold invite_member without manage_members).
   // The raw code is shown once at creation and only its hash is stored.

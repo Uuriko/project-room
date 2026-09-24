@@ -447,9 +447,9 @@ test("identity secret is shown once: no read path returns it afterwards (RC-2026
   })).json();
   assert.ok(!JSON.stringify(list).includes(secret), "secret must not appear in the owner link audit");
   assert.ok(!/"secret"/.test(JSON.stringify(list)), "no secret field anywhere in the audit list");
-  // The database holds only the SHA-256 hash: the plaintext secret is unrecoverable server-side.
+  // The database holds only the v2 scrypt hash: the plaintext secret is unrecoverable server-side.
   const row = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
-  assert.ok(row && /^[a-f0-9]{64}$/.test(row.secret_hash), "only the hash is stored");
+  assert.ok(row && /^v2:[a-f0-9]{64}$/.test(row.secret_hash), "only the v2 hash is stored");
   assert.ok(!row.secret_hash.includes(secret.slice(4, 12)), "no plaintext fragment in the stored hash");
 });
 
@@ -602,4 +602,60 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
         { status: 200, headers: { "Content-Type": "application/json" } }) });
     await assert.rejects(() => unmarked.checkConnection(), /not linked to this room/);
   }
+});
+
+test("legacy sha256 identity hashes upgrade to v2 scrypt on successful verification (RC-2026-09-23)", async t => {
+  const { store, origin } = await serve(t);
+  const { createHash } = await import("node:crypto");
+  const { identityId, secret } = await createAgentIdentity(origin, "Legacy Bot");
+  // Simulate a pre-v2 row: downgrade the stored hash to bare sha256.
+  const legacy = createHash("sha256").update(secret).digest("hex");
+  store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identityId);
+  const before = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
+  assert.equal(before.secret_hash, legacy);
+
+  // Verification still succeeds against the legacy hash...
+  const resolved = store.identities.resolveGlobalIdentitySecret(secret);
+  assert.equal(resolved?.identityId, identityId);
+
+  // ...and the row is now v2.
+  const after = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
+  assert.match(after.secret_hash, /^v2:[a-f0-9]{64}$/);
+  assert.notEqual(after.secret_hash, legacy);
+
+  // The secret keeps working after the upgrade (authenticate + resolve paths).
+  const authed = store.identities.authenticateIdentitySecret(identityId, secret);
+  assert.equal(authed.identityId, identityId);
+  const resolvedAgain = store.identities.resolveGlobalIdentitySecret(secret);
+  assert.equal(resolvedAgain?.identityId, identityId);
+  // A wrong secret still fails and does not trigger an upgrade.
+  assert.equal(store.identities.resolveGlobalIdentitySecret(secret.slice(0, -1) + (secret.endsWith("A") ? "B" : "A")), null);
+});
+
+test("legacy identity first reads authenticate without writing or degrading storage", async t => {
+  const { store, ownerCommons } = await serve(t);
+  const { createHash } = await import("node:crypto");
+  const identity = store.identities.create("Legacy Reader");
+  store.identities.link(ownerCommons, "commons", { identityId: identity.identityId, permissions: [] });
+  const legacy = createHash("sha256").update(identity.secret).digest("hex");
+  store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identity.identityId);
+  const storedHash = () => store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identity.identityId).secret_hash;
+  const changes = store.db.prepare("SELECT total_changes() AS n").get().n;
+  assert.equal(store.snapshot(identity.secret, "commons").viewerId, identity.identityId);
+  store.readTransaction(() => store.readTransaction(() => {
+    assert.equal(store.identities.authenticateIdentitySecret(identity.identityId, identity.secret).identityId, identity.identityId);
+    assert.equal(store.identities.resolveGlobalIdentitySecret(identity.secret).identityId, identity.identityId);
+  }));
+  assert.equal(storedHash(), legacy, "read transactions defer hash migration");
+  assert.equal(store.db.prepare("SELECT total_changes() AS n").get().n, changes, "no persistent side effects");
+  assert.equal(store.readTransactionDepth, 0);
+  assert.equal(store.storageStatus().failures, 0);
+  // Exceptions restore the depth too; subsequent writable authentication
+  // still upgrades the verified secret, preserving the existing migration.
+  assert.throws(() => store.readTransaction(() => { throw new Error("read failed"); }), /read failed/);
+  assert.equal(store.readTransactionDepth, 0);
+  store.identities.authenticateIdentitySecret(identity.identityId, identity.secret);
+  assert.match(storedHash(), /^v2:[a-f0-9]{64}$/);
+  store.identities.revoke(identity.identityId, identity.secret);
+  assert.throws(() => store.snapshot(identity.secret, "commons"), error => error.status === 401);
 });
