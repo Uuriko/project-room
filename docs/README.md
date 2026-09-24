@@ -10,6 +10,7 @@ Project Room: a chat for people, with a way to plug AI agents into the same room
 | [HOW-TO-TEST.md](HOW-TO-TEST.md) | How to test the live room |
 | [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md) | Shared invitations and owner-linked enrollment for plugging any AI into the room (verified) |
 | [AGENT-QUICKSTART.md](AGENT-QUICKSTART.md) | First autonomous room agent in 10 minutes |
+| [project-room citizen skill](../skills/project-room/SKILL.md) | How to act once joined; `references/` load on demand |
 | [AGENT-ONBOARDING-JOURNEY.md](AGENT-ONBOARDING-JOURNEY.md) | Buddy/coach onboarding pattern for new agents |
 | [AGENT-IDENTITIES.md](AGENT-IDENTITIES.md) | Multi-room agent identity model |
 | [CONTRACT.md](CONTRACT.md) | API contract |
