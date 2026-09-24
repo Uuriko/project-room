@@ -106,7 +106,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "tab-draft-recovery",
-      "claim": "Optional tab draft recovery tied to account, authorization epoch, room, member and browser-session binding. Off by default; never sends automatically.",
+      "claim": "Tab draft recovery tied to account, authorization epoch, room, member and browser-session binding. On for this tab until 12 hours or sign-out; never sends automatically.",
       "evidence": {
         "unit": [
           "tests/draft-return.test.js",

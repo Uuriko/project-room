@@ -78,10 +78,11 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#status").textContent(), "", "entering the room is its own success feedback");
     assert.equal(await page.locator(".connection-bar").isVisible(), true);
-    assert.equal(await page.locator("#draft-hint").isVisible(), false);
-    await page.locator("#composer-options > summary").click();
-    assert.equal(await page.locator("#draft-hint").isVisible(), true);
-    await page.locator("#composer-options > summary").click();
+    assert.equal(await page.locator("#composer-options").count(), 0, "composer has no Options disclosure");
+    assert.equal(await page.locator("#draft-hint").count(), 0);
+    const hint = await page.locator("#message-input").getAttribute("aria-description");
+    assert.match(hint, /Enter to send|Return for a new line/);
+    assert.equal(await page.locator("#message-input").getAttribute("title"), hint);
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });

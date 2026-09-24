@@ -41,8 +41,11 @@ for (const touch of [false, true]) test(`live client upgrade preserves pending o
     const page = await context.newPage(); page.setDefaultTimeout(8000); page.on('dialog', dialog => dialog.accept());
     await page.goto(`http://127.0.0.1:${port}`); await fillAccessKey(page, fixture.keys.owner);
     await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
-    if (!await page.locator('#remember-drafts').isVisible()) await page.locator('#composer-options > summary').click();
-    await page.locator('#remember-drafts').check();
+    const box = page.locator('#remember-drafts');
+    if (await box.count()) {
+      if (!(await box.isVisible())) await page.locator('#composer-options > summary').click();
+      await box.check();
+    }
     const body = 'Live pending ordinary message';
     const commands = [], receipts = [];
     await page.route('**/api/rooms/commons/commands', async route => {

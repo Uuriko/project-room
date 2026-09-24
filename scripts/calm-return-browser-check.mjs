@@ -100,7 +100,6 @@ for (const mobile of [false, true]) {
     // Catch-up is a modal dialog; close it to use the composer, then reopen.
     await closeCatchUp(page);
     await page.locator("#message-input").fill("A draft to keep while catching up.");
-    await page.locator("#composer-options > summary").click();
     page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "guest");
     await page.locator("#message-input").evaluate(node => node.setSelectionRange(2, 9));
     await openCatchUp(page); await ready();

@@ -38,9 +38,6 @@ const input = page => page.locator("#message-input");
 const idle = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled);
 const failed = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
 const saved = page => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#request-mode-bar").hidden);
-async function options(page) {
-  if (!await page.locator("#composer-options").evaluate(el => el.open)) await page.locator("#composer-options > summary").click();
-}
 async function mode(page, id, kind) {
   await record(page, id).locator(`[data-message-action="request-${kind}"]`).click();
   await page.waitForFunction(() => !document.querySelector("#request-mode-bar").hidden && !document.querySelector("#message-input").disabled);
@@ -51,7 +48,7 @@ test("request journey: request, clarify and answer stay in chat without closing 
   const f = await setup(t), owner = await f.login("owner"), guest = await f.login("guest");
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
-  await options(owner); await owner.locator("#request-reply").click();
+  await owner.locator("#request-reply").click();
   await input(owner).fill("Which agenda should we use?");
   await owner.locator("#message-to-select").selectOption("guest");
   await input(owner).press("Enter"); await saved(owner);
@@ -105,7 +102,6 @@ test("stale answer keeps text, explicit refresh updates context, decline and can
 test("lost committed answer remains exact and read-only across reload, then retries once", { timeout: 60000 }, async t => {
   const f = await setup(t); f.request("retry");
   const page = await f.login("guest");
-  await options(page); await page.locator("#remember-drafts").check();
   await mode(page, "retry", "answered"); await input(page).fill("One answer only.");
   const commands = []; let lose = true;
   await page.route("**/api/rooms/commons/commands", async route => {
@@ -128,7 +124,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
-  await input(page).fill("Ordinary draft"); await options(page); await page.locator("#request-reply").click();
+  await input(page).fill("Ordinary draft"); await page.locator("#request-reply").click();
   await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
   let alter = true; const commands = [];
   await page.route("**/api/rooms/commons/commands", async route => {
@@ -143,7 +139,7 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
   assert.match(await page.locator("#composer-status").textContent(), /Save not confirmed/);
   assert.equal(await input(page).evaluate(el => el.readOnly), true);
   await page.locator("#request-exit").click(); assert.equal(await input(page).inputValue(), "Ordinary draft");
-  await options(page); await page.locator("#request-reply").click();
+  await page.locator("#request-reply").click();
   assert.equal(await input(page).inputValue(), "An explicit question");
   await page.getByRole("button", { name: "Retry original", exact: true }).click(); await saved(page);
   assert.deepEqual(commands[0], commands[1]);
@@ -198,13 +194,13 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       replyToId: "follow-original", toMemberId: "owner", workItemId: null });
     const page = await f.login("owner");
     await input(page).fill("Keep my normal draft");
-    await options(page); await page.locator("#remember-drafts").check();
     await mode(page, "follow-original", "follow-up");
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
     assert.equal(await page.locator("#message-to-select").isDisabled(), true);
     assert.match(await page.locator("#request-mode-label").textContent(), /Earlier exchange included/);
     assert.match(await page.locator("#thread-context").textContent(), /includes private messages/);
-    assert.doesNotMatch(await page.locator("#composer-options").textContent(), /Visible to everyone here/);
+    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.doesNotMatch(await page.locator("#message-form").innerText(), /Visible to everyone here/);
     assert.equal(await record(page, "follow-answer").locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");
     await input(page).fill("Add keyboard support");
     await page.screenshot({ path: `test-results/request-follow-up-${viewport.width}.png`, fullPage: true });

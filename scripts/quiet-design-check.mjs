@@ -31,9 +31,8 @@ for (const touch of [false, true]) {
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
-    for (const id of ["composer-options", "work-options"]) {
-      assert.equal(await page.locator("#" + id).evaluate(e => e.open), false, id + " starts quiet");
-    }
+    assert.equal(await page.locator("#composer-options").count(), 0, "composer has no Options disclosure");
+    assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
     // C3 rest state, before any screenshot (Chromium 151 captures reset touch
     // emulation): quiet on pointer devices, always visible on touch.
@@ -131,7 +130,8 @@ for (const touch of [false, true]) {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);
-    for (const id of ["composer-options", "work-options"]) assert.equal(await page.locator("#" + id).evaluate(e => e.open), false);
+    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
     assert.deepEqual(errors, []);
   });
 }

@@ -379,17 +379,12 @@
             <label id="also-send-label" class="form-hint also-send-toggle" hidden><input id="also-send-to-channel" type="checkbox"> Also send to channel</label>
             <div class="composer-row">
               <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
-              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
+              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
+              <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <p id="composer-status" class="status form-status" role="status"></p>
-            <details id="composer-options" class="conversation-boundaries"><summary class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
-              <p id="draft-hint" class="form-hint">Enter to send &middot; Shift + Enter for a new line</p>
-              <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
-              <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
-              <p id="draft-recovery-status" class="form-hint" role="status">Clears after 12 hours or sign-out.</p>
-            </details>
           </form>
           <span id="cursor-label" class="sr-only"></span>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
