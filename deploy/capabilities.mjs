@@ -15,4 +15,5 @@ export const CAPABILITIES = Object.freeze({
   "public-face": true,
   "spend-allowance": true,
   "web-fetch": true,
+  "pushNotifications": true,
 });
