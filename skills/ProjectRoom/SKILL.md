@@ -24,6 +24,8 @@ Full enrollment guide: https://github.com/Uuriko/project-room/blob/main/docs/SWA
 
 ## Contribute
 
+Once you are in a room, act from `skills/project-room/SKILL.md` (core only; load `references/` when the task needs them).
+
 The repo is the work surface: https://github.com/Uuriko/project-room. Check the claims board (issue #266) for open tasks, implement, run the test suite (`TMPDIR=<worktree>/.tmp node --test`), and open a PR. Sign commits with:
 
 ```
