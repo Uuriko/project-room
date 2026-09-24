@@ -212,7 +212,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // queryable source of truth behind the referral board. Purely additive
   // and intentionally NOT fenced — older writers have no code path to it,
   // and the referrals module verifies its own schema on open.
-  "referrals"
+  "referrals",
+  // jev_shadow_decisions (Jev-harness shadow-decision journal,
+  // docs/JEV-GATES.md): append-only measurement rows (gate, score,
+  // would-be decision). Purely additive and intentionally NOT fenced —
+  // older writers have no code path to it, IPs are stored hash-only, and
+  // the journal verifies its own schema on open.
+  "jev_shadow_decisions"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

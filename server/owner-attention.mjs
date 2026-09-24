@@ -125,6 +125,26 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     }));
   }
 
+  // 5. Jev-harness shadow escalations (docs/JEV-GATES.md): receipt decisions
+  // the gate WOULD have escalated to a human, surfaced read-only. Shadow
+  // mode changes nothing — this is the human lane the escalate flag points
+  // at, not a new notification system.
+  if (store.jevShadow) {
+    for (const entry of store.jevShadow.list({ roomId, escalate: true, limit: 5 })) {
+      const label = entry.gate === "receipt" && entry.subject ? `work "${entry.subject}"` : entry.path;
+      items.push(Object.freeze({
+        kind: "jev_escalation",
+        id: entry.id,
+        severity: "info",
+        title: `Shadow gate would escalate: ${label}`,
+        detail: `Jev ${entry.gate} gate scored ${(entry.score * 100).toFixed(0)}% (would-be: ${entry.decision}) — accepted anyway, shadow mode`,
+        actions: Object.freeze([Object.freeze({ action: "review", method: "GET",
+          path: `/api/rooms/${roomId}/jev-shadow?gate=${entry.gate}&limit=25`,
+          hint: "Hand-review recent shadow decisions with scores" })]),
+      }));
+    }
+  }
+
   return Object.freeze({
     roomId,
     // Viewer echo for the client's ownsResponse identity check: without these

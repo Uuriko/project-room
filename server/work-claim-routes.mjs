@@ -34,6 +34,7 @@ import {
   createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
   roomWorkClaimConfig, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
+import { evaluateReceipt } from "./jev-receipts.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -197,6 +198,31 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy, now: nowMs }));
+    if (data.state === "done") {
+      // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
+      // score the receipt, journal the would-be verdict (flagging
+      // low-confidence accepts for a human look), then accept anyway —
+      // shadow mode never changes the outcome. Never throws: a scoring or
+      // journal failure cannot break the done transition.
+      try {
+        const policy = updated.reviewPolicy ?? config.reviewPolicy;
+        const reviewer = policy === "self_attested" ? (data.reviewedBy ?? caller) : data.reviewedBy;
+        const receiptDecision = evaluateReceipt({
+          workId: updated.id, ownerId: updated.owner ?? null,
+          reviewPolicy: policy,
+          attestations: updated.attestations ?? [],
+          reviewerIsVerifier: typeof reviewer === "string" && verifiersOf(store, roomId).includes(reviewer),
+          deliveryMode: updated.deliveryMode ?? null,
+          note: typeof data.note === "string" ? data.note : null,
+          claimedAtMs: updated.claimedAt ? Date.parse(updated.claimedAt) : null,
+          doneAtMs: nowMs, at: nowMs,
+        });
+        store.jevShadow.record({ gate: "receipt", roomId, identityId: updated.owner ?? null,
+          subject: updated.id, path: "work-claim:done",
+          score: receiptDecision.quality, decision: receiptDecision.verdict,
+          escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
+      } catch { /* shadow-only: never break the done transition */ }
+    }
     registry.set(roomId, updated);
     return json(res, 200, updated);
   }
