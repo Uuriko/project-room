@@ -11,7 +11,7 @@ import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
-import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage } from "./friend-bond.js";
+import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget } from "./friend-bond.js";
 import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
@@ -1603,7 +1603,7 @@ function render() {
       const bondAttr = chrome.bondId ? ` data-friend-bond="${esc(chrome.bondId)}"` : "";
       return `<button type="button" class="text-button friend-action" data-friend-action="${esc(action.action)}" data-friend-peer="${esc(m.id)}"${bondAttr} aria-label="${esc(names[action.action] || action.label)}"${friendBusy ? " disabled" : ""}>${esc(action.label)}</button>`;
     }).join("");
-    return `<span class="friend-bond" tabindex="-1" data-friend-peer="${esc(m.id)}" data-friend-state="${esc(chrome.state)}" role="group" aria-label="Friend ${esc(m.displayName)}">${chip}${buttons}</span>`;
+    return `<span class="friend-bond" tabindex="-1" data-friend-peer="${esc(m.id)}" data-friend-state="${esc(chrome.state)}" data-focus-key="friend-group:${esc(m.id)}" role="group" aria-label="Friend ${esc(m.displayName)}">${chip}${buttons}</span>`;
   };
   const dmConsentDetails = m => {
     if (!session || m.id === session.member.id || m.active === false) return "";
@@ -4135,6 +4135,21 @@ $("#presence-list").addEventListener("click", async e => {
   e.preventDefault();
   await runDmConsentAction(consentButton.dataset.dmConsentAction, consentButton.dataset.dmConsentPeer, consentButton);
 });
+$("#presence-list").addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const friendButton = event.target?.closest?.("[data-friend-action]");
+  // A held Enter repeats. The first press may already have proposed or
+  // accepted; the repeat must not activate whatever button focus lands on
+  // (Revoke is the hazard). The group itself never activates a child.
+  if (friendButton) {
+    if (!event.repeat) return;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  if (!event.target?.closest?.(".friend-bond")) return;
+  event.preventDefault();
+});
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-friend-action]");
   if (!button || !state || !session || friendBusy) return;
@@ -5469,12 +5484,22 @@ async function refreshFriendBonds() {
 function friendPeerTarget(peer) {
   return identityIdOf(peer, presenceStates.get(peer.id)) || peer.id;
 }
+function focusFriendGroup(peerMemberId) {
+  const group = $(`#presence-list .friend-bond[data-friend-peer="${CSS.escape(peerMemberId)}"]`);
+  // The group carries data-focus-key, so a snapshot render while this action
+  // is in flight restores the group and not a replacement Revoke button.
+  if (group && document.activeElement !== group) group.focus({ preventScroll: true });
+}
 async function runFriendAction(action, peerMemberId, bondId, button) {
   if (!state || !session || friendBusy) return;
   const peer = state.members[peerMemberId];
   if (!peer || peer.active === false || peer.kind !== "agent" || peer.id === session.member.id) return;
   if (action === "dm") { openFriendThread(peerMemberId); return; }
   const generation = client.generation;
+  // Move focus off the clicked button before any await. A held Enter repeats
+  // on the focused control; landing on Revoke sent bond.revoke, including
+  // after the peer had already accepted and the chrome had become Friends.
+  if (friendFocusTarget(action) === "group") focusFriendGroup(peerMemberId);
   friendBusy = true;
   if (button) button.disabled = true;
   try {
@@ -5489,14 +5514,10 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
     if (generation === client.generation && state) notice(friendFailureMessage(error), true);
   } finally {
     friendBusy = false;
-    if (button) button.disabled = false;
+    if (button?.isConnected) button.disabled = false;
     if (generation === client.generation && state) {
       await refreshFriendBonds();
-      // Focus the group, never the Revoke button. Propose used to focus
-      // Revoke; the next Enter (key repeat while Friend was held) sent
-      // bond.revoke, including after the peer had already accepted.
-      const group = $(`#presence-list .friend-bond[data-friend-peer="${CSS.escape(peerMemberId)}"]`);
-      group?.focus();
+      if (friendFocusTarget(action) === "group") focusFriendGroup(peerMemberId);
     }
   }
 }
