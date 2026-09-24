@@ -91,6 +91,23 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
           }
           const { assignmentId, record } = collab.assignThread(roomId, fields.threadId,
             fields.assignee, { by: caller, force: fields.force === true });
+          // RC-2026-09-24-203: push doorbell when a thread is assigned to an
+          // offline agent with a push subscription. Member id resolves to the
+          // agent identity via identity_links; pushNotify itself gates on the
+          // agent being offline. Never fails the assignment.
+          try {
+            const assigneeId = record?.assignee?.kind === "agent" && typeof record.assignee.id === "string"
+              ? record.assignee.id : null;
+            if (assigneeId) {
+              const link = store.db.prepare(
+                "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+                .get(roomId, assigneeId);
+              if (link?.identityId) {
+                store.agentHeartbeats.pushNotify({ identityId: link.identityId,
+                  eventType: "assignment.created", roomId, id: assignmentId, ts: store.now() });
+              }
+            }
+          } catch { /* the push path never fails the assignment */ }
           return json(res, 201, { assignmentId, assignment: record });
         }
         if (req.method === "GET") {

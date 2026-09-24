@@ -622,11 +622,30 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-heartbeat:${remoteAddress}`, 120);
     const auth = agentAuth(req, requiredScope("heartbeats:report"));
     const data = await body(req);
-    if (!data || !(exact(data, ["hostId", "mode"]) || exact(data, ["hostId", "mode", "wakeUrl"])))
-      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only), with optional wakeUrl, are the accepted fields");
-    const { host, pendingWakes } = store.agentHeartbeats.heartbeat({
-      agentId: auth.identityId, hostId: data.hostId, mode: data.mode, wakeUrl: data.wakeUrl ?? null });
-    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, next: heartbeatNext(pendingWakes) });
+    // RC-2026-09-24-203: the body stays backward-compatible — hostId + mode
+    // are required, wakeUrl / cadenceSeconds / pushNotification are optional.
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification"];
+    if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
+        || !Object.hasOwn(data, "hostId") || !Object.hasOwn(data, "mode"))
+      reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only) are required; wakeUrl, cadenceSeconds, and pushNotification are optional");
+    // Subscribe-time SSRF guard: the push url's hostname must resolve to a
+    // public address BEFORE the sync heartbeat() upsert stores anything.
+    // Shape validation (token, auth) happens inside heartbeat().
+    if (data.pushNotification !== undefined && data.pushNotification !== null) {
+      await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
+    }
+    const { host, pendingWakes, pushConfigured, pushSuspended, reachability } = store.agentHeartbeats.heartbeat({
+      agentId: auth.identityId, hostId: data.hostId, mode: data.mode,
+      wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
+      pushNotification: data.pushNotification ?? null });
+    // A suspended push subscription tells the agent how to re-arm it: POST
+    // a fresh pushNotification on the next heartbeat.
+    const next = [...heartbeatNext(pendingWakes)];
+    if (pushSuspended) next.push(Object.freeze({
+      action: "rearm-push", method: "POST", path: "/api/agent-heartbeats",
+      description: "Your push subscription was suspended after 3 failed deliveries; POST a fresh pushNotification to re-arm.",
+    }));
+    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, next, pushConfigured, reachability });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {

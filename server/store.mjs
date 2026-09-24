@@ -3390,6 +3390,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
+        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
+        // offline agent's push subscription (the inbox pull carries the
+        // body). Fire-and-forget; never fails the command.
+        if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
+          eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+      }
+      // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
+      // (not the proposer, who is online by definition) get a pointer-only
+      // POST when offline with a push subscription.
+      if (bondEffect?.eventType === "bond.proposed" && bondEffect.data) {
+        const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
+        for (const partyId of [agentAId, agentBId]) {
+          if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
+            this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
+              roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
+          }
+        }
       }
       // #658: mention lifecycle. Runs in the same transaction as the message
       // event: mention rows are never recorded without their triggering
@@ -3475,7 +3492,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
-      if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+      if (woken && signal) {
+        this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
+        // offline agent's push subscription; the inbox pull carries the body.
+        this.agentHeartbeats.pushNotify({ identityId: link.identityId, eventType: "message.posted",
+          roomId, id: data.messageId ?? eventId, ts: this.now() });
+      }
     }
   }
 

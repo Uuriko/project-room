@@ -119,6 +119,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // agent identity, and AgentHeartbeats.verifySchema() is read-only-safe.
   "agent_hosts",
   "agent_wake_signals",
+  // Push wake path (RC-2026-09-24-203): agent_push_configs. Same rationale
+  // as agent_hosts — purely additive, per-identity rows, self-verified
+  // schema on open; rows never drive bans, slashes, or balances.
+  "agent_push_configs",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
