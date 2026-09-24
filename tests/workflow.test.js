@@ -90,7 +90,7 @@ test("visible actions respect roles, producer independence, claims and retired w
   const writer = { ...member, permissions: [...member.permissions, "write_external"] };
   assert.deepEqual(actions(item, writer), ["claim", "block"]);
   item.claim = { status: "active", holderId: "producer", expiresAt: new Date(2000).toISOString() };
-  assert.deepEqual(actions(item, writer), ["start", "block", "complete", "release"]);
+  assert.deepEqual(actions(item, writer), ["start", "block", "complete", "release", "renew"]);
   item.claim.holderId = "other";
   assert.deepEqual(actions(item, writer), ["block"]);
   item.claim.expiresAt = new Date(1000).toISOString();

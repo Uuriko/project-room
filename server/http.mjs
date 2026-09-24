@@ -2702,8 +2702,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
+      const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
@@ -2872,9 +2873,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimClaimMatch ? "claim"
           : workClaimUpdateMatch ? "update"
           : workClaimReviewMatch ? "review"
-          : workClaimReleaseMatch ? "release" : "reassign";
+          : workClaimReleaseMatch ? "release"
+          : workClaimRenewMatch ? "renew" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
       }

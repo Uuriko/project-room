@@ -17,6 +17,7 @@ const cases = [
   ["record_verification", "verification.recorded", { ...base, result: "pass", completionEventId: "completion", evidenceVersion: "v1", summary: "Checked exact bytes" }],
   ["acquire_claim", "claim.acquired", { ...base, repository: "fictional/repo", ref: "main", paths: ["notes/a", "notes/b"], expiresAt: "2030-01-01T00:00:00.000Z" }],
   ["release_claim", "claim.released", base],
+  ["renew_claim", "claim.renewed", { ...base, progressMessageId: "progress-1", expiresAt: "2030-01-01T00:00:00.000Z" }],
   ["supersede_work", "work.superseded", { ...base, supersededByWorkItemId: "next-work", reason: "New definition" }],
   ["record_handoff", "work.handoff_recorded", { ...base, doneSummary: "3 of 5 done", nextAction: "Reassign the adapter feed", limitReason: "context window exhausted" }],
   ["clear_halt", "work.halt_cleared", { requestId: "operation", memberId: "agent", haltEventId: "halt-event" }]

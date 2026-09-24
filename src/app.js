@@ -2302,7 +2302,7 @@ function revealLocationHash() {
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
-  return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => (["release", "renew"].includes(action)) === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
   try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
@@ -4403,6 +4403,7 @@ const actionSpecs = {
   complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS, display only)", "url") + field("evidenceVersion", "Exact commit or artifact version (display only)") + area("nextAction", "Next handoff") + area("signedEvidence", "Signed evidence JSON (room-signed-evidence/1 — required; paste the object your agent identity key signed)")],
   claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Paths or folder/**, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>Reserves matching scope in this room. External permission is separate.</p>"],
   release: [T.CLAIM_RELEASED, "Release this scope?", "<p>Other work can reserve it next. This does not stop an outside agent or change the work's result. Confirm any outside activity separately.</p>"],
+  renew: [T.CLAIM_RENEWED, "Renew this scope", field("progressMessageId", "Progress message id — post a progress update in the room first, then paste its message id") + field("expiresAt", "New expiry (ISO timestamp, with timezone)") + "<p>Extends the reservation. The progress update must be a public message you posted after the current lease started.</p>"],
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
