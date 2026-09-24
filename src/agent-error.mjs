@@ -68,6 +68,25 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
     };
   }
+  // A DM refusal is about the recipient's consent, not the caller's access:
+  // "check access; ask the owner" sends the agent the wrong way.
+  if (reasonCode === "dm_consent_required") {
+    const consentPath = roomId ? `/api/rooms/${roomId}/dm-consents` : null;
+    return {
+      status: "action_required", reason: "dm_consent_required",
+      hint: /pending/i.test(String(message || ""))
+        ? "Your DM request is pending. Wait for approval, or post in the room instead."
+        : "Ask for DM consent first with POST dm-consents { targetId }, or post in the room instead.",
+      next: [...(consentPath ? [path(consentPath)] : []), command("Request DM consent from the recipient, or post the message in the room")]
+    };
+  }
+  if (reasonCode === "dm_blocked") {
+    return {
+      status: "action_required", reason: "dm_blocked",
+      hint: "This member is not accepting DMs from you. Post in the room instead.",
+      next: [command("Post the message in the room instead")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
@@ -102,6 +121,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
           ...(commandsPath ? [path(commandsPath)] : []),
           command("Resend message.posted with data.body (a string), not text.")
         ]
+      };
+    }
+    if (reasonCode === "invalid_command" && /^Unknown command type/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "Use one of the command types named in the error message.",
+        next: [command("Resend with a listed command type; keep the same id if the earlier send was uncertain")]
       };
     }
     return {
