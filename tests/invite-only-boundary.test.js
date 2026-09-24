@@ -72,6 +72,10 @@ const PROBES = {
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
+  // Public opportunity feed (v2): read-only open-work discovery across
+  // owner opt-in directory-listed rooms, decoupled from admission; an
+  // empty directory answers 200 with no opportunities.
+  "GET /api/opportunities.json": [undefined, 200],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it

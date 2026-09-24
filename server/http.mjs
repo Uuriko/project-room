@@ -15,6 +15,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
+import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { webhookAcceptsHash, webhookRotationDefaults } from "./channel-adapters/telegram-rotation.mjs";
@@ -1409,6 +1410,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
+      // Public opportunity feed (v2): read-only discovery of open work
+      // across directory-listed rooms. Decoupled from admission — reading
+      // the feed grants nothing; acting on an opportunity uses the normal
+      // invite/join flow. Strict public shape: no member, identity, invite
+      // code, or admission data ever leaves. ?since=<cursor> returns only
+      // items opened/created after the cursor (cheap resume for pollers).
+      if (url.pathname === "/api/opportunities.json" && req.method === "GET") {
+        rate(`opportunities:${remoteAddress}`, 120);
+        return json(res, 200, buildOpportunitiesFeed(store, {
+          now: store.now(),
+          roomId: url.searchParams.get("room"),
+          limit: url.searchParams.get("limit"),
+          since: url.searchParams.get("since"),
+        }));
+      }
+      if (url.pathname === "/api/opportunities.json") reject(405, "method_not_allowed", "Method not allowed");
       // Public read-only face: no login, owner opt-in only. The code is the
       // Bearer <redacted> (unguessable pub1.*); no member, identity, or DM data ever leaves.
       const publicFaceMatch = /^\/p\/([A-Za-z0-9._~-]{1,128})$/.exec(url.pathname);
