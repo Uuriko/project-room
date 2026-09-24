@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -75,6 +76,17 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.ok(unknownMember.next.some(step => step.path === "/api/rooms/commons/presence"));
   assert.ok(!unknownMember.next.some(step => step.tool === "room_read_work"),
     "unknown member must not point at a work re-read");
+  const unsigned = agentErrorAx({ httpStatus: 422, code: "missing_signed_evidence", message: "unsigned external evidence is rejected", roomId: "commons", workItemId: "test-handoff" });
+  assertAx(unsigned, { reason: "missing_signed_evidence" });
+  assert.match(unsigned.hint, /evidenceKind room_text/);
+  assert.match(unsigned.hint, /signedEvidence/);
+  assert.doesNotMatch(unsigned.hint, /unsigned URL is (ok|accepted|enough)/i);
+  const unsignedNext = JSON.stringify(unsigned.next);
+  for (const field of ["evidenceKind", "room_text", "evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId", "producerId", "evidenceVersion", "signedEvidence"]) {
+    assert.match(unsignedNext, new RegExp(field));
+  }
+  assert.match(unsignedNext, /unsigned evidenceUrl stays rejected/);
+  assert.ok(unsigned.next.some(step => step.tool === "room_submit_text_result"));
   const refused = agentErrorAx({ httpStatus: 0, code: "invalid_work_action", message: "" });
   assertAx(refused, { reason: "input_refused" });
   assert.equal(agentErrorAx({ httpStatus: 500, code: "internal_error", message: "" }).status, "failed");
@@ -183,4 +195,69 @@ test("orient advertises errors include next; MCP structured refusals follow the 
   assert.equal(JSON.stringify(call).includes("Stale Work Item"), false);
   assertAx(value, { reason: "stale_revision" });
   assert.ok(value.next.some(step => step.tool === "room_read_work"));
+});
+
+test("unsigned work.completed names room_text fields, then a room_text completion succeeds", async t => {
+  const f = await live(t);
+  const producer = f.client("producer");
+  const proposed = await producer.workContext("test-handoff");
+  await producer.command({ id: "ax-ev-accept", type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: proposed.work.revision } });
+  const accepted = await producer.workContext("test-handoff");
+  await producer.command({ id: "ax-ev-start", type: T.WORK_STARTED, data: { workItemId: "test-handoff", expectedRevision: accepted.work.revision } });
+  const working = await producer.workContext("test-handoff");
+  assert.equal(working.work.state, "working");
+
+  const unsigned = await f.request("/api/rooms/commons/commands", {
+    method: "POST", token: f.keys.producer,
+    data: {
+      id: "ax-ev-unsigned", type: T.WORK_COMPLETED,
+      data: {
+        workItemId: "test-handoff", expectedRevision: working.work.revision,
+        summary: "unsigned url", evidenceUrl: "https://example.invalid/result",
+        evidenceVersion: "v1", nextAction: "Review"
+      }
+    }
+  });
+  assert.equal(unsigned.status, 422);
+  const unsignedBody = await unsigned.json();
+  assert.equal(unsignedBody.error.code, "missing_signed_evidence");
+  assert.match(unsignedBody.error.message, /unsigned external evidence is rejected/);
+  assert.match(unsignedBody.error.message, /evidenceKind room_text/);
+  for (const field of ["evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId", "producerId", "evidenceVersion"]) {
+    assert.match(unsignedBody.error.message, new RegExp(field));
+  }
+  assertAx(unsignedBody, { reason: "missing_signed_evidence" });
+  assert.match(unsignedBody.hint, /room_text/);
+  const still = await producer.workContext("test-handoff");
+  assert.equal(still.work.state, "working");
+  assert.equal(still.work.revision, working.work.revision);
+
+  const body = "the exact in-room result";
+  const messageId = `ax-result-${randomUUID()}`;
+  const posted = await producer.command({
+    id: "ax-ev-post", type: T.MESSAGE_POSTED,
+    data: { messageId, workItemId: "test-handoff", body }
+  });
+  const evidenceVersion = `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`;
+  const done = await f.request("/api/rooms/commons/commands", {
+    method: "POST", token: f.keys.producer,
+    data: {
+      id: "ax-ev-room-text", type: T.WORK_COMPLETED,
+      data: {
+        workItemId: "test-handoff", expectedRevision: still.work.revision,
+        summary: "in-room result", nextAction: "Review the room message",
+        evidenceKind: "room_text", evidenceMessageId: messageId,
+        evidenceMessageEventId: posted.event.id, previousCompletionEventId: null,
+        producerId: null, evidenceVersion
+      }
+    }
+  });
+  assert.equal(done.status, 201);
+  const completed = await producer.workContext("test-handoff");
+  assert.equal(completed.work.state, "completed");
+  assert.equal(completed.work.receipt.evidenceVersion, evidenceVersion);
+  assert.equal(completed.work.receipt.evidenceUrl, null);
+  assert.equal(completed.work.receipt.nativeText.kind, "room_text");
+  assert.equal(completed.work.receipt.nativeText.messageId, messageId);
+  assert.equal(Object.hasOwn(completed.work.receipt, "signedEvidence"), false);
 });

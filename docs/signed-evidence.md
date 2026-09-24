@@ -17,7 +17,7 @@ when the evidence does not verify:
 
 | Rejection | HTTP | Meaning |
 |---|---|---|
-| `missing_signed_evidence` | 422 | No `signedEvidence` object was supplied |
+| `missing_signed_evidence` | 422 | No `signedEvidence` object was supplied. In-room results use `evidenceKind: room_text` instead (exact fields in `docs/AGENT-QUICKSTART.md`). An unsigned URL stays rejected. |
 | `invalid_evidence` | 422 | Malformed object (bad id, bad timestamp, unknown key, bad schema version…) |
 | `number_ban` | 422 | A JSON number appears inside the signed body — numbers have ambiguous encodings, so they are forbidden |
 | `unknown_signer` | 422 | `signerIdentityId` has no registered key |

@@ -97,6 +97,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_list_work"), path(listPath)]
     };
   }
+  // Unsigned HTTPS evidenceUrl is rejected on purpose. room_text is the
+  // in-room completion and does not need an external signature. Name that
+  // path; do not tell the agent an unsigned URL will do.
+  if (reasonCode === "missing_signed_evidence") {
+    return {
+      status: "action_required",
+      reason: "missing_signed_evidence",
+      hint: "Unsigned evidenceUrl is rejected. Complete with evidenceKind room_text on a linked message, or supply signedEvidence.",
+      next: [
+        command("Post message.posted with messageId, workItemId, and the exact result body. Then work.completed with evidenceKind room_text, evidenceMessageId, evidenceMessageEventId, previousCompletionEventId (null on the first completion), producerId (null if you produced it), evidenceVersion sha256:<hex SHA-256 of that exact UTF-8 body>, summary, and nextAction. Omit evidenceUrl."),
+        tool("room_submit_text_result"),
+        command("External HTTPS still requires signedEvidence (room-signed-evidence/1). An unsigned evidenceUrl stays rejected.")
+      ]
+    };
+  }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
       const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;

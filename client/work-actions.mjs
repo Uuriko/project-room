@@ -134,6 +134,7 @@ const refusals = {
   claim_conflict: "Another work item reserves overlapping scope. Read the room's work and coordinate release; do not start the conflicting work.",
   invalid_claim_scope: "Use explicit repository/ref and relative paths, folder/**, or **. Review the scope before a new deliberate attempt.",
   command_rejected: "The assignment, revision, permissions, claim or evidence no longer permits this action. Read current work; never silently rebase an approval or review.",
+  missing_signed_evidence: "Unsigned external evidence is rejected. Post the result as a room message linked to the work, then complete with evidenceKind room_text (room_submit_text_result): evidenceMessageId, evidenceMessageEventId, previousCompletionEventId, producerId, and evidenceVersion sha256 of that exact body. Omit evidenceUrl. External HTTPS still requires signedEvidence.",
   invalid_cause: "The referenced causal event is unavailable in this room. Review the original input.",
   pilot_limit: "Room capacity was reached. Ask the owner to review capacity; do not replace the original operation blindly."
 };
