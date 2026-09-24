@@ -1388,6 +1388,11 @@ summary { overflow-wrap: anywhere; }
 
 #settings-dialog.results-only #results-panel > summary { display: none; }
 #settings-dialog.results-only #results-panel { border: 0; padding: 0; }
+
+/* A recovery hint appears only when recorded worker progress needs attention. */
+.work-recovery { border-left: 3px solid var(--muted); padding: .5rem .75rem; margin: .75rem 0; }
+.work-recovery p { margin: .35rem 0; color: var(--muted); }
+
 /* Guest upgrade hint: one-time inline nudge after first message. */
 .guest-upgrade-hint {
   display: flex;

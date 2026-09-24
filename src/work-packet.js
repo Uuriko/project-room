@@ -1,4 +1,5 @@
 import { matchesReceipt } from "./events.js";
+import { workContinuity } from "./work-item-session.js";
 // Portable data, never a credential, permission grant, or proof of authorship.
 const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
@@ -218,6 +219,7 @@ export function workProgress(item, now = Date.now()) {
     .map(key => [key, structuredClone(record[key])])) : null;
   return {
     version: 1, workItemId: item.id, revision: item.revision,
+    continuity: workContinuity(item, now),
     reportedProgress: item.handoff?.open ? item.handoff.doneSummary : item.receipt?.summary ?? item.handoff?.doneSummary ?? null,
     blocker: pick(item.blocker, ["reason", "nextAction"]),
     handoff: pick(item.handoff, ["open", "doneSummary", "nextAction", "limitReason", "haltAll"]),
@@ -238,6 +240,7 @@ export function workProgress(item, now = Date.now()) {
 export function resumeMarkdown(resume) {
   const lines = ["## Current progress (reported context)"];
   if (resume.next) lines.push(`Next in Room: ${resume.next.label}`);
+  if (resume.continuity) lines.push(`Worker: ${resume.continuity.label}${resume.continuity.lastUpdate ? ` (last update ${resume.continuity.lastUpdate})` : ""}.`, resume.continuity.next ?? "");
   if (resume.reportedProgress) lines.push("Recorded progress: " + resume.reportedProgress);
   if (resume.handoff) lines.push(resume.handoff.open ? "Handoff: awaiting owner triage" : "Previous handoff (closed)",
     "Completed at handoff: " + resume.handoff.doneSummary, "Suggested continuation: " + resume.handoff.nextAction,

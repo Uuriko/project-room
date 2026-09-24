@@ -303,6 +303,25 @@ export function cancellationState(item, { nowMs = Date.now(), workerActive = tru
   });
 }
 
+// Shared read-time presentation. A missing heartbeat is uncertainty, never
+// permission to duplicate a worker or proof that its process stopped.
+export function workContinuity(item, nowMs = Date.now()) {
+  const session = sessionRecord(item);
+  if (!session.attempt_count && !session.started_at) return null;
+  const common = { attempt: session.attempt_count, lastUpdate: session.heartbeat_at };
+  if (session.status === "done") return { ...common, state: "finished", label: "Run finished", needsAttention: false };
+  if (session.status === "failed") return { ...common, state: "interrupted", label: "Run interrupted", needsAttention: true,
+    next: "Read saved progress before retrying or handing off." };
+  const flags = cancellationState(item, { nowMs });
+  if (flags.stopRequested) return { ...common, state: "stopping", label: "Stop requested", needsAttention: true,
+    next: "Confirm the worker stopped before starting another run." };
+  if (session.status === "suspended") return { ...common, state: "paused", label: "Run paused", needsAttention: true,
+    next: session.suspended_by === "round_limit" ? "The owner can resume this run after reviewing its round limit." : "Read saved progress to continue or hand off." };
+  if (flags.unresponsive || !session.heartbeat_at) return { ...common, state: "unknown", label: "Waiting for a worker update", needsAttention: true,
+    next: "Process state is unknown. Check the worker and saved progress before resuming." };
+  return { ...common, state: "running", label: "Worker checked in", needsAttention: false };
+}
+
 export function workItemSessionContract() {
   return {
     status: "live",
