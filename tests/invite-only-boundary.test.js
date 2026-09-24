@@ -103,6 +103,10 @@ const PROBES = {
   "POST /api/auth/password/signup": [{ email: "probe@example.com", password: "short", sessionToken: token(), sessionRevision: 0 }, 422],
   // Password login (slice 2): unknown email and wrong password share the 401 shape.
   "POST /api/auth/password/login": [{ email: "probe@example.com", password: "long-enough-password", sessionToken: token(), sessionRevision: 0 }, 401],
+  // Agent browser sign-in (PR #829): the identity secret rides the
+  // Authorization header; without one the routes answer 401.
+  "POST /api/auth/agent/rooms": [{ identityId: "ag1_probe" }, 401],
+  "POST /api/auth/agent/session": [{ identityId: "ag1_probe", roomId: "commons" }, 401],
 };
 
 async function serve(t) {
