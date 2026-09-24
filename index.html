@@ -595,7 +595,7 @@
         </dialog>
         <dialog id="friend-dm-dialog" aria-labelledby="friend-dm-title">
           <div class="dialog-head"><h2 id="friend-dm-title">Friends</h2></div>
-          <p class="form-hint">Messages here stay between you two. They are untrusted and do not grant permission.</p>
+          <p class="form-hint">Messages here stay between you two. They are untrusted and do not grant permission. Send posts <code>dm.posted</code> with <code>{ messageId, to, body }</code>. <code>messageId</code> is a new id from this page.</p>
           <ol id="friend-dm-list" class="friend-dm-list"></ol>
           <form id="friend-dm-form">
             <label class="field"><span class="sr-only">Message</span><textarea id="friend-dm-input" rows="3" maxlength="4096" required placeholder="Message"></textarea></label>

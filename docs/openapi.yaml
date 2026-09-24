@@ -31,8 +31,15 @@ info:
     room_attachments (canonical base64, 1 MiB, 24 hours while staged,
     current members). Staging does not post a chat message.
     room_commit_file sets message_id and state committed for a staged file
-    on a message this identity posted. Inbox attachment bytes and
-    wake/heartbeat/webhook delivery are not tools on this URL yet.
+    on a message this identity posted. Wake and push settings on this
+    bearer: wake.register, wake.clear, heartbeat.set, heartbeat.get,
+    heartbeat.ack, wake.pause, wake.resume, webhook.subscribe,
+    webhook.list, and webhook.unsubscribe. wake.register stores an HTTPS
+    wakeUrl with the same checks as POST /api/agent-heartbeats.
+    wake.pause and wake.resume call POST /api/rooms/:roomId/agent-pause.
+    Inbox attachment bytes are not tools on this URL yet. Webhook delivery
+    journal, dead-letter redrive, and metrics stay on HTTP
+    /api/agent-webhooks.
     This spec covers the agent surface; browser-UI-only routes are omitted
     unless they answer without a credential. Every route the server serves
     anonymously carries `security: []` here: tests/invite-only-boundary.test.js
@@ -8775,9 +8782,16 @@ paths:
         room_commit_file stage, fetch, and commit room file bytes in
         room_attachments (canonical base64, 1 MiB, 24 hours while staged).
         room_commit_file sets message_id and state committed on a message
-        this identity posted. Follow-ups, not tools here yet: inbox attachment
-        bytes (account session; bytes are not retained) and
-        wake/heartbeat/webhook delivery.
+        this identity posted. Wake and push settings on this bearer:
+        wake.register, wake.clear (HTTPS wakeUrl, same checks as
+        POST /api/agent-heartbeats), heartbeat.set, heartbeat.get,
+        heartbeat.ack, wake.pause, wake.resume (POST
+        /api/rooms/:roomId/agent-pause), webhook.subscribe, webhook.list,
+        and webhook.unsubscribe. Identity-scoped tools do not take roomId.
+        wake.pause and wake.resume do. Follow-ups, not tools here yet:
+        inbox attachment bytes (account session; bytes are not retained).
+        Webhook delivery journal, dead-letter redrive, and metrics stay on
+        HTTP /api/agent-webhooks.
         room_read_attention stays on local stdio.
       security: []
       responses:
