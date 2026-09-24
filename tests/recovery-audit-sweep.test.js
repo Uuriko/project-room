@@ -257,6 +257,12 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 51,
+  //
+  // claim.renewed (52) is not exercised here: it needs a leased write-claim
+  // plus the holder's public progress message, and the sweep fixture's
+  // producer holds no write_external grant, so claim.acquired is refused
+  // before a renewal is even reachable. The reducer's validation is covered
+  // by tests/lease-renewal.test.js instead.
+  assert.equal(Object.values(T).length, 52,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

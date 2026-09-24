@@ -87,7 +87,7 @@ test("projection uses one explicit clock and exact source IDs without guessing o
   }
   state.members.producer.permissions = [];
   assert.equal(project(1999).next.addressedToViewer, true);
-  assert.deepEqual(project(1999).suggestedActions.map(action => action.action), ["release"], "holder may release scope, but assignment never grants start/completion");
+  assert.deepEqual(project(1999).suggestedActions.map(action => action.action), ["release", "renew"], "holder may release or renew scope, but assignment never grants start/completion");
   item.sourceMessageId = "missing-id";
   assert.equal(project(2000, { includeSource: true }).context.source.status, "unavailable");
   item.sourceMessageId = null;
