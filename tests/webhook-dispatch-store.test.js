@@ -466,7 +466,7 @@ test("wake pings also POST to registered wakeUrls via the same signed sender", a
   ]);
   // WakeUrl rows ride the subscription's journal and secret.
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 3);
-  for (const { url, signature, body } of captured) {
+  for (const { signature, body } of captured) {
     assert.equal(body.eventType, "agent.wake");
     assert.equal(verifyDeliverySignature(SECRET, signature, {
       deliveryId: body.deliveryId, eventType: body.eventType,
