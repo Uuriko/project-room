@@ -3159,9 +3159,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
       ).all(roomId, senderMemberId);
       const answered = pending.find(row => {
-        let event = null;
-        try { event = JSON.parse(row.body); } catch { event = null; }
-        return (event?.data?.messageId || row.eventId) === replyToId;
+        let parsed = null;
+        try { parsed = JSON.parse(row.body); } catch { parsed = null; }
+        return (parsed?.data?.messageId || row.eventId) === replyToId;
       });
       if (answered) this.db.prepare(
         `UPDATE mention_states SET state='responded', decided_at=?
