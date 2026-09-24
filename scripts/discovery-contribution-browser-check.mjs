@@ -82,10 +82,10 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   assert.equal(await page.locator('#work-done-input').inputValue(), original.definitionOfDone);
   for (const id of ['assignee-select', 'verifier-select', 'source-message-id']) assert.equal(await page.locator(`#${id}`).inputValue(), '');
   assert.equal(await page.locator('#work-mode-select').inputValue(), 'read');
-  for (const id of ['require-verification', 'require-decision']) assert.equal(await page.locator(`#${id}`).isChecked(), false);
+  for (const id of ['require-verification', 'require-decision']) assert.equal(await page.locator(`#${id}`).isChecked(), true);
   assert.equal(auditRecovery(f.store).dataSha256, beforeDiscovery);
   await page.locator('#work-title-input').fill('Next telescope session');
-  await page.locator('#assignee-select').selectOption('producer'); await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator('#verifier-select').selectOption('reviewer');
+  await page.locator('#assignee-select').selectOption('producer'); await page.locator('#verifier-select').selectOption('reviewer');
   mkdirSync('test-results', { recursive: true });
   const prefix = `test-results/discovery-contribution-${touch ? 'touch' : 'desktop'}`;
   await page.screenshot({ path: `${prefix}-reuse.png` });

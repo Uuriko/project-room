@@ -81,8 +81,6 @@ for (const touch of [false, true]) {
     assert.equal(await owner.locator('#work-title-input').inputValue(), suggestion);
     await owner.locator('#work-done-input').fill('Three agenda items with an owner for each.');
     await owner.locator('#work-options > summary').click();
-    await owner.locator('#require-verification').check();
-    await owner.locator('#require-decision').check();
     await owner.locator('#assignee-select').selectOption('owner');
     await owner.locator('#reviewer-unavailable').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#require-verification').isChecked(), true, 'review is never silently disabled');
@@ -132,14 +130,10 @@ for (const touch of [false, true]) {
     assert.equal(await owner.locator('#work-title-input').inputValue(), '');
     assert.equal(await owner.locator('#source-message-id').inputValue(), '');
     await owner.locator('#assignee-select').selectOption('owner');
-    await owner.locator('#work-options').evaluate(el => { el.open = true; });
-    await owner.locator('#require-verification').check();
     await owner.locator('#reviewer-unavailable').waitFor({ state: 'visible' });
     store.command(ownerKey, 'commons', { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: 'review-helper', displayName: 'Rae', kind: 'human', permissions: ['verify', 'accept_work', 'complete_work'] } });
     await owner.locator('#reviewer-unavailable').waitFor({ state: 'hidden' });
-    await owner.locator('#work-options').evaluate(el => { el.open = true; });
-    await owner.locator('#require-verification').check();
     assert.equal(await owner.locator('#require-verification').isChecked(), true, 'available reviewer never changes the review requirement');
     await owner.locator('#assignee-select').selectOption('review-helper');
     assert.equal(await owner.locator('#verifier-select option[value="owner"]').count(), 1);

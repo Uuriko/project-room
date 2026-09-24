@@ -1,5 +1,4 @@
 import { terminalWork, nextWorkStep, workActions, matchesReceipt, currentApproval } from "./workflow.js";
-import { workContinuity } from "./work-item-session.js";
 // One shared current-state derivation for the browser, return brief and agent client.
 
 export class CursorError extends Error {
@@ -201,24 +200,5 @@ export function contributionSteps(state, memberId, now = Date.now()) {
       button: draftCount > 1 ? 'View drafts' : 'View draft', priority: 2, at: item.updatedAt };
     if (existing) Object.assign(existing, entry); else steps.push(entry);
   }
-  for (const item of Object.values(state.workItems)) {
-    if (terminalWork(item) || steps.some(step => step.kind === "work" && step.id === item.id)
-      || ![item.accountableMemberId, state.room?.ownerId].includes(memberId)) continue;
-    const continuity = workContinuity(item, now);
-    if (!continuity?.needsAttention) continue;
-    steps.push({ key: `work:${item.id}`, kind: "work", id: item.id, action: null,
-      title: item.title, label: continuity.label, button: "Review progress", recovery: true,
-      priority: 1, at: item.updatedAt });
-  }
   return steps.sort((a, b) => a.priority - b.priority || String(a.at ?? "").localeCompare(String(b.at ?? "")) || a.key.localeCompare(b.key));
-}
-
-// Urgent decisions/reviews must never disappear behind a routine-item limit.
-// Existing selectors own eligibility, permissions and exact-result matching.
-export function attentionPreview(steps, limit = 5) {
-  const urgent = steps.filter(step => step.priority === 0);
-  const routine = steps.filter(step => step.priority !== 0);
-  const all = [...urgent, ...routine];
-  const visible = [...urgent, ...routine.slice(0, Math.max(0, limit - urgent.length))];
-  return { all, visible, hiddenCount: all.length - visible.length };
 }

@@ -1387,16 +1387,6 @@ summary { overflow-wrap: anywhere; }
 
 #settings-dialog.results-only #results-panel > summary { display: none; }
 #settings-dialog.results-only #results-panel { border: 0; padding: 0; }
-
-/* Work stays readable at a glance; evidence and history remain in disclosure. */
-.work-assignee { color: var(--muted); font-size: .8rem; margin: .2rem 0; }
-.work-result-summary { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.work-card:has(.work-details[open]) .work-result-summary { display: block; }
-
-/* A recovery hint appears only when recorded worker progress needs attention. */
-.work-recovery { border-left: 3px solid var(--muted); padding: .5rem .75rem; margin: .75rem 0; }
-.work-recovery p { margin: .35rem 0; color: var(--muted); }
-
 /* Guest upgrade hint: one-time inline nudge after first message. */
 .guest-upgrade-hint {
   display: flex;
