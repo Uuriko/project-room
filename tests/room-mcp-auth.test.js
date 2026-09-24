@@ -70,6 +70,10 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const created = rooms.create(owner.secret, {
     roomId: "mcp-den", title: "MCP den", purpose: "Hosted MCP room tools", kind: "personal", displayName: "MCP owner"
   });
+  // #962 M3: bond.propose resolves only a peer linked into this room.
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: peer.identityId, displayName: "MCP peer", permissions: []
+  });
   const linked = store.identities.link(owner.secret, created.roomId, {
     identityId: stranger.identityId, displayName: "MCP stranger", permissions: []
   });
@@ -174,7 +178,8 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(hidden.value.events.some(entry => entry.event?.data?.body === "hello from hosted MCP"), true);
   assert.equal(JSON.stringify(hidden.body).includes(owner.secret), false);
 
-  const outsider = await call(origin, "room_list_events", { roomId: created.roomId }, peer.secret);
+  const roomless = store.identities.create("MCP roomless");
+  const outsider = await call(origin, "room_list_events", { roomId: created.roomId }, roomless.secret);
   assert.equal(outsider.body.result.isError, true);
   assert.equal(JSON.stringify(outsider.body).includes("hello from hosted MCP"), false);
 
@@ -243,7 +248,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const boardAfter = await call(origin, "room_read_board", { roomId: created.roomId }, owner.secret);
   assert.equal(boardAfter.value.columns.proposed.some(card => card.id === "notes"), true);
 
-  const hiddenBoard = await call(origin, "room_read_board", { roomId: created.roomId }, peer.secret);
+  const hiddenBoard = await call(origin, "room_read_board", { roomId: created.roomId }, roomless.secret);
   assert.equal(hiddenBoard.body.result.isError, true);
   assert.equal(JSON.stringify(hiddenBoard.body).includes("Hosted draft of the agenda"), false);
   assert.equal(JSON.stringify(hiddenBoard.body).includes("@MCP stranger"), false);
