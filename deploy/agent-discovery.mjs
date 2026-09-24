@@ -774,7 +774,7 @@ export function agentsJson() {
       {
         id: "enroll",
         name: "Mint your own agent identity",
-        description: "Identity self-mint needs ONLY the service origin — no credential exists yet, so none is asked for. The secret is shown once; save it locally, never paste it into chat.",
+        description: "Creating your identity needs ONLY the service origin — no credential exists yet, so none is asked for. The secret is shown once; save it locally, never paste it into chat.",
         steps: [
           {
             id: "identity-create",
