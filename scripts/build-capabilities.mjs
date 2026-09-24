@@ -29,6 +29,10 @@ export const FAMILIES = [
   ["agent-inbox", p => /^\/api\/inbox(\/|$)/.test(p) || /\/agent-inbox(\/|$)/.test(p)],
   ["collab", p => /\/collab\//.test(p)],
   ["webhooks", p => /webhook/.test(p)],
+  // Wakeable host registration (POST /api/agent-heartbeats). The A2A
+  // pushNotifications flag is derived from this family plus webhooks;
+  // see pushNotificationsSupported in deploy/agent-discovery.mjs.
+  ["agent-heartbeats", p => /^\/api\/agent-heartbeats(\/|$)/.test(p)],
   ["public-face", p => /public-face/.test(p) || /^\/api\/public\//.test(p)],
   ["spend-allowance", p => /spend-allowance/.test(p)],
   ["web-fetch", p => /^\/api\/web\/fetch(\/|$)/.test(p)],

@@ -68,7 +68,7 @@ test("skills are non-empty with id/name/description/tags", () => {
 test("capabilities carry the discovery capability flags and security is declared", () => {
   const card = agentCard();
   assert.equal(typeof card.capabilities.streaming, "boolean");
-  assert.equal(typeof card.capabilities.pushNotifications, "boolean");
+  assert.equal(card.capabilities.pushNotifications, true, "wakeUrl registration is mounted on this tip");
   assert.equal(typeof card.capabilities.stateTransitionHistory, "boolean");
   assert.ok(card.securitySchemes.digestAuth, "digestAuth scheme declared");
   assert.ok(card.securitySchemes.guestLinkAuth, "guestLinkAuth scheme declared");
@@ -125,6 +125,7 @@ test("funnel serves the signed-shape card at the well-known path", async t => {
   assert.match(res.headers.get("content-type") ?? "", /application\/json/);
   const card = await res.json();
   assert.equal(card.name, "Uuriko Project Room");
+  assert.equal(card.capabilities.pushNotifications, true);
   assert.ok(Array.isArray(card.supportedInterfaces));
   assert.ok(Array.isArray(card.skills) && card.skills.length > 0);
   const twin = await (await fetch(`${origin}/.well-known/agent.json`)).json();

@@ -271,6 +271,18 @@ const A2A_SKILLS = Object.freeze([
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
+// A2A pushNotifications on the global discovery card.
+//
+// The card is assembled once at module load, and its capabilities are
+// covered by the build-time Ed25519 signature, so this flag cannot count
+// live host rows. Hosts are per identity. The flag is true when this tip
+// mounts wakeable-host registration (POST /api/agent-heartbeats with
+// mode "wakeable" and an HTTPS wakeUrl) and outbound webhook delivery.
+// That is support for wakeUrl push, not "a host is registered right now".
+export function pushNotificationsSupported(capabilities = CAPABILITIES) {
+  return capabilities["agent-heartbeats"] === true && capabilities.webhooks === true;
+}
+
 export function agentCard() {
   // Deploy-aware discovery (#601): capabilities inventory the route table
   // at build time; `deployed` names the exact build they describe. Compare
@@ -347,7 +359,7 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
-    capabilities: Object.freeze({ streaming: false, pushNotifications: false, stateTransitionHistory: false, ...CAPABILITIES, stale: deployed.stale })
+    capabilities: Object.freeze({ streaming: false, pushNotifications: pushNotificationsSupported(), stateTransitionHistory: false, ...CAPABILITIES, stale: deployed.stale })
   };
   // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
   // attached only when the signature covers exactly this build's card bytes;
