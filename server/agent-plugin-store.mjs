@@ -23,7 +23,7 @@ import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs"
 import {
   createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
 } from "./agent-webhook-subscriptions.mjs";
-import { buildWakePing, WAKE_PING_EVENT } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
   backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS,
@@ -76,6 +76,9 @@ export const agentPluginSchema = `
   -- One row per (event, subscription) delivery; the idempotency_key makes
   -- fan-out double-delivery impossible even if an event is applied twice.
   -- state: pending -> delivered | failed (-> retry) -> dead_letter.
+  -- target_url overrides the subscription URL for wakeUrl pushes: the wake
+  -- ping is journaled on the matching subscription but POSTed to the
+  -- host's wakeUrl (NULL = the subscription's own URL).
   CREATE TABLE IF NOT EXISTS agent_webhook_deliveries (
     delivery_id TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -84,6 +87,7 @@ export const agentPluginSchema = `
     event_id TEXT,
     event_type TEXT NOT NULL,
     room_id TEXT,
+    target_url TEXT,
     payload_json TEXT NOT NULL,
     signature TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('pending','delivered','failed','dead_letter')),
@@ -132,6 +136,11 @@ export class AgentPluginStore {
     this.subs = new Map();
     this.verifications = new Map();
     this.verificationPolicies = new Map();
+    // Event-push dispatch kick: set by the process entry point (server.mjs,
+    // cloudflare/room.mjs) to flush due deliveries fire-and-forget after a
+    // commit journals them. Null in tests and when unset — deliveries then
+    // wait for the cron tick / manual drain.
+    this.dispatchKick = null;
     const clock = () => store.now();
     this.apiKeys = createAgentApiKeys({ store: this.keys, clock });
     // RC-2026-09-18-049: verification tiers ride on the trust evidence —
@@ -184,6 +193,12 @@ export class AgentPluginStore {
     const cardColumns = new Set(this.db.prepare("PRAGMA table_info(agent_directory_cards)").all().map(c => c.name));
     if (!cardColumns.has("public_key")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN public_key TEXT");
     if (!cardColumns.has("signature")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN signature TEXT");
+    // Event-push: target_url overrides the subscription URL for wakeUrl
+    // pushes. Same additive backfill pattern as the card key envelope.
+    const deliveryColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_deliveries)").all().map(c => c.name));
+    if (deliveryColumns.size > 0 && !deliveryColumns.has("target_url")) {
+      this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN target_url TEXT");
+    }
     this.keys.clear();
     this.cards.clear();
     this.subs.clear();
@@ -669,25 +684,62 @@ export class AgentPluginStore {
   }
 
   // RC-2026-09-18-051: journal an agent.wake delivery for every enabled
-  // subscription of the identity that listens for wake pings. Delivery is
-  // pending (actual HTTP dispatch is a later slice); the agent sees the
-  // pending entry in its delivery journal. No subscription, no delivery —
-  // the heartbeat queue alone carries the wake.
+  // subscription of the identity that listens for wake pings. Deliveries
+  // flush fire-and-forget after the request path returns (setDispatchKick),
+  // with the cron tick as the restart-safe backstop; the agent sees each
+  // delivery in its journal. No subscription, no delivery — the heartbeat
+  // queue alone carries the wake.
   deliverWakePing({ identityId, signal }) {
-    return this.mutate(() => {
+    const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
       const deliveries = [];
+      const wakePing = buildWakePing({ agentId: identityId, signal });
+      const eventId = signal?.signalId ?? null;
       for (const row of rows) {
         let events = [];
         try { events = JSON.parse(row.eventsJson); } catch { continue; }
         if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
         deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
-          { eventType: WAKE_PING_EVENT, data: buildWakePing({ agentId: identityId, signal }),
-            eventId: signal?.signalId ?? null, roomId: null }));
+          { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null }));
+      }
+      // Event-push: when the agent registered wakeable hosts with wakeUrls,
+      // the same wake ping is also POSTed to each distinct wakeUrl via the
+      // same signed sender. The wakeUrl row is journaled on the first
+      // matching subscription (target_url override); the idempotency
+      // suffix keeps it distinct from the subscription-URL row. A bad
+      // stored wakeUrl must never break the wake path, so it is skipped,
+      // not thrown.
+      if (deliveries.length > 0) {
+        for (const wake of this.wakeUrlTargets(identityId)) {
+          try {
+            deliveries.push(this.buildWebhookDelivery(deliveries[0].subscriptionId,
+              { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null,
+                url: wake.wakeUrl, idempotencySuffix: `wake-url:${wake.hostId}` }));
+          } catch { /* skip invalid wakeUrl; the subscription-URL delivery still stands */ }
+        }
       }
       return Object.freeze({ deliveries: Object.freeze(deliveries) });
     });
+    if (result.deliveries.length > 0) this.kickDispatch();
+    return result;
+  }
+
+  // Distinct wakeUrls of the identity's wakeable hosts. Never throws — a
+  // missing heartbeats table (older DB) just means no push targets.
+  wakeUrlTargets(identityId) {
+    let hosts = [];
+    try { hosts = this.store.agentHeartbeats?.statusOf(identityId)?.hosts ?? []; }
+    catch { return []; }
+    const seen = new Set();
+    const targets = [];
+    for (const host of hosts) {
+      if (host?.mode !== "wakeable" || typeof host?.wakeUrl !== "string" || !host.wakeUrl) continue;
+      if (seen.has(host.wakeUrl)) continue;
+      seen.add(host.wakeUrl);
+      targets.push({ hostId: host.hostId, wakeUrl: host.wakeUrl });
+    }
+    return targets;
   }
 
   // ---- Per-agent webhook subscriptions ----
@@ -749,18 +801,19 @@ export class AgentPluginStore {
     return Object.freeze(rows.map(row => this.deliveryView(row)));
   }
 
-  buildWebhookDelivery(subscriptionId, { eventType, data, eventId = null, roomId = null }) {
+  buildWebhookDelivery(subscriptionId, { eventType, data, eventId = null, roomId = null, url = null, idempotencySuffix = null }) {
     return this.mutate(() => {
       // Idempotency: the same event fanned out twice to the same
       // subscription yields one delivery. The UNIQUE idempotency_key
       // enforces this even across restarts; the SELECT first keeps the
       // pure module's counter from burning ids on replays.
-      const idempotencyKey = eventId ? `${eventId}:${subscriptionId}` : null;
+      const idempotencyKey = eventId ? `${eventId}:${subscriptionId}${idempotencySuffix ? `:${idempotencySuffix}` : ""}` : null;
       if (idempotencyKey) {
         const existing = this.db.prepare(
           "SELECT * FROM agent_webhook_deliveries WHERE idempotency_key=?").get(idempotencyKey);
         if (existing) return Object.freeze({ ...this.deliveryView(existing), duplicate: true });
       }
+      if (url !== null) validateWebhookUrl(url);
       const delivery = this.webhooks.buildDelivery(subscriptionId, { eventType, data });
       const sub = this.subs.get(subscriptionId);
       const now = this.store.now();
@@ -770,11 +823,11 @@ export class AgentPluginStore {
       const envelope = deliveryEnvelope(
         { deliveryId: delivery.deliveryId, subscriptionId, eventType, issuedAt, roomId, data });
       this.db.prepare(`INSERT OR IGNORE INTO agent_webhook_deliveries
-        (delivery_id, idempotency_key, subscription_id, agent_id, event_id, event_type, room_id,
+        (delivery_id, idempotency_key, subscription_id, agent_id, event_id, event_type, room_id, target_url,
          payload_json, signature, state, attempts, next_attempt_at, last_error, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL, ?, ?)`)
         .run(delivery.deliveryId, idempotencyKey ?? `manual:${delivery.deliveryId}`,
-          subscriptionId, sub.agentId, eventId, eventType, roomId,
+          subscriptionId, sub.agentId, eventId, eventType, roomId, url,
           JSON.stringify(envelope), signature, now, now, now);
       this.persistJournal(subscriptionId);
       return delivery;
@@ -833,6 +886,10 @@ export class AgentPluginStore {
         { eventType: event.type, data: event.data ?? {}, eventId: event.id, roomId });
       if (!delivery.duplicate) created++;
     }
+    // Prompt dispatch: the drain kicks fire-and-forget after the request
+    // path returns (setDispatchKick by the entry point); the cron tick is
+    // the restart-safe backstop. kickDispatch never throws.
+    if (created > 0) this.kickDispatch();
     return Object.freeze({ deliveries: created });
   }
 
@@ -872,7 +929,7 @@ export class AgentPluginStore {
       eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
-    const result = await postDelivery({ fetchImpl, url: sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
+    const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
     return this.mutate(() => {
       try { this.webhooks.recordAttempt(row.delivery_id, { ok: result.ok, error: result.error }); } catch { /* cache may lag; the table is authoritative */ }
       if (result.ok) {
@@ -896,6 +953,22 @@ export class AgentPluginStore {
         .run(attempts, result.error, now + backoffDelayMs(attempts), signature, JSON.stringify(envelope), now, row.delivery_id);
       return "retried";
     });
+  }
+
+  // Prompt dispatch kick. The process entry point (server.mjs,
+  // cloudflare/room.mjs) registers a fire-and-forget kick that runs the
+  // drain after a commit journals deliveries; the cron tick and manual
+  // drain remain the restart-safe backstop. kickDispatch never throws, so
+  // the command that triggered the fan-out cannot fail from the kick.
+  setDispatchKick(fn) {
+    this.dispatchKick = typeof fn === "function" ? fn : null;
+    return this;
+  }
+
+  kickDispatch() {
+    if (typeof this.dispatchKick !== "function") return false;
+    try { this.dispatchKick(); return true; }
+    catch { return false; }
   }
 
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).

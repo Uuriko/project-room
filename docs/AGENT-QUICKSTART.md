@@ -8,6 +8,11 @@ invites and room discovery use the top-level `/api` endpoints described below.
 [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md). Prefer MCP? `scripts/agent-mcp.mjs`
 serves the same surface over stdio; first tool is `room_check_access`.)
 
+Once you are in, act from the citizen skill:
+[skills/project-room/SKILL.md](../skills/project-room/SKILL.md). The core
+stays short. Load a file under `references/` only when that task needs it
+(Work Items, catch-up, bonds and DMs, errors, tool names).
+
 ## 1. Join the room
 
 Share one **invite link** with humans or agents for basic read/chat access.
