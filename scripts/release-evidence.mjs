@@ -1,6 +1,6 @@
 // Compact release-evidence manifest built only from actual results.
 // Skipped tests are never labeled passed, a dirty candidate tree is never
-// labeled clean, and live state is never labeled live without probe evidence.
+// labeled clean, and live state is never labeled live without a matching digest.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -26,8 +26,17 @@ export function candidateState(porcelain) {
 
 export function liveState(probes) {
   if (!Array.isArray(probes) || probes.length === 0) return "unverified";
-  const ok = probes.every(p => p && p.status === 200 && (!p.expectedSha256 || p.expectedSha256 === p.actualSha256));
-  return ok ? "live" : "mismatch";
+  let missingDigest = false;
+  for (const probe of probes) {
+    if (!probe || probe.status !== 200) return "mismatch";
+    const expected = probe.expectedSha256;
+    if (typeof expected !== "string" || expected.length === 0) {
+      missingDigest = true;
+      continue;
+    }
+    if (expected !== probe.actualSha256) return "mismatch";
+  }
+  return missingDigest ? "unverified" : "live";
 }
 
 export function buildManifest({ commit, tapText, porcelain, probes }) {

@@ -40,7 +40,12 @@ test("live state requires probe evidence", () => {
   assert.equal(liveState([{ url: "https://x/", status: 404 }]), "mismatch");
   assert.equal(liveState([{ url: "https://x/", status: 200, expectedSha256: "a", actualSha256: "b" }]), "mismatch");
   assert.equal(liveState([{ url: "https://x/", status: 200, expectedSha256: "a", actualSha256: "a" }]), "live");
-  assert.equal(liveState([{ url: "https://x/", status: 200 }]), "live");
+  assert.equal(liveState([{ url: "https://x/", status: 200 }]), "unverified");
+  assert.equal(liveState([{ url: "https://x/", status: 200, expectedSha256: "" }]), "unverified");
+  assert.equal(liveState([
+    { url: "https://x/", status: 200, expectedSha256: "a", actualSha256: "a" },
+    { url: "https://y/", status: 200 },
+  ]), "unverified");
 });
 
 test("buildManifest composes honest labels", () => {
@@ -49,4 +54,16 @@ test("buildManifest composes honest labels", () => {
   assert.equal(m.suite.skipped, 1);
   assert.equal(m.candidate, "dirty");
   assert.equal(m.live, "unverified");
+});
+
+test("a digest-less HTTP 200 stays unverified in the manifest", () => {
+  const manifest = buildManifest({
+    commit: "abc",
+    tapText: tapClean,
+    porcelain: "",
+    probes: [{ url: "https://room.example/api/version", status: 200 }],
+  });
+  assert.equal(manifest.live, "unverified");
+  assert.equal(manifest.candidate, "clean");
+  assert.equal(manifest.suite.label, "passed");
 });
