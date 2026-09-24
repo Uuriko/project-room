@@ -111,6 +111,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const leftoverHealth = await json(await call('/room/health'));
     assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
+    assert.deepEqual(await json(await call('/api/healthz')), leftoverHealth);
+    assert.deepEqual(await json(await call('/healthz')), leftoverHealth);
+    assert.deepEqual(await json(await call('/room/healthz')), leftoverHealth);
+    assert.deepEqual(await json(await call('/room/api/healthz')), leftoverHealth);
     const kits = await call('/room/kits');
     assert.equal(kits.status, 200);
     assert.match(kits.headers.get('content-type'), /text\/plain/);
@@ -120,6 +124,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(kitsBody, await (await call('/room/apps')).text());
     assert.equal(kitsBody, await (await call('/room/tools')).text());
     assert.equal(kitsBody, await (await call('/kits.txt')).text());
+    assert.equal(kitsBody, await (await call('/kits')).text());
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
     const cookie = login.headers.get('set-cookie');
     assert.match(cookie, /^__Host-room_session=/);

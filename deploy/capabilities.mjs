@@ -13,4 +13,5 @@ export const CAPABILITIES = Object.freeze({
   "webhooks": true,
   "public-face": true,
   "spend-allowance": true,
+  "web-fetch": true,
 });

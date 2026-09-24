@@ -7,8 +7,11 @@ import { catalogDoorHtml } from "../src/room-roster.js";
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
-// browsers survive. #join/<token> onto Join, then leave the public wrapper
-// so the app opens the join dialog with the token intact.
+// browsers survive. A complete #join/<43-char> leaves the public wrapper so
+// the app opens the join dialog. Bare or short #join/ stays here and shows
+// #join-empty. #code/ and the Join-with-code form also stay: CSP cannot
+// preview a code, so a formatted code (including ABC-DEF-GHJ) shows a
+// live-invite error instead of a silent leave.
 export function publicDoorHashForward() {
   function id() {
     var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
@@ -18,6 +21,37 @@ export function publicDoorHashForward() {
     var s = String(value || "").toUpperCase().replace(/[\s_-]/g, "").replace(/I/g, "1").replace(/L/g, "1").replace(/O/g, "0");
     if (!/^[0-9A-HJKMNP-TV-Z]{9}$/.test(s)) return "";
     return s.slice(0, 3) + "-" + s.slice(3, 6) + "-" + s.slice(6, 9);
+  }
+  function joinInvite(hash) {
+    if (hash.indexOf("#join/") !== 0) return "";
+    var piece = hash.slice(6).split("/")[0];
+    return /^[A-Za-z0-9_-]{43}$/.test(piece) ? piece : "";
+  }
+  function whisperJoin(show, text) {
+    var el = globalThis.document.getElementById && globalThis.document.getElementById("join-empty");
+    if (!el) return;
+    var msg = el.querySelector && el.querySelector("#join-empty-message");
+    if (show) {
+      if (msg && text) msg.textContent = text;
+      el.removeAttribute("hidden");
+    } else el.setAttribute("hidden", "");
+  }
+  function whisperCode(show, text) {
+    var el = globalThis.document.getElementById && globalThis.document.getElementById("join-code-status");
+    var input = globalThis.document.querySelector && globalThis.document.querySelector("#join-code");
+    if (el) {
+      if (show) {
+        if (text) el.textContent = text;
+        el.removeAttribute("hidden");
+      } else {
+        el.textContent = "";
+        el.setAttribute("hidden", "");
+      }
+    }
+    if (input) {
+      if (show) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
   }
   function handoff(href) {
     var room = id();
@@ -33,25 +67,33 @@ export function publicDoorHashForward() {
     var people = globalThis.document.querySelector("a.people");
     var join = globalThis.document.querySelector("a.join") || globalThis.document.querySelector("a[href*=\"#join/\"]");
     var room = id();
+    whisperJoin(false);
+    whisperCode(false);
     if (room && open) {
       open.setAttribute("href", handoff(open.getAttribute("href")));
       if (people) people.setAttribute("href", open.getAttribute("href"));
       return;
     }
-    if (hash.indexOf("#join/") === 0 && hash.length > 6 && join) {
-      var joinUrl = new URL(join.getAttribute("href"), globalThis.location.href);
-      joinUrl.hash = hash;
-      join.setAttribute("href", joinUrl.href);
-      globalThis.location.replace(joinUrl.href);
-      return;
+    if (hash.indexOf("#join/") === 0) {
+      if (!joinInvite(hash)) {
+        whisperJoin(true, "This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.");
+        return;
+      }
+      if (join) {
+        var joinUrl = new URL(join.getAttribute("href"), globalThis.location.href);
+        joinUrl.hash = hash;
+        join.setAttribute("href", joinUrl.href);
+        globalThis.location.replace(joinUrl.href);
+        return;
+      }
     }
-    if (hash.indexOf("#code/") === 0 && join) {
+    if (hash.indexOf("#code/") === 0) {
       var formatted = formatCode(hash.slice(6).split("/")[0]);
-      if (!formatted) return;
-      var codeUrl = new URL(join.getAttribute("href"), globalThis.location.href);
-      codeUrl.hash = "#code/" + formatted;
-      join.setAttribute("href", codeUrl.href);
-      globalThis.location.replace(codeUrl.href);
+      var codeMsg = formatted
+        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
+        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+      whisperJoin(true, codeMsg);
+      whisperCode(true, codeMsg);
     }
   }
   apply();
@@ -72,9 +114,11 @@ export function publicDoorHashForward() {
       e.preventDefault();
       var input = globalThis.document.querySelector("#join-code");
       var formatted = formatCode(input && input.value);
-      var origin = form.getAttribute("data-room-origin");
-      if (!formatted || !origin) return;
-      globalThis.location.assign(origin.replace(/\/$/, "") + "/#code/" + formatted);
+      var formMsg = formatted
+        ? "This isn't a live invite. Ask for a full #join/… link or a real join code from the person who invited you."
+        : "That isn't a join code. Use ABC-DEF-GHJ (9 characters).";
+      whisperJoin(true, formMsg);
+      whisperCode(true, formMsg);
     });
   }
 }
@@ -123,9 +167,10 @@ function joinCodeDoorHtml() {
     <p>Short human invite code (ABC-DEF-GHJ). Same join as the full invite link. Not an agent invite code.</p>
     <label for="join-code">Join code</label>
     <div class="invite-row">
-      <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ">
+      <input id="join-code" type="text" autocomplete="off" spellcheck="false" maxlength="11" placeholder="ABC-DEF-GHJ" aria-describedby="join-code-status">
       <button type="submit">Join with code</button>
     </div>
+    <p class="join-code-status" id="join-code-status" role="status" hidden></p>
   </form>`;
 }
 
@@ -264,7 +309,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <p class="help">Rooms are private by default. Adding an agent never lists the room publicly.</p>
     <p class="help">Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
-      <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
+      <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. Live HTTP: <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>. The CLI name <code>bootstrap-agent-room</code> is local-only — there is no <code>POST /api/bootstrap-agent-room</code>.</li>
       <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
       <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
       <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>
@@ -352,6 +397,13 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .join-code .invite-row{display:flex;gap:.6rem;align-items:center}
 .join-code .invite-row input{margin:0;flex:1}
 .join-code button{display:inline-flex;align-items:center;min-height:48px;padding:0 16px;background:var(--acid);color:var(--ink);border:0;font-weight:650}
+.join-code-status{margin:.65rem 0 0;font-size:14px;color:var(--acid)}
+.join-code-status[hidden]{display:none}
+.join-empty{margin:0 0 .85rem;font-size:15px;color:var(--acid);max-width:34em}
+.join-empty[hidden]{display:none}
+.join-empty p{margin:0 0 .45rem}
+.join-empty-recover{display:flex;flex-wrap:wrap;gap:.75rem 1.15rem;font-size:14px}
+.join-empty-recover a{color:var(--acid);text-decoration:none}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
@@ -361,6 +413,10 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
+  </div>
+  <div class="join-empty" id="join-empty" hidden role="status">
+    <p id="join-empty-message">This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.</p>
+    <p class="join-empty-recover" id="join-empty-recover"><a href="/room">Open room door</a> <a href="#join-code">Join with code</a> <a href="#join-agent">Paste a prompt</a> <a href="#mcp-join">Add Room as MCP</a></p>
   </div>
   <p class="whispers"><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
@@ -389,7 +445,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
       <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
       <p>Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
       <ol>
-        <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
+        <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. Live HTTP: <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>. The CLI name <code>bootstrap-agent-room</code> is local-only — there is no <code>POST /api/bootstrap-agent-room</code>.</li>
         <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
         <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
         <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>

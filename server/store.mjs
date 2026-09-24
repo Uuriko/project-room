@@ -46,6 +46,7 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
+import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -56,6 +57,7 @@ import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
   assertTransitionMention, resolveMentionTarget, mentionStateSchema,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
+import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
@@ -571,6 +573,7 @@ export class RoomStore {
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.guestInvites = new GuestInvites(this);
+    this.webFetch = new WebFetch(this);
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
@@ -633,6 +636,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
+        this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
@@ -773,10 +777,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
+      // additive side tables (no events, no projection impact), same pattern.
+      this.db.exec(webFetchSchema);
+      migrateWebFetchLogColumns(this.db);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(mentionStateSchema);
+      // Attention (mark unread / save for later / activity feed): purely
+      // additive side tables (no events, no projection impact): IF NOT
+      // EXISTS is idempotent, no schema version bump, intentionally outside
+      // the writer fence.
+      this.db.exec(activitySchema);
       // Per-thread mutes. Purely additive side table (no events, no
       // projection impact): IF NOT EXISTS is idempotent, no schema version
       // bump, intentionally outside the writer fence. DDL matches the
@@ -3017,6 +3030,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // mentions responded in the same transaction. Never throws for
       // unparseable input — an unresolvable mention is simply not tracked.
       if (command.type === T.MESSAGE_POSTED) this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // Attention: write-time activity fan-out (mention/reply/thread_reply/
+      // reaction). Runs in the same transaction as the triggering event.
+      // Never throws: a fan-out failure must not fail the command.
+      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
       // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
       // event is offered to enabled webhook subscriptions whose event
       // filter matches. Journaled in the same transaction as the event

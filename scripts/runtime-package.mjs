@@ -73,6 +73,7 @@ optional.push("deploy/public-assets.mjs"); // Shared live manifest; historical p
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("deploy/agent-card-key.mjs", "deploy/agent-card-signed.mjs"); // RC-2026-09-23-105: room card signing key (public half) + build-time signature (imported by deploy/agent-discovery.mjs; pure)
 optional.push("server/guest-invites.mjs"); // RC-2026-09-23-100: GX-invite public handoff for external agents (imported by server/store.mjs + server/http.mjs)
+optional.push("server/web-fetch.mjs"); // RC-2026-09-23-102: room-side web fetch (imported by server/store.mjs + server/http.mjs)
 optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("server/agent-identities.mjs");
@@ -176,6 +177,7 @@ optional.push("server/boot-options.mjs"); // imported by server.mjs: default boo
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
+optional.push("server/activity.mjs"); // Attention: activity feed, read horizons, saved messages, thread mutes (imported by server/store.mjs and server/http.mjs)
 optional.push("server/spend-allowance.mjs");
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.

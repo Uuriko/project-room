@@ -111,6 +111,23 @@ test("owner bearer mints guest-agent links with no Origin header", async t => {
   assert.equal(minted.status, 201);
 });
 
+test("www Origin on a JSON API is 403 origin_denied with an Origin hint", async t => {
+  const { request } = await serve(t);
+  const hint = "Use Origin: https://room.trydemigod.com or omit the Origin header.";
+  for (const originHeader of ["https://www.getdasha.com", "https://www.getdasha.com/room"]) {
+    const denied = await request("/api/health", { headers: { Origin: originHeader } });
+    assert.equal(denied.status, 403, originHeader);
+    const body = await denied.json();
+    assert.equal(body.error.code, "origin_denied");
+    assert.equal(body.hint, hint);
+    assert.equal(JSON.stringify(body.next).includes("guest invite"), false);
+    assert.equal(JSON.stringify(body.next).includes("Add agent"), false);
+    assert.ok(body.next.some(step => step.command?.includes("https://room.trydemigod.com")));
+  }
+  const open = await request("/api/health");
+  assert.equal(open.status, 200);
+});
+
 test("no bearer, no Origin: the gate still bites", async t => {
   const { request, ownerKey } = await serve(t);
   const minted = await mintInvite(request, ownerKey);

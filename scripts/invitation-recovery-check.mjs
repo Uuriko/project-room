@@ -212,6 +212,11 @@ for (const failure of ['malformed', 'expired']) {
     });
     await page.goto(`${origin}/#join/${failure === 'expired' ? fixture.links.expired : 'invalid-invitation'}`);
     await page.waitForFunction(() => /incomplete|Unable to open/.test(document.querySelector('#join-link-scope').textContent));
+    assert.equal(await page.locator('#join-link-recover').isVisible(), true);
+    assert.equal(await page.locator('#join-link-recover a[href="/room"]').count(), 1);
+    assert.equal(await page.locator('#join-link-recover a[href="/room#join-code"]').count(), 1);
+    assert.equal(await page.locator('#join-link-recover a[href="/room#join-agent"]').count(), 1);
+    assert.equal(await page.locator('#join-link-recover a[href="/room#mcp-join"]').count(), 1);
     assert.equal(await page.locator('#join-link-retry').isVisible(), false);
     assert.equal(await page.locator('#join-link-form').isVisible(), false);
     assert.equal(new URL(page.url()).hash, '');

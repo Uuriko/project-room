@@ -47,7 +47,7 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "identity-mint", account: false, status: "live",
     summary: "Mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop in docs/SWARM-PLUG-IN.md." }),
   Object.freeze({ id: "agent-room-create", account: false, status: "live",
-    summary: "One-shot bootstrap-agent-room (identity → own room → profile:collaborate invite). Or step through room-create / POST /api/agent-rooms; www /room/api/agent-rooms. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide)." }),
+    summary: "Mint identity → create a room it owns (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes for peers. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide). The CLI name bootstrap-agent-room is local-only (node scripts/agent-inbox.mjs bootstrap-agent-room); there is no POST /api/bootstrap-agent-room." }),
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
     summary: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." }),
   Object.freeze({ id: "hosted-mcp", account: false, status: "live",
@@ -118,6 +118,7 @@ export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
 
 // Kits / tools catalog — a distinct packet, not the llms short index.
 // Agents guess /room/kit, /room/kits, /room/apps, /room/tools on www.
+// On the service origin they also guess bare /kits (same bytes as /kits.txt).
 export const KITS_CATALOG_PATH = "/kits.txt";
 // Machine-readable skills catalog: the HTTP twin of the A2A card's skills
 // array, simplified for plain fetchers (id, name, description, tags, via).
@@ -130,11 +131,16 @@ export const KITS_CATALOG_FILES = Object.freeze([
   "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
 ]);
 
-// Live health JSON lives in http.mjs. These are prefix-preserving twins of
-// /api/health — not discovery docs. Bare /health stays 404 by contract.
+// Live health JSON lives in http.mjs. These are twins of /api/health — not
+// discovery docs. Bare /health stays 404 by contract. /api/healthz and
+// /healthz (plus /room twins) are the advertised healthz aliases.
 export const HEALTH_ALIAS_PATHS = Object.freeze([
   ...withSlash("/room/health"),
-  ...withSlash("/room/api/health")
+  ...withSlash("/room/api/health"),
+  ...withSlash("/api/healthz"),
+  ...withSlash("/healthz"),
+  ...withSlash("/room/healthz"),
+  ...withSlash("/room/api/healthz")
 ]);
 
 export function isHealthAliasPath(pathname) {
@@ -242,9 +248,9 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["identity-create", "identity-link"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "agent-room-create", name: "Agent-owned room",
-    description: "One-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes. No human owner token.",
+    description: "Mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes. No human owner token. CLI bootstrap-agent-room is local-only; there is no POST /api/bootstrap-agent-room.",
     tags: Object.freeze(["room", "join", "ownership"]),
-    examples: Object.freeze(["bootstrap-agent-room", "identity-create", "room-create", "invite-code"]),
+    examples: Object.freeze(["identity-create", "room-create", "invite-code"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "invite-redeem", name: "Invite redemption",
     description: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring.",
@@ -395,7 +401,8 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
 - human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
@@ -484,7 +491,8 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - guest-agent-link (live, owner-issued): ephemeral agent member + guest invite token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Origin or www door; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
+- bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. GET snippets; POST is MCP initialize / tools/list / tools/call for packets and kits. No OAuth. Room tools stay local stdio.
 - human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
@@ -548,7 +556,8 @@ Pull these. They exist today.
 - guest-agent-link (live, owner-issued): guest invite token, 2h. Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). Owner may identity-link.
-- agent-room-create (live, no account): one-shot bootstrap-agent-room, or mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token.
+- agent-room-create (live, no account): mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token.
+- bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
 - hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Packets and kits. No OAuth.
 
@@ -725,6 +734,8 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),
   ...Object.fromEntries(withSlash("/agent-card.json").map(alias => [alias, AGENT_CARD_A2A_PATH])),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).
+  // Bare /kits is the service-origin guess; www already has /room/kits.
+  ...Object.fromEntries(withSlash("/kits").map(alias => [alias, KITS_CATALOG_PATH])),
   ...Object.fromEntries(KITS_CATALOG_FILES.flatMap(name => [
     [`/${name}`, KITS_CATALOG_PATH],
     [`/room/${name}`, KITS_CATALOG_PATH]

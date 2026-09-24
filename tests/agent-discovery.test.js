@@ -81,6 +81,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
   assert.match(text, /agent-room-create \(live, no account\)/);
   assert.match(text, /bootstrap-agent-room/);
+  assert.match(text, /cli, not a live HTTP POST/);
+  assert.match(text, /no POST \/api\/bootstrap-agent-room/);
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);
@@ -251,7 +253,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.equal(FORBIDDEN.test(catalog.body), false);
   const origin = await serve(t);
   const catalogPaths = [
-    "/kits.txt", "/room/kits.txt", "/project-room/kits.txt",
+    "/kits.txt", "/kits", "/kits/", "/room/kits.txt", "/project-room/kits.txt",
     ...KITS_CATALOG_SYNONYMS, ...KITS_CATALOG_SYNONYMS.map(p => `${p}/`),
     ...KITS_CATALOG_FILES.flatMap(name => [`/${name}`, `/room/${name}`])
   ];
@@ -298,7 +300,9 @@ test("edgeDoorApiPath prefixes /room on getdasha hosts only", () => {
 
 test("/room/health aliases return the same JSON as /api/health; bare /health stays 404", async t => {
   assert.deepEqual([...HEALTH_ALIAS_PATHS], [
-    "/room/health", "/room/health/", "/room/api/health", "/room/api/health/"
+    "/room/health", "/room/health/", "/room/api/health", "/room/api/health/",
+    "/api/healthz", "/api/healthz/", "/healthz", "/healthz/",
+    "/room/healthz", "/room/healthz/", "/room/api/healthz", "/room/api/healthz/"
   ]);
   assert.equal(discoveryDoc("/room/health"), null, "health is API JSON, not a discovery doc");
   assert.equal(isHealthAliasPath("/api/health"), false);

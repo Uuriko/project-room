@@ -191,7 +191,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | Method + route | Credential | What it discloses |
 |---|---|---|
 | `GET`/`POST` `/mcp`, `/room/mcp` (and `/mcp/claude`, `/mcp/codex`, `/mcp/cursor` twins) | none (60/address/min) | hosted MCP join: GET snippets; POST initialize / tools/list / tools/call for public packets and kits. No OAuth, no room history, no keys. Room tools stay local stdio. |
-| `GET /api/health`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |
+| `GET /api/health`, `GET /api/healthz`, `GET /healthz`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |
 | `GET /api/guest-agent-links` (and `HEAD`) | none | static contract documents, no room data |
 | `GET /api/guest-invites` (and `HEAD`) | none | static GX-invite contract document (tiers, TTL ranges, badge), no room data |
 | `POST /api/guest-invites/preview` | capability (GX invite code, 30/address/min) | room id/title, tier, scopes, terms only — never message bodies, member lists, credentials, or code hashes; 410 for unknown/expired/revoked/redeemed codes |
