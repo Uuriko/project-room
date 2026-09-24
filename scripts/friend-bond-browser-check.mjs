@@ -193,6 +193,9 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   const quillMemberId = store.db.prepare(
     "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
   ).get(roomId, quill.identityId).memberId;
+  // Graduated autonomy tiers: Quill is operator-promoted so the browser check
+  // exercises it as a working agent, not t1_readonly.
+  setTier(store.db, roomId, quillMemberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   let browser;
   t.after(async () => {
