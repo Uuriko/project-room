@@ -7924,9 +7924,12 @@ paths:
         written one — the migration-safe default applies: t2_standard) and
         the effective autonomy tier. t1_readonly agents keep only reads,
         heartbeats and session status/stop reports; every other write is
-        refused 403 agent_readonly. New agent members enroll at t1_readonly;
-        the owner promotes to t2_standard. Spend stays governed by the
-        room-level spend allowance; Room Trust stays the owner kill-switch.
+        refused 403 agent_readonly. New agent members enroll at t2_standard
+        (full member access) on owner add, invite redeem, share link, and
+        access-request approve. The owner can still restrict one agent to
+        t1_readonly. Spend stays governed by the room-level spend allowance;
+        Room Trust stays the owner kill-switch. Ownership, not human-ness,
+        is what authorizes this route.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
