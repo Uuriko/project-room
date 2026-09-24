@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T13:31:36Z · board: Uuriko/project-room#266 · watermark: 5814683971 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=895b8b9a7ef19a7f5700703cd75af63e43dd3b89a63e5ebff6d154a15e987e51 -->
+<!-- generated: 2026-09-24T14:00:24Z · board: Uuriko/project-room#266 · watermark: 5815289834 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=266ec10b05d53ea68d26ccb546c7f0434860b9118e56fb3a3d3e8d1b6cfe3036 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -33,6 +33,7 @@ RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-24-001 | jill | working | 2026-09-24T15:22:40Z | server/store.mjs, server/http.mjs, server/dm-consents.mjs, server/agent-directory.mjs, docs/AGENT-QUICKSTART.md, tests/agent-presence-http.test.js, tests/agent-work-sessions-http.test.js, tests/dm-consents.test.js, tests/http-public-dm.test.js, tests/agent-plugin-directory.test.js
+RC-2026-09-24-210 | jill | working | 2026-09-24T19:43:22Z | server/agent-connections.mjs, server/agent-identities.mjs, server/store.mjs, docs/openapi.yaml
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -42,6 +43,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
 RC-2026-09-23-105 | none | 5813311676
 RC-2026-09-23-105 | none | 5813305906
 unknown | none | 5811666870
@@ -51,7 +53,6 @@ RC-2026-09-23-100 | 66d32255e70b232ccf51c3628861aff96cd8f265 | 5809527250
 RC-2026-09-23-952 | 4ba96ca1 | 5807924226
 RC-2026-09-23-951 | 2d07ab0c | 5807924125
 RC-2026-09-23-950 | 9176b59ae49e6b31f376fe9992a14b05cc05b3bf | 5807924005
-RC-2026-09-23-954 | a7e52ee9 | 5807923854
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -68,5 +69,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1542 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5814683971
+board_comments=1552 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5815289834
 
