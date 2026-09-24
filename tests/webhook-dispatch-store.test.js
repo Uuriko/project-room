@@ -490,3 +490,82 @@ test("deliverWakePing still works with no wakeable hosts and no kick", t => {
   assert.equal(deliveries.length, 1);
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 1);
 });
+
+// Targeted-DM push privacy (mirrors the RC-2026-09-18-012 read-path rule):
+// a message.posted event carrying data.toMemberId is a direct message, so
+// the push fan-out must deliver it only to the sender's and the addressed
+// member's subscriptions. A third-party subscriber — room-linked or not —
+// must never be journaled (or sent) the DM body.
+function subscribeLinked(f, name, url, events = ["message.posted"]) {
+  const identity = f.store.identities.create(name);
+  const { memberId } = f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, permissions: [],
+  });
+  const { subscription } = f.store.agentPlugin.subscribeWebhook({
+    identityId: identity.identityId, url, events, secret: SECRET,
+  });
+  return { identity, memberId, subscription, url, key: f.store.issueAccessKey("commons", memberId) };
+}
+
+function journalCount(store, subscription) {
+  return store.agentPlugin.webhookJournal(subscription.subscriptionId).length;
+}
+
+test("targeted DMs fan out only to sender and addressee subscriptions", async t => {
+  const f = freshFixture(t);
+  const sender = subscribeLinked(f, "dm-sender", "https://hooks.example.test/dm-sender");
+  const addressee = subscribeLinked(f, "dm-addressee", "https://hooks.example.test/dm-addressee");
+  const outsider = subscribeLinked(f, "dm-outsider", "https://hooks.example.test/dm-outsider");
+  // A subscriber whose identity is never linked to the room: neither sender
+  // nor addressee by construction.
+  const unlinkedIdentity = f.store.identities.create("dm-unlinked");
+  const { subscription: unlinkedSub } = f.store.agentPlugin.subscribeWebhook({
+    identityId: unlinkedIdentity.identityId, url: "https://hooks.example.test/dm-unlinked",
+    events: ["message.posted"], secret: SECRET,
+  });
+  // DM consent so the targeted post is accepted by the command gate.
+  f.store.dmConsents.request("commons", sender.memberId, addressee.memberId, "test fixture");
+  f.store.dmConsents.decide("commons", addressee.memberId, sender.memberId, "approve");
+  const dmBody = `dm-secret-${randomUUID()}`;
+  const { event } = f.store.command(sender.key, "commons", {
+    id: randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId: randomUUID(), body: dmBody, toMemberId: addressee.memberId },
+  });
+  assert.equal(event.type, "message.posted");
+  assert.equal(event.actorId, sender.memberId);
+  // Sender and addressee are journaled; the outsider and the unlinked
+  // subscriber are not — the denial case.
+  assert.equal(journalCount(f.store, sender.subscription), 1);
+  assert.equal(journalCount(f.store, addressee.subscription), 1);
+  assert.equal(journalCount(f.store, outsider.subscription), 0);
+  assert.equal(journalCount(f.store, unlinkedSub), 0);
+  // The push wire carries the DM body only to the two parties.
+  const captured = [];
+  await drain(f.store, { fetchImpl: async (url, opts) => {
+    captured.push({ url, body: JSON.parse(opts.body) });
+    return { status: 200, text: async () => "ok" };
+  }});
+  assert.equal(captured.length, 2);
+  const urls = captured.map(c => c.url).sort();
+  assert.deepEqual(urls, [addressee.url, sender.url].sort());
+  for (const { body } of captured) {
+    assert.equal(body.eventType, "message.posted");
+    assert.equal(body.data.body, dmBody);
+    assert.equal(body.data.toMemberId, addressee.memberId);
+  }
+});
+
+test("non-targeted messages still fan out to every matching subscription", t => {
+  const f = freshFixture(t);
+  const a = subscribeLinked(f, "room-a", "https://hooks.example.test/room-a");
+  const b = subscribeLinked(f, "room-b", "https://hooks.example.test/room-b");
+  const unlinkedIdentity = f.store.identities.create("room-unlinked");
+  const { subscription: unlinkedSub } = f.store.agentPlugin.subscribeWebhook({
+    identityId: unlinkedIdentity.identityId, url: "https://hooks.example.test/room-unlinked",
+    events: ["message.posted"], secret: SECRET,
+  });
+  postMessage(f.store, f.keys, "hello room");
+  assert.equal(journalCount(f.store, a.subscription), 1);
+  assert.equal(journalCount(f.store, b.subscription), 1);
+  assert.equal(journalCount(f.store, unlinkedSub), 1);
+});
