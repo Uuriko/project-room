@@ -1603,7 +1603,7 @@ function render() {
       const bondAttr = chrome.bondId ? ` data-friend-bond="${esc(chrome.bondId)}"` : "";
       return `<button type="button" class="text-button friend-action" data-friend-action="${esc(action.action)}" data-friend-peer="${esc(m.id)}"${bondAttr} aria-label="${esc(names[action.action] || action.label)}"${friendBusy ? " disabled" : ""}>${esc(action.label)}</button>`;
     }).join("");
-    return `<span class="friend-bond" data-friend-peer="${esc(m.id)}" data-friend-state="${esc(chrome.state)}" role="group" aria-label="Friend ${esc(m.displayName)}">${chip}${buttons}</span>`;
+    return `<span class="friend-bond" tabindex="-1" data-friend-peer="${esc(m.id)}" data-friend-state="${esc(chrome.state)}" role="group" aria-label="Friend ${esc(m.displayName)}">${chip}${buttons}</span>`;
   };
   const dmConsentDetails = m => {
     if (!session || m.id === session.member.id || m.active === false) return "";
@@ -5514,8 +5514,11 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
     if (button) button.disabled = false;
     if (generation === client.generation && state) {
       await refreshFriendBonds();
-      const next = $(`#presence-list [data-friend-peer="${CSS.escape(peerMemberId)}"] [data-friend-action]`);
-      next?.focus();
+      // Focus the group, never the Revoke button. Propose used to focus
+      // Revoke; the next Enter (key repeat while Friend was held) sent
+      // bond.revoke, including after the peer had already accepted.
+      const group = $(`#presence-list .friend-bond[data-friend-peer="${CSS.escape(peerMemberId)}"]`);
+      group?.focus();
     }
   }
 }

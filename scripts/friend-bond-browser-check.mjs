@@ -159,3 +159,97 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
   assert.equal(museUi.errors.length, 0, museUi.errors.join("\n"));
   assert.equal(quillUi.errors.length, 0, quillUi.errors.join("\n"));
 });
+
+test("Enter on Friend does not revoke a bond the peer just accepted", { timeout: 120000 }, async t => {
+  // After propose, the client used to move focus onto Revoke. The next Enter
+  // (key repeat, or the key still down) sent bond.revoke. A peer who accepted
+  // in that window saw the bond flip active, then revoked, within a second.
+  const directory = mkdtempSync(join(tmpdir(), "room-friend-revoke-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  const server = createRoomServer({ store, streamInterval: 1000 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const muse = store.identities.create("Muse");
+  const quill = store.identities.create("Quill");
+  const roomId = "friend-revoke-loop";
+  const created = await post(origin, "/api/agent-rooms", {
+    roomId, title: "Friends", purpose: "Revoke loop", kind: "personal", displayName: "Muse"
+  }, muse.secret);
+  assert.equal(created.status, 201);
+  const requestId = randomUUID();
+  const asked = await post(origin, "/api/access-requests", {
+    roomId, identityId: quill.identityId, displayName: "Quill",
+    requestedPermissions: ["accept_work"], note: null, requestId
+  });
+  assert.equal(asked.status, 201);
+  const decided = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
+    decision: "approve", permissions: ["accept_work"], note: null
+  }, muse.secret);
+  assert.equal(decided.status, 200);
+  const quillMemberId = store.db.prepare(
+    "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
+  ).get(roomId, quill.identityId).memberId;
+
+  let browser;
+  t.after(async () => {
+    await browser?.close();
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  browser = await chromium.launch({
+    headless: true,
+    args: ["--disable-features=LocalNetworkAccessChecks"],
+    ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {})
+  });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const commands = [];
+  page.on("request", request => {
+    if (request.method() === "POST" && request.url().includes(`/api/rooms/${roomId}/commands`)) {
+      commands.push(request.postDataJSON()?.type);
+    }
+  });
+  await page.goto(origin);
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await expandSigninMore(page);
+  await page.locator('[name="identityId"]').fill(muse.identityId);
+  await page.locator('[name="secret"]').fill(muse.secret);
+  await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
+  await page.locator(`[data-room-id="${roomId}"]`).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
+    await page.locator("#people-panel > summary").click();
+  }
+  const row = page.locator(`#presence-list .presence-member[data-member-record-id="${quillMemberId}"]`);
+  const propose = row.locator('[data-friend-action="propose"]');
+  await propose.waitFor();
+  await propose.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(memberId => {
+    const group = document.querySelector(`#presence-list .presence-member[data-member-record-id="${memberId}"] .friend-bond`);
+    return group?.dataset.friendState === "outgoing" && group.contains(document.activeElement);
+  }, quillMemberId);
+  const bondId = await row.locator("[data-friend-bond]").getAttribute("data-friend-bond");
+  const accepted = await jsonOf(await post(origin, `/api/rooms/${roomId}/commands`, {
+    id: randomUUID(), type: "bond.accept", data: { bondId }
+  }, quill.secret));
+  assert.equal(accepted.status, 201);
+  assert.equal(accepted.body.event.type, "bond.activated");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  assert.equal(commands.includes("bond.revoke"), false, `commands: ${commands.join(", ")}`);
+  const listed = await jsonOf(await fetch(`${origin}/api/rooms/${roomId}/bonds`, {
+    headers: { authorization: `Bearer ${muse.secret}` }
+  }));
+  assert.equal(listed.status, 200);
+  const bond = listed.body.bonds.find(row => row.id === bondId);
+  assert.equal(bond.state, "active");
+  assert.equal(bond.revokedAt, null);
+  assert.ok(bond.acceptedScopes.includes("peer.dm"));
+  await row.locator('.friend-chip[data-friend-state="active"]').waitFor();
+  assert.equal(await row.locator(".friend-chip").innerText(), "Friends");
+  await row.locator('[data-friend-action="dm"]').waitFor();
+  assert.equal(await row.locator('[data-friend-action="revoke"]').count(), 1);
+});

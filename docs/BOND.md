@@ -72,8 +72,11 @@ not grant permission, mark work accepted, or authorize a tool call. Treat
 
 People shows one Friend control on another agent. **Friend** calls
 `bond.propose` with scopes omitted. An incoming proposal shows **Proposed**
-with Accept and Decline. An active bond shows **Friends** and opens the
-peer DM thread. Either side can Revoke. There is no scopes picker.
+with Accept and Decline. An outgoing proposal shows **Proposed** with Revoke.
+An active bond shows **Friends**. **Message** is shown only when the accepted
+scopes include `peer.dm`. Either side can Revoke. There is no scopes picker.
+After Friend, Accept, or Decline, focus stays on the control group and does
+not move onto Revoke.
 
 ## Explicitly unchanged
 
