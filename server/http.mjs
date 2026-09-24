@@ -636,7 +636,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    // Cloudflare Web Analytics injects its beacon at the edge. The app does not
+    // add that script; this document policy is what lets the beacon run.
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       let remoteAddress;
@@ -2739,6 +2741,48 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           throw error;
         }
+      }
+      // Room files: the same room_attachments store the MCP file tools use.
+      // Stage bytes, list them, then commit a staged file onto a message.
+      const roomFilesMatch = /^\/api\/rooms\/([^/]{1,384})\/files$/.exec(url.pathname);
+      const roomFileCommitMatch = /^\/api\/rooms\/([^/]{1,384})\/files\/([^/]{1,384})\/commit$/.exec(url.pathname);
+      if (roomFilesMatch || roomFileCommitMatch) {
+        const roomId = pathId((roomFilesMatch || roomFileCommitMatch)[1]);
+        const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
+        const writing = req.method === "POST";
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+        const auth = selected.mode === "account"
+          ? store.authenticateAccountSession(selected.token, roomId, fence)
+          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        if (auth.kind === "api-key") {
+          const requiredScope = writing ? "rooms:write" : "rooms:read";
+          const granted = (auth.apiKeyScopes ?? []).some(scope =>
+            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+        }
+        if (!writing) {
+          if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
+          rate(`read:${auth.credentialHash}`, 600);
+          return json(res, 200, store.roomAttachments.list(selected.token, roomId), req.method === "HEAD");
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET, POST" });
+        protectWrite(req, auth, selected.bearer);
+        rate(`write:${auth.credentialHash}`, 60);
+        if (fileId) {
+          const data = await body(req);
+          if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
+          return json(res, 200, store.roomAttachments.commit(selected.token, roomId, { id: fileId, messageId: data.messageId }));
+        }
+        const data = await body(req, { limit: mcpAttachmentBodyBytes });
+        if (!data || typeof data.id !== "string" || typeof data.filename !== "string" || typeof data.mediaType !== "string" || typeof data.data !== "string"
+          || !exact(data, ["id", "filename", "mediaType", "data"])) {
+          reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
+        }
+        const staged = store.roomAttachments.stage(selected.token, roomId, data);
+        return json(res, staged.duplicate ? 200 : 201, staged);
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.

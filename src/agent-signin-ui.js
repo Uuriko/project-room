@@ -376,6 +376,17 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
       container.addEventListener("submit", onSubmit);
     },
     // Show the human account UI instead (called when agent chooses human path)
+    clear() {
+      identityId = "";
+      secret = "";
+      rooms = [];
+      displayName = "";
+      createdIdentity = null;
+      busy = false;
+      error = "";
+      phase = "credentials";
+      if (container) render();
+    },
     hide() {
       if (container) container.hidden = true;
     },
