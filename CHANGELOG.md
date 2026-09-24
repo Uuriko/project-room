@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Removed 21 unwired Sept 16 server stubs the production Worker never loaded
+  (OKRs, retros, standup bot, time tracking, whiteboard, polls, sparklines,
+  five growth modules, dashboards, work calendar, recurring rooms, recurrence,
+  decision voting, announcements, benchmarks, wiki export, notes-to-work).
+  Recover them from git `076b0c105305fbc148ec9cfdfad87ed00f81a82b`.
+  `growth-funnel.mjs` stays.
 - Room Trust is one owner header toggle (`room.trust_set`). It starts **on**:
   members may assign Work Items and wake agents across owners. Turning it
   **off** blocks only that cross-owner assign and wake (`trust_off`);
