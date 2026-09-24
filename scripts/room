@@ -1538,10 +1538,10 @@ cmd_jev_shadow() {
   printf '%s\n' "$response" | jq -r '
     "shadow decisions for room \(.roomId): admission=\(.counts.admission) receipt=\(.counts.receipt) escalate=\(.counts.escalate)",
     (.entries[] |
-      "\(.id) [\(.gate)] \(.path)\(if .subject then " work=\(.subject)" else "" end)" +
-      " score=\(.score * 100 | round)% would-be=\(.decision)\(if .escalate then " ESCALATE" else "" end)" +
-      " at=\(.recordedAt)",
-      "    " + ([.signals[] | "\(.key)=\(.value * 100 | round)%"] | join(" "))'
+      (if .subject then " work=\(.subject)" else "" end) as $subj |
+      (if .escalate then " ESCALATE" else "" end) as $esc |
+      "\(.id) [\(.gate)] \(.path)\($subj) score=\(.score * 100 | round)% would-be=\(.decision)\($esc) at=\(.recordedAt)",
+      "    " + ([.signals[] | "\(.key)=\(.value * 100 | round)%"] | join(" ")))'
 }
 
 cmd_metrics() {

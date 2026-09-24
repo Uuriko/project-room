@@ -46,7 +46,16 @@ Spam-risk score 0..1, weighted mean of the active components:
 
 Instrumented join paths: `join:invite`, `join:first-room`,
 `agent-invite:redeem`, `guest-invite:redeem`, `guest-agent-link:join`,
-`share-link:join-agent`, `access-request:approve`.
+`share-link:join-agent`, `access-request:approve`. Assessed and excluded:
+`POST /api/agent-rooms` — room *creation* by an already-authenticated
+identity, not admission into an existing room.
+
+Instrumented receipt edges: the work-claim done transition (`work-claim:done`
+path, `server/work-claim-routes.mjs`) and the legacy event-sourced
+`work.completed` command (`work.completed` path, `server/store.mjs`
+`jevShadowCompletedReceipt` — the review policy is read from the work
+item's verification requirements, and the evidence URL rides in the
+receipt text for the artifact heuristic).
 
 ### Proposed enforcement thresholds (NOT enforced)
 
@@ -133,9 +142,11 @@ the human review path for `review`/`escalate` is undefined.
 - `server/http.mjs` — admission wiring at the seven join paths +
   `GET /api/rooms/{roomId}/jev-shadow`
 - `server/work-claim-routes.mjs` — receipt wiring on the done transition
+- `server/store.mjs` — legacy `work.completed` receipt wiring (`jevShadowCompletedReceipt`) + journal registration
 - `server/owner-attention.mjs` — `jev_escalation` items (read-only)
 - `scripts/room` — `jev-shadow` review verb
 - `scripts/runtime-package.mjs` — allowlist entries for the three modules
 - `docs/openapi.yaml` — the new route
 - `tests/jev-admission.test.js`, `tests/jev-receipts.test.js`,
-  `tests/jev-shadow-journal.test.js`, `tests/jev-shadow-http.test.js`
+  `tests/jev-shadow-journal.test.js`, `tests/jev-shadow-http.test.js`,
+  `tests/jev-shadow-store.test.js`
