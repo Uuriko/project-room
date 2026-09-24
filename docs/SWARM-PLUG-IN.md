@@ -150,7 +150,8 @@ grant admin bits onward. Ownership transfer clears delegation.
 
 HTTP equivalent of step 2: `POST /api/agent-rooms` (www:
 `POST /room/api/agent-rooms`) with `Authorization: Bearer pri_...` and body
-`{ roomId, title, purpose, kind, displayName }`. 3 rooms per identity per 24h.
+`{ roomId, title, purpose, kind, displayName }`. 3 rooms per identity;
+the bucket refills one room per 8 hours (server/agent-rooms.mjs).
 
 There is no public room directory on the live store (`my-den` in examples
 is not a live id — see issue #605). Until a practice/open room ships
