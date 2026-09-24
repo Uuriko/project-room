@@ -1,7 +1,9 @@
-// DM consent UI journey: request → pending → approve → DM posts → revoke →
-// block → gate errors → unblock, plus a forced 500's visible notice and the
-// logged-out public face staying consent-control-free. Real browser + local
-// HTTP service; identities and keys are disposable fixtures.
+// DM consent UI journey under default-open DMs: request → pending (never
+// gates the composer) → approve → DM posts → revoke → the gate refuses the
+// DM and names the next step → block → gate errors → unblock, plus a forced
+// 500's visible notice and the logged-out public face staying
+// consent-control-free. Real browser + local HTTP service; identities and
+// keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -88,15 +90,15 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   await aliceBob.getByText("Request pending").waitFor();
   assert.match(await a.page.locator("#status.visible").textContent(), /DM request sent to Bob/);
 
-  // --- The consent gate refuses the DM in the composer, draft kept. ---
+  // --- Default-open: a pending request never gates the DM in the composer. ---
   await selectRecipient(a.page, "bob");
-  await a.page.locator("#message-input").fill("hello bob, consent-gated");
+  await a.page.locator("#message-input").fill("hello bob, default-open");
   await a.page.locator("#message-form button[type=submit]").click();
-  const composerError = a.page.locator("#composer-status.visible.error");
-  await composerError.waitFor();
-  assert.match(await composerError.textContent(), /Bob hasn't approved DMs from you yet/);
-  assert.equal(await a.page.locator("#message-input").inputValue(), "hello bob, consent-gated",
-    "the refused draft stays in the composer");
+  // The send is async (network round-trip): wait for the cleared composer,
+  // which is the visible proof the DM posted, instead of asserting mid-flight.
+  await a.page.waitForFunction(() => document.querySelector("#message-input")?.value === "", null, { timeout: 30000 });
+  assert.equal(await a.page.locator("#composer-status.visible.error").count(), 0,
+    "a pending DM request never gates the composer under default-open DMs");
 
   // --- Bob's People panel carries the incoming request; he approves. ---
   const b = await signIn(bobKey);
@@ -136,6 +138,16 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   // --- Alice revokes; she is back to requesting. ---
   await aliceBob2.getByRole("button", { name: "Revoke my consent", exact: true }).click();
   await aliceBob2.getByText("Request again").waitFor();
+
+  // --- Explicit denial: after revoke the gate refuses the DM and names the next step. ---
+  await selectRecipient(a.page, "bob");
+  await a.page.locator("#message-input").fill("hello bob, revoked");
+  await a.page.locator("#message-form button[type=submit]").click();
+  const revokeError = a.page.locator("#composer-status.visible.error");
+  await revokeError.waitFor();
+  assert.match(await revokeError.textContent(), /Bob declined direct messages from you/);
+  assert.equal(await a.page.locator("#message-input").inputValue(), "hello bob, revoked",
+    "the refused draft stays in the composer");
 
   // --- Bob proactively blocks Alice; her row says so and the gate refuses. ---
   const bobAlice2 = consentSection(b.page, "alice");

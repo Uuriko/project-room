@@ -114,7 +114,7 @@ test("pair descriptions narrate both directions honestly", () => {
   assert.ok(blocked.some(l => /isn't accepting/.test(l)));
   assert.ok(blocked.some(l => /You've blocked/.test(l)));
   const none = dmConsentPairDescription({ outgoing: null, incoming: null }, "Bob");
-  assert.ok(none.some(l => /consent first/.test(l)));
+  assert.ok(none.some(l => /open by default/.test(l)));
 });
 
 test("status labels are human", () => {
@@ -165,9 +165,9 @@ test("API wrapper encodes requester ids in the decide path", async () => {
 });
 
 test("failure messages: gate codes are actionable, transport failures stay honest", () => {
-  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }, "Bob"), /Bob hasn't approved/);
-  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }, "Bob"), /People panel/);
-  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }), /They haven't approved/);
+  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }, "Bob"), /Bob declined/);
+  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }, "Bob"), /ask in the room/);
+  assert.match(dmConsentFailureMessage({ code: "dm_consent_required" }), /They declined/);
   assert.match(dmConsentFailureMessage({ code: "dm_blocked" }, "Bob"), /Bob isn't accepting/);
   assert.match(dmConsentFailureMessage({ code: "dm_already_approved" }), /already approved/);
   assert.match(dmConsentFailureMessage({ code: "dm_no_pending_request" }), /no longer pending/);

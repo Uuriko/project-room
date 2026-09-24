@@ -96,17 +96,16 @@ test("GET /skills serves the machine-readable catalog (+ aliases)", async t => {
   }
 });
 
-test("DM consent gates posting; approval flows over HTTP", async t => {
+test("DMs are open by default; request/block flows still work over HTTP", async t => {
   const { origin, ownerKey, aliceKey, bobKey } = await serve(t);
   const aliceId = "alice", bobId = "bob";
-  // No consent yet: the DM never lands.
-  const refused = await postMessage(origin, aliceKey, { messageId: "dm1", body: "hey bob", toMemberId: bobId });
-  assert.equal(refused.status, 403);
-  assert.equal(refused.json.error.code, "dm_consent_required");
+  // No consent row: the DM posts on default-open.
+  const open = await postMessage(origin, aliceKey, { messageId: "dm1", body: "hey bob", toMemberId: bobId });
+  assert.equal(open.status, 201, JSON.stringify(open.json));
   // Public messages still post fine.
   const pub = await postMessage(origin, aliceKey, { messageId: "pub1", body: "hello all" });
   assert.equal(pub.status, 201, JSON.stringify(pub.json));
-  // Request + approve.
+  // Request + approve still flow (the API remains for explicit bookkeeping).
   const req = await post(origin, "/api/rooms/commons/dm-consents", { targetId: bobId, reason: "sync?" }, aliceKey);
   assert.equal(req.status, 201, JSON.stringify(req.json));
   assert.equal(req.json.status, "pending");
@@ -124,21 +123,24 @@ test("DM consent gates posting; approval flows over HTTP", async t => {
   const decide = await post(origin, `/api/rooms/commons/dm-consents/${aliceId}/decide`, { decision: "approve" }, bobKey);
   assert.equal(decide.status, 200, JSON.stringify(decide.json));
   assert.equal(decide.json.status, "approved");
-  // Now the DM posts.
-  const ok = await postMessage(origin, aliceKey, { messageId: "dm2", body: "hey bob", toMemberId: bobId });
-  assert.equal(ok.status, 201, JSON.stringify(ok.json));
   // Owner sees pair metadata, not contents.
   const listed = await get(origin, "/api/rooms/commons/dm-consents", ownerKey);
   assert.equal(listed.status, 200);
   assert.equal(listed.json.length, 1);
   assert.equal(listed.json[0].requester, "Alice");
   assert.ok(!JSON.stringify(listed.json).includes("hey bob"));
-  // Revoke: the door closes again.
+  // Revoke is an explicit denial: the door closes.
   const revoked = await post(origin, "/api/rooms/commons/dm-consents/revoke", { peerId: bobId }, aliceKey);
   assert.equal(revoked.status, 200);
   const refused2 = await postMessage(origin, aliceKey, { messageId: "dm3", body: "again?", toMemberId: bobId });
   assert.equal(refused2.status, 403);
   assert.equal(refused2.json.error.code, "dm_consent_required");
+  // Block: a different explicit-denial code.
+  const blocked = await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: aliceId }, bobKey);
+  assert.equal(blocked.status, 200);
+  const refused3 = await postMessage(origin, aliceKey, { messageId: "dm4", body: "blocked?", toMemberId: bobId });
+  assert.equal(refused3.status, 403);
+  assert.equal(refused3.json.error.code, "dm_blocked");
 });
 
 test("public face: owner opt-in, sanitized reads, DMs never leak, disable 404s", async t => {
@@ -206,17 +208,19 @@ test("discovery surfaces carry Link headers", async t => {
 });
 
 test("refused DM persists no event and no message", async t => {
-  const { store, origin, aliceKey } = await serve(t);
+  const { store, origin, aliceKey, bobKey } = await serve(t);
+  // Explicit denial first: bob blocks alice, so her DM is refused.
+  assert.equal((await post(origin, "/api/rooms/commons/dm-consents/block", { peerId: "alice" }, bobKey)).status, 200);
   const before = store.room("commons").sequence;
   const wakeBefore = store.db.prepare("SELECT COUNT(*) AS n FROM wake_queue").get().n;
-  const refused = await postMessage(origin, aliceKey, { messageId: "dm-nope", body: "no consent", toMemberId: "bob" });
+  const refused = await postMessage(origin, aliceKey, { messageId: "dm-nope", body: "blocked dm", toMemberId: "bob" });
   assert.equal(refused.status, 403);
-  assert.equal(refused.json.error.code, "dm_consent_required");
+  assert.equal(refused.json.error.code, "dm_blocked");
   assert.equal(store.room("commons").sequence, before, "a refused DM must not append an event");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM wake_queue").get().n, wakeBefore,
     "a refused DM must not enqueue a wake");
   const bodies = (store.room("commons").state.messages ?? []).map(m => m.body);
-  assert.ok(!bodies.includes("no consent"), "a refused DM body must not enter the projection");
+  assert.ok(!bodies.includes("blocked dm"), "a refused DM body must not enter the projection");
 });
 
 test("DM consent reject / block / unblock over HTTP", async t => {

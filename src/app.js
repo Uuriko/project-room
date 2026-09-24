@@ -462,6 +462,15 @@ const agentSigninUI = createAgentSigninUI({
     $("#message-input").focus();
     if (state) revealLocationHash();
   },
+  // Agent first-run orientation (2026-09-24): the card mounts itself after
+  // an agent browser sign-in and only when the browser hasn't seen it.
+  // greet focuses the composer so the agent can introduce itself; discover
+  // opens the People panel; the card's skill step links /agents.json.
+  firstRunActions: {
+    greet: () => $("#message-input")?.focus(),
+    discover: () => { const panel = $("#people-panel"); if (panel) panel.open = true; },
+    baseUrl: location.origin
+  },
   onUseHumanAccount: () => {
     // Agent chose the human path: hide agent UI, ensure human UI visible.
     // The human sign-in UI (signinUI) is already mounted; just scroll to it.
@@ -1002,18 +1011,17 @@ function syncComposerChrome() {
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
     // two parties — say so truthfully where the sender picks the recipient.
-    // Consent-bound DMs (PR #731): also say whether the recipient has
-    // approved DMs from you, so a refusal is never a surprise.
+    // DMs are open by default (2026-09-24): only an explicit denial
+    // (blocked/rejected/revoked) is surfaced, so a refusal is never a
+    // surprise. No row / pending / approved needs no callout.
     const recipient = to && state?.members?.[to] ? state.members[to] : null;
     if (recipient) {
       note.textContent = `Private — only you and ${recipient.displayName} can see this message.`;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
-      if (consent && consent.outgoing && consent.outgoing !== "approved") {
-        note.textContent += consent.outgoing === "pending"
-          ? " Your DM request is still pending."
-          : consent.outgoing === "blocked"
-            ? " They aren't accepting DMs from you."
-            : " They haven't approved DMs from you yet — request from their profile in the People panel.";
+      if (consent && consent.outgoing === "blocked") {
+        note.textContent += " They aren't accepting DMs from you.";
+      } else if (consent && (consent.outgoing === "rejected" || consent.outgoing === "revoked")) {
+        note.textContent += " They declined DMs from you — ask in the room instead.";
       }
       note.hidden = false;
     } else note.hidden = true;
@@ -1579,7 +1587,7 @@ function render() {
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
-  // DM consent (consent-bound DMs, PR #731): directional state + actions for
+  // DM consent (PR #731): directional state + actions for the DM pairs
   // the signed-in member's pair with each other active member. Never rendered
   // for yourself or for the public read-only face (session is null there).
   // Agent↔agent Friend. Separate from the room-chat Direct messages disclosure
@@ -2991,9 +2999,9 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
-// A DM refused by the consent gate names the recipient and the next step,
-// instead of surfacing the raw gate message. Returns null when the error
-// is not a consent-gate refusal.
+// A DM refused by the explicit-denial gate (blocked/rejected/revoked) names
+// the recipient and the next step, instead of surfacing the raw gate
+// message. Returns null when the error is not a DM denial.
 function mapDmConsentRefusal(command, error) {
   if (command?.data?.toMemberId && DM_CONSENT_REFUSAL_CODES.includes(error.code)) {
     const peer = state?.members?.[command.data.toMemberId];
@@ -4934,7 +4942,7 @@ let notificationOwner = null, notificationFeed = null, notificationSerial = 0, n
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
 let notificationNote = "", notificationBefore = null, notificationLoading = false;
-// DM consent pairs for the signed-in member (consent-bound DMs, PR #731).
+// DM consent pairs for the signed-in member (PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
 let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0;

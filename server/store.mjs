@@ -3278,10 +3278,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       refuseArchivedWrite(room.state);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
-        // Consent-bound DMs: the recipient must have approved this direction.
-        // Runs before the event is built, so a refused DM never persists and
-        // never wakes its target.
-        this.dmConsents.requireApproved(roomId, auth.member.id, command.data.toMemberId);
+        // DMs are open by default: only an explicit denial (blocked /
+        // rejected / revoked) refuses. Runs before the event is built, so a
+        // refused DM never persists and never wakes its target.
+        this.dmConsents.requireDmAllowed(roomId, auth.member.id, command.data.toMemberId);
       }
       // Room Trust off: a post that would wake a cross-owner agent is refused
       // before it is stored, so the sender gets a clear error and nothing wakes.

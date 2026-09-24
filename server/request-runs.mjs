@@ -56,7 +56,7 @@ export class RequestRuns {
       const row = this.store.db.prepare("SELECT * FROM request_runs WHERE room_id=? AND opening_id=?").get(roomId, request.openingEventId);
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
       if (input.action === "claim" || input.action === "working") {
-        this.store.dmConsents.requireApproved(roomId, auth.member.id, request.requesterId);
+        this.store.dmConsents.requireDmAllowed(roomId, auth.member.id, request.requesterId);
         if (request.status !== "open" || state.room.archivedAt || state.members[request.requesterId]?.active !== true
           || this.store.wakeQueue.pauseStatus(roomId, auth.member.id)
           || request.revision !== input.expectedRequestRevision || request.contextEventId !== input.contextEventId)

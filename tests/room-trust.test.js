@@ -114,9 +114,9 @@ test("Trust off blocks cross-owner wake and still posts ordinary chat", t => {
   assert.equal(f.store.room("commons").sequence, before);
   assert.equal(f.state().messages.some(message => message.id === "blocked-mention"), false);
   assert.equal(f.state().messages.some(message => message.id === "blocked-mixed"), false);
-  assert.throws(() => f.post("producer", "needs consent first", { messageId: "needs-consent", toMemberId: "foreign" }), {
-    status: 403, code: "dm_consent_required"
-  });
+  // DMs are open by default: consent no longer gates this DM; the trust-off
+  // cross-owner policy blocks it instead.
+  assertTrustOff(() => f.post("producer", "cross owner dm", { messageId: "needs-consent", toMemberId: "foreign" }));
   f.store.dmConsents.request("commons", "producer", "foreign", "acceptance");
   f.store.dmConsents.decide("commons", "foreign", "producer", "approve");
   assertTrustOff(() => f.post("producer", "cross owner dm", { messageId: "blocked-dm", toMemberId: "foreign" }));

@@ -107,9 +107,9 @@ export function dmConsentPairDescription(summary, peerName) {
   const outgoingText = {
     pending: `Your request to message ${name} is still pending.`,
     approved: `${name} approved your request — you can message them directly.`,
-    rejected: `${name} declined your request. You can ask again.`,
+    rejected: `${name} declined your request. DMs with them stay off until they unblock you.`,
     blocked: `${name} isn't accepting DM requests from you.`,
-    revoked: `DM consent with ${name} was revoked. Send a fresh request to message again.`,
+    revoked: `DMs with ${name} are off — consent was revoked.`,
   }[summary?.outgoing];
   const incomingText = {
     pending: `${name} wants to message you — approve, reject, or block below.`,
@@ -120,7 +120,7 @@ export function dmConsentPairDescription(summary, peerName) {
   }[summary?.incoming];
   if (outgoingText) lines.push(outgoingText);
   if (incomingText) lines.push(incomingText);
-  if (!lines.length) lines.push(`No DM arrangement with ${name} yet — messaging needs their consent first.`);
+  if (!lines.length) lines.push(`No DM arrangement with ${name} yet — DMs are open by default, so just message them.`);
   return lines;
 }
 
@@ -190,7 +190,7 @@ export function unblockDmMember(client, peerId) {
 export function dmConsentFailureMessage(error, peerName) {
   const they = (one, many) => peerName ? `${peerName} ${one}` : `They ${many}`;
   const code = error?.code;
-  if (code === "dm_consent_required") return `${they("hasn't", "haven't")} approved DMs from you yet — send a request from their profile in the People panel.`;
+  if (code === "dm_consent_required") return `${they("declined", "declined")} direct messages from you — ask in the room instead.`;
   if (code === "dm_blocked") return `${they("isn't", "aren't")} accepting direct messages from you.`;
   if (code === "dm_already_approved") return "DM consent is already approved — you can message them directly.";
   if (code === "dm_no_pending_request") return "That DM request is no longer pending.";
