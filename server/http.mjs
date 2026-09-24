@@ -35,6 +35,8 @@ const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
+import { collectNeedsMe } from "./needs-me.mjs";
+import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
@@ -385,7 +387,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
-  const hostedRoomMcp = createHostedRoomMcp(store);
+  const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -2669,6 +2671,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // POST-only route. Other methods are not part of that contract.
       if (url.pathname === "/api/agent-rooms") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
+      }
+      // Cross-room attention for one identity. Same read as MCP room_needs_me.
+      if (url.pathname === "/api/needs-me" && (req.method === "GET" || req.method === "HEAD")) {
+        rate(`needs-me:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (!secret || !isIdentitySecret(secret)) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const sinceParam = url.searchParams.get("since");
+        let since;
+        if (sinceParam == null || sinceParam === "") since = undefined;
+        else if (/^\d+$/.test(sinceParam)) since = Number(sinceParam);
+        else {
+          try { since = JSON.parse(sinceParam); }
+          catch { reject(422, "invalid_cursor", "since must be a sequence number or a cursor object"); }
+        }
+        return json(res, 200, collectNeedsMe(store, secret, { since }), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/needs-me") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
       }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {
