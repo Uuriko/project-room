@@ -67,6 +67,16 @@ for (const [width, account] of [[1440, false], [390, false], [320, false], [1440
     await page.locator('#cancel-work-button').click();
     await page.locator('#message-input').fill('');
     await page.evaluate(() => document.documentElement.style.fontSize = '200%');
+    const composerControls = await page.locator('.composer-row > button').evaluateAll(buttons => buttons.filter(button => !button.hidden).map(button => {
+      const box = button.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height, scrollWidth: button.scrollWidth, clientWidth: button.clientWidth };
+    }));
+    for (const [index, box] of composerControls.entries()) {
+      assert.ok(box.left >= 0 && box.right <= width + 1, 'composer action stays in viewport at large text');
+      assert.ok(box.width >= 24 && box.height >= 24, 'composer action remains usable at large text');
+      assert.ok(box.scrollWidth <= box.clientWidth + 1, 'composer action label fits its button');
+      if (index) assert.ok(composerControls[index - 1].right <= box.left || composerControls[index - 1].bottom <= box.top, 'composer actions do not overlap at large text');
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'large text reflows without horizontal overflow');
     await page.evaluate(() => document.documentElement.style.fontSize = '');
     await page.locator('#session-menu-button').click();

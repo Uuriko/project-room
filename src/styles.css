@@ -1322,8 +1322,12 @@ summary { overflow-wrap: anywhere; }
   #catchup-count { max-width: 100%; overflow-wrap: anywhere; text-align: center; }
 }
 @media (max-width: 520px) {
-  .composer-add { width: auto; padding-inline: .4rem; }
-  .composer-add-label { display: inline; }
+  .composer-row { display: flex; flex-wrap: wrap; }
+  .composer-row textarea { order: -1; flex: 1 0 100%; width: 100%; }
+  .composer-row > button[type="submit"] { flex: 0 0 44px; }
+  .composer-add { width: auto; min-width: 0; max-width: 100%; height: auto; padding-inline: .4rem; }
+  .composer-add-label { display: inline; white-space: normal; }
+  .composer-row #request-reply { margin-left: auto; min-width: 0; max-width: 100%; white-space: normal; }
 }
 @media (max-width: 940px) {
   .app-shell:has(#main:not([hidden])) > #workspace-nav {
