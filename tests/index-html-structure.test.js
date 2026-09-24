@@ -64,6 +64,17 @@ test("the chat composer has no Options disclosure", () => {
   assert.match(composer, /aria-description="Enter to send/);
 });
 
+test("new work tasks default to requiring verification and a decision", () => {
+  // #886 silently flipped these two checkboxes to unchecked. The approved
+  // policy is checked-by-default: the client reads .checked straight from the
+  // DOM when proposing work, so the markup attribute is the default.
+  assert.match(html, /id="require-verification"[^>]*\bchecked\b/);
+  assert.match(html, /id="require-decision"[^>]*\bchecked\b/);
+  // The gate must fail on flipped (unchecked) markup, not just pass here.
+  const unchecked = '<input id="require-verification" type="checkbox" name="requireVerification">';
+  assert.doesNotMatch(unchecked, /id="require-verification"[^>]*\bchecked\b/);
+});
+
 test("the guard actually detects what it claims to", () => {
   // A gate over a document that happens to be clean proves nothing until it has
   // been shown to fail. These run the same logic over planted input.
