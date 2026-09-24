@@ -272,6 +272,23 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       return { roomId, bounty, approval, attribution, receipt };
     });
   }
+  // Free-miss settlement: the poster (or the designated verifier) rejects
+  // submitted work with a written reason. The award — still locked with the
+  // poster, never attributed — refunds to the poster in full with no fee;
+  // the worker settles at zero; the claim bond is forfeited and a flake
+  // strike recorded (the same "work judged bad" treatment as a
+  // dispute-upheld cancel). Idempotent: a replayed request replays the
+  // stored settlement verdict without new journal movement.
+  if (escrowRoute === "reject" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{reason, idempotencyKey?}");
+    return idem(payload, "bounty.reject", 200, () => {
+      const { bounty, settlement, alreadySettled, receipt } = escrow.rejectWork(roomId, bountyId,
+        { rejector: caller, reason: payload.reason, actor });
+      return { roomId, bounty, settlement, alreadySettled, receipt };
+    });
+  }
   if (escrowRoute === "dispute" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["bond", "grounds"], optional: ["idempotencyKey"] }))

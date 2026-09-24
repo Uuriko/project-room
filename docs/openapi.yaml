@@ -3100,6 +3100,49 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/reject:
+    post:
+      summary: Reject submitted work (failed verification)
+      description: |
+        Free-miss settlement: the poster (or the designated verifier, never
+        the claimant) rejects a submitted bounty with a written reason. The
+        award — still locked with the poster, never attributed — refunds to
+        the poster in full with no fee; the worker settles at zero. "Work
+        judged bad" forfeits the claim bond to the room pool and records an
+        anti-flake strike. The settlement verdict (failed, worker 0, escrow
+        to poster) is stamped on the resolution and emitted as
+        `bounty.settled`. Idempotent: a replayed request replays the stored
+        verdict without new journal movement. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The rejection with its settlement verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  settlement: { type: object }
+                  alreadySettled: { type: boolean }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute:
     post:
       summary: Dispute an accepted bounty
