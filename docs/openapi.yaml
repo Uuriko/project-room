@@ -218,7 +218,10 @@ paths:
         - `channel.archived`: data {channelId, expectedRevision}.
           Owner-only. `general` cannot be archived. Archived channels reject
           new messages (409 channel_archived).
-        Messages carry `channelId`; omitted defaults to `general`. Replies
+        Messages carry `channelId`; omitted defaults to `general`. `message.posted`
+        data.body is 1 to 4096 characters (the client `say()` refuses longer;
+        the whole command envelope is capped at 16 KiB, 413 `too_large`).
+        Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the
         thread's channel (same event; ignored for DMs and work proposals).
@@ -252,6 +255,12 @@ paths:
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
+      description: |
+        Ordered events strictly after the `after` sequence. The cursor query
+        parameter is `after`, not `afterSequence`. Sending `afterSequence`
+        (alone or with `after`) is 422 `invalid_event_cursor`: it is not
+        applied as a filter, and it does not mean the caller is caught up.
+        Pass the previous response's `next` back as `after`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: after
@@ -291,7 +300,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed" }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -7006,7 +7015,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ roomId, viewerId, unread }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, total, byType: { mention, reply, thread_reply, reaction } }" }
   /api/rooms/{roomId}/activity-read:
     post:
       summary: Mark activity events read

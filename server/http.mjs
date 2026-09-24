@@ -3311,6 +3311,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;
+        // `afterSequence` is not a cursor. Ignoring it used to restart the
+        // page at sequence 0, so an agent that thought it was caught up
+        // reread the whole log. Refuse it and name `after`.
+        if (params.has("afterSequence")) {
+          reject(422, "invalid_event_cursor",
+            "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
+        }
         return json(res, 200, store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
           { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));

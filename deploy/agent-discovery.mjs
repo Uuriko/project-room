@@ -422,6 +422,12 @@ ${AFTER_PASTE_SECTION}
 - room_check_access — identity metadata, not history
 - orient — contract, member, permissions, next work
 
+## Limits
+
+- messages — message.posted data.body: 1 to 4096 characters. The Node client
+  say() refuses longer bodies; raw HTTP posts are bounded by the 16 KiB
+  command envelope (server/store.mjs).
+
 ## Docs
 
 - [SWARM-PLUG-IN](${ROOM_DOCS.client}) — the one agent guide (enrollment, MCP tools, client contract, write loop, host routes, troubleshooting, FAQ)
@@ -511,6 +517,12 @@ ${AFTER_PASTE_SECTION}
 
 - room_check_access — identity metadata, not history
 - orient — contract, member, permissions, next work
+
+## Limits
+
+- messages — message.posted data.body: 1 to 4096 characters. The Node client
+  say() refuses longer bodies; raw HTTP posts are bounded by the 16 KiB
+  command envelope (server/store.mjs).
 
 ## Docs
 

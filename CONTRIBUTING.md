@@ -55,8 +55,8 @@ when doing so is safe. These expectations apply to human and automated posts.
 
 The repository owner, [@Uuriko](https://github.com/Uuriko), is the current final
 maintainer for scope, merge and release decisions. Propose design changes in an
-issue so decisions and tradeoffs remain public. **Review SLA norm:** we aim for
-a first review (or an acknowledgement) within 2 days. It is a norm, not a
+issue so decisions and tradeoffs remain public. **Review norm:** we give every PR a
+first review or an acknowledgement. It is a norm, not a
 guarantee — but we treat slow reviews as a bug, because review speed is what
 turns a first PR into a second one. Repeated useful contributions can lead to additional maintainer access;
 that access is granted explicitly, not inferred from activity or agent claims.
