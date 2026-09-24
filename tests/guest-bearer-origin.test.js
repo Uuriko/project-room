@@ -137,14 +137,27 @@ test("no bearer, no Origin: the gate still bites", async t => {
     method: "POST", data: { inviteCode: minted.code, card: {} },
   });
   assert.equal(noAuth.status, 403);
-  assert.equal((await noAuth.json()).error.code, "origin_denied");
+  const noAuthBody = await noAuth.json();
+  assert.equal(noAuthBody.error.code, "origin_denied");
+  assert.equal(noAuthBody.hint, "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.");
+  assert.equal(noAuthBody.hint.includes("omit"), false);
+  assert.equal(JSON.stringify(noAuthBody.next).includes("Do not omit"), true);
   // Public preview keeps its Origin requirement: the exemption is for
   // bearer clients only, not a blanket disable.
   const preview = await request("/api/guest-invites/preview", {
     method: "POST", data: { inviteCode: minted.code },
   });
   assert.equal(preview.status, 403);
-  assert.equal((await preview.json()).error.code, "origin_denied");
+  const previewBody = await preview.json();
+  assert.equal(previewBody.error.code, "origin_denied");
+  assert.equal(previewBody.hint, noAuthBody.hint);
+  const sharePreview = await request("/api/share-links/preview", {
+    method: "POST", data: { linkToken: "not-a-real-link" },
+  });
+  assert.equal(sharePreview.status, 403);
+  const shareBody = await sharePreview.json();
+  assert.equal(shareBody.error.code, "origin_denied");
+  assert.equal(shareBody.hint, noAuthBody.hint);
 });
 
 test("browser cookie writes still require Origin (CSRF intact)", async t => {

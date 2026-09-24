@@ -56,6 +56,10 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const wrongOrigin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Request origin is not allowed" });
   assertAx(wrongOrigin, { reason: "origin_denied" });
   assert.equal(wrongOrigin.hint, "Use Origin: https://room.trydemigod.com or omit the Origin header.");
+  const requiredOrigin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Origin header is required" });
+  assert.equal(requiredOrigin.hint, "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.");
+  assert.equal(requiredOrigin.hint.includes("omit"), false);
+  assert.equal(JSON.stringify(requiredOrigin.next).includes("Do not omit"), true);
   assert.equal(JSON.stringify(wrongOrigin).includes("guest invite"), false);
   assert.equal(JSON.stringify(wrongOrigin).includes("Add agent"), false);
   const stale = agentErrorAx({ httpStatus: 409, code: "command_rejected", message: "Stale Work Item revision: expected 1", workItemId: "test-handoff", roomId: "commons" });
