@@ -352,7 +352,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
            else ($body | prose_claim($lp.lane)) end
          elif $pf.p == "[receipt]" then
            {kind:"receipt",
-            task:($pf.tail | first_task),
+            task:((($pf.tail | first_rc) // ($pf.tail | first_task))),
             pr:($body | first_pr),
             merged:($body | first_sha),
             ref:($pf.tail | first_rc),
