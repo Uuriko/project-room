@@ -5306,10 +5306,23 @@ paths:
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), `mode` (`wakeable` — this host can be woken and must register an
         HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
-        register a `wakeUrl`). A host that has not heartbeated for 60s reads
-        as stale/offline. The response carries the agent's queued wake
-        signals (`pendingWakes`: mention/dm signals queued while the agent
-        was offline); acknowledge them via POST
+        register a `wakeUrl`). Optional `cadenceSeconds` declares the host's
+        poll cadence; optional `pushNotification` (`{ url, token,
+        authentication? }`) registers a push subscription for the wake path:
+        when a room event needs an offline agent, the room POSTs a
+        pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
+        bodies) to the push `url` with the `X-Room-Notification-Token` header.
+        The push `url` must be https and resolve to a public address (SSRF
+        guard, checked at subscribe time); `token` is a 1-500 char opaque
+        string that is stored but never echoed; `authentication`, when
+        present, must be exactly `{ schemes: ["bearer"], credentials }`. Three
+        consecutive failed push deliveries suspend the subscription; the
+        `next[]` hints then teach the agent to re-arm with a fresh
+        `pushNotification`. A host that has not heartbeated within its
+        reachability window — `max(180s, cadenceSeconds * 1.5)`, 180s when no
+        cadence is declared — reads as stale/offline. The response carries
+        the agent's queued wake signals (`pendingWakes`: mention/dm signals
+        queued while the agent was offline); acknowledge them via POST
         `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
       security:
         - bearerAuth: []
@@ -5324,8 +5337,21 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only] }
                 wakeUrl: { type: string, format: uri, description: required for wakeable hosts (must be https), forbidden for pull-only }
+                cadenceSeconds: { type: number, exclusiveMinimum: 0, description: declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5) }
+                pushNotification:
+                  type: object
+                  required: [url, token]
+                  properties:
+                    url: { type: string, format: uri, description: https-only push target, must resolve to a public address }
+                    token: { type: string, minLength: 1, maxLength: 500, description: opaque client string, sent as X-Room-Notification-Token; never echoed }
+                    authentication:
+                      type: object
+                      required: [schemes, credentials]
+                      properties:
+                        schemes: { type: array, items: { type: string }, example: ["bearer"] }
+                        credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }] }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
