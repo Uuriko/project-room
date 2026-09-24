@@ -120,15 +120,12 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   assert.equal(conflict.body.result.isError, true);
 
   const listedFiles = await call(origin, "room_list_files", { roomId: created.roomId }, peer.secret);
-  assert.equal(listedFiles.value.files.length, 1);
-  assert.equal(listedFiles.value.files[0].id, "note");
-  assert.equal("data" in listedFiles.value.files[0], false);
+  // #983: staged files are visible only to the uploader.
+  assert.deepEqual(listedFiles.value.files, []);
 
   const downloaded = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, peer.secret);
-  assert.equal(downloaded.value.attachment.data, data);
-  assert.equal(downloaded.value.attachment.encoding, "base64");
-  assert.equal(Buffer.from(downloaded.value.attachment.data, "base64").toString(), "room file bytes");
-  assert.equal(JSON.stringify(downloaded.body).includes(owner.secret), false);
+  assert.equal(downloaded.value.status, 404);
+  assert.equal(downloaded.value.code, "attachment_not_found");
 
   const hidden = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, outsider.secret);
   assert.equal(hidden.body.result.isError, true);
@@ -389,4 +386,74 @@ test("staged files expire and a member cannot exceed the staged-file cap", t => 
   const expired = store.db.prepare("SELECT state, bytes FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "f0");
   assert.equal(expired.state, "expired");
   assert.equal(expired.bytes, null);
+});
+
+test("#983: staged files visible only to uploader; private-message files only to author/recipient", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Vis owner");
+  const peer = store.identities.create("Vis peer");
+  const outsider = store.identities.create("Vis outsider");
+  const created = rooms.create(owner.secret, {
+    roomId: "vis-den", title: "Vis den", purpose: "File visibility", kind: "personal", displayName: "Vis owner"
+  });
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: peer.identityId, displayName: "Vis peer", permissions: []
+  });
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: outsider.identityId, displayName: "Vis outsider", permissions: []
+  });
+  setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  setTier(store.db, created.roomId, outsider.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+
+  // Owner stages a file. Peer and outsider must not see it in list.
+  const data = Buffer.from("secret bytes").toString("base64");
+  const staged = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "secret", filename: "secret.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(staged.value.status, "staged");
+
+  const ownerList = await call(origin, "room_list_files", { roomId: created.roomId }, owner.secret);
+  assert.equal(ownerList.value.files.length, 1);
+
+  const peerList = await call(origin, "room_list_files", { roomId: created.roomId }, peer.secret);
+  assert.deepEqual(peerList.value.files, []);
+
+  const peerGet = await call(origin, "room_get_file", { roomId: created.roomId, id: "secret" }, peer.secret);
+  assert.equal(peerGet.value.status, 404);
+  assert.equal(peerGet.value.code, "attachment_not_found");
+
+  // Owner posts a message and commits the file onto it, then marks the
+  // message private to peer (simulating a DM; the MCP post tool doesn't
+  // accept toMemberId).
+  const posted = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-dm", messageId: "msg-dm", body: "private file"
+  }, owner.secret);
+  assert.equal(posted.value.status, "posted");
+
+  const committed = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "secret", messageId: "msg-dm"
+  }, owner.secret);
+  assert.equal(committed.value.status, "committed");
+
+  const roomRow = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(created.roomId);
+  const projection = JSON.parse(roomRow.projection);
+  const peerMemberId = Object.values(projection.members).find(m => m.displayName === "Vis peer").id;
+  const msg = projection.messages.find(m => m.id === "msg-dm");
+  msg.toMemberId = peerMemberId;
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), created.roomId);
+
+  // Outsider (not author/recipient) must not see the private file.
+  const outsiderList = await call(origin, "room_list_files", { roomId: created.roomId }, outsider.secret);
+  assert.deepEqual(outsiderList.value.files, []);
+  const outsiderGet = await call(origin, "room_get_file", { roomId: created.roomId, id: "secret" }, outsider.secret);
+  assert.equal(outsiderGet.value.status, 404);
+  assert.equal(outsiderGet.value.code, "attachment_not_found");
+
+  // Peer (recipient) CAN see it.
+  const peerList2 = await call(origin, "room_list_files", { roomId: created.roomId }, peer.secret);
+  assert.equal(peerList2.value.files.length, 1);
+  assert.equal(peerList2.value.files[0].id, "secret");
+  const peerGet2 = await call(origin, "room_get_file", { roomId: created.roomId, id: "secret" }, peer.secret);
+  assert.equal(peerGet2.value.attachment.id, "secret");
+  assert.equal(peerGet2.value.attachment.data, data);
 });
