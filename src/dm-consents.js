@@ -113,7 +113,7 @@ export function dmConsentPairDescription(summary, peerName) {
   }[summary?.outgoing];
   const incomingText = {
     pending: `${name} wants to message you — approve, reject, or block below.`,
-    approved: `${name} can message you directly.`,
+    approved: summary?.outgoing ? `${name} can message you directly.` : `${name} can message you directly, and you can answer.`,
     rejected: `You declined ${name}'s request. They can ask again.`,
     blocked: `You've blocked ${name} — they can't message you or send new requests.`,
     revoked: `DM consent with ${name} was revoked.`,
@@ -142,6 +142,8 @@ export function dmConsentActionsForPeer(summary) {
   if (outgoing === "approved") actions.push({ action: "revoke", label: "Revoke my consent" });
   else if (outgoing === "pending") actions.push({ action: "noop-pending", label: "Request pending", disabled: true });
   else if (outgoing === "blocked") actions.push({ action: "noop-blocked", label: "Not accepting requests", disabled: true });
+  // They asked me and I approved: I can already answer, so no request is needed.
+  else if (!outgoing && incoming === "approved") { /* answer path is open */ }
   else actions.push({ action: "request", label: outgoing ? "Request again" : "Request to message" });
   // Their approved consent toward me is revocable too.
   if (incoming === "approved") actions.push({ action: "revoke", label: "Revoke their consent" });

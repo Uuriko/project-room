@@ -27,7 +27,8 @@ carry the claim, and the remaining tiers stay visibly open.
         "browser": [
           "scripts/invitation-check.mjs",
           "scripts/quiet-invites-check.mjs",
-          "scripts/invitation-recovery-check.mjs"
+          "scripts/invitation-recovery-check.mjs",
+          "scripts/accountless-join-restore-browser-check.mjs"
         ],
         "agent": [
           "docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"
@@ -416,7 +417,7 @@ carry the claim, and the remaining tiers stay visibly open.
 
 | Claim | Unit/integration | Browser | Actual agent | Hosted |
 | --- | --- | --- | --- | --- |
-| Accounts, invitations, guests | invitations, invitation-http, share-links, account-rooms | invitation-check, quiet-invites-check, invitation-recovery-check | agent onboarding exercise | staging worker README |
+| Accounts, invitations, guests | invitations, invitation-http, share-links, account-rooms | invitation-check, quiet-invites-check, invitation-recovery-check, accountless-join-restore-browser-check | agent onboarding exercise | staging worker README |
 | First-result onboarding (join, contribute, see the outcome) | help-offer-service, work-help-service, help-offer-context | first-result-journey-check | open | open |
 | Invite for a purpose (deep-link the invited question or result) | share-link-service, join-link-dialog | purpose-invite-check | open | open |
 | Conversation, threads, reactions, search | conversation, work-search, work-discussion | browser-check, work-search-browser-check | open | open |

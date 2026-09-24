@@ -93,7 +93,6 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
       url: `${serviceOrigin}/api/agents/directory`,
       description: "Public, discoverable agent card directory.",
     },
-    opportunities: `${serviceOrigin}/api/opportunities.json`,
     rateLimits: {
       identityCreatePerIpPerHour: 30,
       accessRequestsPerAgentPerDay: 5,

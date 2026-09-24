@@ -124,10 +124,17 @@ test("open work lists claimants, claim statuses and lease expiries", async t => 
   const pack = await (await getPack(origin, ROOM, f.ownerKey)).json();
   assert.equal(pack.openWork.length, 2);
   const [claimed, unclaimed] = pack.openWork;
-  assert.deepEqual(claimed, { id: "pack-work-1", title: "Wire the activation pack",
+  const { accountableMemberId, definitionOfDone, progress, readContext, next, ...claimedSummary } = claimed;
+  assert.equal(accountableMemberId, "worker");
+  assert.equal(definitionOfDone, "Endpoint serves the pack.");
+  assert.equal(progress.claim, "active");
+  assert.equal(next.memberId, "worker");
+  assert.deepEqual(readContext, { tool: "room_read_work", arguments: { workItemId: "pack-work-1", includeDiscussion: true, includeSource: true } });
+  assert.deepEqual(claimedSummary, { id: "pack-work-1", title: "Wire the activation pack",
     state: "accepted", claimant: "worker", claimStatus: "active", deliveryMode: "write",
     reviewPolicy: "independent", leaseExpiresAt: FUTURE_LEASE });
-  assert.deepEqual(unclaimed, { id: "pack-work-2", title: "Document the norms",
+  assert.equal(unclaimed.progress.claim, "none");
+  assert.deepEqual(Object.fromEntries(Object.entries(unclaimed).filter(([key]) => !["accountableMemberId", "definitionOfDone", "progress", "readContext", "next"].includes(key))), { id: "pack-work-2", title: "Document the norms",
     state: "accepted", claimant: null, claimStatus: null, deliveryMode: "read",
     reviewPolicy: "independent", leaseExpiresAt: null });
 });
@@ -172,4 +179,15 @@ test("agent client orientation agrees with the browser projection and reads do n
   assert.deepEqual(pack.orientation, roomOrientation(before.state));
   assert.equal(pack.orientation.purpose, "Current instructions");
   assert.equal(f.store.room(ROOM).sequence, before.sequence);
+});
+
+
+test("activation keeps pending review discoverable and excludes finished results", async t => {
+  const { createResultsFixture } = await import('../scripts/results-fixture.mjs');
+  const f = createResultsFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const pack = buildActivationPack(f.store, 'commons');
+  assert.equal(pack.openWork.find(work => work.id === 'pending-result').next.action, 'verify');
+  assert.equal(pack.openWork.some(work => work.id === 'approved-result'), false);
+  assert.equal(pack.openWork.some(work => work.id === 'native-result'), false);
 });

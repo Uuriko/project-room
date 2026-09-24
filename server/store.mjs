@@ -410,9 +410,38 @@ const shapes = {
 // action-class completeness test (every key must carry a class).
 export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
 
+// An unknown type names the closest real types, so "message.post" or
+// "message.reacted" points at message.posted / message.reaction_set
+// instead of a bare "invalid type".
+function unknownCommandTypeMessage(type) {
+  const given = typeof type === "string" ? type.slice(0, 64) : "";
+  const family = given.split(".")[0];
+  const distance = (a, b) => {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = row[0]; row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const next = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = row[j]; row[j] = next;
+      }
+    }
+    return row[b.length];
+  };
+  const types = Object.keys(shapes);
+  const sameFamily = family ? types.filter(t => t.split(".")[0] === family) : [];
+  // Prefer a same-family type sharing the verb's stem (reacted -> reaction_set).
+  const stem = (given.split(".")[1] ?? "").slice(0, 5);
+  const stemmed = stem.length >= 4 ? sameFamily.find(t => t.split(".")[1].startsWith(stem)) : undefined;
+  const closest = stemmed ?? (given ? [...types].sort((a, b) => distance(given, a) - distance(given, b))[0] : null);
+  const suggestion = closest && (closest === stemmed || distance(given, closest) <= Math.max(3, Math.floor(closest.length / 3))) ? ` Did you mean "${closest}"?` : "";
+  const listed = sameFamily.length ? ` ${family} types: ${sameFamily.join(", ")}.` : ` Types include ${types.filter(t => t.startsWith("message.")).join(", ")}.`;
+  return `Unknown command type${given ? ` "${given}"` : ""}.${suggestion}${listed}`;
+}
+
 export function validateCommand(command) {
   if (!command || Array.isArray(command) || typeof command !== "object" || Object.keys(command).some(k => !["id", "type", "data", "causationId"].includes(k))) fail(422, "invalid_command", "Supply only id, type, data, and optional causationId");
-  if (!validId(command.id) || !Object.hasOwn(shapes, command.type)) fail(422, "invalid_command", "Invalid command id or type");
+  if (!validId(command.id)) fail(422, "invalid_command", "Invalid command id or type");
+  if (!Object.hasOwn(shapes, command.type)) fail(422, "invalid_command", unknownCommandTypeMessage(command.type));
   try { classifyCommand(command.type); } catch { fail(422, "invalid_command", "Unclassified command type"); }
   if (command.causationId != null && !validId(command.causationId)) fail(422, "invalid_command", "Invalid causationId");
   if (!command.data || Array.isArray(command.data) || typeof command.data !== "object") fail(422, "invalid_command", "Data must be an object");

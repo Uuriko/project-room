@@ -35,12 +35,12 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   await fillAccessKey(page, f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
-  const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
+  const next = page.locator('[data-work-record-id="naming-work"] .work-assignee');
   const directed = record('naming-directed').locator('.audience-chip');
   // RC-2026-09-19-070 made a targeted message visible only to its sender and
   // its recipient, so the chip says private where it used to say room-visible.
   assert.equal(await directed.textContent(), 'To Jordan · private');
-  assert.match(await next.textContent(), /Jordan —/); assert.equal((await next.textContent()).includes(jordan), false);
+  assert.match(await next.textContent(), /Jordan/); assert.equal((await next.textContent()).includes(jordan), false);
   assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
   assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
