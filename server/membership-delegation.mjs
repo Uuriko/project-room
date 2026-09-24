@@ -5,7 +5,7 @@
 // forbids non-owner agents from holding manage_members/decide in their
 // member record) can list and decide access requests. That blocks the
 // "owner trusts an agent lane to run membership" shape: Jill could not
-// approve Instinct's access request to john-and-jill because her scoped
+// approve Instinct's access request to muse-room because her scoped
 // key carries work permissions only.
 //
 // This module adds a separate, explicit, owner-granted delegation: the

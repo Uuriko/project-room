@@ -1,5 +1,5 @@
 // Work-item template gallery (K001). Pure template definitions for common
-// work-item types: bug, feature, research, bounty. Each template provides
+// work-item types: bug, feature, research, bounty, friction. Each template provides
 // a title pattern, default fields, checklist items, and required roles.
 // instantiate() fills a template with values. The module is pure and
 // dependency-free. Frozen outputs; malformed inputs throw TemplateError.
@@ -35,6 +35,13 @@ const TEMPLATES = {
     fields: Object.freeze({ priority: "medium", labels: Object.freeze(["bounty"]) }),
     checklist: Object.freeze(["Post bounty terms", "Accept submission", "Verify work", "Release escrow"]),
     requiredRoles: Object.freeze(["accountable", "verifier", "decider"]),
+  },
+  friction: {
+    templateId: "friction", label: "Friction report",
+    titlePattern: "Friction: {{summary}}",
+    fields: Object.freeze({ priority: "medium", labels: Object.freeze(["friction"]) }),
+    checklist: Object.freeze(["Reproduce the friction", "File or link the report", "Fix or spec the fix", "Close the loop with the reporter"]),
+    requiredRoles: Object.freeze(["accountable"]),
   },
 };
 for (const template of Object.values(TEMPLATES)) Object.freeze(template);
