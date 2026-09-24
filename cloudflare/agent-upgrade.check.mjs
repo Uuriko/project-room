@@ -9,7 +9,6 @@ import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
-import { setTier } from '../server/autonomy-tiers.mjs';
 import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline, v24ReplyResolutionBaseline, v26IdentitiesBaseline, v27LifecycleBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
 for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, '33c817a911ebb9fb0310592cac77d8e61380541d'], [26, v26IdentitiesBaseline], [27, v27LifecycleBaseline]]) test(`real Workers v${sourceVersion}→v${STORE_SCHEMA_VERSION} permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
@@ -137,8 +136,9 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             for(const memberId of ['producer','reviewer']) {
               store.command(f.token,'commons',{id:'reply-member-'+memberId,type:'member.added',data:{memberId,displayName:'Synthetic '+memberId,kind:'agent',permissions:memberId==='producer'?['accept_work','complete_work']:['verify']}},f.session.sessionBinding);
               // #953: new members default to t1_readonly; the producer needs
-              // write access for work.accepted below.
-              if (memberId === 'producer') setTier(store.db, 'commons', memberId, 't2_standard', { updatedBy: 'owner', nowMs: store.now() });
+              // write access for work.accepted below. Direct SQL upsert
+              // (avoids importing server modules into the check bundle).
+              if (memberId === 'producer') store.db.prepare('INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by) VALUES(\'commons\',?,\'t2_standard\',?,\'owner\') ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier=\'t2_standard\',updated_at=excluded.updated_at,updated_by=\'owner\'').run(memberId, store.now());
               replyKeys[memberId]=store.issueAccessKey('commons',memberId);
             }
             const reply=prepareInboxResult({store,keys:replyKeys},f.token,f.session.sessionBinding,{sourceId:'private-source'});
