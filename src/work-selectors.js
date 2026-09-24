@@ -203,7 +203,7 @@ export function contributionSteps(state, memberId, now = Date.now()) {
   }
   for (const item of Object.values(state.workItems)) {
     if (terminalWork(item) || steps.some(step => step.kind === "work" && step.id === item.id)
-      || ![item.accountableMemberId, state.room.ownerId].includes(memberId)) continue;
+      || ![item.accountableMemberId, state.room?.ownerId].includes(memberId)) continue;
     const continuity = workContinuity(item, now);
     if (!continuity?.needsAttention) continue;
     steps.push({ key: `work:${item.id}`, kind: "work", id: item.id, action: null,
