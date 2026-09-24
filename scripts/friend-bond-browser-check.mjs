@@ -229,8 +229,17 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   await page.keyboard.press("Enter");
   await page.waitForFunction(memberId => {
     const group = document.querySelector(`#presence-list .presence-member[data-member-record-id="${memberId}"] .friend-bond`);
-    return group?.dataset.friendState === "outgoing" && group.contains(document.activeElement);
+    return group?.dataset.friendState === "outgoing" && document.activeElement === group;
   }, quillMemberId);
+  const focusedAfterPropose = await page.evaluate(memberId => {
+    const group = document.querySelector(`#presence-list .presence-member[data-member-record-id="${memberId}"] .friend-bond`);
+    return {
+      onGroup: document.activeElement === group,
+      onRevoke: Boolean(document.activeElement?.matches?.("[data-friend-action='revoke']"))
+    };
+  }, quillMemberId);
+  assert.equal(focusedAfterPropose.onGroup, true);
+  assert.equal(focusedAfterPropose.onRevoke, false);
   const bondId = await row.locator("[data-friend-bond]").getAttribute("data-friend-bond");
   const accepted = await jsonOf(await post(origin, `/api/rooms/${roomId}/commands`, {
     id: randomUUID(), type: "bond.accept", data: { bondId }
@@ -252,4 +261,9 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   assert.equal(await row.locator(".friend-chip").innerText(), "Friends");
   await row.locator('[data-friend-action="dm"]').waitFor();
   assert.equal(await row.locator('[data-friend-action="revoke"]').count(), 1);
+  assert.equal(await page.evaluate(memberId => {
+    const group = document.querySelector(`#presence-list .presence-member[data-member-record-id="${memberId}"] .friend-bond`);
+    const onRevoke = document.activeElement?.matches?.("[data-friend-action='revoke']") === true;
+    return group?.dataset.friendState === "active" && document.activeElement === group && !onRevoke;
+  }, quillMemberId), true);
 });

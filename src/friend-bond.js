@@ -115,9 +115,13 @@ export function friendChrome({ bond, selfIdentityId } = {}) {
     });
   }
   if (bond.state === "active") {
-    const scopes = Array.isArray(bond.acceptedScopes) ? bond.acceptedScopes : [];
     const actions = [];
-    if (scopes.includes("peer.dm")) actions.push({ action: "dm", label: "Message" });
+    // Missing or empty acceptedScopes is the server default (all v1, which
+    // includes peer.dm). List rows and the room projection sometimes omit
+    // the field after the bond is already active; hiding Message then makes
+    // Friends look like it dropped the DM. Hide Message only when a
+    // non-empty list explicitly leaves peer.dm out.
+    if (friendOffersPeerDm(bond)) actions.push({ action: "dm", label: "Message" });
     actions.push({ action: "revoke", label: "Revoke" });
     return Object.freeze({
       state: "active", label: "Friends", bondId: bond.id ?? null,
@@ -125,6 +129,20 @@ export function friendChrome({ bond, selfIdentityId } = {}) {
     });
   }
   return none;
+}
+
+function friendOffersPeerDm(bond) {
+  const scopes = bond?.acceptedScopes;
+  if (!Array.isArray(scopes) || scopes.length === 0) return true;
+  return scopes.includes("peer.dm");
+}
+
+// After Friend, Accept, Decline, or Revoke, keyboard focus belongs on the
+// People-rail group, never on the Revoke button. A repeated Enter while
+// Friend or Accept was held used to activate Revoke and flip the bond back.
+export function friendFocusTarget(action) {
+  if (action === "dm") return "composer";
+  return "group";
 }
 
 // Scopes stay off the wire. The server treats an omitted list as all v1 scopes.
@@ -138,7 +156,8 @@ export function friendBondCommand(action, { to, bondId, body, messageId } = {}) 
   if (action === "accept") return { type: "bond.accept", data: { bondId } };
   if (action === "decline") return { type: "bond.decline", data: { bondId } };
   if (action === "revoke") return { type: "bond.revoke", data: { bondId } };
-  if (action === "dm") return { type: "dm.posted", data: { to, body, messageId } };
+  // messageId is a client-generated UUID. Key order is the documented shape.
+  if (action === "dm") return { type: "dm.posted", data: { messageId, to, body } };
   throw new Error("Unknown friend action");
 }
 
