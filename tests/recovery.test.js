@@ -231,10 +231,10 @@ test("online capture preserves all 117 tables, identity boundaries and exact ret
     VALUES('commons','owner','recovery-thread',?)`)
     .run(f.now());
   // Seed one autonomy-tier row so the capture comparison covers
-  // agent_autonomy_tiers (graduated autonomy tiers #928; replaces the
-  // slice 1/3 agent_operator_controls table).
+  // agent_autonomy_tiers (operator prerequisites rescope, PR #953).
   f.store.db.prepare(`INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by)
-    VALUES('commons','agent','t1_readonly',?,'owner')`)
+    VALUES('commons','agent','t2_standard',?,'owner')
+    ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier='t2_standard',updated_at=excluded.updated_at,updated_by='owner'`)
     .run(f.now());
   // Seed one published skill card so the capture comparison covers
   // agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202).
