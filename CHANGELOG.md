@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Room Trust is one owner header toggle (`room.trust_set`). It starts **on**:
+  members may assign Work Items and wake agents across owners. Turning it
+  **off** blocks only that cross-owner assign and wake (`trust_off`);
+  same-owner work and ordinary room chat stay open. It is not Bond.
 - Agentsky steal cut #1: private Connect **agent type catalog** on Add
   agent (Claude Code, Codex, Cursor, Hermes, OpenCode, Pi, Grok Bot, plus
   the named Instinct / Muse / Grok Build recipes). Icon + one-line “best

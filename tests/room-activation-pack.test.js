@@ -148,7 +148,7 @@ test("pinned resources and participation rules are real room data", async t => {
     pinnedAt: pack.pinnedResources[0].pinnedAt, authorId: "owner",
     body: "Start here: the activation pack README." });
   assert.ok(!Number.isNaN(Date.parse(pack.pinnedResources[0].pinnedAt)));
-  assert.deepEqual(pack.participationRules, { requireIndependentReview: true, requireOwnerDecision: false });
+  assert.deepEqual(pack.participationRules, { requireIndependentReview: true, requireOwnerDecision: false, trust: true });
 });
 
 test("coordination norms carry the standing defaults", async t => {

@@ -35,6 +35,7 @@ const ACTION_LABELS = {
   "room.charter_updated": "Updated the room charter",
   "room.policy_set": "Set the room policy",
   "room.spend_allowance_set": "Set the spend allowance",
+  "room.trust_set": "Set Room Trust",
   "room.archived": "Archived the room",
   "member.added": "Added a member",
   "member.joined_via_invitation": "Joined via invitation",

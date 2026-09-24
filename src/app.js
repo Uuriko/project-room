@@ -1,5 +1,5 @@
 import { installRoomLayout } from "./room-layout.js";
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
@@ -1586,6 +1586,7 @@ function render() {
   renderSpendAllowance();
   syncReports();
   syncRoomHealth();
+  syncRoomTrust();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -3970,6 +3971,39 @@ function renderReports(reports) {
 $("#reports-section").addEventListener("toggle", () => { if ($("#reports-section").open) syncReports(); });
 // Reports append no room event, so a new one does not move the stream; the owner can ask again.
 $("#report-refresh").addEventListener("click", () => { reportsSequence = -1; syncReports(); });
+// Room Trust: one header toggle, shown to the owner when the room has more
+// than one member-owner. On (the default) allows cross-owner assign and wake.
+// Off is the kill-switch. Same-owner work is never gated here.
+let roomTrustBusy = false;
+function syncRoomTrust() {
+  const button = $("#room-trust-toggle");
+  if (!button) return;
+  const viewerId = session?.member?.id;
+  const show = Boolean(state && viewerId && viewerId === state.room.ownerId && distinctMemberOwnerIds(state).size > 1);
+  button.hidden = !show;
+  if (!show) return;
+  const enabled = roomTrust(state).enabled;
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
+  button.textContent = enabled ? "Trust" : "Trust off";
+  button.title = enabled
+    ? "Trust is on. Members may assign and wake agents across owners. Turn off to block that."
+    : "Trust is off. Cross-owner assign and wake are blocked. Turn on to allow them again.";
+  button.disabled = roomTrustBusy;
+}
+$("#room-trust-toggle").addEventListener("click", async () => {
+  if (!state || roomTrustBusy || session?.member?.id !== state.room.ownerId) return;
+  const enabled = !roomTrust(state).enabled;
+  roomTrustBusy = true;
+  syncRoomTrust();
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_TRUST_SET, data: { enabled } });
+  } catch (error) {
+    notice(error.message || "Trust was not changed.", true);
+  } finally {
+    roomTrustBusy = false;
+    if (state) syncRoomTrust();
+  }
+});
 // Room policy (issue #6 A4): when the owner made review or approval mandatory,
 // the proposer sees the requirement locked on with the reason. The server
 // enforces it regardless of what a client sends; this is only the honest view.

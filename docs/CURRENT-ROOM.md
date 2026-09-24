@@ -96,6 +96,8 @@ Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md). Work Items carry an
 additive [session](WORK-ITEM-SESSION.md) (`queued`…`failed`, Stop) so agents
 see a ledger, not a chat thread. Writer stays 26.
 
+Room Trust is one owner header toggle (`room.trust_set`, field `enabled`). It defaults **on**: members may assign Work Items and wake agents across owners. Turning it **off** is the kill-switch for that cross-owner assign and wake only. Same-owner work stays open. It is not Bond, not a scopes picker, and not a per-task confirm. The header control appears for the owner when the room has more than one member-owner.
+
 ## Historical merge notes
 
 PR #23 is in history at `63c3b712`. #8, #12, #13, #14 and #20 are included by

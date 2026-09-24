@@ -4,7 +4,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
+  TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -368,6 +369,7 @@ const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
+  [T.ROOM_TRUST_SET]: "enabled",
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",
@@ -460,7 +462,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -605,6 +607,29 @@ const workSessionsNext = (roomId, sessions) => {
     description: "No work sessions are open. Start one with the session.start command on a work item.",
   })];
 };
+
+// Agent members a message.posted would wake: @mentions resolved the same way
+// as wake-on-mention (member id and display name, not identity aliases) plus
+// a DM addressed to an agent. Order is first appearance. The sender is never a target.
+function agentWakeTargets(state, senderMemberId, data) {
+  const members = state?.members ?? {};
+  const targets = new Map();
+  const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
+  const body = typeof data?.body === "string" ? data.body : "";
+  for (const memberId of resolveMentionTargetsInText(agents, {}, body, senderMemberId)) {
+    if (!targets.has(memberId)) targets.set(memberId, "mention");
+  }
+  const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
+  const dm = dmId ? members[dmId] : null;
+  if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
+    targets.set(dmId, "dm");
+  }
+  return targets;
+}
+
+function agentWakeTargetIds(state, senderMemberId, data) {
+  return [...agentWakeTargets(state, senderMemberId, data).keys()];
+}
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null } = {}) {
@@ -3196,6 +3221,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // never wakes its target.
         this.dmConsents.requireApproved(roomId, auth.member.id, command.data.toMemberId);
       }
+      // Room Trust off: a post that would wake a cross-owner agent is refused
+      // before it is stored, so the sender gets a clear error and nothing wakes.
+      // Ordinary room chat that does not address a cross-owner agent still posts.
+      if (command.type === T.MESSAGE_POSTED) {
+        const blocked = firstBlockedWakeTarget(room.state, auth.member.id, agentWakeTargetIds(room.state, auth.member.id, command.data));
+        if (blocked) fail(403, TRUST_OFF_CODE, trustOffMessage(blocked));
+      }
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
@@ -3251,7 +3283,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state);
         if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
       }
-      catch (error) { fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      catch (error) {
+        if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
+        fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
+      }
       // Integration map slice 5: the external path is only as strong as
       // its signature. Room_text is unchanged above; every other completion
       // must carry a signed evidence object that verifies against the agent
@@ -3333,20 +3368,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
-    const members = state?.members ?? {};
-    const targets = new Map(); // memberId -> "mention" | "dm"
-    // Whole display names, so a multi-word agent name ("@Claude (Cowork)")
-    // wakes its agent; the single-token parse only ever saw "@Claude".
-    const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
-    for (const memberId of resolveMentionTargetsInText(agents, {}, typeof data.body === "string" ? data.body : "", senderMemberId)) {
-      if (!targets.has(memberId)) targets.set(memberId, "mention");
-    }
-    const dm = typeof data.toMemberId === "string" ? members[data.toMemberId] : null;
-    if (dm && dm.active !== false && dm.kind === "agent" && data.toMemberId !== senderMemberId
-      && !targets.has(data.toMemberId)) targets.set(data.toMemberId, "dm");
+    const targets = agentWakeTargets(state, senderMemberId, data);
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
+      // Defense in depth: Trust off never enqueues a cross-owner wake, even
+      // if a message reached this point. The command path refuses that post first.
+      if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
       const link = linkOf.get(roomId, memberId);
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
