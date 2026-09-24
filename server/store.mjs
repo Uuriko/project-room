@@ -51,6 +51,7 @@ import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
+import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
@@ -693,6 +694,7 @@ export class RoomStore {
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
+    this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard).
     this.publicFace = new PublicFace(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });

@@ -64,7 +64,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
-paths.add('server/attachment-schema.mjs');
+  paths.add('server/attachment-schema.mjs');
+  paths.add('server/room-attachment-bytes.mjs'); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/attachments.mjs'); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
   paths.add('server/moderation.mjs');
   paths.add('scripts/release-evidence.mjs');
   paths.add('server/usage-summary.mjs');

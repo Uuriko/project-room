@@ -44,7 +44,8 @@ test("online capture preserves all 113 tables, identity boundaries and exact ret
   f.store.moderation.report(f.keys.owner, "commons", { messageId: "recovery-reported", reason: "recovery fixture report" });
   f.store.threadMutes.set(f.keys.owner, "commons", { threadId: "recovery-reported", muted: true });
   // The v34 convergence fences room_attachments: seed one staged row so the
-  // capture comparison covers the table (no store API stages attachments yet).
+  // capture comparison covers the table. roomAttachments.stage is the product
+  // writer; this fixture inserts directly so the audit row needs no identity.
   f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
     VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
     .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);

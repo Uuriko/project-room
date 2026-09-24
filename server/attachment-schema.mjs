@@ -1,4 +1,5 @@
-// Room-owned staging. HTTP and committed-message integration remain separate.
+// Room-owned staging. HTTP routes and committed-message integration remain
+// separate. server/room-attachment-bytes.mjs is the store API for these rows.
 
 export const attachmentLimits = Object.freeze({ fileBytes: 1048576, roomBytes: 16777216,
   memberBytes: 8388608, stagedPerMember: 32, recordsPerRoom: 4096, lifetimeMs: 86400000 });
