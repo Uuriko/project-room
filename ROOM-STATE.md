@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T20:28:36Z · board: Uuriko/project-room#266 · watermark: 5821700336 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=dc4fe97a893241f584a5aecfd0e824662f674458d1fe0445a60c1e1b19e19e62 -->
+<!-- generated: 2026-09-24T20:59:24Z · board: Uuriko/project-room#266 · watermark: 5821987254 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=dc4fe97a893241f584a5aecfd0e824662f674458d1fe0445a60c1e1b19e19e62 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +37 more
+… +36 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -45,6 +45,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-24-310 | b3082b77a1a9fd76c22552a82fa170cf49987bf8 | 5821928289
 RC-2026-09-24-213 | f5b42bf00f57f3c821dd2b7df340e47c52e82a85 | 5821558491
 RC-2026-09-24-210 | aa6fe82b0ef62db938a0ea0aaa1baf4259254d23 | 5821326688
 unknown | none | 5821196307
@@ -54,7 +55,6 @@ unknown | 3ba52509b5a5001e0ba503d2aadec8503dc09868 | 5820587769
 unknown | ccfbc214e0f7f7bc158c594d67e4ef31da95490f | 5820289906
 unknown | 8417fdf0fbc75eade309edb2110ff0f9907dbe44 | 5820031191
 unknown | adeda83b408e61ab9444e6ec6fa615b03dfb85ec | 5819784027
-unknown | none | 5819560088
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -71,5 +71,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1628 threshold=1500 rotation_due=yes watcher=active open_claims=62 prose_open=2 unfenced_prose=63 watermark=5821700336
+board_comments=1632 threshold=1500 rotation_due=yes watcher=active open_claims=61 prose_open=2 unfenced_prose=63 watermark=5821987254
 
