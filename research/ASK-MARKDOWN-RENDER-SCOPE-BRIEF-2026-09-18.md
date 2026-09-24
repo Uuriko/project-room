@@ -97,7 +97,6 @@ collapse.
 Paths this fold owns:
 
 - `research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md` (this file)
-- `tests/ask-markdown-render-scope-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` **next to
   the Artifacts-lite / T081 / stream-safe MD rows** (not the T084
   New-chat rows, not the T083 battery rows)

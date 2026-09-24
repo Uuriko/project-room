@@ -47,7 +47,6 @@ longer.
 Paths this fold owns:
 
 - `research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md` (this file)
-- `tests/provide-battery-soft-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md`
 
 No `client/` · `cloudflare/` · `server/` · `src/` · Worker · wrangler
