@@ -23,16 +23,19 @@ for (const mobile of [false, true]) test(`autonomous work ${mobile ? 'mobile' : 
   await page.keyboard.press('Enter');
   assert.equal(await card.locator('.work-details').evaluate(el => el.open), false);
   await page.locator('#new-work-button').click();
-  assert.equal(await page.locator('#require-verification').isChecked(), false);
-  assert.equal(await page.locator('#require-decision').isChecked(), false);
-  assert.equal(await page.locator('#verifier-field').isVisible(), false);
+  // Approved policy: new work defaults to requiring verification and a
+  // decision (#886 flipped these to unchecked; #922 restores checked).
+  assert.equal(await page.locator('#require-verification').isChecked(), true);
+  assert.equal(await page.locator('#require-decision').isChecked(), true);
+  assert.equal(await page.locator('#verifier-field').isVisible(), true);
   await page.locator('#work-title-input').fill('Independent research');
   await page.locator('#work-done-input').fill('Return a useful comparison.');
   await page.locator('#assignee-select').selectOption('producer');
+  await page.locator('#verifier-select').selectOption('reviewer');
   await page.locator('#create-work-button').click();
   await page.locator('#work-dialog').waitFor({ state: 'hidden' });
   const work = Object.values(f.store.room('commons').state.workItems).find(w => w.title === 'Independent research');
-  assert.equal(work.independentVerificationRequired, false); assert.equal(work.ownerDecisionRequired, false);
+  assert.equal(work.independentVerificationRequired, true); assert.equal(work.ownerDecisionRequired, true);
   const source = page.locator('[data-message-record-id="test-request"]');
   await source.locator('details.message-more').evaluate(el => { el.open = true; });
   await source.locator('[data-message-action="work"]').click();
