@@ -1,0 +1,25 @@
+name: apply-992-allowlist
+on:
+  push:
+    branches: [cursor/cron-job-heartbeat]
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/cron-job-heartbeat
+      - name: Register job-heartbeat in runtime allowlist
+        run: |
+          set -euo pipefail
+          if ! grep -Fq 'optional.push("cloudflare/job-heartbeat.mjs")' scripts/runtime-package.mjs; then
+            sed -i '/^optional.push("server\/retention-run.mjs");/a optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)' scripts/runtime-package.mjs
+          fi
+          grep -Fq 'optional.push("cloudflare/job-heartbeat.mjs")' scripts/runtime-package.mjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/runtime-package.mjs
+          git commit -m "Register cloudflare/job-heartbeat.mjs in the runtime package allowlist"
+          git push origin HEAD:cursor/cron-job-heartbeat
