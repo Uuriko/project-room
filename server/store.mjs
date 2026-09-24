@@ -410,7 +410,7 @@ const shapes = {
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
-  [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
+  [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
   [T.SESSION_STARTED]: `${work} budget environment`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
@@ -478,6 +478,14 @@ export function validateCommand(command) {
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
     try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
+  // F2: every new owner decision must cite the public room message carrying
+  // its rationale. The reducer validates the cited message when present so
+  // pre-requirement history still replays; the command gate below is what
+  // makes the source mandatory going forward.
+  if (command.type === T.OWNER_DECISION_RECORDED
+    && (typeof command.data.sourceMessageId !== "string" || !command.data.sourceMessageId.trim())) {
+    fail(422, "decision_source_required", "Post the rationale in the room first, then record the decision with its message id");
   }
   if (command.type === T.WORK_HELP_UPDATED) {
     try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }

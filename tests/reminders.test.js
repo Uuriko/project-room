@@ -85,12 +85,13 @@ test("review and owner approval retire reminders only on genuine resolution; reo
   const evidence = { completionEventId: f.work().receipt.eventId, evidenceVersion: "v1" };
   f.mutate(T.VERIFICATION_RECORDED, { ...evidence, result: "pass", summary: "Checked" }, "reviewer");
   assert.equal(f.read().reminders[0].state, "active");
+  f.send(T.MESSAGE_POSTED, { messageId: "rationale-reminder", body: "Rationale: accepting the agenda." });
   const beforeApproval = f.store.snapshot(f.keys.owner, "commons");
   f.store.db.exec("CREATE TRIGGER test_retirement_failure BEFORE UPDATE ON private_reminders BEGIN SELECT RAISE(ABORT,'synthetic retirement failure'); END");
-  assert.throws(() => f.mutate(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accepted" }, "owner"), /synthetic retirement failure/);
+  assert.throws(() => f.mutate(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accepted", sourceMessageId: "rationale-reminder" }, "owner"), /synthetic retirement failure/);
   assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), beforeApproval);
   f.store.db.exec("DROP TRIGGER test_retirement_failure");
-  f.mutate(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accepted" }, "owner");
+  f.mutate(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accepted", sourceMessageId: "rationale-reminder" }, "owner");
   for (const actor of ["owner", "guest"]) assert.equal(f.read(actor).reminders[0].state, "resolved");
   assert.equal(f.save(request).reminders[0].state, "resolved", "historical retry cannot reactivate");
   assert.throws(() => f.save(f.request({ expectedRevision: 2 })), { code: "work_resolved" });

@@ -37,7 +37,9 @@ function completeLifecycle(store, owner, human, agent, workItemId, signEvidence)
   store.command(human, "commons", command(T.WORK_STARTED, { workItemId, expectedRevision: 1 }));
   const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId, expectedRevision: 2, producerId: "human", summary: "s", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "verify", signedEvidence: signEvidence() }));
   store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "checked" }));
-  store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId, expectedRevision: 4, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "good" }));
+  const rationaleId = `rationale-${workItemId}`;
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: rationaleId, body: "Rationale: the evidence checks out, shipping it." }));
+  store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId, expectedRevision: 4, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "good", sourceMessageId: rationaleId }));
 }
 
 test("history pages keep the frozen horizon beyond 100 events; mid-pagination arrivals never leak in", t => {
@@ -123,7 +125,8 @@ test("an unknown producer PASS stays visible for accountable provenance and cann
   const item = store.snapshot(owner, "commons").state.workItems["w-unknown-producer"];
   assert.equal(item.verification.result, "pass");
   assert.equal(item.verification.independenceConfirmed, false);
-  assert.throws(() => store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: item.id, expectedRevision: 3, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "Looks good" })), /confirmed producer independence/);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "rationale-unknown-producer", body: "Rationale draft for the unknown-producer decision." }));
+  assert.throws(() => store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: item.id, expectedRevision: 3, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "Looks good", sourceMessageId: "rationale-unknown-producer" })), /confirmed producer independence/);
   assert.deepEqual(store.returnBrief(human, "commons", {}).current.needsAttention.map(i => [i.workItemId, i.step]), [[item.id, "establish_provenance"]]);
   assert.deepEqual(store.returnBrief(agent, "commons", {}).current.needsAttention, []); // repeating the same check cannot establish provenance
   assert.deepEqual(store.returnBrief(owner, "commons", {}).current.needsAttention, []); // no decision until independence is confirmed
@@ -190,7 +193,8 @@ for (const cause of ["block", "verification-failure"]) {
     assert.ok(item().decisionHistory[0].invalidatedByEventId);
     assert.equal(store.returnBrief(agent, "commons").current.needsAttention[0].step, "verify");
     store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, result: "pass", completionEventId: done.event.id, evidenceVersion: "v2", summary: "Checked v2" }));
-    store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v2", reason: "Current result" }));
+    store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "rationale-rework-v2", body: "Rationale: v2 addresses the findings." }));
+    store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v2", reason: "Current result", sourceMessageId: "rationale-rework-v2" }));
     const approval = item().decision;
     store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, result: "fail", completionEventId: old.receipt.eventId, evidenceVersion: "v1", summary: "Historical finding only" }));
     assert.equal(item().state, "completed"); assert.deepEqual(item().decision, approval);
