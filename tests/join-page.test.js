@@ -29,6 +29,7 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(html, /id="join-form"/, `${path} has the join form`);
     assert.match(html, /id="join-consent"/, `${path} has the consent screen`);
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
+    assert.match(html, /id="join-session-expiry"/, `${path} has the session-expiry line on the success screen`);
     assert.match(html, /src="[^"]*\/src\/join\.js"/, `${path} loads the join script`);
     assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
   }
@@ -110,6 +111,12 @@ test("join by invite sets a working browser session cookie for the new member", 
   assert.equal(response.status, 201);
   const joined = await response.json();
   assert.equal(joined.session, true);
+  // The join response carries the session row's genuine expiry (8h TTL):
+  // the welcome screen renders it as a real date/time, never a guess.
+  const eightHours = 8 * 3600 * 1000;
+  assert.ok(Number.isSafeInteger(joined.sessionExpiresAt), "join returns sessionExpiresAt");
+  assert.ok(joined.sessionExpiresAt > Date.now(), "expiry is in the future");
+  assert.ok(joined.sessionExpiresAt <= Date.now() + eightHours + 60_000, "expiry matches the 8h session TTL");
   const setCookie = response.headers.get("set-cookie");
   assert.ok(setCookie, "join sets a session cookie");
   assert.match(setCookie, /room_session=[^;]+;.*HttpOnly/);
@@ -122,6 +129,8 @@ test("join by invite sets a working browser session cookie for the new member", 
   // then posting a message works through the session like any browser client.
   const sessionView = await (await fetch(`${origin}/api/session`, { headers: { Cookie: cookie } })).json();
   assert.equal(typeof sessionView.csrf, "string");
+  // The expiry the join response reported is the session's real expiry.
+  assert.equal(sessionView.expiresAt, joined.sessionExpiresAt);
   const posted = await fetch(`${origin}/api/rooms/${roomId}/commands`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin, "X-CSRF-Token": sessionView.csrf },
@@ -140,6 +149,11 @@ test("first-room join also signs the browser in", async t => {
   assert.equal(response.status, 201);
   const joined = await response.json();
   assert.equal(joined.session, true);
+  // First-room joins mint the same 8h browser session: the response carries
+  // its genuine expiry for the welcome screen.
+  assert.ok(Number.isSafeInteger(joined.sessionExpiresAt), "first-room join returns sessionExpiresAt");
+  assert.ok(joined.sessionExpiresAt > Date.now(), "expiry is in the future");
+  assert.ok(joined.sessionExpiresAt <= Date.now() + 8 * 3600 * 1000 + 60_000, "expiry matches the 8h session TTL");
   const cookie = response.headers.get("set-cookie").split(";")[0];
   const snapshot = await (await fetch(`${origin}/api/rooms/${joined.roomId}`, { headers: { Cookie: cookie } })).json();
   assert.equal(snapshot.viewerId, joined.memberId);

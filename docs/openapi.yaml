@@ -847,6 +847,7 @@ paths:
                   via: { type: string, enum: [first-room, invite] }
                   duplicate: { type: boolean }
                   session: { type: boolean, description: "true when the response also sets the room session cookie" }
+                  sessionExpiresAt: { type: integer, description: "epoch-ms expiry of the browser session cookie set by this response (the session row's genuine expiry)" }
                   next:
                     type: array
                     items: { type: string }
