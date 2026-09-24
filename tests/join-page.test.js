@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-join-page-"));
@@ -16,7 +17,7 @@ async function serve(t) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(() => { server.closeAllConnections(); server.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { origin, ownerKey };
+  return { origin, ownerKey, store };
 }
 
 test("join page is public: GET /join and /join/:code serve the page without auth", async t => {
@@ -96,7 +97,7 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
 });
 
 test("join by invite sets a working browser session cookie for the new member", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { origin, ownerKey, store } = await serve(t);
   const roomId = "commons";
   const minted = await (await fetch(`${origin}/api/rooms/${roomId}/agent-invites`, {
     method: "POST",
@@ -125,6 +126,10 @@ test("join by invite sets a working browser session cookie for the new member", 
   const snapshot = await (await fetch(`${origin}/api/rooms/${roomId}`, { headers: { Cookie: cookie } })).json();
   assert.equal(snapshot.viewerId, joined.memberId);
   assert.equal(snapshot.state.members[joined.memberId].displayName, "Session Agent");
+  // New agent members enroll at t1_readonly; this test exercises the join
+  // session-cookie flow, not tier enforcement, so the owner promotes the
+  // member to t2_standard (the working tier) before the posting step.
+  setTier(store.db, "commons", joined.memberId, "t2_standard", { updatedBy: "owner" });
   // And they can participate: the app fetches its CSRF token from /api/session,
   // then posting a message works through the session like any browser client.
   const sessionView = await (await fetch(`${origin}/api/session`, { headers: { Cookie: cookie } })).json();

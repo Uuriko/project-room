@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-disconnected-agent-"));
@@ -86,6 +87,10 @@ test("agent asks, disconnects, reconnects, reads clarification, and answers", as
   const identitySecret = redeem.json.secret;
   const agentMemberId = redeem.json.memberId;
   assert.ok(identitySecret && agentMemberId, "redeem must return an identity secret and member id");
+  // New agent members enroll at t1_readonly; this test exercises the
+  // disconnect/reconnect roundtrip flow, not tier enforcement, so the
+  // owner promotes the agent to t2_standard (the working tier).
+  setTier(store.db, "commons", agentMemberId, "t2_standard", { updatedBy: "owner" });
 
   // Consent-bound DMs: the agent requests consent to DM the owner and the
   // owner approves, before the first question goes out.

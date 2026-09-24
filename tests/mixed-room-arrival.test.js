@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { RoomAgentClient, redeemAgentInvite, listAgentRooms } from "../client/room-agent.mjs";
 
 // Independent protocol clients, not claims of execution by model vendors.
@@ -36,6 +37,11 @@ test("two people and two enrolled agents share a persistent room without a task"
   };
   const a = await enroll("First agent"), b = await enroll("Second agent");
   assert.notEqual(a.identityId, b.identityId);
+  // New agent members enroll at t1_readonly; this test exercises the mixed
+  // arrival/snapshot flows, not tier enforcement, so the owner promotes
+  // both agents to t2_standard (the working tier) before they post.
+  setTier(store.db, "commons", a.memberId, "t2_standard", { updatedBy: "owner" });
+  setTier(store.db, "commons", b.memberId, "t2_standard", { updatedBy: "owner" });
   // Consent-bound DMs: the first agent's DM to the second needs approval.
   store.dmConsents.request("commons", a.memberId, b.memberId, "test fixture");
   store.dmConsents.decide("commons", b.memberId, a.memberId, "approve");
