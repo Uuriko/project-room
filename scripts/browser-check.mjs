@@ -158,7 +158,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#work-title-input").fill("Pick our first book");
     await page.locator("#work-done-input").fill("A shared reading choice with its original discussion.");
     await page.locator("#assignee-select").selectOption("maya");
-    await page.locator("#verifier-select").selectOption("owner");
+    await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator("#verifier-select").selectOption("owner");
     await page.locator('#new-work-form button[type="submit"]').click();
     await page.locator("#new-work-form").waitFor({ state: "hidden" });
     const work = Object.values(store.snapshot(owner, "commons").state.workItems);

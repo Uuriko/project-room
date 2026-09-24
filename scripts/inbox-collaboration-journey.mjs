@@ -106,7 +106,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
     await page.locator(`[data-message-id="${shared.id}"][data-message-action="work"]`).click();
     await page.locator("#work-title-input").fill("A warm invitation reply");
     await page.locator("#work-done-input").fill("A warm reply of at most 60 words, based only on the shared excerpt, with one small next step and no invented claims. Keep it as a draft; do not send.");
-    await page.locator("#assignee-select").selectOption("owner"); await page.locator("#verifier-select").selectOption("mail-reviewer");
+    await page.locator("#assignee-select").selectOption("owner"); await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator("#verifier-select").selectOption("mail-reviewer");
     assert.equal(await page.locator("#require-verification").isChecked(), true);
     assert.equal(await page.locator("#require-decision").isChecked(), true);
     await page.locator("#new-work-form button[type=submit]").click(); await page.locator("#work-dialog").waitFor({ state: "hidden" });

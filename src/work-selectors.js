@@ -202,3 +202,13 @@ export function contributionSteps(state, memberId, now = Date.now()) {
   }
   return steps.sort((a, b) => a.priority - b.priority || String(a.at ?? "").localeCompare(String(b.at ?? "")) || a.key.localeCompare(b.key));
 }
+
+// Urgent decisions/reviews must never disappear behind a routine-item limit.
+// Existing selectors own eligibility, permissions and exact-result matching.
+export function attentionPreview(steps, limit = 5) {
+  const urgent = steps.filter(step => step.priority === 0);
+  const routine = steps.filter(step => step.priority !== 0);
+  const all = [...urgent, ...routine];
+  const visible = [...urgent, ...routine.slice(0, Math.max(0, limit - urgent.length))];
+  return { all, visible, hiddenCount: all.length - visible.length };
+}

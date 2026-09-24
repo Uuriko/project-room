@@ -2,7 +2,7 @@ import { installRoomLayout } from "./room-layout.js";
 import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
-import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
+import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -2127,6 +2127,14 @@ function revealWork(id) {
   card.querySelector(".work-details").open = true;
   focusRecord(card);
 }
+document.addEventListener("keydown", event => {
+  if (![" ", "Enter"].includes(event.key) || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const card = event.target;
+  if (!card.matches?.(".work-card")) return;
+  const details = card.querySelector(".work-details");
+  if (!details) return;
+  event.preventDefault(); details.open = !details.open;
+});
 function revealDrafts(id) {
   const card = revealWorkTimeline(id);
   if (!card) return;
@@ -2216,7 +2224,9 @@ function revealLocationHash() {
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
-  return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  const step = nextWorkStep(i, now, state.room.ownerId).action;
+  const primary = ({ revise: "resolve", in_progress: "complete" })[step] ?? step;
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button ${action === primary ? "primary" : "secondary"}" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
   try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
@@ -2365,8 +2375,8 @@ function workCard(i, now, drafts, messages = []) {
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
   const loops = coordinationLoops(i, messages);
   const loopNotice = loops.length ? `<p class="loop-warning" data-loop-kind="${esc(loops[0].kind)}"><strong>Possible coordination loop.</strong> ${esc(loops[0].label)}</p>` : "";
-  const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
-  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
+  const nextActor = next.memberId && next.memberId !== i.accountableMemberId ? `${name(next.memberId)} — ` : "";
+  const nextLine = `<p class="work-assignee">${esc(name(i.accountableMemberId))}</p><p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p>${source ? `<p><a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-handoff-source:${esc(i.id)}">Open discussion</a></p>` : ""}<details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
@@ -2388,7 +2398,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${handoff}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${i.receipt ? `<p class="work-result-summary"><strong>${i.state === "completed" ? "Result" : "Previous result"}:</strong> ${esc(i.receipt.summary)}</p>` : ""}${handoff}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -3971,7 +3981,11 @@ function openWork(sourceId = null, reuseId = null) {
   $("#work-options").open = false;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
-  if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
+  if (sourceId) {
+    const body = state.messages.find(m => m.id === sourceId)?.body || "";
+    $("#work-title-input").value = body.trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
+    $("#work-done-input").value = body;
+  }
   if (definition) {
     // The title field is a single-line input: HTML value sanitization strips newlines,
     // silently joining words ("Weekly\nagenda" -> "Weeklyagenda"). Normalize whitespace
@@ -4106,7 +4120,7 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+    closeWorkForm(); selectWorkView("work"); notice("Task created. Waiting for acceptance.");
   }, { failureHint: "Your work proposal was kept; try again." });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
@@ -5315,13 +5329,14 @@ function renderReturnBrief() {
   const attentionIds = new Set(attention.map(item => item.workItemId));
   const attentionSteps = [...attention.map(item => byWork.get(item.workItemId)).filter(Boolean),
     ...contributions.filter(step => step.kind === "request" || !attentionIds.has(step.id))];
+  const preview = attentionPreview(attentionSteps);
   const allButton = $("#rb-show-all"), allFocused = document.activeElement === allButton;
-  if (contributions.length <= 5) showAllAttention = false;
-  allButton.hidden = contributions.length <= 5;
+  if (!preview.hiddenCount) showAllAttention = false;
+  allButton.hidden = !preview.hiddenCount;
   allButton.textContent = showAllAttention ? "Show less" : `Show all (${contributions.length})`;
   allButton.setAttribute("aria-expanded", String(showAllAttention));
   if (allFocused && allButton.hidden) $("#return-brief-panel > summary").focus({ preventScroll: true });
-  renderBriefList("#rb-attention-list", (showAllAttention ? attentionSteps : attentionSteps.slice(0, 5)).map(i => {
+  renderBriefList("#rb-attention-list", (showAllAttention ? preview.all : preview.visible).map(i => {
     const messageId = i.draftCount > 1 ? null : i.draftMessageId ?? (i.kind === "request" ? i.id : null);
     const href = messageId ? recordHref("message", messageId) : workHref(i.id);
     const target = messageId ? `data-open-message="${esc(messageId)}"` : `data-open-work="${esc(i.id)}"${i.draftCount > 1 ? ' data-view-drafts' : ''}`;
