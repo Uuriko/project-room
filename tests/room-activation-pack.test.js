@@ -14,6 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { buildActivationPack, COORDINATION_NORMS } from "../server/room-activation-pack.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const ROOM = "activation-demo";
 const FUTURE_LEASE = new Date(Date.now() + 6 * 3600 * 1000).toISOString();
@@ -33,6 +34,9 @@ function fixture(t) {
   store.command(ownerKey, ROOM, { id: "pack-add-worker", type: T.MEMBER_ADDED, data: {
     memberId: "worker", displayName: "Pack Worker", kind: "agent",
     permissions: ["accept_work", "write_external", "complete_work"], accountableHumanId: "owner" } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // activation-pack tests exercise it as a working agent.
+  setTier(store.db, ROOM, "worker", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const workerKey = store.issueAccessKey(ROOM, "worker");
   store.command(ownerKey, ROOM, { id: "pack-policy", type: T.ROOM_POLICY_SET, data: {
     requireIndependentReview: true, requireOwnerDecision: false } });

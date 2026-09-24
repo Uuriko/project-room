@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 test("local API handoff: distinct scripted clients, revision correction, restart, review and human decision", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-handoff-contract-"));
@@ -21,6 +22,9 @@ test("local API handoff: distinct scripted clients, revision correction, restart
     store.command(ownerKey, "commons", { id: `add-${memberId}`, type: T.MEMBER_ADDED, data: {
       memberId, displayName: `${memberId} (scripted fixture)`, kind: "agent", permissions, accountableHumanId: "owner"
     } });
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // handoff contract exercises them as working agents.
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const producerKey = store.issueAccessKey("commons", "producer"), reviewerKey = store.issueAccessKey("commons", "reviewer");
   let signEvidence = makeTestSigner(store);

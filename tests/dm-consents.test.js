@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { DmConsents, dmConsentSchema } from "../server/dm-consents.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
@@ -191,6 +192,9 @@ test("default-open against a real RoomStore projection: DM posts without consent
     for (const [id, name] of [["alice", "Alice"], ["bob", "Bob"]]) {
       store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
         data: { memberId: id, displayName: name, kind: "agent", permissions: [] } });
+      // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+      // migration test exercises it as a working agent.
+      setTier(store.db, "commons", id, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     }
     const aliceKey = store.issueAccessKey("commons", "alice");
     // No consent row at all: the DM posts on default-open.

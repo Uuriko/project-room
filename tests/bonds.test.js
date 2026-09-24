@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 import { peerEventVisible, visibleBonds } from "../server/bonds.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -59,8 +60,12 @@ async function roomOf(t) {
     roomId, title: "Bonds", purpose: "probe", kind: "personal", displayName: "Owner"
   }, owner.secret);
   assert.equal(created.status, 201);
-  await admit(origin, roomId, owner.secret, friend, "Friend");
-  await admit(origin, roomId, owner.secret, stranger, "Stranger");
+  const friendMemberId = await admit(origin, roomId, owner.secret, friend, "Friend");
+  const strangerMemberId = await admit(origin, roomId, owner.secret, stranger, "Stranger");
+  // #953: new members default to t1_readonly; bond tests need write access
+  for (const memberId of [friendMemberId, strangerMemberId]) {
+    setTier(fixture.store.db, roomId, memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
+  }
   const command = (secret, type, data) => post(origin, `/api/rooms/${roomId}/commands`, {
     id: randomUUID(), type, data
   }, secret);
@@ -358,9 +363,13 @@ test("M2: a room owner cannot revoke a bond formed in another room", async t => 
     assert.equal(created.status, 201, roomId);
   }
   // Agent a joins BOTH rooms, so a has an identity_links row in room-x.
-  await admit(origin, "m2-room-x", owner.secret, a, "A");
-  await admit(origin, "m2-room-y", owner.secret, a, "A");
-  await admit(origin, "m2-room-y", owner.secret, b, "B");
+  const aMemberX = await admit(origin, "m2-room-x", owner.secret, a, "A");
+  const aMemberY = await admit(origin, "m2-room-y", owner.secret, a, "A");
+  const bMemberY = await admit(origin, "m2-room-y", owner.secret, b, "B");
+  // #953: new members default to t1_readonly; bond tests need write access
+  setTier(fixture.store.db, "m2-room-x", aMemberX, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
+  setTier(fixture.store.db, "m2-room-y", aMemberY, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
+  setTier(fixture.store.db, "m2-room-y", bMemberY, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
   const cmdX = (secret, type, data) => post(origin, "/api/rooms/m2-room-x/commands",
     { id: randomUUID(), type, data }, secret);
   const cmdY = (secret, type, data) => post(origin, "/api/rooms/m2-room-y/commands",

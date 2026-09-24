@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-autonomy-client-"));
@@ -21,6 +22,10 @@ async function fixture(t) {
     store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId, displayName: memberId, kind: "agent", permissions: ["accept_work", "complete_work"] } });
   }
+  // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+  // client tests exercise them as working agents.
+  for (const memberId of ["agent", "agent-two"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
     workItemId: "auto-task", title: "Autonomy probe", definitionOfDone: "Claimed through the client",
     accountableMemberId: "agent", mode: "read"

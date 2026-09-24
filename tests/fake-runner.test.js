@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { steppedClock, fixedIds, runScenario } from "../scripts/fake-runner.mjs";
 
 // W4-38 G2: the fake runner simulates start, output, failure, timeout and
@@ -24,6 +25,9 @@ function buildStore(t) {
   store.command(ownerKey, "commons", { id: ids(), type: T.MEMBER_ADDED,
     data: { memberId: "fake-runner", displayName: "Fake runner", kind: "agent",
       permissions: ["accept_work", "complete_work"] } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // fake-runner test exercises it as a working agent.
+  setTier(store.db, "commons", "fake-runner", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   store.command(ownerKey, "commons", { id: ids(), type: T.WORK_PROPOSED, data: {
     workItemId: "runner-task", title: "Simulated task", definitionOfDone: "Scenario completes",
     accountableMemberId: "fake-runner", mode: "read" } });

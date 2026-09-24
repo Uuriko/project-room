@@ -9,6 +9,7 @@ import { listOpenQuestions } from '../server/open-questions.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { setTier } from '../server/autonomy-tiers.mjs';
 
 const msg = (id, authorId, body, extra = {}) => ({
   id, authorId, body, createdAt: '2026-09-23T20:00:00.000Z', ...extra,
@@ -108,6 +109,9 @@ function fixture(t) {
     }));
     keys[id] = store.issueAccessKey('commons', id);
   }
+  // #953: new agent members default to t1_readonly; agents need write access for message.posted
+  for (const id of ['agent-a', 'agent-b'])
+    setTier(store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { store, keys };
 }

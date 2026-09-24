@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
@@ -16,6 +17,9 @@ function room(t) {
   const owner = store.issueAccessKey("commons", "owner");
   const send = (key, type, data, id = crypto.randomUUID()) => store.command(key, "commons", { id, type, data });
   for (const kind of ["human", "agent"]) send(owner, T.MEMBER_ADDED, { memberId: kind, displayName: kind, kind, permissions: [] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // conversation tests exercise it as a posting member.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human"), agent = store.issueAccessKey("commons", "agent");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { get store() { return store; }, owner, human, agent, send, restart() { store.close(); store = new RoomStore(filename); } };

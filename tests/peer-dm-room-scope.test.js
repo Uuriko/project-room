@@ -10,6 +10,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function storeFixture(t) {
@@ -112,6 +113,7 @@ async function admit(origin, roomId, ownerSecret, identity, label) {
     decision: "approve", permissions: ["accept_work"], note: null
   }, ownerSecret);
   assert.equal(decide.status, 200, label);
+  return (await decide.json()).memberId;
 }
 
 test("end-to-end: a DM posted in room A is invisible when the thread is read in room B", async t => {
@@ -124,7 +126,9 @@ test("end-to-end: a DM posted in room A is invisible when the thread is read in 
       roomId, title: `Scope ${roomId}`, purpose: "probe", kind: "personal", displayName: "Owner"
     }, owner.secret);
     assert.equal(created.status, 201, roomId);
-    await admit(origin, roomId, owner.secret, friend, "Friend");
+    const memberId = await admit(origin, roomId, owner.secret, friend, "Friend");
+    // #953: access-request admission defaults to t1_readonly; friend needs write access for bond.accept
+    setTier(f.store.db, roomId, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const command = (roomId, secret, type, data) => post(origin, `/api/rooms/${roomId}/commands`, { id: randomUUID(), type, data }, secret);
 

@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const guide = readFileSync(new URL("../docs/SWARM-PLUG-IN.md", import.meta.url), "utf8");
 const examples = new Map([...guide.matchAll(/<!-- room-command: ([a-z-]+) -->\s*```json\n([\s\S]*?)\n```/g)]
@@ -44,6 +45,9 @@ async function fixture(t) {
     store.command(ownerToken, "commons", { id: `fixture-add-${memberId}`, type: T.MEMBER_ADDED, data: {
       memberId, displayName: `${memberId} (synthetic guide fixture)`, kind: "agent", permissions, accountableHumanId: "owner"
     } });
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // guide contract exercises them as working agents.
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   store.command(ownerToken, "commons", { id: "fixture-source", type: T.MESSAGE_POSTED, data: {
     messageId: "guide-source", body: "Synthetic task: prepare an agenda that names its owner. No real work or approval is represented."

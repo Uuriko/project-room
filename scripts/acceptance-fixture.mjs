@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 export function createAcceptanceFixture({ managedProducer = false, dmConsent = false } = {}) {
   if (typeof managedProducer !== "boolean") throw new Error("Choose a boolean managed-producer fixture mode");
@@ -36,6 +37,11 @@ export function createAcceptanceFixture({ managedProducer = false, dmConsent = f
       send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
       keys[memberId] = store.issueAccessKey("commons", memberId);
     }
+    // Graduated autonomy tiers: new agent members enroll at t1_readonly. The
+    // fixture's working agents are operator-promoted to t2_standard so
+    // acceptance flows exercise the full command surface.
+    for (const memberId of ["producer", "reviewer"])
+      setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: store.now() });
     // Consent-bound DMs: acceptance flows address each other directly.
     // Opt-in via { dmConsent: true } so consent-flow tests keep a clean slate.
     // Approves every direction among the fixture members so UI journeys that

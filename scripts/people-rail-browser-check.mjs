@@ -15,6 +15,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -31,6 +32,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     memberId: "instinct", displayName: "Instinct", kind: "agent",
     permissions: ["accept_work", "complete_work", "verify"]
   }));
+  // Graduated autonomy tiers: new agents enroll at t1_readonly; promote the
+  // fixture agent so the check exercises it as a working agent.
+  setTier(store.db, "commons", "codex", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agent = store.issueAccessKey("commons", "codex");
   store.command(owner, "commons", command(T.WORK_PROPOSED, {
     workItemId: "work-review", title: "Review the Project Room v0 contract",

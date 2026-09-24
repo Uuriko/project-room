@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { validAgentNext } from "../src/agent-error.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import {
   classifyJoinToken, guestAgentLinkContract, guestAgentMemberId,
   GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_KIND, GUEST_AGENT_PERMISSIONS,
@@ -96,6 +97,8 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   assert.equal(value.hashPath, GUEST_AGENT_HASH_PATH);
   assert.ok(value.expiresAt > Date.now());
   assert.equal(store.room("commons").state.members[value.member.id].kind, "agent");
+  // #953: new agent members default to t1_readonly; the guest agent needs write access to chat
+  setTier(store.db, "commons", value.member.id, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   const preview = await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: body.linkToken } });
   assert.equal(preview.status, 200);

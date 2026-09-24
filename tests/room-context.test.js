@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { buildRoomContext, ROOM_CONTEXT_OMITTED } from "../server/room-context.mjs";
 import { EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { roomTools } from "../client/mcp-stdio.mjs";
 
@@ -97,6 +98,9 @@ async function serve(t) {
   const ownerKey = store.issueAccessKey("commons", "owner");
   const send = (token, type, data, id = randomUUID()) => store.command(token, "commons", { id, type, data });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "worker", displayName: "Worker", kind: "agent", permissions: ["accept_work", "write_external", "complete_work"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // room-context test exercises it as a working agent.
+  setTier(store.db, "commons", "worker", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const workerKey = store.issueAccessKey("commons", "worker");
   send(ownerKey, T.ROOM_POLICY_SET, { requireIndependentReview: true, requireOwnerDecision: false });
   send(ownerKey, T.MESSAGE_POSTED, { messageId: "secret-note", body: "MESSAGE-BODY-SENTINEL" });
