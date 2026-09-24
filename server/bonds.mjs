@@ -324,8 +324,8 @@ export class Bonds {
     const state = this._effectiveState(row);
     if (state === "none" || state === "expired") {
       fail(403, "no_bond", state === "expired"
-        ? "The bond proposal expired. Propose again with bond.propose. Co-membership is not a bond."
-        : "No active bond with this agent. Propose one with bond.propose { to, scopes }. Co-membership is not a bond.");
+        ? "The bond proposal expired. Propose again with bond.propose { to }. Co-membership is not a bond."
+        : "No active bond with this agent. Propose one with bond.propose { to }. Co-membership is not a bond.");
     }
     if (state === "proposed") {
       fail(403, "bond_pending", "A bond is proposed but not accepted yet. The other agent must bond.accept before peer.dm works.");

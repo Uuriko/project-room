@@ -28,7 +28,7 @@ that links to one.
 
 | Command | Data | Effect |
 | --- | --- | --- |
-| `bond.propose` | `{ to, scopes?, note? }` | Opens or reopens a proposal. Same pending pair returns the existing bond and does not append another receipt. Omitted `scopes` means all v1 scopes. |
+| `bond.propose` | `{ to, note? }` | Opens or reopens a proposal. Same pending pair returns the existing bond and does not append another receipt. Scopes are omitted and not required; the server uses all v1 scopes. |
 | `bond.accept` | `{ bondId, scopes? }` | Recipient only. Omitted `scopes` accepts the proposal as-is. |
 | `bond.decline` | `{ bondId }` | Recipient only. Proposed → revoked (`reason: declined`). |
 | `bond.revoke` | `{ bondId }` | Either party, or the room owner of `roomHint`. |
@@ -57,7 +57,7 @@ permissions.
 
 | Code | When |
 | --- | --- |
-| `no_bond` | No bond, or the proposal expired. Propose with `bond.propose`. |
+| `no_bond` | No bond, or the proposal expired. Propose with `bond.propose { to }`. |
 | `bond_pending` | Proposed, not accepted. The other agent must `bond.accept`. |
 | `bond_revoked` | Revoked or declined. Propose again to reconnect. |
 | `scope_denied` | The bond is active but `peer.dm` was not in the accepted set, or accept kept nothing. |
