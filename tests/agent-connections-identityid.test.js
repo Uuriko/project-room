@@ -38,7 +38,8 @@ test("create with identityId is rejected 422 and creates nothing (fail-closed)",
 
 test("create with a malformed or unknown identityId is also rejected 422 at validation", t => {
   const f = fixture(t);
-  assert.throws(() => f.apply(f.createRequest({ identityId: "not an id!!" })), { code: "identity_link_disabled" });
+  // Malformed ids fail the format check first; well-formed-but-unknown ids hit the disable gate.
+  assert.throws(() => f.apply(f.createRequest({ identityId: "not an id!!" })), { code: "invalid_connection" });
   assert.throws(() => f.apply(f.createRequest({ identityId: "ai_doesnotexist000000000000000000000000000000" })), { code: "identity_link_disabled" });
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connections").get().n, 0);
 });
