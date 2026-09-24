@@ -4696,9 +4696,34 @@ function renderNotifications() {
       : (state.workItems[item.workItemId]?.title ?? item.workItemId);
     const actor = item.kind === "access_request" && item.displayName ? item.displayName : memberLabel(item.actorId);
     const label = `${actor} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
-    return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
+    // Tag acknowledgment (2026-09-23): a pending mention carries a one-tap 👍
+    // button. A bare react counts as a response, so the button sends the
+    // suggested react through the normal reaction path; it sits outside the
+    // row's link so tapping it never navigates to the message.
+    const ack = item.kind === "mention" && item.ackState === "pending" && item.messageId
+      ? `<button type="button" class="notification-ack" data-ack-message="${esc(item.messageId)}" data-ack-reaction="${esc(item.suggestedAck ?? "like")}" title="Acknowledge with a 👍 react" aria-label="Acknowledge mention with thumbs up">👍</button>`
+      : "";
+    return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a>${ack}</li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
 }
+// Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
+// suggested 👍 react through the normal reaction path. Idempotent — when the
+// member already reacted (stale feed), the button does nothing rather than
+// toggling the react off.
+function ackMention(messageId, reaction = "like") {
+  if (!messageId || !state || !Object.hasOwn(REACTIONS, reaction)) return;
+  // The notification feed can name a message the local conversation index
+  // has not loaded; setReaction reads the local index to toggle, so a
+  // missing message bails instead of throwing (the row's link still reaches it).
+  const message = conversation?.byId.get(messageId);
+  if (!message) return;
+  const ids = message.reactions?.[reaction] || [];
+  if (!ids.includes(session.member.id)) setReaction(messageId, reaction);
+}
+$("#notification-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-ack-message]");
+  if (button && state && !busy) { e.preventDefault(); ackMention(button.dataset.ackMessage, button.dataset.ackReaction); }
+});
 async function loadNotifications() {
   const pagingFocus = ["notification-older", "notification-newest"].includes(document.activeElement?.id) ? document.activeElement : null;
   const ticket = notificationOwner, request = ++notificationSerial;
