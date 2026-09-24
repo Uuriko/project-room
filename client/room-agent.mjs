@@ -294,7 +294,7 @@ export class RoomAgentClient {
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -606,6 +606,11 @@ export class RoomAgentClient {
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);
+  }
+  roomContext({ sinceVersion, signal } = {}) {
+    if (sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)) throw new RoomClientError(0, "invalid_context_version", "since_version must be the 64-character context_version");
+    const query = sinceVersion === undefined ? "" : `?since_version=${sinceVersion}`;
+    return this.#request(`/context${query}`, undefined, signal);
   }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");

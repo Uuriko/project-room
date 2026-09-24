@@ -92,6 +92,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_list_work"), path(listPath)]
     };
   }
+  if (reasonCode === "invalid_context_version") {
+    return {
+      status: "action_required", reason: "invalid_context_version",
+      hint: "Pass the previous context_version as since_version, or omit it.",
+      next: [tool("get_room_context"), command("Retry get_room_context with the last context_version, or omit since_version")]
+    };
+  }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
       const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;

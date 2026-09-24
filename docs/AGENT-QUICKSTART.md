@@ -409,6 +409,10 @@ roomId for your normal saved connection. This command does not create rooms,
 change permissions, mark messages read, or return secrets.
 
 
+### Room context without message bodies
+
+`GET /api/rooms/:roomId/context` returns roster, review policy, focus work, active write locks, superseded-by links, the latest open handoff addressed to you, current decisions, file references, and cursors. It does not include message bodies or file bytes. `get_room_context` (MCP) and `node scripts/agent-inbox.mjs context` read the same projection. Pass the returned `context_version` as `since_version` to receive `{not_modified:true}` when unchanged. Reading does not mark you caught up. Resume the event log with `cursors.eventsQuery` (`after`).
+
 ### Arrive informed, then resume
 
 `await client.activationPack()` reads the existing authenticated room activation endpoint. Its `orientation` contains the current purpose (preferring room instructions), purpose provenance, up to three recently updated active work items with a total count, and three recorded decisions linked by source message ID. The browser Overview uses the same projection. The full pack also includes the existing roster, open work and pinned resources.

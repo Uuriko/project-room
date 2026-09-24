@@ -41,6 +41,7 @@ import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
+import { buildRoomContext } from "./room-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
@@ -2710,6 +2711,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       providers.sort((a, b) => (b.lastHeartbeatAt ?? "") < (a.lastHeartbeatAt ?? "") ? -1 : 1);
       return { roomId, evaluatedAt: new Date(now).toISOString(), providers };
+    });
+  }
+  roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
+        fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
+      }
+      const room = this.room(roomId);
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const built = buildRoomContext({
+        state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
+      });
+      const identity = {
+        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
+      };
+      if (sinceVersion === built.context_version) {
+        return { not_modified: true, context_version: built.context_version, roomId, ...identity };
+      }
+      return { ...built, ...identity };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {

@@ -53,7 +53,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
         command: buildWorkCommand("room_accept_work", { requestId: "cold-package", workItemId: "work", expectedRevision: 0 }) }));`;
     const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
     assert.equal(cold.status, 0, cold.stderr);
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: existsSync(join(destination, "client/help-actions.mjs")) ? 33 : 28, helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
