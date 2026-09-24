@@ -1,6 +1,13 @@
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+// ServiceError lives in server/service-error.mjs (shared, cycle-free); the
+// local import keeps the binding in scope (e.g. for StorageUnavailableError
+// below) and it is re-exported so every existing
+// `import { ServiceError } from "./store.mjs"` resolves to the exact same
+// class object and all `instanceof` checks behave identically.
+import { ServiceError } from "./service-error.mjs";
+export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
@@ -83,9 +90,8 @@ import {
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
-export class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+// ServiceError is defined in server/service-error.mjs and re-exported by
+// store.mjs; see the import at the top of this file.
 // Exhausted or unwritable storage (disk full, quota, read-only file or
 // database, I/O errors) is one typed refusal. The failing transaction has
 // already been rolled back, so no partial write exists, and the driver text
