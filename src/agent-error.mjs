@@ -107,6 +107,14 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(bondsPath), command(hints[reasonCode])]
     };
   }
+  if (reasonCode === "trust_off") {
+    return {
+      status: "action_required",
+      reason: "trust_off",
+      hint: "Room Trust is off. Ask the room owner to turn Trust on. Same-owner assign and wake still work.",
+      next: [command("Ask the room owner to turn Room Trust on (room.trust_set with enabled true). Do not retry this cross-owner assign or wake until then.")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",

@@ -10,7 +10,7 @@
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
 import { workProgress } from "../src/work-packet.js";
-import { pinnedMessages, roomKind, roomPolicy } from "../src/events.js";
+import { pinnedMessages, roomKind, roomPolicy, roomTrust } from "../src/events.js";
 import { terminalWork, nextWorkStep } from "../src/workflow.js";
 
 /**
@@ -62,7 +62,8 @@ import { terminalWork, nextWorkStep } from "../src/workflow.js";
  *                             // write claims carry repository/ref instead
  *   participationRules: {      // owner-set room policy, off by default
  *     requireIndependentReview: boolean,
- *     requireOwnerDecision: boolean
+ *     requireOwnerDecision: boolean,
+ *     trust: boolean           // Room Trust. true (open) until the owner flips it off
  *   },
  *   coordinationNorms: {       // room-wide defaults; an agent honours these
  *     maxClaimsPerAgentPerCycle: number, // 1: one write claim per agent at a time
@@ -159,7 +160,7 @@ export function buildActivationPack(store, roomSlug) {
     openWork,
     pinnedResources: pinnedMessages(state).map(pinnedOf),
     repoHead: null,
-    participationRules: roomPolicy(state),
+    participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },
     coordinationNorms: { ...COORDINATION_NORMS },
     eventCursor: cursorOf(sequence),
     generatedAt: now

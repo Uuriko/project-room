@@ -11,6 +11,8 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
+  // One owner kill-switch for cross-owner assign and wake. Default open.
+  ROOM_TRUST_SET: "room.trust_set",
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
@@ -119,6 +121,78 @@ export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "re
 export function roomPolicy(state) {
   const stored = state?.room?.policy ?? {};
   return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
+}
+
+// Room Trust is one binary kill-switch, separate from Bond and from review
+// policy. Default is open: no stored value means cross-owner assign and wake
+// stay allowed for members. The owner flips it off with room.trust_set.
+// Rooms that never record the event keep no `room.trust` field, so replay of
+// older logs stays byte-identical.
+export const TRUST_OFF_CODE = "trust_off";
+export const trustOffMessage = targetId =>
+  `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
+
+export function roomTrust(state) {
+  const stored = state?.room?.trust;
+  if (!stored || typeof stored.enabled !== "boolean") return { enabled: true };
+  return {
+    enabled: stored.enabled,
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null
+  };
+}
+
+// Humans own themselves. An agent belongs to its accountable human, or to
+// the room owner when that sponsor was never recorded.
+export function memberOwnerId(state, memberId) {
+  const member = state?.members?.[memberId];
+  if (!member) return null;
+  if (typeof member.accountableHumanId === "string" && member.accountableHumanId) return member.accountableHumanId;
+  if (member.kind === "human") return member.id;
+  return state?.room?.ownerId ?? null;
+}
+
+export function distinctMemberOwnerIds(state) {
+  const owners = new Set();
+  for (const member of Object.values(state?.members ?? {})) {
+    if (!member || member.active === false) continue;
+    const ownerId = memberOwnerId(state, member.id);
+    if (ownerId) owners.add(ownerId);
+  }
+  return owners;
+}
+
+// Cross-owner means the two members have different sponsors and at least
+// one of them is an agent. Two humans coordinating are not this gate.
+export function isCrossOwnerAgentAction(state, actorId, targetId) {
+  if (!actorId || !targetId || actorId === targetId) return false;
+  const actor = state?.members?.[actorId];
+  const target = state?.members?.[targetId];
+  if (!actor || !target || actor.active === false || target.active === false) return false;
+  if (actor.kind !== "agent" && target.kind !== "agent") return false;
+  const ownerA = memberOwnerId(state, actorId);
+  const ownerB = memberOwnerId(state, targetId);
+  return Boolean(ownerA && ownerB && ownerA !== ownerB);
+}
+
+export function roomTrustBlocks(state, actorId, targetId) {
+  return roomTrust(state).enabled === false && isCrossOwnerAgentAction(state, actorId, targetId);
+}
+
+export function assertRoomTrust(state, actorId, targetId) {
+  if (!roomTrustBlocks(state, actorId, targetId)) return;
+  const error = new Error(trustOffMessage(targetId));
+  error.code = TRUST_OFF_CODE;
+  throw error;
+}
+
+export function firstBlockedWakeTarget(state, actorId, targetIds) {
+  if (roomTrust(state).enabled !== false || !Array.isArray(targetIds)) return null;
+  for (const targetId of targetIds) {
+    if (isCrossOwnerAgentAction(state, actorId, targetId)) return targetId;
+  }
+  return null;
 }
 
 // Room lifecycle (issue #6 A2). `kind` is a creation-time attribute: the
@@ -289,6 +363,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
+    [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
@@ -427,6 +502,19 @@ function setRoomPolicy(state, incoming) {
   state.room.policy = {
     requireIndependentReview: incoming.data.requireIndependentReview,
     requireOwnerDecision: incoming.data.requireOwnerDecision,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function setRoomTrust(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set Room Trust");
+  if (typeof incoming.data.enabled !== "boolean") throw new Error("Room Trust requires enabled as true or false");
+  const previous = state.room.trust ?? null;
+  state.room.trust = {
+    enabled: incoming.data.enabled,
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
     setAt: incoming.at
@@ -931,6 +1019,11 @@ function proposeWork(state, incoming) {
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
   if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
+  // Trust off refuses a cross-owner assign before the item is recorded.
+  // Same-owner assigns, including an owner handing work to their own agent,
+  // are unchanged. Replay applies the Trust value in force at this point
+  // in the log, so an earlier assign stays valid after a later flip.
+  assertRoomTrust(state, incoming.actorId, incoming.data.accountableMemberId);
   if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
   // RC-2026-09-23: optional machine-readable labels (e.g. "friction" for
   // friction reports from agent feedback). Validated as an array of short

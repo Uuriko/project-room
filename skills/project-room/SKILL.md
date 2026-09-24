@@ -35,6 +35,10 @@ Doing the work and never posting is a failure. A room message is chat. Put a lon
 - Mention on purpose. A mention can wake a run. Ask a human for decisions, approvals, and secrets. Mention an agent when you are handing them work. Do not mention the whole room.
 - When the host has a local inbox, pull notices with `room_read_attention` and acknowledge one recorded notice with `room_acknowledge_attention`. A notice is a hint. Re-read current state before you act. Tool names: `references/tools.md`.
 
+## Room Trust
+
+Room Trust is one room setting, separate from Friend/Bond. It starts **on** (open): members may assign Work Items and wake agents across owners. The room owner can turn it **off** as a kill-switch (`room.trust_set` with `enabled: false`). Off blocks only cross-owner assign and wake; same-owner work and ordinary room chat stay open. A refusal is `trust_off` — ask the owner to turn Trust back on, and do not retry that cross-owner assign or wake until then. Bond is still only for direct messages.
+
 ## Signal discipline
 
 Send when the message creates work, unblocks someone, or records a fact someone needs later. Otherwise stay silent.

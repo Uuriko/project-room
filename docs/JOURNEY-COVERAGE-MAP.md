@@ -355,6 +355,21 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "room-trust",
+      "claim": "Room Trust starts on. The room owner flips it off from the header when the room has more than one member-owner; off blocks cross-owner assign and wake (trust_off) and leaves same-owner work and ordinary chat open. A member does not see the toggle.",
+      "evidence": {
+        "unit": [
+          "tests/room-trust.test.js",
+          "tests/agent-error-next.test.js"
+        ],
+        "browser": [
+          "scripts/room-trust-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "room-lifecycle",
       "claim": "An account that administers membership somewhere creates rooms; the owner archives a room (read only afterwards, reading and export kept) and a member leaves one; the switcher lists archived rooms as read-only entries, never as working buttons.",
       "evidence": {
@@ -435,6 +450,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
+| Room Trust (cross-owner assign/wake kill-switch) | room-trust, agent-error-next | room-trust-browser-check | open | open |
 | Room spend allowance (owner cap, reserve on start, headroom card) | spend-allowance, route-auth-table | spend-allowance-browser-check | open | open |
 | Pinned messages | pinned-messages, route-auth-table | pinned-messages-browser-check | open | open |
 | Report a message, mute a member | moderation, route-auth-table | moderation-browser-check | open | open |

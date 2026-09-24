@@ -76,6 +76,11 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.ok(unknownMember.next.some(step => step.path === "/api/rooms/commons/presence"));
   assert.ok(!unknownMember.next.some(step => step.tool === "room_read_work"),
     "unknown member must not point at a work re-read");
+  const trustOff = agentErrorAx({ httpStatus: 403, code: "trust_off", message: "Room Trust is off: cross-owner assign and wake are blocked (foreign). Ask the room owner to turn Trust on.", roomId: "commons" });
+  assertAx(trustOff, { reason: "trust_off" });
+  assert.match(trustOff.hint, /turn Trust on/);
+  assert.match(trustOff.hint, /Same-owner/);
+  assert.ok(trustOff.next.some(step => /room\.trust_set/.test(step.command)));
   const unsigned = agentErrorAx({ httpStatus: 422, code: "missing_signed_evidence", message: "unsigned external evidence is rejected", roomId: "commons", workItemId: "test-handoff" });
   assertAx(unsigned, { reason: "missing_signed_evidence" });
   assert.match(unsigned.hint, /evidenceKind room_text/);

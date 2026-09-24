@@ -1231,7 +1231,10 @@ summary { overflow-wrap: anywhere; }
 .sidebar-tools { margin-top: auto; padding-top: .75rem; border-top: 1px solid var(--line-soft); }
 .sidebar-tools .topbar-button { width: 100%; justify-content: space-between; color: var(--muted); }
 .conversation-heading { min-width: 0; flex: 1; }
-.conversation-heading h2 { margin: 0; overflow-wrap: anywhere; }
+.conversation-title-row { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.conversation-heading h2 { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+#room-trust-toggle { flex: none; }
+#room-trust-toggle[aria-pressed="false"] { border-color: var(--line); background: var(--panel-raised); }
 #mobile-room-name { display: none; }
 .room-topbar { gap: .5rem; }
 .room-topbar .topbar-actions { flex-wrap: nowrap; flex: none; }
