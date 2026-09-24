@@ -82,8 +82,9 @@ test("planner is deterministic and cost-visible", () => {
   const { service } = makeService();
   const plan = service.plan({ question: "how do claims work", sources: ["room", "docs", "fetch", "provider"], urls: [], maxEvidence: 5 });
   const bySource = Object.fromEntries(plan.map(p => [p.source, p]));
-  assert.equal(bySource.room.status, "planned");
-  assert.match(bySource.room.cost, /free/);
+  assert.equal(bySource.room.status, "disabled");
+  assert.match(bySource.room.reason, /scoping fix/);
+  assert.equal(bySource.room.cost, "n/a");
   assert.equal(bySource.docs.status, "planned");
   assert.equal(bySource.fetch.status, "skipped");
   assert.match(bySource.fetch.reason, /no urls/);
@@ -171,22 +172,17 @@ function seedCache(db) {
     JSON.stringify({ title: "Cooking" }), 100, 950_000);
 }
 
-test("room leg surfaces past fetches with provenance receipts", async () => {
+test("room leg is interim-disabled: no room evidence, plan marks it disabled", async () => {
+  // INTERIM (2026-09-24): the room leg searched the global web_fetch_cache
+  // with no room scope (cross-room disclosure). Disabled until the
+  // room-scoped web_fetch_cache_rooms fix lands. Seeded cache rows must NOT
+  // surface as evidence.
   const { service } = makeService({}, seedCache);
   const res = await service.research("room1", "member1", { question: "how do claim leases work" });
   const room = res.evidence.filter(e => e.source === "room");
-  assert.equal(room.length, 1);
-  assert.equal(room[0].id, "room:k1");
-  assert.equal(room[0].url, "https://example.com/claims-guide");
-  assert.match(room[0].excerpt, /lease/);
-  const p = room[0].provenance;
-  assert.equal(p.source, "room");
-  assert.equal(p.final_url, "https://example.com/claims-guide");
-  assert.equal(p.retrieved_at, 900_000);
-  assert.equal(p.content_sha256, sha256(room[0].excerpt));
-  assert.equal(p.content_sha256.length, 64);
-  assert.deepEqual(p.cache, { status: "hit", age_ms: 100_000 });
-  assert.equal(p.request_id, res.request_id);
+  assert.equal(room.length, 0);
+  const planRoom = res.plan.find(p => p.source === "room");
+  assert.equal(planRoom.status, "disabled");
 });
 
 // ---------------------------------------------------------------------------

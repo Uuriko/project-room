@@ -342,11 +342,14 @@ export class WebResearch {
     if (req.sources.includes("room")) {
       plan.push({
         source: "room",
-        status: keywords.length ? "planned" : "skipped",
-        reason: keywords.length
-          ? `keyword search over the room's own fetch history (${keywords.join(", ")})`
-          : "no usable keywords in question",
-        cost: "free (room memory)",
+        // INTERIM DISABLE (2026-09-24): the room leg searched the global
+        // web_fetch_cache with no room scope — cross-room disclosure.
+        // Proper fix (room-scoped web_fetch_cache_rooms mapping) is in flight;
+        // until it lands the leg stays disabled. searchRoomCache() also
+        // returns [] as defense in depth.
+        status: "disabled",
+        reason: "temporarily disabled: room-leg cache scoping fix in progress — no room evidence returned",
+        cost: "n/a",
       });
     }
     if (req.sources.includes("docs")) {
@@ -407,6 +410,10 @@ export class WebResearch {
 
   // -- room leg: the room's own fetch memory.
   searchRoomCache(req, keywords, requestId, now) {
+    // INTERIM DISABLE (2026-09-24): cross-room disclosure — web_fetch_cache
+    // is global with no room scope. Defense in depth: the planner already
+    // marks this leg "disabled", but never return rows from here regardless.
+    return [];
     if (!keywords.length) return [];
     const clauses = keywords.map(() => "(url LIKE ? OR metadata_json LIKE ?)").join(" OR ");
     const params = keywords.flatMap(kw => [`%${kw}%`, `%${kw}%`]);
