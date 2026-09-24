@@ -1,7 +1,7 @@
 # Publishes server.json to the official MCP Registry (registry.modelcontextprotocol.io).
 #
 # Auth is keyless GitHub OIDC: the workflow's OIDC identity proves the repo
-# belongs to the Uuriko org, which owns the io.github.uuriko namespace. No
+# belongs to the Uuriko org, which owns the io.github.Uuriko namespace. No
 # stored tokens, no paid listing, nothing interactive.
 #
 # Bump server.json's version for every publish (registry versions are immutable).
@@ -29,7 +29,7 @@ jobs:
           jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
       - name: Validate server.json
         run: |
-          node -e "const m=require('./server.json'); if(!/^io\.github\.uuriko\/project-room$/.test(m.name)) throw new Error('bad name'); if(!(m.description&&m.description.length<=100)) throw new Error('bad description'); if(!m.version) throw new Error('missing version'); if(!m.remotes?.length) throw new Error('no remotes'); console.log('server.json OK', m.name, m.version);"
+          node -e "const m=require('./server.json'); if(!/^io\.github\.Uuriko\/project-room$/.test(m.name)) throw new Error('bad name'); if(!(m.description&&m.description.length<=100)) throw new Error('bad description'); if(!m.version) throw new Error('missing version'); if(!m.remotes?.length) throw new Error('no remotes'); console.log('server.json OK', m.name, m.version);"
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher

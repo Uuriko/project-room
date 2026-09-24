@@ -311,6 +311,8 @@
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
+              <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Later <span id="later-count" class="count-chip" hidden></span></button>
               <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Find an action <kbd aria-hidden="true">&#8984;K</kbd></button>
               <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--bg)"/><circle cx="15" cy="17" r="2.5" fill="var(--bg)"/></svg></button>
             </div>
@@ -322,6 +324,13 @@
             </header>
             <ol id="attention-list" class="attention-list"></ol>
             <p id="attention-status" class="status form-status" role="status"></p>
+          </section>
+          <section id="activity-preview" class="needs-attention" aria-label="Recent activity for you" hidden>
+            <header class="attention-header">
+              <h3><span class="attention-icon" aria-hidden="true">✦</span> Needs your attention <span id="activity-preview-count" class="count-chip"></span></h3>
+              <button id="activity-preview-open" class="button ghost" type="button">Open activity</button>
+            </header>
+            <ol id="activity-preview-list" class="attention-list"></ol>
           </section>
           <form id="search-form" class="topbar-search" role="search" aria-label="Search this room" hidden>
             <label class="sr-only" for="message-search">Search messages and work</label>
@@ -438,6 +447,31 @@
             </details>
             <div class="rb-actions"><button id="rb-refresh-button" class="button ghost" type="button">Refresh</button><button id="rb-ack-button" class="button primary" type="button">Mark read</button><span id="rb-ack-note" class="form-hint"></span></div>
           </details>
+        </dialog>
+
+        <dialog id="activity-dialog" aria-labelledby="activity-title">
+          <div class="dialog-head"><h2 id="activity-title">Activity</h2><button id="activity-close" class="button ghost" type="button">Close</button></div>
+          <p class="form-hint">Mentions, replies, thread replies, and reactions naming you — newest first. Opening an item marks it read.</p>
+          <div id="activity-filters" class="filter-row" role="group" aria-label="Filter activity">
+            <button class="button ghost" type="button" data-activity-filter="" aria-pressed="true">All</button>
+            <button class="button ghost" type="button" data-activity-filter="mention" aria-pressed="false">Mentions</button>
+            <button class="button ghost" type="button" data-activity-filter="reply" aria-pressed="false">Replies</button>
+            <button class="button ghost" type="button" data-activity-filter="thread_reply" aria-pressed="false">Threads</button>
+            <button class="button ghost" type="button" data-activity-filter="reaction" aria-pressed="false">Reactions</button>
+          </div>
+          <p id="activity-status" class="status form-status" role="status"></p>
+          <ul id="activity-list" class="rb-list"></ul>
+          <div class="rb-actions">
+            <button id="activity-older" class="button ghost" type="button" hidden>Older</button>
+            <button id="activity-read-all" class="button ghost" type="button">Mark all read</button>
+          </div>
+        </dialog>
+
+        <dialog id="later-dialog" aria-labelledby="later-title">
+          <div class="dialog-head"><h2 id="later-title">Saved for later</h2><button id="later-close" class="button ghost" type="button">Close</button></div>
+          <p class="form-hint">Messages you saved. Opening one jumps to it in the conversation.</p>
+          <p id="later-status" class="status form-status" role="status"></p>
+          <ul id="later-list" class="rb-list"></ul>
         </dialog>
 
         <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
