@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { mountAgentFirstRun, agentFirstRunSeen, skillPackLink, FIRST_RUN_SEEN_KEY } from "../src/agent-first-run.js";
 
 // ---- default-open DM enforcement -------------------------------------------
@@ -23,6 +24,11 @@ test("HTTP: a DM with no consent row posts on default-open; an explicit block st
       store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
         data: { memberId: id, displayName: name, kind: "agent", permissions: [] } });
     }
+    // Graduated autonomy tiers: new agents enroll t1_readonly, so the DM
+    // parties are operator-promoted to t2_standard — this test exercises
+    // DM consent, not the enrollment tier.
+    for (const id of ["alice", "bob"]) setTier(store.db, "commons", id, "t2_standard",
+      { updatedBy: "owner", nowMs: Date.now() });
     const aliceKey = store.issueAccessKey("commons", "alice");
     const bobKey = store.issueAccessKey("commons", "bob");
     // No consent row in either direction: the DM posts.
