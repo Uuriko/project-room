@@ -84,6 +84,7 @@ import { classifyCommand } from "./action-classes.mjs";
 import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
+  sessionClaimConflict,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
   validateAttemptEnvironment, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
@@ -2571,14 +2572,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           resumeApproved = true;
         }
       }
-      if (request.action === "set_status" && !resumeApproved) {
-        // Structural anti-collision: a live claim belongs to its worker. Anyone
-        // else needs the manage_claims permission; a stale heartbeat means the
-        // worker went away and the item is takeable. request_stop stays open to
-        // all members — it is a polite signal, not a state change.
-        const worker = sessionWorker(item, this.now());
-        if (worker && worker !== auth.member.id && !memberCan(roomState, auth.member.id, "manage_claims"))
-          fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
+      if (request.action === "set_status" && !resumeApproved && !memberCan(roomState, auth.member.id, "manage_claims")) {
+        // Structural anti-collision: a live claim belongs to its worker.
+        // expectedRevision is the compare-and-swap token (checked when the
+        // command is applied). A stale heartbeat means the worker went away
+        // and the same claim command can take the item. request_stop stays
+        // open — it is a signal, not a claim change.
+        const conflict = sessionClaimConflict(item, auth.member.id, this.now());
+        if (conflict) fail(409, "session_claimed", conflict);
       }
       let type;
       try { type = sessionCommandType(item, request.action, request.status); }
@@ -3255,6 +3256,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           || priorOffer?.status === "selected" && command.data.status === "released");
       const endingClaim = command.type === T.CLAIM_RELEASED
         && room.state.workItems[command.data.workItemId]?.claim?.status === "active";
+      // Hard lock for the work-item claim, on every write path (not only
+      // POST /work-sessions). Live-only: replay of an older manager override
+      // still applies. The holder re-claims; a fresh foreign holder conflicts.
+      // Owner resume of a round-limit pause is the existing supervised handoff.
+      if ([T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOPPED].includes(command.type)) {
+        const heldItem = room.state.workItems?.[command.data?.workItemId];
+        const supervisedResume = command.data?.resumeApproved === true
+          && (room.state.room?.ownerId === auth.member.id || memberCan(room.state, auth.member.id, "manage_claims"));
+        if (heldItem && !supervisedResume && !memberCan(room.state, auth.member.id, "manage_claims")) {
+          const conflict = sessionClaimConflict(heldItem, auth.member.id, this.now());
+          if (conflict) fail(409, "session_claimed", conflict);
+        }
+      }
       const HALT_GATED = [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
         T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
       if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])
@@ -3298,6 +3312,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       catch (error) {
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
+        if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
       // Integration map slice 5: the external path is only as strong as

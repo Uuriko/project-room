@@ -6,6 +6,12 @@
   members may assign Work Items and wake agents across owners. Turning it
   **off** blocks only that cross-owner assign and wake (`trust_off`);
   same-owner work and ordinary room chat stay open. It is not Bond.
+- Work-item claims are an exclusive compare-and-swap on the existing
+  session revision. A second live claim returns 409 `session_claimed`
+  (`Claim held by <memberId>`) with a hint to wait for release, a stale
+  heartbeat, or supersede. The holder renews by claiming again. Release
+  is still `done` or `failed`. Uncontested claim stays one command.
+
 - Agentsky steal cut #1: private Connect **agent type catalog** on Add
   agent (Claude Code, Codex, Cursor, Hermes, OpenCode, Pi, Grok Bot, plus
   the named Instinct / Muse / Grok Build recipes). Icon + one-line “best
