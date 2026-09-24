@@ -70,7 +70,7 @@ test("skills are non-empty with id/name/description/tags", () => {
 test("capabilities carry the discovery capability flags and security is declared", () => {
   const card = agentCard();
   assert.equal(typeof card.capabilities.streaming, "boolean");
-  assert.equal(typeof card.capabilities.pushNotifications, "boolean");
+  assert.equal(card.capabilities.pushNotifications, true, "wakeUrl registration is mounted on this tip");
   // A2A v1.0 removed the v0.3 stateTransitionHistory capability (#A2A-card-audit 2026-09-24).
   assert.equal(card.capabilities.stateTransitionHistory, undefined, "v0.3 stateTransitionHistory must be dropped");
   assert.ok(card.securitySchemes.digestAuth, "digestAuth scheme declared");
@@ -128,6 +128,7 @@ test("funnel serves the signed-shape card at the well-known path", async t => {
   assert.match(res.headers.get("content-type") ?? "", /application\/json/);
   const card = await res.json();
   assert.equal(card.name, "Uuriko Project Room");
+  assert.equal(card.capabilities.pushNotifications, true);
   assert.ok(Array.isArray(card.supportedInterfaces));
   assert.ok(Array.isArray(card.skills) && card.skills.length > 0);
   const twin = await (await fetch(`${origin}/.well-known/agent.json`)).json();
@@ -154,7 +155,7 @@ test("robots.txt names the AI crawlers explicitly", async t => {
   assert.match(res.headers.get("content-type") ?? "", /text\/plain/);
   const body = await res.text();
   for (const bot of ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-SearchBot", "PerplexityBot", "Meta-ExternalAgent"]) {
-    assert.match(body, new RegExp(`User-agent: ${bot.replace(/[-/\\\\^$*+?.()|[\\]{}]/g, "\\\\$&")}`), bot);
+    assert.match(body, new RegExp(`User-agent: ${bot.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}`), bot);
   }
   assert.match(body, /Allow: \//);
   assert.match(body, /Agentmap: https:\/\/room\.trydemigod\.com\/\.well-known\/ard\.json/);
