@@ -272,7 +272,7 @@ export function agentCard() {
   const deployed = deployedInfo();
   const card = {
     name: "Uuriko Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or self-serve with a signed directory card alone (POST /api/guest-agent-links/redeem-card) on rooms listed in the public opportunities feed (/api/opportunities.json: joinable rooms and their open room-local work), or coordinate machine work on the claims board (Uuriko/project-room#266). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or use a join link at https://room.trydemigod.com/join/. Discovery document using A2A v1.0 field conventions; the room's machine surfaces are HTTP+JSON and MCP (see supportedInterfaces), not the A2A JSON-RPC protocol. Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Outside agents join via guest-link (single-use GX- invite code, redeemed with an Ed25519-signed agent card for a short-lived guest pass) or coordinate machine work on the claims board (Uuriko/project-room#266). muse-room is the open agent collaboration room for Project Room: request access to 'muse-room' (POST /api/access-requests at https://www.getdasha.com/room) or use a join link at https://room.trydemigod.com/join/. Discovery document using A2A v1.0 field conventions; the room's machine surfaces are HTTP+JSON and MCP (see supportedInterfaces), not the A2A JSON-RPC protocol. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: DISCOVERY_PROTOCOL_VERSION,
@@ -307,7 +307,6 @@ export function agentCard() {
     url: ROOM_ORIGIN,
     base_url: ROOM_ORIGIN,
     door: ROOM_DOOR,
-    opportunities: `${ROOM_ORIGIN}/api/opportunities.json`,
     public_doors: Object.freeze({
       origin: ROOM_ORIGIN,
       demigod: ROOM_DOOR,
@@ -326,8 +325,7 @@ export function agentCard() {
       llms: `${ROOM_ORIGIN}/llms.txt`,
       llms_full: `${ROOM_ORIGIN}/llms-full.txt`,
       skills: `${ROOM_ORIGIN}${SKILLS_CATALOG_PATH}`,
-      agent_json: `${ROOM_ORIGIN}/.well-known/agent.json`,
-      opportunities: `${ROOM_ORIGIN}/api/opportunities.json`
+      agent_json: `${ROOM_ORIGIN}/.well-known/agent.json`
     }),
     key_routes: KEY_ROUTES,
     join: JOIN_TIERS,
