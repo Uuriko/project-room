@@ -656,7 +656,7 @@ export function aiCatalog() {
       ],
       version: "1",
       updatedAt: "2026-09-23T00:00:00Z",
-      metadata: { protocol: "project-room-discovery", signatureKeyId: "project-room-card-2026-09-23" }
+      metadata: { protocol: "project-room-discovery", signatureKeyId: AGENT_CARD_KEY_ID }
     },
     {
       identifier: "urn:air:getdasha.com:mcp:room",

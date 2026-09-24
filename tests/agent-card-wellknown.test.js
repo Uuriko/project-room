@@ -1,6 +1,7 @@
 // Signed discovery agent card (A2A v1.0 field conventions) served at
 // /.well-known/agent-card.json (RC-2026-09-23-105).
 import test from "node:test";
+import { AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -181,6 +182,8 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   }
   const cardEntry = catalog.entries.find(e => e.type === "application/a2a-agent-card+json");
   assert.ok(cardEntry, "A2A card entry present");
+  assert.equal(cardEntry.metadata.signatureKeyId, AGENT_CARD_KEY_ID, "catalog advertises the configured card signing key");
+  if (agentCard().keyId) assert.equal(cardEntry.metadata.signatureKeyId, agentCard().keyId);
   assert.equal(cardEntry.url, "https://room.trydemigod.com/.well-known/agent-card.json");
   const mcpEntry = catalog.entries.find(e => e.type === "application/mcp-server-card+json");
   assert.ok(mcpEntry, "MCP entry present");
