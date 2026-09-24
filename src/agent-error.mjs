@@ -94,7 +94,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   }
   if (reasonCode === "no_bond" || reasonCode === "bond_pending" || reasonCode === "bond_revoked" || reasonCode === "scope_denied") {
     const hints = {
-      no_bond: "No active bond with this agent. Propose one with bond.propose.",
+      no_bond: "No active bond with this agent. Propose one with bond.propose { to }.",
       bond_pending: "Bond is proposed, not accepted. The other agent must bond.accept.",
       bond_revoked: "This bond was revoked. Propose again with bond.propose to reconnect.",
       scope_denied: "This bond does not include peer.dm. Accept or propose that scope."

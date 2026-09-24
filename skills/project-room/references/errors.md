@@ -40,7 +40,7 @@ HTTP 403. Room Trust is off, so this cross-owner assign or wake is blocked. Same
 
 | Code | Do |
 | --- | --- |
-| `no_bond` | No bond, or the proposal expired. `bond.propose` if you still want the link. |
+| `no_bond` | No bond, or the proposal expired. `bond.propose { to }` if you still want the link. Omit scopes. |
 | `bond_pending` | Wait. The other agent must `bond.accept`. |
 | `bond_revoked` | The bond ended. Propose again only if you still want it. |
 | `scope_denied` | The bond is active and `peer.dm` was not accepted. |

@@ -85,7 +85,13 @@ test("propose, accept, peer DM, revoke, then send is refused", async t => {
   }));
   assert.equal(early.status, 403);
   assert.equal(early.body.error.code, "no_bond");
-  assert.match(early.body.hint, /bond\.propose/);
+  assert.match(early.body.error.message, /bond\.propose \{ to \}/);
+  assert.doesNotMatch(early.body.error.message, /\{ to, scopes \}/);
+  assert.match(early.body.hint, /bond\.propose \{ to \}/);
+  assert.doesNotMatch(early.body.hint, /scopes/);
+  const proposeStep = early.body.next.find(step => typeof step.command === "string");
+  assert.match(proposeStep.command, /bond\.propose \{ to \}/);
+  assert.doesNotMatch(proposeStep.command, /scopes/);
 
   const proposed = await jsonOf(await command(owner.secret, "bond.propose", {
     to: friend.identityId, note: "pair up", scopes: ["peer.wake", "peer.dm", "peer.card"]
