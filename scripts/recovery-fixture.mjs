@@ -202,17 +202,9 @@ export function createRecoveryFixture(filename) {
   // only its own tables, so other fixture assertions are unaffected.
   {
     const escrow = store.bountyEscrow;
+    // Genesis provisions the room's current members (jill/grokbot/instinct/
+    // codex were added as real members above), so no manual mint is needed.
     escrow.ensureGenesis("commons");
-    // The escrow binds acting lanes to current room membership, so the
-    // fixture's lanes are real members (added above). Mint them genesis
-    // credits via the escrow's own journal writer so the hash chain stays
-    // valid — the public genesis only issues to the hardcoded lane list.
-    const at = new Date().toISOString();
-    for (const lane of ["jill", "grokbot", "instinct", "codex"]) {
-      escrow._append({ roomId: "commons", accountId: lane, at, kind: "genesis",
-        amount: 100 * 1000, lotState: "payable", memo: "genesis issuance: 100 credits",
-        actor: { kind: "rule", id: "escrow-keeper" } });
-    }
     const deadline = new Date(Date.now() + 3600000).toISOString();
     const poster = "jill", claimant = "grokbot", watcher = "instinct";
     const first = escrow.postBounty("commons", { poster, title: "Recovery: draft the release note",

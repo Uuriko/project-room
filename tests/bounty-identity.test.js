@@ -14,6 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
+import { projectBountyReputation } from "../server/bounty-reputation.mjs";
 
 const ROOM = "room-identity";
 const JILL = "id:agent/jill";
@@ -121,11 +122,14 @@ test("the verifier cannot be the poster", () => {
   expectCode(() => post(escrow, { verifierId: JILL }), "invalid_input");
 });
 
-test("transfers to non-members are rejected; members and the pool are allowed", () => {
+test("transfers to non-members are rejected; the pool is escrow-internal", () => {
   const { escrow } = makeEscrow();
   expectCode(() => escrow.transfer(ROOM, { from: JILL, to: GHOST, amount: 1 }), "not_authorized");
-  const toPool = escrow.transfer(ROOM, { from: JILL, to: "pool", amount: 1 });
-  assert.equal(toPool.to, "pool");
+  // The pool is the escrow's internal fee sink, not a participant: public
+  // transfers cannot target it. Internal settlement paths (fee sweep, bond
+  // forfeit) still move value to the pool — covered by the fee and forfeit
+  // tests in bounty-escrow.test.js.
+  expectCode(() => escrow.transfer(ROOM, { from: JILL, to: "pool", amount: 1 }), "not_authorized");
   const toMember = escrow.transfer(ROOM, { from: JILL, to: GROK, amount: 1 });
   assert.equal(toMember.to, GROK);
   assert.equal(toMember.from, JILL);
@@ -206,4 +210,108 @@ test("a dispute with no eligible seated verifier is honestly unavailable", () =>
     { challenger: OWNER, bond: 2.5, grounds: "x" });
   assert.equal(dispute.decider, null);
   assert.match(dispute.unavailable ?? "", /no-designated-verifier/);
+});
+
+test("journal actor kind derives from the membership record, not the lane string", () => {
+  const { escrow, members } = makeEscrow();
+  // Production agent identities are opaque ids (ai_...), not id:agent/...
+  // labels: the old prefix rule mislabeled them as human.
+  const AI = "ai_Q7xTestAgent001";
+  members[AI] = { active: true, kind: "agent", displayName: "test agent" };
+  assert.deepEqual(escrow.ensureGenesis(ROOM).lanes, [AI]);
+  const agentMove = escrow.transfer(ROOM, { from: AI, to: GROK, amount: 2 });
+  assert.equal(agentMove.receipt.actor.id, AI);
+  assert.equal(agentMove.receipt.actor.kind, "agent");
+  // A human member with a bare id is journaled as human.
+  const humanMove = escrow.transfer(ROOM, { from: OWNER, to: GROK, amount: 1 });
+  assert.equal(humanMove.receipt.actor.id, OWNER);
+  assert.equal(humanMove.receipt.actor.kind, "human");
+});
+
+test("a participant-supplied rule actor is rejected", () => {
+  const { escrow } = makeEscrow();
+  // Participants must not attribute a transition to the mechanical keeper:
+  // the rule actor is never a participant identity on these paths.
+  expectCode(() => escrow.postBounty(ROOM, { poster: JILL, title: "T", criteria: "C",
+    amount: 10, deadline: isoFuture(3_600_000),
+    actor: { kind: "rule", id: "escrow-keeper" } }), "not_authorized");
+  expectCode(() => escrow.transfer(ROOM, { from: JILL, to: GROK, amount: 1,
+    actor: { kind: "rule", id: "escrow-keeper" } }), "not_authorized");
+});
+
+test("genesis provisions current members exactly once, never phantom lanes", () => {
+  const { escrow, members } = makeEscrow();
+  // A member who joins after the first genesis is provisioned on the next call.
+  const AI = "ai_Newcomer002";
+  members[AI] = { active: true, kind: "agent", displayName: "newcomer" };
+  const first = escrow.ensureGenesis(ROOM);
+  assert.equal(first.issued, true);
+  assert.deepEqual(first.lanes, [AI]);
+  assert.equal(escrow.balances(ROOM, AI).payable, 100);
+  // Idempotent per member: no double mint, and a lane that was never a
+  // member holds nothing.
+  const second = escrow.ensureGenesis(ROOM);
+  assert.equal(second.issued, false);
+  assert.deepEqual(second.lanes, []);
+  assert.equal(escrow.balances(ROOM, AI).payable, 100);
+  assert.equal(escrow.balances(ROOM, GHOST).total, 0);
+  assert.equal(escrow.verifyConservation(ROOM).ok, true);
+});
+
+test("stale and phantom labels accrue no reputation", () => {
+  const { escrow, members } = makeEscrow();
+  const bounty = runToDisputed(escrow);
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
+  // Before the membership change both sides' signals project.
+  const before = projectBountyReputation(escrow, ROOM).signals.map(s => s.agent);
+  assert.ok(before.includes(GROK), "expected grokbot's dispute_won signal");
+  assert.ok(before.includes(CODEX), "expected codex's dispute_lost signal");
+  // The claimant leaves the room: their stale labels project to nothing,
+  // while the challenger's (still a member) survive.
+  delete members[GROK];
+  const after = projectBountyReputation(escrow, ROOM).signals;
+  assert.ok(after.every(s => s.agent !== GROK), "stale label must not accrue reputation");
+  assert.ok(after.some(s => s.agent === CODEX), "current member signals must survive");
+  // A phantom label that was never a member projects to nothing even when
+  // present in the event stream.
+  escrow._event(ROOM, "bounty.paid",
+    { actor: { kind: "agent", id: GHOST }, data: { earner: GHOST } });
+  const phantom = projectBountyReputation(escrow, ROOM).signals;
+  assert.ok(phantom.every(s => s.agent !== GHOST), "phantom label must not accrue reputation");
+  assert.equal(escrow.verifyConservation(ROOM).ok, true);
+});
+
+test("dispute settlement moves value only through escrow finalization, bound to the decider", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToDisputed(escrow);
+  const SETTLEMENT_KINDS = new Set(["attribute", "approve", "bond-compensate", "bond-return", "bond-forfeit", "refund"]);
+  const settlementIds = who => new Set(escrow.history(ROOM, who)
+    .filter(r => r.bountyId === bounty.bountyId && SETTLEMENT_KINDS.has(r.kind))
+    .map(r => r.receiptId));
+  // The dispute was opened from "accepted", so the accept-time attribution
+  // already exists; the dispute machinery itself settles nothing until the
+  // decider rules.
+  const before = new Set([...settlementIds(GROK), ...settlementIds(CODEX)]);
+  const decided = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
+  assert.equal(decided.receipt.actor.id, INSTINCT);
+  assert.equal(decided.receipt.actor.kind, "agent");
+  // Every settlement journal entry created by the ruling is attributed to
+  // the membership-bound decider whose ruling caused it — never a
+  // participant-supplied identity, never the mechanical actor alone.
+  const fresh = [...settlementIds(GROK), ...settlementIds(CODEX)].filter(id => !before.has(id));
+  assert.ok(fresh.length >= 2, `expected new settlement movements, got ${fresh.length}`);
+  for (const id of fresh) {
+    const receipt = [...escrow.history(ROOM, GROK), ...escrow.history(ROOM, CODEX)].find(r => r.receiptId === id);
+    assert.equal(receipt.actor.id, INSTINCT, `settlement ${receipt.kind} misattributed`);
+    assert.equal(receipt.actor.kind, "agent", `settlement ${receipt.kind} kind mislabeled`);
+  }
+  // A second ruling on the settled dispute fails and moves no value.
+  const journalBefore = escrow.history(ROOM, GROK).length + escrow.history(ROOM, CODEX).length;
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] }), "invalid_state");
+  const journalAfter = escrow.history(ROOM, GROK).length + escrow.history(ROOM, CODEX).length;
+  assert.equal(journalAfter, journalBefore);
+  assert.equal(escrow.verifyConservation(ROOM).ok, true);
 });

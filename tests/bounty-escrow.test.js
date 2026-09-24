@@ -25,7 +25,7 @@ function makeEscrow(db = new DatabaseSync(":memory:")) {
     catch (error) { db.exec("ROLLBACK TO escrow_test"); db.exec("RELEASE escrow_test"); throw error; }
   };
   const store = { db, transaction, readTransaction: transaction };
-  const escrow = new BountyEscrow(store, { now: () => nowMs });
+  const escrow = new BountyEscrow(store, { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
   return { escrow, db };
 }
@@ -540,7 +540,7 @@ test("persistence across restart: journal, bounties, watchers and sequences rehy
       try { const r = fn(); db.exec("RELEASE t"); return r; }
       catch (e) { db.exec("ROLLBACK TO t"); db.exec("RELEASE t"); throw e; }
     };
-    return new BountyEscrow({ db, transaction, readTransaction: transaction }, { now: () => nowMs });
+    return new BountyEscrow({ db, transaction, readTransaction: transaction }, { now: () => nowMs, allowLegacyStringLanes: true });
   };
   const e1 = mk();
   e1.ensureGenesis(ROOM);

@@ -529,9 +529,11 @@ export function canonicalLane(memberId) {
 }
 
 // Normalize an actor to {kind: human|agent|rule, id}. Callers pass an explicit
-// actor; when absent it is derived from the acting identity (agent lanes are
-// `id:agent/...`, anything else is human). Mechanical transitions use
-// RULE_ACTOR explicitly.
+// actor; when absent it is derived from the acting identity as a pre-validation
+// hint only — the escrow re-derives kind from the room membership record on
+// every participant path (server/bounty-escrow.mjs _actorFor), so production
+// agent identities (ai_...) are never mislabeled by their string shape.
+// Mechanical transitions use RULE_ACTOR explicitly.
 const ACTOR_KINDS = new Set(["human", "agent", "rule"]);
 export function normalizeActor(actor, fallbackId) {
   if (actor && typeof actor === "object" && typeof actor.kind === "string" && typeof actor.id === "string") {
@@ -673,10 +675,16 @@ export function citationsAgainstRubric(citations, rubric) {
 const roomSlug = roomId => roomId.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12) || "ROOM";
 
 export class BountyEscrow {
-  constructor(store, { now, receipts = null } = {}) {
+  // `allowLegacyStringLanes` enables the string-only lane mode for pure
+  // state-machine unit tests that construct the escrow without a membership
+  // source. It is never set in production: the real store always exposes
+  // roomAuthority() (server/store.mjs), and both production construction
+  // sites pass the real store. Without it, lane assertion fails closed.
+  constructor(store, { now, receipts = null, allowLegacyStringLanes = false } = {}) {
     this.store = store;
     this.db = store.db;
     this._now = typeof now === "function" ? now : null;
+    this._allowLegacyStringLanes = allowLegacyStringLanes === true;
     this._ready = false;
     this._disputes = null; // createDisputes instance, hydrated lazily
     this._disputeRecords = null; // Map(disputeId -> frozen dispute), write-through to bounty_disputes
@@ -700,22 +708,57 @@ export class BountyEscrow {
   // membership, so it cannot prove who acted. Every lane-asserting path in
   // this module goes through _requireLane(), which binds the normalized lane
   // to the room's live membership via store.roomAuthority(). When the store
-  // exposes no membership source (pure unit-test doubles), the legacy
-  // string-only behavior is preserved so the pure state-machine tests keep
-  // exercising the ledger logic; production always has a membership source.
+  // exposes no membership source, lane assertion FAILS CLOSED unless the
+  // escrow was explicitly constructed with allowLegacyStringLanes (pure
+  // state-machine unit tests only — unreachable in production, where the
+  // store always exposes roomAuthority()).
   _members(roomId) {
     if (typeof this.store.roomAuthority !== "function") return null;
     const authority = this.store.roomAuthority(roomId);
     return authority && typeof authority.members === "object" ? authority.members : null;
   }
 
+  // The validated membership record for a canonical lane, or null when
+  // there is no membership source (legacy string-only test mode).
+  _memberOf(roomId, lane) {
+    const members = this._members(roomId);
+    if (members === null) return null;
+    if (Object.hasOwn(members, lane)) return members[lane];
+    // Legacy colon form: id:agent:foo names the same member as id:agent/foo.
+    if (lane.startsWith("id:agent/")) {
+      const colon = `id:agent:${lane.slice("id:agent/".length)}`;
+      if (Object.hasOwn(members, colon)) return members[colon];
+    }
+    return null;
+  }
+
+  // Canonical lane ids of the room's current active members, or null when
+  // the store exposes no membership source. The reputation projector uses
+  // this to refuse reputation to stale or phantom labels.
+  memberLaneIds(roomId) {
+    const members = this._members(roomId);
+    if (members === null) return null;
+    const ids = new Set();
+    for (const id of Object.keys(members)) {
+      const m = members[id];
+      if (m && m.active !== false) ids.add(canonicalLane(id));
+    }
+    return ids;
+  }
+
   // Validate that rawId names a current, active member of roomId. Returns the
   // canonical lane. Fails closed (not_authorized) when the membership source
-  // is present and the id is unknown, inactive, or unlinked.
+  // is present and the id is unknown, inactive, or unlinked — and fails
+  // closed (internal) when there is no membership source at all unless the
+  // legacy string-only test mode was explicitly enabled at construction.
   _requireLane(roomId, rawId, role) {
     const lane = canonicalLane(rawId);
     const members = this._members(roomId);
-    if (members === null) return lane;
+    if (members === null) {
+      check(this._allowLegacyStringLanes === true, "internal",
+        "bounty escrow requires a membership source (store.roomAuthority)");
+      return lane;
+    }
     const member = members[rawId] ?? members[lane];
     if (!member || member.active === false)
       fail("not_authorized", `${role}: "${lane}" is not a current member of this room`);
@@ -735,15 +778,21 @@ export class BountyEscrow {
     return lane;
   }
 
-  // The transfer recipient must name a current, active member of the room —
-  // or the escrow's own pool account (the internal fee sink). Sending to a
-  // phantom lane would mint ledger accounts for identities that do not
-  // exist, so this fails closed when a membership source is present.
+  // The transfer recipient must name a current, active member of the room.
+  // The pool is the escrow's internal fee sink, not a participant: public
+  // transfers cannot target it. Internal settlement paths (fee sweep, bond
+  // forfeit) move to the pool via _move directly and never pass through
+  // here. Sending to a phantom lane would mint ledger accounts for
+  // identities that do not exist, so this fails closed when a membership
+  // source is present.
   _requireRecipient(roomId, rawTo) {
     const recipient = canonicalLane(rawTo);
-    if (recipient === POOL_ACCOUNT) return recipient;
+    check(recipient !== POOL_ACCOUNT, "not_authorized",
+      "the room pool is escrow-internal and cannot receive participant transfers");
     const members = this._members(roomId);
     if (members === null) {
+      check(this._allowLegacyStringLanes === true, "internal",
+        "bounty escrow requires a membership source (store.roomAuthority)");
       check(recipient.length >= 1 && recipient.length <= 256, "invalid_input", "recipient must be 1..256 characters");
       return recipient;
     }
@@ -754,18 +803,23 @@ export class BountyEscrow {
   }
 
   // Resolve the journal actor for a transition. The actor is ALWAYS derived
-  // from the membership-validated lane — an explicitly supplied actor is
-  // honored only as a consistency check (it must name the same lane), never
-  // as an independent identity claim. The mechanical rule actor is the one
-  // exception. Anything else fails closed: the journal must never attribute
-  // an action to a lane that did not perform it.
-  _actorFor(actor, lane) {
-    const kind = lane.startsWith("id:agent/") ? "agent" : "human";
+  // from the membership-validated lane: kind comes from the member record
+  // (agent/human), never from the shape of the lane string — production
+  // agent identities are opaque ids (ai_...), not id:agent/... labels. An
+  // explicitly supplied actor is honored only as a consistency check (it
+  // must name the same lane), never as an independent identity claim. The
+  // mechanical rule actor is never a participant identity: participant
+  // methods that receive it fail closed. Mechanical paths use RULE_ACTOR
+  // directly and never go through here. Anything else fails closed: the
+  // journal must never attribute an action to a lane that did not perform it.
+  _actorFor(roomId, actor, lane) {
+    const member = this._memberOf(roomId, lane);
+    const kind = member ? (member.kind === "agent" ? "agent" : "human")
+      : (lane.startsWith("id:agent/") ? "agent" : "human");
     if (actor === null || actor === undefined)
       return Object.freeze({ kind, id: lane });
     if (typeof actor === "object" && typeof actor.kind === "string" && typeof actor.id === "string") {
-      if (actor.kind === "rule" && actor.id === RULE_ACTOR.id) return RULE_ACTOR;
-      if (canonicalLane(actor.id) === lane)
+      if (actor.kind !== "rule" && canonicalLane(actor.id) === lane)
         return Object.freeze({ kind, id: lane });
     }
     fail("not_authorized", "actor identity does not match the authenticated lane");
@@ -1021,21 +1075,45 @@ export class BountyEscrow {
   }
 
   // --- genesis ----------------------------------------------------------------
-  // The one and only mint: 100 credits per pre-registered lane, recorded as
-  // one auditable journal entry per lane (per-account hash chains start
-  // here). Idempotent: later calls are no-ops.
+  // The one and only mint: 100 credits per CURRENT active room member,
+  // recorded as one auditable journal entry per member (per-account hash
+  // chains start here). Idempotent per member: members who join later are
+  // provisioned on the next call; members who left keep their balance.
+  // Genesis never issues to synthetic lane labels — the recipient set is
+  // always the room's live membership. Without a membership source
+  // (legacy string-only test mode), the historical fixed lane list is used.
   ensureGenesis(roomId) {
     return this.store.transaction(() => {
       this._ensure();
-      const minted = this.db.prepare("SELECT COUNT(*) AS n FROM bounty_journal WHERE room_id=? AND kind='genesis'").get(roomId).n;
-      if (minted > 0) return { issued: false, lanes: [...GENESIS_LANES] };
       const at = isoNow(this.nowMs());
       const millis = GENESIS_CREDITS * MILLIS_PER_CREDIT;
-      for (const lane of GENESIS_LANES)
+      const members = this._members(roomId);
+      let recipients;
+      if (members === null) {
+        check(this._allowLegacyStringLanes === true, "internal",
+          "bounty escrow requires a membership source (store.roomAuthority)");
+        recipients = [...GENESIS_LANES];
+      } else {
+        recipients = [];
+        for (const id of Object.keys(members)) {
+          const m = members[id];
+          if (m && m.active !== false) recipients.push(canonicalLane(id));
+        }
+      }
+      const issued = new Set(this.db.prepare(
+        "SELECT DISTINCT account_id AS a FROM bounty_journal WHERE room_id=? AND kind='genesis'")
+        .all(roomId).map(r => r.a));
+      const lanes = [];
+      for (const lane of recipients) {
+        if (issued.has(lane)) continue;
         this._append({ roomId, accountId: lane, at, kind: "genesis", amount: millis, lotState: "payable",
           memo: `genesis issuance: ${GENESIS_CREDITS} credits`, actor: RULE_ACTOR });
-      this._event(roomId, "genesis.issued", { actor: RULE_ACTOR, data: { lanes: [...GENESIS_LANES], creditsPerLane: GENESIS_CREDITS } });
-      return { issued: true, lanes: [...GENESIS_LANES] };
+        issued.add(lane);
+        lanes.push(lane);
+      }
+      if (lanes.length > 0)
+        this._event(roomId, "genesis.issued", { actor: RULE_ACTOR, data: { lanes, creditsPerLane: GENESIS_CREDITS } });
+      return { issued: lanes.length > 0, lanes };
     });
   }
 
@@ -1077,7 +1155,7 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const at = isoNow(this.nowMs());
       this._addWatcher(roomId, bountyId, lane, at);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       return { bountyId, watcher: lane, watchers: this._watchersOf(roomId, bountyId),
         receipt: { kind: "watch", bountyId, watcher: lane, at, actor: act } };
     });
@@ -1225,7 +1303,7 @@ export class BountyEscrow {
       this._ensure();
       this.ensureGenesis(roomId);
       const lane = this._requireLane(roomId, poster, "poster");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       check(typeof title === "string" && title.length >= 1 && title.length <= 256, "invalid_input", "title must be 1..256 characters");
       check(typeof criteria === "string" && criteria.length >= 1 && criteria.length <= 2000, "invalid_input", "criteria must be 1..2000 characters");
       const amountMillis = toMillis(amount);
@@ -1284,7 +1362,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const { bounty, lane } = this._triageBounty(roomId, bountyId, poster);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const pinned = canonicalRubric(rubric);
       const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
       const version = (bounty.rubric?.version ?? 0) + 1;
@@ -1336,7 +1414,7 @@ export class BountyEscrow {
       this._ensure();
       this.ensureGenesis(roomId);
       const { bounty, lane } = this._triageBounty(roomId, bountyId, funder);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       this._requirePayable(roomId, lane, bounty.amountMillis, "fund");
       const at = isoNow(this.nowMs());
       const lotId = newId("lot_");
@@ -1360,7 +1438,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const { bounty, lane } = this._triageBounty(roomId, bountyId, decliner);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       check(typeof reason === "string" && reason.length >= 1 && reason.length <= 2000,
         "invalid_input", "reason must be 1..2000 characters");
       this._transition(bounty, "cancelled");
@@ -1380,7 +1458,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const { bounty, lane } = this._triageBounty(roomId, bountyId, snoozer);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const untilMs = Date.parse(until);
       check(Number.isFinite(untilMs), "invalid_input", "until must be an ISO timestamp");
       check(untilMs > this.nowMs(), "invalid_input", "until must be in the future");
@@ -1398,7 +1476,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const { bounty, lane } = this._triageBounty(roomId, bountyId, marker);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       check(typeof canonicalId === "string" && canonicalId.length >= 1, "invalid_input", "canonical_id is required");
       check(canonicalId !== bountyId, "invalid_input", "a bounty cannot duplicate itself");
       const canonical = this.db.prepare("SELECT bounty_id FROM bounty_records WHERE room_id=? AND bounty_id=?")
@@ -1515,7 +1593,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const bounty = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId)
         ?? fail("unknown_bounty", `unknown bounty "${bountyId}"`));
       check(bounty.state === "funded" || bounty.state === "claimed", "invalid_state",
@@ -1555,7 +1633,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, claimant, "claimant");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
@@ -1785,7 +1863,7 @@ export class BountyEscrow {
       this.db.prepare(`UPDATE bounty_sybil_flags SET status=?, resolved_at=?, resolved_by=?, resolution_reason=?
         WHERE room_id=? AND flag_id=?`).run(resolution, resolvedAt, by, trimmed, roomId, flagId);
       this._event(roomId, "sybil.flag-resolved",
-        { actor: normalizeActor(null, by),
+        { actor: this._actorFor(roomId, null, by),
           data: { flagId, clusterId: row.cluster_id, signal: row.signal, resolution, reason: trimmed,
             // Slice #4: the reputation projector reads memberLanes to apply
             // sybil_confirmed to each member lane on "confirmed".
@@ -1886,7 +1964,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, acceptor, "acceptor");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
@@ -1986,7 +2064,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, rejector, "rejector");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
@@ -2074,8 +2152,11 @@ export class BountyEscrow {
   // seated; the dispute path then reports honestly-unavailable.
   _laneCards(roomId) {
     const members = this._members(roomId);
-    if (members === null)
+    if (members === null) {
+      check(this._allowLegacyStringLanes === true, "internal",
+        "bounty escrow requires a membership source (store.roomAuthority)");
       return GENESIS_LANES.map(lane => ({ lane, trust_level: "standard" }));
+    }
     return Object.entries(members)
       .filter(([, m]) => m && m.active !== false && m.kind === "agent")
       .map(([id]) => ({ lane: canonicalLane(id), trust_level: "standard" }));
@@ -2086,7 +2167,7 @@ export class BountyEscrow {
       this._ensure();
       this.ensureGenesis(roomId);
       const lane = this._requireLane(roomId, challenger, "challenger");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
@@ -2159,7 +2240,7 @@ export class BountyEscrow {
     return this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, decider, "decider");
-      const act = this._actorFor(actor, lane);
+      const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
@@ -2571,7 +2652,7 @@ export class BountyEscrow {
       this.ensureGenesis(roomId);
       const sender = this._requireLane(roomId, from, "sender");
       const recipient = this._requireRecipient(roomId, to);
-      const act = this._actorFor(actor, sender);
+      const act = this._actorFor(roomId, actor, sender);
       check(sender !== recipient, "invalid_input", "cannot transfer to yourself");
       const amountMillis = toMillis(amount);
       this._requirePayable(roomId, sender, amountMillis, "transfer");

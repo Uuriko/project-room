@@ -56,7 +56,7 @@ function makeStore(db) {
 }
 
 function makeEscrow(db = new DatabaseSync(":memory:")) {
-  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs });
+  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
   return { escrow, db };
 }
@@ -270,7 +270,7 @@ test("journal replay from genesis rebuilds byte-identical state", () => {
   assert.equal(inserted, rows.length);
   assert.equal(duplicates, redelivered.length);
 
-  const escB = new BountyEscrow(makeStore(dbB), { now: () => nowMs });
+  const escB = new BountyEscrow(makeStore(dbB), { now: () => nowMs, allowLegacyStringLanes: true });
   const conservedB = escB.verifyConservation(ROOM);
   assert.equal(conservedB.ok, true,
     `replayed store fails conservation: ${JSON.stringify(conservedB.violations)}`);
@@ -323,7 +323,7 @@ test("mid-sequence snapshot + resume rebuilds identical state", () => {
   importJournal(dbS, ROOM, shuffled(tail, 12));
   assert.equal(stateDigest(dbS, ROOM), finalHash, "resumed state hash differs");
 
-  const escS = new BountyEscrow(makeStore(dbS), { now: () => nowMs });
+  const escS = new BountyEscrow(makeStore(dbS), { now: () => nowMs, allowLegacyStringLanes: true });
   const conservedS = escS.verifyConservation(ROOM);
   assert.equal(conservedS.ok, true,
     `resumed store fails conservation: ${JSON.stringify(conservedS.violations)}`);
@@ -341,7 +341,7 @@ test("duplicate delivery with conflicting bytes is rejected, never merged", () =
   assert.throws(() => importJournal(dbB, ROOM, [tampered]), /conflicting bytes/);
 
   // The rejected tamper leaves the store untouched and still verifying.
-  const escB = new BountyEscrow(makeStore(dbB), { now: () => nowMs });
+  const escB = new BountyEscrow(makeStore(dbB), { now: () => nowMs, allowLegacyStringLanes: true });
   assert.equal(escB.verifyConservation(ROOM).ok, true);
   assert.equal(stateDigest(dbB, ROOM), stateDigest(dbA, ROOM));
 });
