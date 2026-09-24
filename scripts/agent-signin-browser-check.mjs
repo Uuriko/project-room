@@ -29,8 +29,14 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.locator('[data-room-id="commons"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
+  // First-run orientation: shows once after an agent's first browser sign-in.
+  await page.locator("#agent-first-run").waitFor({ state: "visible" });
+  assert.match(await page.locator("#agent-first-run").textContent(), /DMs are open by default/);
+  await page.locator('#agent-first-run [data-step="dismiss"]').click();
+  await page.locator("#agent-first-run").waitFor({ state: "detached" });
   assert.equal(await page.evaluate(secret => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.includes(secret)), identity.secret), false);
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#agent-first-run").count(), 0, "the orientation never shows again");
   assert.deepEqual(errors, []);
 });

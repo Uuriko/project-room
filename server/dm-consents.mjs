@@ -286,55 +286,32 @@ export class DmConsents {
   }
 
   // ---- enforcement ------------------------------------------------------------
-  // requireApproved: throws 403 unless requesterId → targetId is approved.
-  // Self-DMs are always allowed. Lazy migration: a direction that already
-  // has ≥1 persisted DM message is seeded approved (past exchange implies
-  // consent), so shipping this gate never breaks live conversations.
-  requireApproved(roomId, requesterId, targetId) {
+  // requireDmAllowed: DMs are open by default (2026-09-24 standing rule).
+  // Throws 403 only when the recipient has EXPLICITLY denied this direction
+  // (blocked, rejected, or revoked). No row, pending, or approved all allow:
+  // nobody needs permission to start a conversation; abuse is handled with
+  // block/mute, per-pair rate limits, and journal accountability.
+  // Self-DMs are always allowed.
+  requireDmAllowed(roomId, requesterId, targetId) {
     if (requesterId === targetId) return true;
     return this.store.transaction(() => {
-      const state = this._roomState(roomId);
       // NB: no member-active check here — an inactive recipient (or
       // requester) is rejected downstream by message posting ("Member
       // access revoked"), preserving that long-standing error contract.
       const existing = this._get(roomId, requesterId, targetId);
       if (existing) {
-        if (existing.status === "approved") return true;
         if (existing.status === "blocked") {
           fail(403, "dm_blocked", "This member is not accepting direct messages from you");
         }
-        // pending / rejected / revoked are all explicit states: the
-        // recipient (or a past revocation) has spoken, so the
-        // migration heuristic below must NOT override them.
-        fail(403, "dm_consent_required",
-          existing.status === "pending"
-            ? "Your DM request is still pending — wait for approval before messaging"
-            : "Direct messages need the recipient's consent — send a DM request first");
+        if (existing.status === "rejected" || existing.status === "revoked") {
+          fail(403, "dm_consent_required",
+            "This member declined direct messages from you — ask in the room or have them unblock you");
+        }
+        // approved or pending: an explicit or default-open direction allows.
       }
-      // No row in this direction, but the recipient asked us for a DM and
-      // we approved it: they started the conversation, so we may answer.
-      // Not persisted, so revoking their consent also ends the answer path.
-      const reverse = this._get(roomId, targetId, requesterId);
-      if (reverse && reverse.status === "approved") return true;
-      // No row ever existed: lazy migration. A direction that already has
-      // ≥1 persisted DM message is seeded approved (past exchange implies
-      // consent), so shipping this gate never breaks live conversations.
-      if (this._hasPriorDm(state, requesterId, targetId)) {
-        const at = nowMs();
-        this.db.prepare(
-          "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,'approved','',?,?)"
-        ).run(roomId, requesterId, targetId, at, at);
-        return true;
-      }
-      fail(403, "dm_consent_required", "Direct messages need the recipient's consent — send a DM request first");
+      // No row, or a non-denying row: DMs are open by default.
+      return true;
     });
   }
 
-  // _hasPriorDm: any persisted message.posted with from=requester,
-  // toMemberId=target. Reads room state messages (the reducer's store).
-  _hasPriorDm(state, requesterId, targetId) {
-    const messages = state?.messages;
-    if (!Array.isArray(messages)) return false;
-    return messages.some(m => m && m.toMemberId === targetId && m.authorId === requesterId && m.body !== null);
-  }
 }

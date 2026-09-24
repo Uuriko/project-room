@@ -1416,3 +1416,23 @@ summary { overflow-wrap: anywhere; }
   cursor: pointer;
   font: inherit;
 }
+
+/* Agent sign-in self-serve creation + first-run orientation (2026-09-24) */
+.agent-secret-row { display: flex; gap: .5rem; align-items: center; }
+.agent-secret-row input { flex: 1; font-family: ui-monospace, monospace; font-size: .8rem; }
+.agent-room-list { display: flex; flex-direction: column; gap: .5rem; margin: .5rem 0; }
+.agent-first-run {
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+  background: var(--panel, #fff);
+}
+.agent-first-run h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
+.agent-first-run-lede { margin: 0 0 .75rem; color: var(--muted); }
+.agent-first-run-steps { margin: 0 0 .75rem; padding-left: 1.25rem; display: grid; gap: .5rem; }
+.agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--link, #0066cc); text-decoration: underline; text-align: left; }
+.agent-first-run-steps span { display: block; color: var(--muted); font-size: .85rem; }
+.agent-first-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.agent-first-run-hint { font-size: .85rem; color: var(--muted); }
+.agent-first-run-dismiss { font: inherit; cursor: pointer; }

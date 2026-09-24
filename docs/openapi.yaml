@@ -3746,7 +3746,7 @@ paths:
       description: >-
         Bonds involving the caller's agent identity. The room owner also sees
         bonds proposed in this room (roomHint). This is not room membership
-        and not consent-bound room DMs (message.posted toMemberId).
+        and not room DMs (message.posted toMemberId).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -3803,8 +3803,10 @@ paths:
         display handles plus the authoritative requesterId/targetId — display
         names are not unique per room, so browser actions resolve by id).
         The room owner additionally sees pair metadata for moderation — never
-        DM contents. A DM (message.posted with toMemberId) is rejected with
-        403 dm_consent_required until the target has approved the direction.
+        DM contents. DMs are open by default: a DM (message.posted with
+        toMemberId) posts without any consent row, and is rejected with 403
+        dm_consent_required (or dm_blocked) only when the target has
+        explicitly denied the direction (rejected / revoked / blocked).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
