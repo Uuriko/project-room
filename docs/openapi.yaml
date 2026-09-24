@@ -1945,7 +1945,12 @@ paths:
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
-      description: Active members and the skills they advertised via capabilities.advertised.
+      description: |
+        Active members and the skills they advertised via capabilities.advertised.
+        Slice 11 (server/capability-registry.mjs) adds the typed registry behind this
+        listing: provider/capability[@version] addressing, JSON-Schema inputs/outputs,
+        credits-only pricing, and fail-closed resolution — see components.schemas
+        CapabilityManifest / CapabilityQuote / CapabilitySearchHit.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: search
@@ -9332,6 +9337,83 @@ components:
             attemptsCounted: { type: integer }
             attemptsUnreported: { type: integer }
             attemptsHeld: { type: integer }
+    CapabilityManifest:
+      type: object
+      description: |
+        Slice 11 — typed capability manifest (server/capability-registry.mjs).
+        Addressable as provider/capability[@version]; fail-closed validation
+        (unknown fields rejected, strict semver, credits-only pricing).
+      required: [provider, name, version, title, description, inputs, outputs, pricing, acceptance]
+      properties:
+        provider: { type: string, description: 'Lowercase [a-z0-9-], the namespace (e.g. acme)' }
+        name: { type: string, description: 'Lowercase [a-z0-9-], the capability (e.g. ocr)' }
+        version: { type: string, description: 'Strict semver x.y.z — pinning is exact' }
+        title: { type: string, maxLength: 140 }
+        description: { type: string, maxLength: 4000 }
+        inputs: { type: object, description: JSON Schema for the call inputs }
+        outputs: { type: object, description: JSON Schema for the deliverable shape }
+        pricing:
+          type: object
+          description: Credits-only pricing — integer milli-credits (1000 mc = 1 credit). No money, no wallets.
+          required: [milliCreditsPerCall, freeCallsPerDay]
+          properties:
+            milliCreditsPerCall: { type: integer, minimum: 0 }
+            freeCallsPerDay: { type: integer, minimum: 0 }
+        examples:
+          type: array
+          items:
+            type: object
+            required: [input]
+            properties:
+              input: { type: object }
+              output: { type: object }
+              note: { type: string }
+        acceptance:
+          type: object
+          description: Pinned acceptance rubric — the named deliverable and how it is judged.
+          required: [rubric]
+          properties:
+            rubric: { type: string, maxLength: 4000 }
+            criteria: { type: array, items: { type: string, maxLength: 500 } }
+        category: { type: string, description: 'Lowercase [a-z0-9-]; defaults to provider' }
+    CapabilityNextAction:
+      type: string
+      enum: [invoke, inspect, watch]
+      description: Slice 11 — the search-time promise of what the caller can do next with a match (invoke is declared, not implemented).
+    CapabilityQuote:
+      type: object
+      description: |
+        Slice 11 — credits-only quote for nCalls against a CapabilityManifest.
+        Free tier consumed first; integer milli-credit arithmetic only.
+      properties:
+        capability: { type: string, description: 'provider/name address quoted' }
+        version: { type: string }
+        calls: { type: integer }
+        milliCreditsPerCall: { type: integer }
+        freeCallsPerDay: { type: integer }
+        freeCallsUsedToday: { type: integer }
+        freeCallsRemaining: { type: integer }
+        freeCallsApplied: { type: integer }
+        paidCalls: { type: integer }
+        totalMilliCredits: { type: integer }
+        breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              kind: { type: string, enum: [free, paid] }
+              calls: { type: integer }
+              milliCreditsPerCall: { type: integer }
+              subtotalMilliCredits: { type: integer }
+    CapabilitySearchHit:
+      type: object
+      description: Slice 11 — a search match carries its next actions, not a bare listing.
+      properties:
+        manifest: { $ref: '#/components/schemas/CapabilityManifest' }
+        score: { type: number }
+        actions:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityNextAction' }
   responses:
     Conflict:
       description: The world moved — re-read, then decide; never blind-retry

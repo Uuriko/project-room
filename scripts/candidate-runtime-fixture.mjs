@@ -116,6 +116,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
   paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)
+  paths.add('server/capability-registry.mjs'); // Integration slice #11: typed capability registry (library module; pure, no imports of its own)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

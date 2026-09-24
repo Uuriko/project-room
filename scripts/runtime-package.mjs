@@ -63,6 +63,7 @@ optional.push("server/quarantine-review-coverage.mjs"); // per-signal review-cov
 // collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("server/jev-admission.mjs"); // Jev-harness admission gate (imported by server/http.mjs; pure, no imports of its own)
+optional.push("server/capability-registry.mjs"); // Integration slice #11: typed capability registry (library module, not yet imported by a route; pure, no imports of its own)
 optional.push("server/jev-receipts.mjs"); // Jev-harness receipt gate (imported by server/work-claim-routes.mjs; pure, no imports of its own)
 optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (imported by server/store.mjs; imports ServiceError from server/service-error.mjs)
 optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
