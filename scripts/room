@@ -291,8 +291,11 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
 
     # prose receipt fields: [lane][receipt] A010-2 ... PR #392 ... Merge SHA: <hex>
     def first_task: ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t) // null;
+    # "pull" alone cannot see "pull request #392": the space is consumed and
+    # the next character is "r", so the number never matches. "pull request"
+    # has to be tried before the shorter "pull".
     def first_pr:
-      (([capture("(?:PR|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
+      (([capture("(?:(?i)PR|pull request|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
        // ([capture("project-room#(?<n>[0-9]+)")] | .[0] | .n)) // null;
     def first_sha:
       ([capture("(?<![A-Za-z0-9])[Mm]erge(?:d)?(?: SHA| commit)?[ \\t]*:[ \\t]*(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")]
@@ -352,7 +355,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
            else ($body | prose_claim($lp.lane)) end
          elif $pf.p == "[receipt]" then
            {kind:"receipt",
-            task:($pf.tail | first_task),
+            task:((($pf.tail | first_rc) // ($pf.tail | first_task))),
             pr:($body | first_pr),
             merged:($body | first_sha),
             ref:($pf.tail | first_rc),
@@ -883,6 +886,7 @@ cmd_claim() {
     --reason)  reason="$2"; shift 2 ;;
     --state)   state="$2"; shift 2 ;;
     --title)   title="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "claim: unknown flag $1" ;;
   esac; done
   [ -n "$task" ]   || die "claim: --task-id required"
@@ -1337,6 +1341,12 @@ $(suffix_line "$task_id" "${by:-(unknown)}")"
 }
 
 cmd_sweep() {
+  # Flags after the verb were ignored, so `sweep --dry-run` posted live
+  # strikes. Unknown flags die before any board read.
+  while [ $# -gt 0 ]; do case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "sweep: unknown flag $1" ;;
+  esac; done
   local st now actions=0 lock_dir=""
   # F2: the initial read is unlocked (concurrent runs may read together);
   # the enforcer lock is then taken and the board re-read, so the deciding

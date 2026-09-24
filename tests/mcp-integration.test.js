@@ -22,6 +22,11 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");
   const selected = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
   assert.equal(selected.context.source.status, "not_requested");
+  const prepared = (await mcp.call("room_read_work", { workItemId: "test-handoff", includeDiscussion: true })).result.structuredContent;
+  assert.equal(prepared.preparation.discussion.items[0].message.id, "test-request");
+  assert.equal(prepared.preparation.discussion.hasMore, false);
+  assert.equal(prepared.preparation.changedDuringRead, false);
+  assert.equal(prepared.work.id, "test-handoff");
   const compact = (await mcp.call("room_read_work", { workItemId: "test-handoff", brief: true })).result.structuredContent;
   assert.equal(compact.workItemId, "test-handoff");
   assert.match(compact.brief, /Accept the assignment/);

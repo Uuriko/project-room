@@ -97,11 +97,13 @@ test("requireApproved: self always allowed; approved passes; pending/rejected/re
   assert.match(err.message, /still pending/);
   dms.decide("r1", "bob", "alice", "approve");
   assert.equal(dms.requireApproved("r1", "alice", "bob"), true);
-  // Directional: bob -> alice is still unapproved.
-  err = errOf(() => dms.requireApproved("r1", "bob", "alice"));
-  assert.equal(err.code, "dm_consent_required");
+  // Alice asked for the conversation, so bob may answer her without asking back.
+  assert.equal(dms.requireApproved("r1", "bob", "alice"), true);
   dms.revoke("r1", "alice", "bob");
   err = errOf(() => dms.requireApproved("r1", "alice", "bob"));
+  assert.equal(err.code, "dm_consent_required");
+  // Revoking alice -> bob also ends bob's answer path.
+  err = errOf(() => dms.requireApproved("r1", "bob", "alice"));
   assert.equal(err.code, "dm_consent_required");
 });
 
@@ -196,8 +198,12 @@ test("migration against a real RoomStore projection: persisted DM seeds approved
     const row = store.db.prepare(
       "SELECT status FROM dm_consents WHERE room_id='commons' AND requester_id='alice' AND target_id='bob'").get();
     assert.equal(row.status, "approved", "migration seeds approved from the persisted DM");
-    // And a direction with no DM history still refuses.
-    const err = errOf(() => store.dmConsents.requireApproved("commons", "bob", "alice"));
+    // Alice started the conversation, so bob may answer her.
+    assert.equal(store.dmConsents.requireApproved("commons", "bob", "alice"), true);
+    // A pair with no history and no consent either way still refuses.
+    store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
+      data: { memberId: "carol", displayName: "Carol", kind: "agent", permissions: [] } });
+    const err = errOf(() => store.dmConsents.requireApproved("commons", "carol", "alice"));
     assert.equal(err.code, "dm_consent_required");
     store.close();
   } finally {
@@ -240,4 +246,19 @@ test("block rejects self, unknown and inactive members", () => {
   assert.equal(errOf(() => dms.block("r1", "bob", "ghost")).code, "blocked_not_found");
   assert.equal(errOf(() => dms.block("r1", "bob", "zed")).code, "blocked_not_found");
   assert.equal(errOf(() => dms.block("nope", "bob", "alice")).code, "room_not_found");
+});
+
+test("an approved request lets the approver answer, but an explicit row the other way still wins", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  dms.request("r1", "alice", "bob");
+  // Before approval, bob cannot write to alice.
+  assert.equal(errOf(() => dms.requireApproved("r1", "bob", "alice")).code, "dm_consent_required");
+  dms.decide("r1", "bob", "alice", "approve");
+  assert.equal(dms.requireApproved("r1", "bob", "alice"), true);
+  // Alice blocks bob: the explicit bob -> alice block beats the implied answer path.
+  dms.block("r1", "alice", "bob");
+  assert.equal(errOf(() => dms.requireApproved("r1", "bob", "alice")).code, "dm_blocked");
+  // A bystander gains nothing from someone else's consent.
+  assert.equal(errOf(() => dms.requireApproved("r1", "carol", "alice")).code, "dm_consent_required");
 });

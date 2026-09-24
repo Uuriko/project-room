@@ -6,7 +6,11 @@
 // approved them, in that direction.
 //
 // Model: one row per (room, requester → target) direction. Consent is
-// directional — A approved to DM B says nothing about B DMing A. States:
+// directional, with one implication: when B approves A's request, A asked
+// for the conversation, so B may answer A without asking A back. That
+// answer path lives only as long as A → B stays approved; any explicit row
+// in the B → A direction (pending, rejected, revoked, blocked) still wins.
+// States:
 //   pending  — requester asked, target has not decided
 //   approved — target approved; DMs flow requester → target
 //   rejected — target declined; requester may ask again
@@ -298,6 +302,11 @@ export class DmConsents {
             ? "Your DM request is still pending — wait for approval before messaging"
             : "Direct messages need the recipient's consent — send a DM request first");
       }
+      // No row in this direction, but the recipient asked us for a DM and
+      // we approved it: they started the conversation, so we may answer.
+      // Not persisted, so revoking their consent also ends the answer path.
+      const reverse = this._get(roomId, targetId, requesterId);
+      if (reverse && reverse.status === "approved") return true;
       // No row ever existed: lazy migration. A direction that already has
       // ≥1 persisted DM message is seeded approved (past exchange implies
       // consent), so shipping this gate never breaks live conversations.

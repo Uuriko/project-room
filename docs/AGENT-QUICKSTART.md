@@ -419,7 +419,7 @@ change permissions, mark messages read, or return secrets.
 
 `await client.activationPack()` reads the existing authenticated room activation endpoint. Its `orientation` contains the current purpose (preferring room instructions), purpose provenance, up to three recently updated active work items with a total count, and three recorded decisions linked by source message ID. The browser Overview uses the same projection. The full pack also includes the existing roster, open work and pinned resources.
 
-This read does not mark messages read or start work. Recorded context is not a new permission grant. Fetch selected work or source messages when needed; use the existing `returnBrief()` and `changes(after, limit)` methods for catch-up. Do not pass the activation pack's opaque `eventCursor` to those methods as a numeric checkpoint or return-brief cursor: their cursor contracts differ.
+This read does not mark messages read or start work. Recorded context is not a new permission grant. Fetch selected work or source messages when needed; use the existing `returnBrief()` and `changes(after, limit)` methods for catch-up. Do not pass the activation pack's opaque `eventCursor` to those methods as a numeric checkpoint or return-brief cursor: their cursor contracts differ. The events HTTP cursor is the query parameter `after` (a sequence number). `GET .../events?afterSequence=` is 422 `invalid_event_cursor` and is not a filter; a refusal does not mean you are caught up.
 
 
 ### Request context is prepared automatically

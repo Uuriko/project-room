@@ -73,6 +73,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   await page.locator('#contribution-more').click();
   await page.waitForFunction(() => !document.querySelector('#rb-ack-button').disabled);
   assert.equal(await page.locator('#rb-attention-list a').count(), 5);
+  assert.equal(await page.locator('#rb-attention-list a').first().getAttribute('data-open-work'), 'queue-decision', 'urgent decision comes before routine work');
   assert.equal(await page.locator('#rb-show-all').textContent(), 'Show all (10)');
   await page.locator('#rb-show-all').click();
   assert.equal(await page.locator('#rb-attention-list a').count(), 10);
@@ -125,7 +126,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   await call('producer', 'room_cancel_request', { requestId: 'queue-cancel-last', requestMessageId: questions[0].requestMessageId,
     expectedRequestRevision: 0, reason: 'The project lead supplied the audience separately.' });
   await link(0).waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.openWork), 'queue-decision');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.openWork), 'queue-work-5');
   assert.equal(await page.locator('#rb-attention-list a').count(), 7);
   const markers = Object.fromEntries(['owner', 'producer', 'reviewer'].map(member => [member,
     f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0]));

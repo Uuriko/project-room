@@ -73,6 +73,25 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
     };
   }
+  // A DM refusal is about the recipient's consent, not the caller's access:
+  // "check access; ask the owner" sends the agent the wrong way.
+  if (reasonCode === "dm_consent_required") {
+    const consentPath = roomId ? `/api/rooms/${roomId}/dm-consents` : null;
+    return {
+      status: "action_required", reason: "dm_consent_required",
+      hint: /pending/i.test(String(message || ""))
+        ? "Your DM request is pending. Wait for approval, or post in the room instead."
+        : "Ask for DM consent first with POST dm-consents { targetId }, or post in the room instead.",
+      next: [...(consentPath ? [path(consentPath)] : []), command("Request DM consent from the recipient, or post the message in the room")]
+    };
+  }
+  if (reasonCode === "dm_blocked") {
+    return {
+      status: "action_required", reason: "dm_blocked",
+      hint: "This member is not accepting DMs from you. Post in the room instead.",
+      next: [command("Post the message in the room instead")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
@@ -112,6 +131,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       ]
     };
   }
+  // events?afterSequence= used to be ignored, which restarted catch-up at 0.
+  if (reasonCode === "invalid_event_cursor") {
+    const eventsPath = roomId ? `/api/rooms/${roomId}/events?after=0&limit=100` : "/api/session";
+    return {
+      status: "action_required",
+      reason: "invalid_event_cursor",
+      hint: "Use the query parameter after, not afterSequence. You are not caught up.",
+      next: [
+        path(eventsPath),
+        command("Retry GET events with after set to the last sequence you handled. Do not send afterSequence.")
+      ]
+    };
+  }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
       const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
@@ -122,6 +154,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
           ...(commandsPath ? [path(commandsPath)] : []),
           command("Resend message.posted with data.body (a string), not text.")
         ]
+      };
+    }
+    if (reasonCode === "invalid_command" && /^Unknown command type/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "input_refused",
+        hint: "Use one of the command types named in the error message.",
+        next: [command("Resend with a listed command type; keep the same id if the earlier send was uncertain")]
       };
     }
     return {

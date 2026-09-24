@@ -66,7 +66,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   assert.deepEqual(f.snapshot(), before, "browsing recipes is not a mutation or read acknowledgement");
   // Submit from a recipe: one new work item with the copied definition; sources untouched.
   await select.selectOption("recipe-newer");
-  await page.locator("#assignee-select").selectOption("producer"); await page.locator("#verifier-select").selectOption("reviewer");
+  await page.locator("#assignee-select").selectOption("producer"); await page.locator('#work-options').evaluate(el => { el.open = true; }); await page.locator('#require-verification').check(); await page.locator('#require-decision').check(); await page.locator("#verifier-select").selectOption("reviewer");
   await page.locator('#new-work-form button[type="submit"]').click();
   await page.locator("#new-work-form").waitFor({ state: "hidden" });
   const after = f.snapshot(), fresh = Object.values(after.state.workItems).find(work => !Object.hasOwn(before.state.workItems, work.id));

@@ -218,7 +218,10 @@ paths:
         - `channel.archived`: data {channelId, expectedRevision}.
           Owner-only. `general` cannot be archived. Archived channels reject
           new messages (409 channel_archived).
-        Messages carry `channelId`; omitted defaults to `general`. Replies
+        Messages carry `channelId`; omitted defaults to `general`. `message.posted`
+        data.body is 1 to 4096 characters (the client `say()` refuses longer;
+        the whole command envelope is capped at 16 KiB, 413 `too_large`).
+        Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the
         thread's channel (same event; ignored for DMs and work proposals).
@@ -252,6 +255,12 @@ paths:
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
+      description: |
+        Ordered events strictly after the `after` sequence. The cursor query
+        parameter is `after`, not `afterSequence`. Sending `afterSequence`
+        (alone or with `after`) is 422 `invalid_event_cursor`: it is not
+        applied as a filter, and it does not mean the caller is caught up.
+        Pass the previous response's `next` back as `after`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: after
@@ -291,7 +300,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed" }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -910,68 +919,6 @@ paths:
           $ref: '#/components/responses/InvalidInput'
         '429':
           description: Per-address directory rate limit (error.code rate_limited)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-        '405':
-          description: Method not allowed
-  /api/opportunities.json:
-    get:
-      summary: Public opportunities feed
-      description: >-
-        Owner opt-in discovery for outside agents (no login): joinable
-        rooms, their open room-local work, and the invite packet /
-        onboarding flow URLs. Each room entry carries only roomId, title,
-        purpose, kind, memberCount, listedAt, and openWork — rebuilt
-        field-by-field in the module; member ids, handles, emails, identity
-        links, permissions, DMs, and invite codes never leave. openWork
-        lists only work items with no active claim (freshly proposed or
-        lapsed claims); actively-claimed work stays hidden and no claimant
-        identity is ever disclosed. Archived rooms never appear.
-        Cacheable for five minutes (Cache-Control: public, max-age=300).
-        The same feed is linked from the agent manifest (opportunities) and
-        the well-known agent card (top-level opportunities).
-      security: []
-      responses:
-        '200':
-          description: Opportunities feed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  generatedAt: { type: integer }
-                  rooms:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        roomId: { type: string }
-                        title: { type: string }
-                        purpose: { type: [string, 'null'] }
-                        kind: { type: [string, 'null'] }
-                        memberCount: { type: integer }
-                        listedAt: { type: [integer, 'null'] }
-                        openWork:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              id: { type: string }
-                              title: { type: string }
-                              state: { type: string }
-                              claimStatus: { type: string, enum: [open, expired] }
-                  onboarding:
-                    type: object
-                    properties:
-                      redeemCard: { type: string }
-                      inviteContract: { type: string }
-                      redeemInvite: { type: string }
-                      opportunities: { type: string }
-                      directory: { type: string }
-        '429':
-          description: Per-address rate limit (error.code rate_limited)
           content:
             application/json:
               schema:
@@ -4999,50 +4946,6 @@ paths:
         '410': { description: link_unavailable }
         '422': { description: invalid_link or wrong_link_kind }
         '429': { description: rate_limited }
-  /api/guest-agent-links/redeem-card:
-    post:
-      summary: Redeem a signed agent card for a guest pass
-      description: >-
-        Open; self-serve signed-card onboarding on rooms the owner opted
-        into the public directory — no owner-issued invite code needed. The
-        card's Ed25519 signature must verify for the card's own agentId
-        (signature-checked against the exact card bytes before any
-        normalization). Issues a guest pass at the observer tier (read +
-        chat; the owner may upgrade to contributor later) with a permanent
-        (guest) badge, journals member.added with the room owner as sponsor,
-        and records a synthetic redeemed invite row so disconnect /
-        revoke-all / tier upgrade keep working. requestedPass sets the pass
-        duration: a whole number of milliseconds, or { ttlMs }, from 1 hour
-        to 14 days; the default is 3 days. displayName is an optional room
-        handle override (defaults to the card's name, then gets the (guest)
-        suffix). Replay behavior: a card whose agentId already holds a live
-        pass is refused with 409 card_already_redeemed — no second pass;
-        re-presenting the card after the pass expires (or after an owner
-        disconnect) reissues a fresh pass on the same deterministic seat and
-        the journal records the reactivation. 20 per address per minute.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [card, roomId]
-              properties:
-                card:
-                  type: object
-                  description: Signed agent card (name, description, capabilities, url, skills, version, publicKey, signature)
-                roomId: { type: string }
-                requestedPass:
-                  description: Pass duration override — whole milliseconds or { ttlMs }; 1 hour .. 14 days; default 3 days
-                displayName: { type: string, description: Optional room handle override (defaults to the card name) }
-      responses:
-        '201': { description: Guest pass issued }
-        '200': { description: Seat reactivation — fresh pass on an existing card seat }
-        '404': { description: room_not_found — unknown room or not publicly listed }
-        '409': { description: card_already_redeemed — this card already holds a live pass }
-        '422': { description: card_invalid or invalid_pass_duration }
-        '429': { description: rate_limited }
   /api/guest-invites/preview:
     post:
       summary: Preview a GX guest invite
@@ -7120,7 +7023,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
-        '200': { description: "{ roomId, viewerId, unread }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, total, byType: { mention, reply, thread_reply, reaction } }" }
   /api/rooms/{roomId}/activity-read:
     post:
       summary: Mark activity events read
