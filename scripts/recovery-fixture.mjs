@@ -38,6 +38,14 @@ export function createRecoveryFixture(filename) {
   send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "agent", displayName: "Synthetic agent", kind: "agent", permissions: [] });
   keys.oldAgent = store.issueAccessKey("commons", "agent");
   keys.agent = store.issueAccessKey("commons", "agent");
+  // Bounty-ledger lanes: the escrow binds every acting lane to current room
+  // membership, so the fixture's bounty lanes must be real members. (Room
+  // memberIds cannot contain "/", so the lanes use the bare lane names.)
+  for (const [memberId, displayName] of [
+    ["jill", "jill"], ["grokbot", "grokbot"], ["instinct", "instinct"], ["codex", "codex"],
+  ]) {
+    send("commons", keys.owner, T.MEMBER_ADDED, { memberId, displayName, kind: "agent", permissions: [] });
+  }
   // Graduated autonomy tiers: new agent members enroll at t1_readonly. The
   // fixture's agents are operator-promoted to t2_standard so the fixture
   // exercises the full command surface.
@@ -195,8 +203,18 @@ export function createRecoveryFixture(filename) {
   {
     const escrow = store.bountyEscrow;
     escrow.ensureGenesis("commons");
+    // The escrow binds acting lanes to current room membership, so the
+    // fixture's lanes are real members (added above). Mint them genesis
+    // credits via the escrow's own journal writer so the hash chain stays
+    // valid — the public genesis only issues to the hardcoded lane list.
+    const at = new Date().toISOString();
+    for (const lane of ["jill", "grokbot", "instinct", "codex"]) {
+      escrow._append({ roomId: "commons", accountId: lane, at, kind: "genesis",
+        amount: 100 * 1000, lotState: "payable", memo: "genesis issuance: 100 credits",
+        actor: { kind: "rule", id: "escrow-keeper" } });
+    }
     const deadline = new Date(Date.now() + 3600000).toISOString();
-    const poster = "id:agent/jill", claimant = "id:agent/grokbot", watcher = "id:agent/instinct";
+    const poster = "jill", claimant = "grokbot", watcher = "instinct";
     const first = escrow.postBounty("commons", { poster, title: "Recovery: draft the release note",
       criteria: "The release note names the bounty id and lists the escrow states.",
       amount: 10, deadline }).bounty;
@@ -223,7 +241,7 @@ export function createRecoveryFixture(filename) {
     escrow.fundBounty("commons", flaky.bountyId, { funder: poster });
     escrow.claimBounty("commons", flaky.bountyId, { claimant });
     // Slice 10: two lanes submitting byte-identical evidence raise a review-only sybil flag.
-    const secondWorker = "id:agent/codex";
+    const secondWorker = "codex";
     const sybilEvidence = { evidenceUrl: "https://example.com/pr/sybil", summary: "Identical fixture submission." };
     const sybilA = escrow.postBounty("commons", { poster, title: "Recovery: sybil cluster A",
       criteria: "Fixture row for the sybil detector.", amount: 5, deadline }).bounty;
