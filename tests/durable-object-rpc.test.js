@@ -165,6 +165,8 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "importRoutedEmail",
     "lookupRoutedConnection",
     "planRetention",
+    "readJobHealth",
+    "recordCronTick",
     "refreshLandQueue",
     "syncGmailMailboxes"
   ]);
@@ -206,6 +208,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "planRetention",
+    "recordCronTick",
     "refreshLandQueue",
     "syncGmailMailboxes"
   ]);
@@ -217,9 +220,14 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
 
   const invoked = [];
   let name = null;
+  // Strict stub: like workerd RPC, only methods the real class defines are
+  // callable. A permissive "any method" stub is how #985 slipped through.
   const stub = new Proxy({}, {
     get(_target, prop) {
       if (prop === "then") return undefined;
+      if (typeof ProjectRoom.prototype[prop] !== "function") {
+        return () => Promise.reject(new TypeError(`ProjectRoom has no RPC method ${String(prop)}`));
+      }
       return () => {
         invoked.push(String(prop));
         return Promise.resolve({ ok: true });
