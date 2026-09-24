@@ -6976,6 +6976,10 @@ paths:
         `requestId`, `memberId` and `expectedOwnerRevision`. The server stores
         only the SHA-256 key hash the browser generated; expiry is at most 30
         days. The same requestId returns the earlier receipt (200).
+        `create` accepts an optional `identityId`: when present, the
+        membership, credential AND identity link are written in one
+        transaction, so the agent can use bonds and peer DMs immediately
+        with no second owner step (the receipt echoes `identityId`).
       security:
         - accountSession: []
       parameters:
