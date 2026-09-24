@@ -69,6 +69,12 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public opportunities feed: joinable rooms, open room-local work, and
+  // the invite-packet/onboarding URLs; cacheable, still noindex.
+  "GET /api/opportunities.json": [undefined, 200],
+  // Signed-card onboarding: public by design; a malformed card is 422
+  // card_invalid before any room data is touched.
+  "POST /api/guest-agent-links/redeem-card": [{ card: {}, roomId: "commons" }, 422],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it

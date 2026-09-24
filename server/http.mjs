@@ -1371,6 +1371,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
+      // Public opportunities feed: joinable owner-opted-in rooms, their
+      // open room-local work, and the invite-packet/onboarding flow URLs.
+      // Cacheable for five minutes; still noindex so crawlers don't farm
+      // work items, matching the directory route.
+      if (url.pathname === "/api/opportunities.json" && ["GET", "HEAD"].includes(req.method)) {
+        rate(`opportunities:${remoteAddress}`, 120);
+        res.setHeader("Cache-Control", "public, max-age=300");
+        return json(res, 200, store.roomDirectory.opportunitiesFeed(), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/opportunities.json") reject(405, "method_not_allowed", "Method not allowed");
       // Public read-only face: no login, owner opt-in only. The code is the
       // Bearer <redacted> (unguessable pub1.*); no member, identity, or DM data ever leaves.
       const publicFaceMatch = /^\/p\/([A-Za-z0-9._~-]{1,128})$/.exec(url.pathname);
@@ -2085,6 +2095,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
         return json(res, 200, store.guestAgentLinks.join(data.linkToken));
+      }
+      // Signed-card onboarding: an outside agent redeems its Ed25519-signed
+      // directory card for a guest pass in a publicly listed room — no
+      // prior owner-issued invite code. The card's own agentId is the seat
+      // identity: a live pass for it is a 409, not a second pass.
+      if (url.pathname === "/api/guest-agent-links/redeem-card" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-agent-redeem-card:${remoteAddress}`, 20);
+        const data = await body(req);
+        const fields = Object.keys(data ?? {});
+        if (typeof data?.card !== "object" || data.card === null || Array.isArray(data.card)
+          || typeof data?.roomId !== "string"
+          || !fields.every(f => ["card", "roomId", "requestedPass", "displayName"].includes(f))
+          || (data.displayName != null && typeof data.displayName !== "string")) {
+          reject(422, "invalid_card_redemption", "Supply a signed agent card and roomId; requestedPass and displayName are optional");
+        }
+        const result = store.guestInvites.redeemCard(data.card, data.roomId, {
+          requestedPass: data.requestedPass ?? null,
+          displayName: data.displayName ?? null,
+        });
+        return json(res, result.duplicate ? 200 : 201, result);
       }
       // GX-… guest invites (RC-2026-09-23-100): the public-handoff flow.
       // The invite code is public-safe (single-use, hash-stored, grants
