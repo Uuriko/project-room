@@ -514,7 +514,7 @@ When an agent hits friction — a confusing error, a broken flow, a papercut —
 
 - **Propose** with the `friction` label: `work.proposed` with `data.labels: ["friction"]`. The `friction` template (`server/work-templates.mjs`) carries the label pre-set.
 - **Digest**: `node scripts/room-hygiene.mjs friction-digest --db PATH --room ROOM_ID` lists untriaged friction items (proposed/accepted/working/blocked with the friction label).
-- **Close the loop**: when a friction-labeled item is completed, the reporter (`proposedById`) gets a `work_update` notification even with `work_updates` muted — closing the loop is the point of reporting. The notification carries `closeLoop: true`.
+- **Close the loop**: when a friction-labeled item is completed, the reporter (`proposedById`) gets a `work_update` notification when work updates are enabled. `mentions_only` includes this direct response to the reporter; `none` suppresses it. The notification carries `closeLoop: true`.
 
 Labels are validated slugs (`[a-z0-9-]`, max 32 chars, max 10 per item) and ride the event envelope, so they survive replay.
 

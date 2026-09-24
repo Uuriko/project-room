@@ -110,10 +110,10 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       }
       continue;
     }
-    // RC-2026-09-23: friction close-loop. When a friction-labeled work item
-    // is completed, the reporter (proposedById) hears about it even with
-    // work_updates muted or mentions-only — closing the loop is the point
-    // of reporting friction. Follows the access-request carve-out pattern.
+    if (preferences.work_updates === "none") continue;
+    // Respect an explicit work-update mute. A friction completion is a
+    // direct response to its reporter, so mentions_only may include it;
+    // unlike an access decision, it is not a required-action notification.
     if (event.type === T.WORK_COMPLETED && event.data?.workItemId) {
       const item = state.workItems?.[event.data.workItemId];
       if (item && Array.isArray(item.labels) && item.labels.includes("friction")
@@ -122,7 +122,6 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
         continue;
       }
     }
-    if (preferences.work_updates === "none") continue;
     if (event.type === T.WORK_PROPOSED) {
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
       continue;

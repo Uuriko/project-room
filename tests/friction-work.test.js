@@ -42,22 +42,25 @@ test("work.proposed stores labels; friction label is machine-readable (RC-2026-0
   } finally { cleanup(); }
 });
 
-test("completing a friction item notifies the reporter even with work_updates muted (RC-2026-09-23)", () => {
+for (const preference of ["all", "mentions_only", "none"]) test(`friction completion respects reporter work_updates=${preference}`, () => {
   const { send, ownerKey, reporterKey, store, cleanup } = setup();
   try {
     send(ownerKey, T.MEMBER_ADDED, { memberId: "fixer", displayName: "Fixer", kind: "agent", permissions: ["steer"] });
     send(reporterKey, T.WORK_PROPOSED, { workItemId: "f1", title: "Friction: confusing error", definitionOfDone: "Clear message",
       accountableMemberId: "fixer", mode: "read", labels: ["friction"] });
-    // Reporter mutes work updates: the close-loop must still reach them.
-    send(reporterKey, T.NOTIFICATION_PREFERENCES_SET, { preferences: { work_updates: "mentions_only" } });
+    // Direct reporter updates are permitted by all/mentions_only, never none.
+    send(reporterKey, T.NOTIFICATION_PREFERENCES_SET, { preferences: { work_updates: preference } });
     const state = store.room("commons").state;
     const member = state.members.reporter;
     const completedEvent = { id: randomUUID(), type: T.WORK_COMPLETED, actorId: "fixer",
       at: new Date().toISOString(), data: { workItemId: "f1" } };
     const notifications = deriveNotifications({ events: [{ event: completedEvent, sequence: 1 }], state, member });
     const closeLoop = notifications.find(n => n.kind === "work_update" && n.workItemId === "f1");
-    assert.ok(closeLoop, "reporter gets a close-loop notification");
-    assert.equal(closeLoop.closeLoop, true);
+    if (preference === "none") assert.equal(closeLoop, undefined, "explicit mute wins");
+    else {
+      assert.ok(closeLoop, "reporter gets the direct completion update");
+      assert.equal(closeLoop.closeLoop, true);
+    }
   } finally { cleanup(); }
 });
 
