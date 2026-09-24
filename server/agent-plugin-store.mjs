@@ -876,12 +876,28 @@ export class AgentPluginStore {
   // delivery is never journaled without its triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
-      "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE enabled=1").all();
+      "SELECT subscription_id AS subscriptionId, agent_id AS agentId, events_json AS eventsJson FROM agent_webhook_subs WHERE enabled=1").all();
     let created = 0;
     for (const row of rows) {
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
+      // Targeted-DM privacy: mirrors the store read-path predicate
+      // (RC-2026-09-18-012, server/store.mjs). A message.posted event
+      // carrying data.toMemberId is a direct message, visible only to its
+      // sender and its addressed member — never to third-party push
+      // subscribers. The subscription's agent_id is an identity id; resolve
+      // it to this room's member id via identity_links and apply the same
+      // rule the /events and /stream read paths use. No link means no
+      // delivery (fail closed): an unlinkable subscriber is neither sender
+      // nor addressee. Non-targeted events fan out unchanged.
+      if (event?.type === "message.posted" && event?.data?.toMemberId) {
+        const link = this.db.prepare(
+          "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?")
+          .get(roomId, row.agentId);
+        const viewerId = link?.memberId ?? null;
+        if (event.actorId !== viewerId && event.data.toMemberId !== viewerId) continue;
+      }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, data: event.data ?? {}, eventId: event.id, roomId });
       if (!delivery.duplicate) created++;
