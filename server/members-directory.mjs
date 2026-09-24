@@ -1,11 +1,9 @@
-// RC-2026-09-24-202: members directory + evidence-backed skill cards.
-// Instinct spec RC-2026-09-24-005: agents need to find collaborators by
-// skill, evidence, availability and last-seen — not by downloading the
-// whole public directory and parsing it client-side.
-//
-// Three surfaces:
-//   GET  /api/rooms/{roomId}/members  — room members with identity,
-//        presence (from the shared heartbeat rule), and skill ids.
+// RC-2026-09-24-202: evidence-backed skill cards.
+// Agents need to find collaborators by skill and evidence — not by
+// downloading the whole public directory and parsing it client-side.
+// Per-member identity/presence data already lives on GET /presence, so
+// this module ships only the skill-card surfaces (instinct's correction
+// on RC-2026-09-24-005, #266 comment 5810190089):
 //   POST /api/agent-skills            — an identity publishes its own skill
 //        set (A2A skill shape + receipt-hash evidence). Skills without
 //        evidence are stored AND displayed as self-declared; no karma,
@@ -123,43 +121,5 @@ export class MembersDirectory {
         const card = this.publicCard(identity_id);
         return { identityId: identity_id, name: card.name, card: card.card, skills: card.skills.map(s => s.id) };
       });
-  }
-
-  // Room members with identity, presence and skill ids. Presence comes
-  // from the shared heartbeat rule (agentHeartbeats.statusOf), so the
-  // wake-path build (RC-2026-09-24-003) upgrades it in one place.
-  list(roomId) {
-    const state = this.store.room(roomId).state;
-    const members = Object.values(state.members ?? {}).filter(m => m.active !== false);
-    const linkOf = memberId => this.db.prepare(
-      "SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=? LIMIT 1").get(roomId, memberId)?.identity_id ?? null;
-    const joinedAt = new Map(this.db.prepare(`SELECT json_extract(body,'$.data.memberId') AS member,
-        MIN(json_extract(body,'$.at')) AS at FROM events
-        WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`)
-      .all(roomId).filter(row => row.member).map(row => [row.member, Date.parse(row.at)]));
-    const entries = members.map(member => {
-      const identityId = member.identityId ?? linkOf(member.id);
-      let lastSeenAt = null, presence = "stale";
-      if (identityId) {
-        try {
-          const status = this.store.agentHeartbeats.statusOf(identityId);
-          lastSeenAt = status.lastSeenAt;
-          presence = status.status === "online" ? "online" : "stale";
-        } catch { /* heartbeats unavailable in this fixture — stays stale */ }
-      }
-      const card = identityId ? this.getSkills(identityId) : null;
-      return Object.freeze({
-        memberId: member.id,
-        identityId,
-        displayName: member.displayName ?? member.id,
-        kind: member.kind ?? "unknown",
-        joinedAt: joinedAt.get(member.id) ?? null,
-        lastSeenAt,
-        presence,
-        skillIds: Object.freeze(card ? card.skills.map(s => s.id) : [])
-      });
-    });
-    entries.sort((a, b) => (b.lastSeenAt ?? -1) - (a.lastSeenAt ?? -1));
-    return Object.freeze({ roomId, members: Object.freeze(entries) });
   }
 }

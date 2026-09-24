@@ -1,8 +1,9 @@
-// RC-2026-09-24-202: members directory + evidence-backed skill cards.
-// Instinct spec RC-2026-09-24-005: room members list with identity,
-// presence and skill ids; per-identity skill publish (A2A skill shape +
-// receipt-hash evidence); public opt-in skill card; /skills catalog gains
-// an opted-in `members` array.
+// RC-2026-09-24-202: evidence-backed skill cards.
+// Per instinct's correction on RC-2026-09-24-005 (#266 comment 5810190089):
+// per-member identity/presence already lives on GET /presence, so this
+// suite covers only the skill-card surfaces: per-identity skill publish
+// (A2A skill shape + receipt-hash evidence); public opt-in skill card;
+// /skills catalog gains an opted-in `members` array.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -125,33 +126,6 @@ test("public card is 404 unless publish:true; the key manifest advertises the ac
   const vocab = manifest.auth?.apiKeyScopes?.scopes ?? [];
   assert.ok(vocab.some(s => s.scope === "skills:publish"
     && s.routes?.some(r => r.includes("POST /api/agent-skills"))), JSON.stringify(vocab.map(s => s.scope)));
-});
-
-test("members directory lists identity, presence and skill ids; unauthenticated is refused", async t => {
-  const { f, identity, roomKey } = setup();
-  const origin = await startServer(t, f);
-  const key = await issueScopedKey(origin, identity.secret, ["skills:publish"]);
-  await post(origin, "/api/agent-skills", { publish: true, skills: [SKILL("directory-skill")] }, key);
-
-  const anon = await get(origin, "/api/rooms/commons/members");
-  assert.ok([401, 403].includes(anon.status), `expected 401/403, got ${anon.status}`);
-
-  const res = await get(origin, "/api/rooms/commons/members", roomKey);
-  assert.equal(res.status, 200);
-  const doc = await res.json();
-  assert.equal(doc.roomId, "commons");
-  const me = doc.members.find(m => m.memberId === "skills-agent");
-  assert.ok(me, JSON.stringify(doc.members.map(m => m.memberId)));
-  assert.equal(me.identityId, identity.identityId);
-  assert.equal(me.displayName, "Skills Agent");
-  assert.ok(typeof me.joinedAt === "number");
-  assert.ok(["online", "stale"].includes(me.presence));
-  assert.deepEqual(me.skillIds, ["directory-skill"]);
-
-  // Members without published skills list an empty skillIds array.
-  const owner = doc.members.find(m => m.memberId === "owner");
-  assert.ok(owner);
-  assert.deepEqual(owner.skillIds, []);
 });
 
 test("/skills catalog gains an opted-in members array", async t => {

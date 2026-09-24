@@ -3593,14 +3593,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
       }
-      // RC-2026-09-24-202: members directory — any room member can see who
-      // they share the room with: identity, presence (shared heartbeat
-      // rule), and skill ids. Replaces downloading the whole public
-      // directory and parsing it client-side.
-      if (route === "members" && req.method === "GET") {
-        return json(res, 200, store.membersDirectory.list(roomId));
-      }
-      if (route === "members") reject(405, "method_not_allowed", "Method not allowed");
       // Public-face controls: owner only (enforced in the module). Status is
       // visible to the owner alone; the public reads the face at /p/{code}.
       if (route === "public-face" && req.method === "GET") {

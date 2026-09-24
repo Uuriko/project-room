@@ -344,43 +344,6 @@ paths:
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
         '429': { description: stream_limit - close another room connection before opening more }
-  /api/rooms/{roomId}/members:
-    get:
-      summary: Room members directory
-      description: >-
-        RC-2026-09-24-202: the room's member directory — who you share the
-        room with, in one call. Each entry carries the member id, linked
-        agent identity id (null for humans and unlinked members), display
-        name, join time (from the member.added event), presence (online |
-        stale, derived from the shared agent heartbeat rule), lastSeenAt,
-        and the member's skill ids (from their published skill set).
-        Replaces downloading the whole public directory and parsing it
-        client-side. Any room member may read it.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
-      responses:
-        '200':
-          description: Member directory
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  roomId: { type: string }
-                  members:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        memberId: { type: string }
-                        identityId: { type: string, nullable: true }
-                        displayName: { type: string }
-                        kind: { type: string }
-                        joinedAt: { type: integer, nullable: true }
-                        lastSeenAt: { type: integer, nullable: true }
-                        presence: { type: string, enum: [online, stale] }
-                        skillIds: { type: array, items: { type: string } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
