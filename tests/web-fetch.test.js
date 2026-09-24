@@ -23,7 +23,7 @@ import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   normalizeUrl, ipLiteralBlocked, htmlToMarkdown, extractMetadata,
   extractHighlights, cacheKeyFor, assertFetchableUrl,
-  WebFetchError, webFetchContract, migrateWebFetchLogColumns,
+  WebFetchError, WebFetch, webFetchSchema, webFetchContract, migrateWebFetchLogColumns,
 } from "../server/web-fetch.mjs";
 
 // The loopback allowance is read dynamically, so strict-mode tests can
@@ -164,6 +164,23 @@ test("cacheKeyFor is deterministic and URL-scoped", () => {
   assert.equal(a, b);
   assert.equal(a.length, 64);
   assert.notEqual(a, cacheKeyFor("http://example.com/b"));
+});
+
+test("noteRoomFetch records per-room cache visibility idempotently", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(webFetchSchema);
+  db.exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)");
+  db.prepare("INSERT INTO rooms(id) VALUES('r1'),('r2')").run();
+  const svc = new WebFetch({ db, now: () => 1_000_000 });
+  svc.noteRoomFetch("k1", "r1", 1_000_000);
+  svc.noteRoomFetch("k1", "r1", 1_000_001); // idempotent re-fetch
+  svc.noteRoomFetch("k1", "r2", 1_000_002); // same URL, other room
+  const rows = db.prepare("SELECT cache_key, room_id FROM web_fetch_cache_rooms ORDER BY room_id").all()
+    .map(r => ({ cache_key: r.cache_key, room_id: r.room_id }));
+  assert.deepEqual(rows, [
+    { cache_key: "k1", room_id: "r1" },
+    { cache_key: "k1", room_id: "r2" },
+  ]);
 });
 
 test("webFetchContract exposes the documented surface", () => {

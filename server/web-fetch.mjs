@@ -99,6 +99,17 @@ export const webFetchSchema = `
     bytes INTEGER NOT NULL CHECK(bytes >= 0),
     fetched_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS web_fetch_cache_rooms (
+    cache_key TEXT NOT NULL,
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (cache_key, room_id)
+    -- Room-scoped visibility for the research room leg (RC-2026-09-24-310
+    -- fix): the cache stays global (one row per URL); this mapping records
+    -- which rooms fetched each URL so a room's research only surfaces its own
+    -- fetch memory. Populated on every successful fetch (hit or miss).
+  );
+  CREATE INDEX IF NOT EXISTS web_fetch_cache_rooms_room ON web_fetch_cache_rooms(room_id);
   CREATE TABLE IF NOT EXISTS web_fetch_log (
     request_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL REFERENCES rooms(id),
@@ -784,6 +795,15 @@ export class WebFetch {
       entry.host, entry.cacheStatus, entry.bytes, JSON.stringify(entry.tags), entry.at);
   }
 
+  // Room-scoped cache visibility (RC-2026-09-24-310 fix): record that this room
+  // fetched this cache key, so the research room leg can scope to the room's
+  // own fetch memory. Idempotent; called on every successful fetch (hit or
+  // miss) so a cache hit from another room's earlier fetch still counts.
+  noteRoomFetch(cacheKey, roomId, now) {
+    this.db.prepare(`INSERT OR IGNORE INTO web_fetch_cache_rooms(cache_key, room_id, fetched_at)
+      VALUES(?,?,?)`).run(cacheKey, roomId, now);
+  }
+
   async fetch(roomId, memberId, input, opts = {}) {
     // The request id is minted before validation so every typed failure
     // carries it — clients can correlate a failure with the room journal,
@@ -838,6 +858,8 @@ export class WebFetch {
       requestId, roomId, memberId, credentialHash, host: safeHost(finalUrl),
       cacheStatus, bytes, tags: req.tags, at: this.store.now(),
     });
+    // Room-scoped visibility: this room fetched this URL (hit or miss).
+    this.noteRoomFetch(key, roomId, this.store.now());
     return {
       url: finalUrl,
       markdown: { requested: req.markdown, data: req.markdown ? markdown : null },

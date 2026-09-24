@@ -336,19 +336,17 @@ export class WebResearch {
 
   // -- Planner: deterministic, no model. Returns [{ source, status, reason, cost }].
   plan(req) {
+    const keywords = researchKeywords(req.question);
     const prov = req.sources.includes("provider") ? providerStatus(true) : null;
     const plan = [];
     if (req.sources.includes("room")) {
       plan.push({
         source: "room",
-        // INTERIM DISABLE (2026-09-24): the room leg searched the global
-        // web_fetch_cache with no room scope — cross-room disclosure.
-        // Proper fix (room-scoped web_fetch_cache_rooms mapping) is in flight;
-        // until it lands the leg stays disabled. searchRoomCache() also
-        // returns [] as defense in depth.
-        status: "disabled",
-        reason: "temporarily disabled: room-leg cache scoping fix in progress — no room evidence returned",
-        cost: "n/a",
+        status: keywords.length ? "planned" : "skipped",
+        reason: keywords.length
+          ? `keyword search over the room's own fetch history, scoped to this room (${keywords.join(", ")})`
+          : "no usable keywords in question",
+        cost: "free (room memory)",
       });
     }
     if (req.sources.includes("docs")) {
@@ -407,13 +405,54 @@ export class WebResearch {
     };
   }
 
-  // -- room leg: the room's own fetch memory.
-  // INTERIM DISABLE (2026-09-24): cross-room disclosure — web_fetch_cache
-  // is global with no room scope. The planner marks this leg "disabled" and
-  // this method returns nothing until the room-scoped web_fetch_cache_rooms
-  // fix lands. (Full query body preserved in git history.)
-  searchRoomCache(_req, _keywords, _requestId, _now) {
-    return [];
+  // -- room leg: the room's own fetch memory, scoped by web_fetch_cache_rooms.
+  // The cache table itself is global (one row per URL), so the leg joins the
+  // per-room mapping: a room only ever sees URLs its own members fetched.
+  searchRoomCache(req, roomId, keywords, requestId, now) {
+    if (!keywords.length) return [];
+    const clauses = keywords.map(() => "(c.url LIKE ? OR c.metadata_json LIKE ?)").join(" OR ");
+    const params = [roomId, ...keywords.flatMap(kw => [`%${kw}%`, `%${kw}%`])];
+    let rows = [];
+    try {
+      rows = this.db.prepare(
+        `SELECT c.key, c.url, c.final_url, c.markdown, c.metadata_json, c.bytes, c.fetched_at
+         FROM web_fetch_cache c
+         JOIN web_fetch_cache_rooms r ON r.cache_key = c.key AND r.room_id = ?
+         WHERE ${clauses} LIMIT ${WEB_RESEARCH_CACHE_SCAN_LIMIT}`).all(...params);
+    } catch { return []; }
+    const scored = [];
+    for (const row of rows) {
+      let title = "";
+      try { title = JSON.parse(row.metadata_json)?.title ?? ""; } catch { /* ignore */ }
+      const haystack = `${row.url} ${row.final_url} ${title}`.toLowerCase();
+      let score = 0;
+      for (const kw of keywords) if (haystack.includes(kw)) score++;
+      if (score > 0) scored.push({ row, title, score });
+    }
+    scored.sort((a, b) => b.score - a.score || b.row.fetched_at - a.row.fetched_at);
+    return scored.slice(0, req.maxEvidence).map(({ row, title }, i) => {
+      const passages = extractHighlights(row.markdown, req.question, 2, title);
+      const excerpt = passages.join("\n\n");
+      return {
+        rank: i,
+        source: "room",
+        id: `room:${row.key.slice(0, 8)}`,
+        url: row.final_url,
+        title: title || row.final_url,
+        excerpt,
+        provenance: this.provenance({
+          source: "room",
+          url: row.url,
+          finalUrl: row.final_url,
+          retrievedAt: row.fetched_at,
+          content: excerpt || row.markdown.slice(0, 4000),
+          bytes: row.bytes,
+          cache: { status: "hit", age_ms: Math.max(0, now - row.fetched_at) },
+          requestId,
+        }),
+      };
+    });
+
   }
 
   // -- docs leg: local markdown corpus (Node only).
@@ -574,7 +613,7 @@ export class WebResearch {
       if (evidence.length >= req.maxEvidence) break;
       try {
         if (leg.source === "room") {
-          for (const e of this.searchRoomCache(req, keywords, requestId, now)) {
+          for (const e of this.searchRoomCache(req, roomId, keywords, requestId, now)) {
             if (evidence.length >= req.maxEvidence) break;
             e.rank = evidence.length;
             evidence.push(e);

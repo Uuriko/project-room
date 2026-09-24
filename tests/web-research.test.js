@@ -32,10 +32,14 @@ function makeService(opts = {}, seed) {
   db.exec(webResearchSchema);
   db.exec(`CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)`);
   db.prepare("INSERT OR IGNORE INTO rooms(id) VALUES('room1')").run();
+  db.prepare("INSERT OR IGNORE INTO rooms(id) VALUES('room2')").run();
   db.exec(`CREATE TABLE IF NOT EXISTS web_fetch_cache (
     key TEXT PRIMARY KEY, url TEXT NOT NULL, final_url TEXT NOT NULL,
     markdown TEXT NOT NULL, metadata_json TEXT NOT NULL, bytes INTEGER NOT NULL,
     fetched_at INTEGER NOT NULL)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS web_fetch_cache_rooms (
+    cache_key TEXT NOT NULL, room_id TEXT NOT NULL, fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (cache_key, room_id))`);
   let now = 1_000_000;
   const store = { db, now: () => now, webFetch: opts.webFetch ?? null };
   const service = new WebResearch(store, opts.serviceOpts ?? {});
@@ -79,9 +83,9 @@ test("planner is deterministic and cost-visible", () => {
   const { service } = makeService();
   const plan = service.plan({ question: "how do claims work", sources: ["room", "docs", "fetch", "provider"], urls: [], maxEvidence: 5 });
   const bySource = Object.fromEntries(plan.map(p => [p.source, p]));
-  assert.equal(bySource.room.status, "disabled");
-  assert.match(bySource.room.reason, /scoping fix/);
-  assert.equal(bySource.room.cost, "n/a");
+  assert.equal(bySource.room.status, "planned");
+  assert.match(bySource.room.reason, /scoped to this room/);
+  assert.match(bySource.room.cost, /free/);
   assert.equal(bySource.docs.status, "planned");
   assert.equal(bySource.fetch.status, "skipped");
   assert.match(bySource.fetch.reason, /no urls/);
@@ -167,19 +171,39 @@ function seedCache(db) {
   insert.run("k2", "https://example.com/unrelated", "https://example.com/unrelated",
     "# Cooking\n\nNothing about claims here at all.",
     JSON.stringify({ title: "Cooking" }), 100, 950_000);
+  // Room-scoped visibility: room1 fetched k1 (the claims guide). k2 was
+  // fetched by some other room and must never surface in room1's leg.
+  const map = db.prepare(`INSERT INTO web_fetch_cache_rooms(cache_key, room_id, fetched_at) VALUES(?,?,?)`);
+  map.run("k1", "room1", 900_000);
+  map.run("k2", "room2", 950_000);
 }
 
-test("room leg is interim-disabled: no room evidence, plan marks it disabled", async () => {
-  // INTERIM (2026-09-24): the room leg searched the global web_fetch_cache
-  // with no room scope (cross-room disclosure). Disabled until the
-  // room-scoped web_fetch_cache_rooms fix lands. Seeded cache rows must NOT
-  // surface as evidence.
+test("room leg never surfaces another room's fetch memory (two-room isolation)", async () => {
   const { service } = makeService({}, seedCache);
-  const res = await service.research("room1", "member1", { question: "how do claim leases work" });
-  const room = res.evidence.filter(e => e.source === "room");
-  assert.equal(room.length, 0);
-  const planRoom = res.plan.find(p => p.source === "room");
-  assert.equal(planRoom.status, "disabled");
+  // room1 only fetched the claims guide; k2 (cooking) belongs to room2.
+  const res1 = await service.research("room1", "member1", { question: "how do claim leases work" });
+  const room1 = res1.evidence.filter(e => e.source === "room");
+  assert.equal(room1.length, 1);
+  assert.equal(room1[0].id, "room:k1");
+
+  // room2 fetched only the cooking page: searching claims yields nothing.
+  const res2 = await service.research("room2", "member2", { question: "how do claim leases work" });
+  assert.equal(res2.evidence.filter(e => e.source === "room").length, 0);
+
+  // room2 searching cooking finds only its own page.
+  const res3 = await service.research("room2", "member2", { question: "cooking recipes" });
+  const room2 = res3.evidence.filter(e => e.source === "room");
+  assert.equal(room2.length, 1);
+  assert.equal(room2[0].id, "room:k2");
+
+  // A shared URL fetched by both rooms is visible to both.
+  const { db, service: svc } = makeService({}, seedCache);
+  db.prepare(`INSERT INTO web_fetch_cache_rooms(cache_key, room_id, fetched_at) VALUES(?,?,?)`)
+    .run("k1", "room2", 900_000);
+  const res4 = await svc.research("room2", "member2", { question: "how do claim leases work" });
+  const shared = res4.evidence.filter(e => e.source === "room");
+  assert.equal(shared.length, 1);
+  assert.equal(shared[0].id, "room:k1");
 });
 
 // ---------------------------------------------------------------------------
