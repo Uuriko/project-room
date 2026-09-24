@@ -7,9 +7,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
-import {
-  resolveMentionTargetsInText, resolveSilentMentionTargetsInText,
-} from "../server/mention-lifecycle.mjs";
+import { resolveMentionTargetsInText } from "../server/mention-lifecycle.mjs";
 
 const members = {
   muse: { displayName: "Muse", active: true },
@@ -21,29 +19,23 @@ const members = {
 };
 
 const loud = text => resolveMentionTargetsInText(members, {}, text, "me");
-const silent = text => resolveSilentMentionTargetsInText(members, {}, text, "me");
 
 test("silent, ordinary, and mixed mentions", () => {
   assert.deepEqual(loud("@_Muse hi"), []);
-  assert.deepEqual(silent("@_Muse hi"), ["muse"]);
   assert.deepEqual(loud("@Muse hi"), ["muse"]);
-  assert.deepEqual(silent("@Muse hi"), []);
   assert.deepEqual(loud("@_Muse and @Grok"), ["grok"]);
-  assert.deepEqual(silent("@_Muse and @Grok"), ["muse"]);
 });
 
 test("a multi-word @_Name is silent and the longest name still wins", () => {
   assert.deepEqual(loud("@_Test producer"), []);
-  assert.deepEqual(silent("@_Test producer"), ["producer"]);
   assert.deepEqual(loud("@Test producer"), ["producer"]);
   assert.deepEqual(loud("@_Test producer and @Grok"), ["grok"]);
 });
 
 test("an @ glued to a word is still ignored, including foo@_bar", () => {
   assert.deepEqual(loud("foo@_bar"), []);
-  assert.deepEqual(silent("foo@_bar"), []);
   assert.deepEqual(loud("mail@Muse"), []);
-  assert.deepEqual(silent("mail@_Muse"), []);
+  assert.deepEqual(loud("mail@_Muse"), []);
 });
 
 test("posting @_Agent to an offline agent with push writes no wake, push, or mention row", t => {

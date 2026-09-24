@@ -115,21 +115,9 @@ export const mentionStateSchema = `
 // inactive members, never invents a recipient, and returns ids in first
 // appearance order without duplicates.
 //
-// `@_Name` is a silent mention (Zulip): the name is resolved the same way,
-// starting after the `_`, but it is omitted here. Wake, push, and mention
-// rows all read this list, so a silent mention notifies nobody. The chat
-// renderer still paints a name only when it already recognizes the text.
+// `@_Name` is a silent mention (Zulip). Skip it here so wake, push, and
+// mention rows never see it. The text is left unchanged for the renderer.
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
-  return collectMentionTargets(members, identityNames, text, senderMemberId, false);
-}
-
-// Same resolution as resolveMentionTargetsInText, but only the silent
-// `@_Name` hits. For a later renderer; nothing in the wake path reads it.
-export function resolveSilentMentionTargetsInText(members, identityNames, text, senderMemberId) {
-  return collectMentionTargets(members, identityNames, text, senderMemberId, true);
-}
-
-function collectMentionTargets(members, identityNames, text, senderMemberId, silentOnly) {
   if (typeof text !== "string" || text.length === 0 || text.length > 20000) return [];
   const candidates = [];
   for (const [memberId, member] of Object.entries(members ?? {})) {
@@ -143,9 +131,8 @@ function collectMentionTargets(members, identityNames, text, senderMemberId, sil
   const lowerText = text.toLowerCase(), found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
-    const silent = text[at + 1] === "_";
-    if (silent !== silentOnly) continue;
-    const nameAt = at + (silent ? 2 : 1);
+    if (text[at + 1] === "_") continue;
+    const nameAt = at + 1;
     let best = null;
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
