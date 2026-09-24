@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
+import { peerEventVisible, visibleBonds } from "../server/bonds.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -297,4 +298,84 @@ test("peer DM wakes an offline recipient through agent.wake and does not room-br
   const broadcast = await jsonOf(await get(origin,
     `/api/agent-webhooks/${roomSub.body.subscriptionId}/deliveries`, stranger.secret));
   assert.equal(broadcast.body.deliveries.some(row => row.eventType === "dm.posted" || String(row.eventType).startsWith("bond.")), false);
+});
+
+test("M1: a member id colliding with a party identity id sees no peer DMs or bonds", async t => {
+  // Regression test for the DM-confidentiality leak: peerEventVisible and
+  // visibleBonds used to match the room-local memberId against party identity
+  // ids. These two predicates are exactly what the room feed (/events), the
+  // full snapshot (state.bonds / eventLog tail), the store events filter and
+  // the return-brief history consume, so pinning them pins those paths.
+  const dm = {
+    type: "dm.posted",
+    data: {
+      messageId: "m-collide", threadId: "dm:ai_a:ai_b", bondId: "bond-1",
+      body: "super secret dm body",
+      fromIdentityId: "ai_a", toIdentityId: "ai_b"
+    }
+  };
+  const activated = { type: "bond.activated", data: { bondId: "bond-1", agentAId: "ai_a", agentBId: "ai_b" } };
+  const bonds = { "bond-1": { agentAId: "ai_a", agentBId: "ai_b", state: "active" } };
+  // Attacker: room member whose member id string equals a party's identity id,
+  // no linked identity, not the owner.
+  const colliding = { memberId: "ai_a", identityId: null, isOwner: false };
+  assert.equal(peerEventVisible(dm, colliding), false);
+  assert.equal(peerEventVisible(activated, colliding), false);
+  assert.deepEqual(visibleBonds(bonds, colliding), {});
+  // A genuine party still sees everything through the resolved identity id,
+  // even when their member id is unrelated.
+  const party = { memberId: "some-unrelated-member", identityId: "ai_b", isOwner: false };
+  assert.equal(peerEventVisible(dm, party), true);
+  assert.equal(peerEventVisible(activated, party), true);
+  assert.deepEqual(Object.keys(visibleBonds(bonds, party)), ["bond-1"]);
+  // The room owner still sees bond receipts but never dm.posted bodies.
+  const owner = { memberId: "owner-member", identityId: "owner-ident", isOwner: true };
+  assert.equal(peerEventVisible(dm, owner), false);
+  assert.equal(peerEventVisible(activated, owner), true);
+  assert.deepEqual(Object.keys(visibleBonds(bonds, owner)), ["bond-1"]);
+  // A plain non-party member sees nothing.
+  const stranger = { memberId: "stranger", identityId: "stranger-ident", isOwner: false };
+  assert.equal(peerEventVisible(dm, stranger), false);
+  assert.deepEqual(visibleBonds(bonds, stranger), {});
+});
+
+test("M2: a room owner cannot revoke a bond formed in another room", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const owner = fixture.store.identities.create("m2 owner");
+  const a = fixture.store.identities.create("m2 a");
+  const b = fixture.store.identities.create("m2 b");
+  for (const roomId of ["m2-room-x", "m2-room-y"]) {
+    const created = await post(origin, "/api/agent-rooms", {
+      roomId, title: "M2", purpose: "probe", kind: "personal", displayName: "Owner"
+    }, owner.secret);
+    assert.equal(created.status, 201, roomId);
+  }
+  // Agent a joins BOTH rooms, so a has an identity_links row in room-x.
+  await admit(origin, "m2-room-x", owner.secret, a, "A");
+  await admit(origin, "m2-room-y", owner.secret, a, "A");
+  await admit(origin, "m2-room-y", owner.secret, b, "B");
+  const cmdX = (secret, type, data) => post(origin, "/api/rooms/m2-room-x/commands",
+    { id: randomUUID(), type, data }, secret);
+  const cmdY = (secret, type, data) => post(origin, "/api/rooms/m2-room-y/commands",
+    { id: randomUUID(), type, data }, secret);
+  const proposed = await jsonOf(await cmdY(a.secret, "bond.propose", { to: b.identityId, scopes: ["peer.dm"] }));
+  assert.equal(proposed.status, 201);
+  const bondId = proposed.body.event.data.bondId;
+  const accepted = await jsonOf(await cmdY(b.secret, "bond.accept", { bondId, scopes: ["peer.dm"] }));
+  assert.equal(accepted.status, 201);
+  // Owner of room-x must NOT be able to revoke a bond formed in room-y, even
+  // though party a has an identity link in room-x (the old fallback).
+  const cross = await jsonOf(await cmdX(owner.secret, "bond.revoke", { bondId }));
+  assert.equal(cross.status, 404);
+  assert.equal(cross.body.error.code, "bond_not_found");
+  // The bond is untouched: a can still DM b in room-y.
+  const still = await jsonOf(await cmdY(a.secret, "dm.posted", {
+    to: b.identityId, messageId: randomUUID(), body: "still bonded"
+  }));
+  assert.equal(still.status, 201);
+  // Owner of the forming room (room_hint) can still revoke.
+  const home = await jsonOf(await cmdY(owner.secret, "bond.revoke", { bondId }));
+  assert.equal(home.status, 201);
+  assert.equal(home.body.event.type, "bond.revoked");
 });

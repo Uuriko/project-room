@@ -97,7 +97,13 @@ export function peerEventVisible(event, { memberId, identityId = null, isOwner =
   if (!event || !isPeerPrivateEvent(event.type)) return true;
   const data = event.data ?? {};
   const parties = [data.agentAId, data.agentBId, data.fromIdentityId, data.toIdentityId].filter(Boolean);
-  const viewerIsParty = (identityId && parties.includes(identityId)) || (memberId && parties.includes(memberId));
+  // M1: party matching is by resolved agent identity only. memberId is a
+  // room-local id in a different namespace — matching it against identity ids
+  // let a member whose id collides with a party's identity id read peer DMs
+  // and bond receipts in room views. memberId stays in the signature for
+  // callers but is intentionally ignored here.
+  void memberId;
+  const viewerIsParty = identityId != null && parties.includes(identityId);
   if (event.type === "dm.posted") return viewerIsParty;
   return viewerIsParty || isOwner === true;
 }
@@ -107,7 +113,9 @@ export function visibleBonds(bonds, { memberId, identityId = null, isOwner = fal
   for (const [id, bond] of Object.entries(bonds ?? {})) {
     if (!bond || typeof bond !== "object") continue;
     const parties = [bond.agentAId, bond.agentBId];
-    const viewerIsParty = (identityId && parties.includes(identityId)) || (memberId && parties.includes(memberId));
+    // M1: same identity-only party match as peerEventVisible.
+    void memberId;
+    const viewerIsParty = identityId != null && parties.includes(identityId);
     if (viewerIsParty || isOwner === true) out[id] = bond;
   }
   return out;
@@ -212,10 +220,10 @@ export class Bonds {
   _canRevoke(roomId, memberId, identityId, row) {
     if (identityId && this._isParty(row, identityId)) return true;
     if (!this._isRoomOwner(roomId, memberId)) return false;
-    if (row.room_hint === roomId) return true;
-    return Boolean(this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id IN (?,?) LIMIT 1"
-    ).get(roomId, row.agent_a, row.agent_b));
+    // M2: owner revoke is scoped to bonds formed in this room (room_hint).
+    // The old identity_links fallback let the owner of room X revoke bonds
+    // formed in any other room, as long as either party had ever joined X.
+    return row.room_hint === roomId;
   }
 
   listForMember(roomId, memberId) {
