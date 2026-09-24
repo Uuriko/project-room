@@ -102,6 +102,7 @@ optional.push("server/room-lifecycle.mjs");
 optional.push("server/room-norms.mjs"); // RC-2026-09-18-043: coordination norms defaults (pure; consumed by the activation-pack route)
 optional.push("server/attachment-schema.mjs");
 optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)
 optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/attention.mjs");
