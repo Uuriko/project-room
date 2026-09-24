@@ -87,7 +87,7 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
     transports: {
       a2a: { description: "Agent-to-agent messaging (src/a2a-transport.mjs)." },
       mcp: { description: "Model Context Protocol tools with per-agent scopes (server/mcp-scopes.mjs)." },
-      webhook: { description: "Signed outbound webhook dispatch (server/webhook-dispatch.mjs + server/agent-plugin-store.mjs). Deliveries are HMAC-signed with a fresh timestamp on every attempt (replay-resistant), retried with exponential backoff up to 5 attempts, then dead-lettered. Read them at /api/agent-webhooks/{subscriptionId}/deliveries (or the identity-wide /api/agent-webhooks/deliveries), redrive dead letters at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive, and measure the delivery rate at /api/agent-webhooks/metrics." },
+      webhook: { description: "Signed outbound webhook dispatch (server/webhook-dispatch.mjs + server/agent-plugin-store.mjs). Deliveries are HMAC-signed with a fresh timestamp on every attempt (replay-resistant), retried with exponential backoff up to 5 attempts, then dead-lettered. Every committed room event fans out to matching subscriptions and flushes fire-and-forget after the request path returns; an agent.wake delivery also fans out to the agent's registered wakeUrl hosts. Read them at /api/agent-webhooks/{subscriptionId}/deliveries (or the identity-wide /api/agent-webhooks/deliveries), redrive dead letters at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive, and measure the delivery rate at /api/agent-webhooks/metrics." },
     },
     directory: {
       url: `${serviceOrigin}/api/agents/directory`,

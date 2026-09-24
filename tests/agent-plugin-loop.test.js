@@ -104,18 +104,18 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
   const secret = "reference-subscription-secret-01";
   const view = subs.subscribe({
     agentId: identityId, url: "https://agents.example/new/hook",
-    events: ["thread.created"], secret,
+    events: ["message.posted"], secret,
   });
   assert.equal(view.agentId, identityId);
-  assert.equal(subs.match(identityId, "thread.created").length, 1);
+  assert.equal(subs.match(identityId, "message.posted").length, 1);
 
   const delivery = subs.buildDelivery(view.subscriptionId,
-    { eventType: "thread.created", data: { threadId: "t-1" } });
+    { eventType: "message.posted", data: { threadId: "t-1" } });
   assert.ok(verifySignature(secret, delivery.signature,
-    { eventType: "thread.created", data: { threadId: "t-1" } }),
+    { eventType: "message.posted", data: { threadId: "t-1" } }),
     "the agent verifies the HMAC signature of the inbound delivery");
   assert.ok(!verifySignature(secret, delivery.signature,
-    { eventType: "thread.created", data: { threadId: "t-2" } }),
+    { eventType: "message.posted", data: { threadId: "t-2" } }),
     "tampered payloads fail verification");
   subs.recordAttempt(delivery.deliveryId, { ok: true });
   const journal = subs.journal(view.subscriptionId);

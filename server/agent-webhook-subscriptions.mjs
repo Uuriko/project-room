@@ -11,7 +11,8 @@
 // Pure module: all state is caller-owned (a Map), no network I/O.
 // Frozen outputs; malformed inputs throw WebhookSubscriptionError (coded).
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { validateWebhookUrl } from "./outbound-webhooks.mjs";
+import { validateWebhookUrl, WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { EVENT_TYPES } from "../src/events.js";
 
 class WebhookSubscriptionError extends Error {
   constructor(code, message) { super(message); this.name = "WebhookSubscriptionError"; this.code = code; }
@@ -21,6 +22,24 @@ const check = (condition, message) => { if (!condition) fail("invalid_subscripti
 
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SUBSCRIPTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+// The canonical dotted event catalog: every room event the subscription
+// surface can filter on, derived from EVENT_TYPES so the taught list can
+// never drift from what the room actually emits, plus the wake-ping event
+// (agent.wake is journaled by the server, not committed as a room event).
+// Wake naming note: an agent.wake delivery for a matching subscription is
+// POSTed both to the subscription URL and — when the agent registered one —
+// to the host's wakeUrl, via the same sender (server/webhook-dispatch.mjs).
+export const EVENT_CATALOG = Object.freeze([...Object.values(EVENT_TYPES).sort(), WAKE_PING_EVENT]);
+const WILDCARD = "*";
+const unknownEvents = events => events.filter(e => e !== WILDCARD && !EVENT_CATALOG.includes(e));
+export function assertKnownEvents(events) {
+  const unknown = unknownEvents(events);
+  if (unknown.length > 0) {
+    fail("invalid_subscription",
+      `unknown event(s): ${unknown.map(e => `"${e}"`).join(", ")}. Known events: ${EVENT_CATALOG.join(", ")} (or "*" for all)`);
+  }
+}
 
 // Create an agent webhook subscription manager. store is a caller-owned Map.
 export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
@@ -56,6 +75,10 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
     check(Array.isArray(events) && events.length > 0 &&
       events.every(e => typeof e === "string" && e.length > 0),
       "events must be a non-empty string array");
+    // Fail fast on unknown event names instead of a 201 that never fires —
+    // the HTTP layer already rejects these; the pure module enforces the
+    // same catalog so programmatic callers get the same error.
+    assertKnownEvents(events);
     check(typeof secret === "string" && secret.length >= 16, "secret must be ≥16 chars");
     const sid = subscriptionId ?? newId();
     check(SUBSCRIPTION_ID_PATTERN.test(sid), "subscriptionId must match [A-Za-z0-9_-]{1,64}");

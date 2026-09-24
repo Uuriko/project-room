@@ -38,6 +38,14 @@ try {
   store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
+// Event-push dispatch: after an event commit journals webhook deliveries,
+// flush them fire-and-forget so the signed POSTs leave without waiting for
+// the cron tick (which stays the restart-safe backstop). The kick never
+// blocks the request path — the drain runs on a microtask and failures
+// stay in the durable retry queue.
+if (store) store.agentPlugin.setDispatchKick(() => {
+  queueMicrotask(() => { store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
+});
 // Track C C13/C14 — growth scheduler state. Declared before the server is
 // created so the C14 read-only HTTP surface can close over live status via
 // a getter evaluated per request (the scheduler itself starts after listen).

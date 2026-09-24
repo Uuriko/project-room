@@ -40,6 +40,12 @@ export class ProjectRoom {
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env) });
+    // Event-push dispatch: same fire-and-forget flush as the node entry
+    // point. The Durable Object may suspend before the microtask drains;
+    // the cron tick remains the restart-safe backstop.
+    this.store.agentPlugin.setDispatchKick(() => {
+      queueMicrotask(() => { this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
+    });
     bootstrapRoom(this.store, env);
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
