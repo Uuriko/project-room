@@ -563,6 +563,27 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, store.identities.revoke(identityId, bearer(req)));
   });
 
+  // ---- Identity link codes (RC-2026-09-24-210) ----
+  //
+  // Proof-of-possession for identityId enrollment
+  // (Uuriko/project-room#942, replacing the #948 interim disable). The
+  // identity HOLDER mints a single-use enrollment code with their OWN pri_
+  // secret — minting IS the holder's consent, and a sponsor's credential
+  // or scoped API key can never mint (ownerAuth rejects rak_ keys, and the
+  // path identity must equal the authenticated identity: one identity can
+  // never mint for another). The sponsor presents the code as
+  // identityLinkCode on agent-connections create; the server verifies hash
+  // + binding + expiry + single-use and consumes it atomically. 10-minute
+  // TTL; only the SHA-256 hash is stored, the raw code is returned once.
+  const LINK_CODE_ROUTE = /^\/api\/identities\/([A-Za-z0-9_-]{1,64})\/link-code$/;
+
+  const mintIdentityLinkCode = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`identity-link-code:${remoteAddress}`, 20);
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only mint link codes for itself");
+    return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req)));
+  });
+
   // ---- Agent public-key registry (integration map slice 9) ----
   //
   // The registry is a room-local, operator-attested Ed25519 key directory:
@@ -704,6 +725,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (secretRotateMatch) { await rotateIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRotateMatch[1]) }); return true; }
     const secretRevokeMatch = method === "POST" ? SECRET_REVOKE_ROUTE.exec(pathname) : null;
     if (secretRevokeMatch) { await revokeIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRevokeMatch[1]) }); return true; }
+    // RC-2026-09-24-210: identity-holder proof-of-possession mint.
+    const linkCodeMatch = method === "POST" ? LINK_CODE_ROUTE.exec(pathname) : null;
+    if (linkCodeMatch) { await mintIdentityLinkCode(req, res, { remoteAddress, identityId: pathId(linkCodeMatch[1]) }); return true; }
     const keyListMatch = method === "GET" ? KEY_LIST_ROUTE.exec(pathname) : null;
     if (keyListMatch) { await listIdentityKeys(req, res, { identityId: pathId(keyListMatch[1]) }); return true; }
     const keyRotateMatch = method === "POST" ? KEY_ROTATE_ROUTE.exec(pathname) : null;
