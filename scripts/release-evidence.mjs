@@ -49,6 +49,14 @@ export function buildManifest({ commit, tapText, porcelain, probes }) {
   };
 }
 
+// A local run with no probes is not a deploy proof, so it can still succeed.
+// Once probes are supplied, only a live label may exit 0.
+export function cliExitCode(manifest, { probesProvided = false } = {}) {
+  if (!manifest || manifest.suite?.label !== "passed" || manifest.candidate !== "clean") return 1;
+  if (probesProvided && manifest.live !== "live") return 1;
+  return 0;
+}
+
 function main(argv) {
   const tapPath = argv[argv.indexOf("--tap") + 1] || null;
   const probesPath = argv.includes("--probes") ? argv[argv.indexOf("--probes") + 1] : null;
@@ -63,7 +71,8 @@ function main(argv) {
   const porcelain = git(["status", "--porcelain"]);
   const manifest = buildManifest({ commit, tapText, porcelain, probes });
   console.log(JSON.stringify(manifest, null, 2));
-  if (manifest.suite.label !== "passed" || manifest.candidate !== "clean") process.exit(1);
+  const code = cliExitCode(manifest, { probesProvided: Boolean(probesPath) });
+  if (code !== 0) process.exit(code);
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) main(process.argv.slice(2));
