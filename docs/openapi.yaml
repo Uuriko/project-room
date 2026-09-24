@@ -7119,6 +7119,33 @@ paths:
       responses:
         '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/jev-shadow:
+    get:
+      summary: Jev-harness shadow-decision review (docs/JEV-GATES.md)
+      description: >-
+        Room owner with `manage_members`, by room Bearer <redacted> or signed-in
+        account session. Read-only listing of Jev-harness shadow decisions
+        (admission gate + receipt-acceptance gate) with scores and
+        contributing signals for hand review. Shadow mode never enforces:
+        this surface only reads the append-only measurement journal.
+        Optional gate (admission|receipt), escalate (true|false, entries
+        flagged for a human look), and limit (1..500, default 50) filters.
+        403 owner_required for anyone else.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: gate
+          in: query
+          schema: { type: string, enum: [admission, receipt] }
+        - name: escalate
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200': { description: "{ roomId, viewerId, evaluatedAt, counts: { admission, receipt, escalate }, entries: [{ id, gate, roomId, identityId, subject, path, score, decision, escalate, signals: [{ key, weight, value, detail }], recordedAt }] }" }
+        '403': { description: owner_required }
+        '422': { description: invalid_jev_shadow_query }
   /api/rooms/{roomId}/mentions:
     get:
       summary: List mention lifecycle rows (#658)

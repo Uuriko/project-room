@@ -29,6 +29,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
+import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -65,6 +66,7 @@ import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
+import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
@@ -679,6 +681,7 @@ export class RoomStore {
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
+    this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
 this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
@@ -868,6 +871,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(spamQuarantineSchema);
+      // Jev-harness shadow-decision journal: purely additive like the
+      // quarantine journal above — IF NOT EXISTS is idempotent, no schema
+      // version bump, outside the writer fence (append-only measurement).
+      this.db.exec(jevShadowSchema);
       // Consent-bound DMs and the public read-only face: purely additive
       // side tables (no events, no projection impact), same pattern.
       this.db.exec(dmConsentSchema);
@@ -3346,6 +3353,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
       try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
+      // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
+      // score the legacy event-sourced work.completed receipt, journal the
+      // would-be verdict, accept anyway. Runs in the same transaction as
+      // the completion; never throws — shadow measurement must not fail
+      // the command that triggered it.
+      if (command.type === T.WORK_COMPLETED) {
+        try { this.jevShadowCompletedReceipt({ roomId, command, incoming, priorItem: room.state.workItems[command.data.workItemId] }); }
+        catch {}
+      }
       // RC-2026-09-19-064: signed webhook fan-out. Every persisted room
       // event is offered to enabled webhook subscriptions whose event
       // filter matches. Journaled in the same transaction as the event
@@ -3361,6 +3377,38 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       return { sequence, event: incoming, duplicate: false };
     });
+  }
+
+  // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
+  // maps the legacy event-sourced work.completed receipt onto the receipt
+  // scorer and journals the would-be verdict. The completion is already
+  // accepted at this point — this is measurement, never enforcement.
+  // Caller wraps in try/catch: never throws into the command path.
+  jevShadowCompletedReceipt({ roomId, command, incoming, priorItem }) {
+    const data = command.data ?? {};
+    // Review-policy mapping: the legacy item carries its verification
+    // requirements, so the policy strength is read from the item rather
+    // than the completion payload.
+    const reviewPolicy = priorItem?.independentVerificationRequired ? "independent_principal"
+      : priorItem?.verifierMemberId ? "distinct_member" : "self_attested";
+    const summary = typeof data.summary === "string" ? data.summary : "";
+    const evidenceUrl = typeof data.evidenceUrl === "string" ? data.evidenceUrl : "";
+    const priorAt = priorItem?.updatedAt ? Date.parse(priorItem.updatedAt) : null;
+    const decision = evaluateReceipt({
+      workId: data.workItemId, ownerId: incoming.actorId,
+      reviewPolicy, attestations: [], // verifications land after completion on the legacy path
+      reviewerIsVerifier: false, deliveryMode: null,
+      // The scorer's artifact heuristic looks for URLs/PR references in
+      // the receipt text; the display-only evidenceUrl is part of the
+      // receipt as presented, so it rides along in the note.
+      note: evidenceUrl ? `${summary} ${evidenceUrl}` : summary,
+      claimedAtMs: Number.isFinite(priorAt) ? priorAt : null, // last mutation before completion (start/block/resolve)
+      doneAtMs: Date.parse(incoming.at), at: this.now(),
+    });
+    this.jevShadow.record({ gate: "receipt", roomId, identityId: incoming.actorId ?? null,
+      subject: data.workItemId, path: "work.completed",
+      score: decision.quality, decision: decision.verdict,
+      escalate: decision.escalate, signals: decision.signals, at: this.now() });
   }
 
   // Wake-on-mention for message.posted: resolve @mentions and the DM target

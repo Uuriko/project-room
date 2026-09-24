@@ -204,7 +204,9 @@ const client = new RoomClient({
     $("#account-rooms-panel").hidden = true;
     $(".connection-bar").hidden = false;
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
-    $("#account-settings-button").hidden = false;
+    const hasAccount = Boolean(accountClient.session?.authenticated && accountClient.session.account);
+    $("#account-settings-button").hidden = hasAccount ? false : true;
+    $("#create-account-button").hidden = hasAccount ? true : false;
     syncSessionMenu();
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
@@ -955,6 +957,32 @@ function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
   try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
 }
+function maybeShowGuestUpgradeHint() {
+  // One-time hint for guests after their first message: surface the
+  // account-upgrade path at the moment they've gotten value.
+  try {
+    if (localStorage.getItem("pr-guest-upgrade-hint-seen") === "1") return;
+  } catch { return; }
+  // Don't show while the account session is still loading: an authenticated
+  // user looks like a guest until restore() completes, and flashing the hint
+  // for them is wrong (it also broke the quiet-design large-text layout check
+  // in CI by squeezing #message-list).
+  if (!accountClient.session) return;
+  const hasAccount = Boolean(accountClient.session.authenticated && accountClient.session.account);
+  if (hasAccount || !state || !session?.member) return;
+  const hint = $("#guest-upgrade-hint");
+  if (!hint) return;
+  $("#guest-upgrade-name").textContent = displayName(session.member.id);
+  hint.hidden = false;
+  try { localStorage.setItem("pr-guest-upgrade-hint-seen", "1"); } catch {}
+}
+$("#guest-upgrade-dismiss")?.addEventListener("click", () => {
+  $("#guest-upgrade-hint").hidden = true;
+});
+$("#guest-upgrade-link")?.addEventListener("click", () => {
+  $("#guest-upgrade-hint").hidden = true;
+  $("#create-account-button")?.click();
+});
 function showRoomGuide() {
   const guide = $("#room-guide");
   if (!guide) return;
@@ -2862,6 +2890,19 @@ const setSessionMenuOpen = open => {
 };
 sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
 $("#clear-session-menu")?.addEventListener("click", () => { setSessionMenuOpen(false); void clearSavedBrowserSession(); });
+$("#create-account-button")?.addEventListener("click", () => {
+  setSessionMenuOpen(false);
+  // Guest upgrade: stash the room so signup returns here. The room session
+  // cookie is left intact — onSignedIn restores it after account creation.
+  if (state?.room?.id) {
+    try { localStorage.setItem("pr-last-room", state.room.id); } catch {}
+    try { localStorage.setItem("pr-last-room-title", state.room.title ?? ""); } catch {}
+  }
+  $("#main").hidden = true;
+  $("#auth-panel").hidden = false;
+  configureAuthPanel(state?.room?.id);
+  $("#auth-title")?.focus?.();
+});
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && sessionMenu.classList.contains("open")) {
     setSessionMenuOpen(false);
@@ -3007,6 +3048,7 @@ $("#message-form").addEventListener("submit", e => {
     $("#also-send-to-channel").checked = false;
     persistDrafts();
     dismissRoomGuide();
+    maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
 // Channel creation and management: any member can create a channel; only the
