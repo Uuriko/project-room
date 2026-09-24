@@ -28,6 +28,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_list_files",
   "room_get_file",
   "room_discard_file",
+  "room_commit_file",
   "room_read_result",
   "room_read_board",
   "room_read_work",
@@ -64,13 +65,10 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
 ]);
 
 // Not on this URL. Inbox attachment bytes stay on the account-session inbox
-// routes, which do not retain bytes. Committing a staged room file onto a
-// message is still separate from room_put_file. Wake delivery stays off this
-// profile. Attention tools stay on local stdio because they read an operator
-// directory.
+// routes, which do not retain bytes. Wake delivery stays off this profile.
+// Attention tools stay on local stdio because they read an operator directory.
 export const HOSTED_MCP_FOLLOW_UPS = Object.freeze([
   "inbox attachment bytes (account-session descriptors only; bytes are not retained)",
-  "committing a staged room file onto a message",
   "wake, heartbeats, and webhook delivery"
 ]);
 
@@ -150,6 +148,7 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "room_list_peer_dms lists this member's peer DM threads. Pass threadId to read one thread, the same reads as GET /api/rooms/:roomId/peer-dms and GET /api/rooms/:roomId/peer-dms/:threadId.",
     "room_read_inbox already lists inbound peerMessages and bondProposals. It does not send a peer DM and it does not return the pair's thread. room_reply is room chat, not dm.posted.",
     "room_put_file, room_list_files, room_get_file, and room_discard_file stage and fetch room file bytes in room_attachments (canonical base64, 1 MiB, visible to current members for 24 hours). They do not post a chat message.",
+    "room_commit_file commits one staged file onto a chat message this identity posted (message_id, state committed). It does not post a new message.",
     "Retry the same command id. Receipts and idempotency stay on that command path. No OAuth. Do not put the secret in tool arguments or chat.",
     "Cursor ~/.cursor/mcp.json: set headers.Authorization to \"Bearer <saved-identity-secret>\" next to url.",
     "Claude Code: add --header \"Authorization: Bearer <saved-identity-secret>\" to the claude mcp add command above.",

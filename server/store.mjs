@@ -702,7 +702,7 @@ export class RoomStore {
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
-    this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard).
+    this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard, commit).
     this.publicFace = new PublicFace(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
