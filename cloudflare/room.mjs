@@ -50,7 +50,9 @@ export class ProjectRoom {
     try { gmailAuth = gmailConfig(env, env.ROOM_ORIGIN, googleAuth); }
     catch (error) { console.warn(`room Gmail disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
+    const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
+      deployment,
       googleAuth,
       gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
