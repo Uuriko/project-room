@@ -26,6 +26,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded PR checks; preserve every main/manual run independently.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   schema-gate:
     runs-on: ubuntu-latest
