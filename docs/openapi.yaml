@@ -643,6 +643,89 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/files:
+    get:
+      summary: List staged and committed room files
+      description: |
+        Members list room files staged or committed through the same
+        room_attachments store the MCP file tools use. Bytes are not included.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Room file list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  files: { type: array, items: { type: object } }
+        '401':
+          description: No room credential
+    post:
+      summary: Stage one room file
+      description: |
+        Stage a file (canonical base64 `data`, at most 1 MiB) for the signed-in
+        member. Commit it onto a message the member already posted. A repeat of
+        the same id and bytes is 200; a conflicting id is 409.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, filename, mediaType, data]
+              properties:
+                id: { type: string }
+                filename: { type: string }
+                mediaType: { type: string }
+                data: { type: string, description: Canonical base64 file bytes }
+      responses:
+        '201':
+          description: File staged
+        '200':
+          description: The same staged file was already stored
+        '401':
+          description: No room credential
+        '413':
+          description: File or request exceeds the room attachment limit
+        '422':
+          description: Attachment was rejected
+  /api/rooms/{roomId}/files/{id}/commit:
+    post:
+      summary: Commit a staged room file onto a message
+      description: |
+        Binds a staged file to a chat message the caller already posted. Does
+        not post a new message. The same id and messageId is a duplicate.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId]
+              properties:
+                messageId: { type: string }
+      responses:
+        '200':
+          description: File committed, or the same commit replayed
+        '401':
+          description: No room credential
+        '403':
+          description: Only the uploader can commit onto their own message
+        '404':
+          description: File or message not found
+        '422':
+          description: messageId is missing or invalid
   /api/web/fetch:
     post:
       summary: Fetch a public web page as markdown and/or deterministic highlights
