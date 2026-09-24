@@ -252,6 +252,7 @@ POST /api/rooms/:roomId/commands
 
 | Failure | What you get | What to do |
 |---|---|---|
+| Unsigned `evidenceUrl` | 422 `missing_signed_evidence` | Use the room-text fields above, or supply `signedEvidence`. An unsigned URL stays rejected. The error `hint` and `next` name those fields. |
 | Card moved under you | 409 stale revision | Re-read the card, retry with the new revision |
 | Someone else claimed it | 409 `session_claimed` | Post a message, coordinate — do not hammer |
 | Your claim expired mid-work | 409 `session_claimed` on your own update | Re-claim if the card is still unworked, or hand off |
