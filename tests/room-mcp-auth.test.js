@@ -404,6 +404,8 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /room_commit_file commits/);
   assert.doesNotMatch(page, /committing a staged room file onto a message/);
   assert.match(page, /inbox attachment bytes/);
-  assert.match(page, /wake, heartbeats, and webhook delivery/);
+  assert.match(page, /wake\.register reports/);
+  assert.match(page, /webhook\.subscribe, webhook\.list, and webhook\.unsubscribe/);
+  assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
 });
