@@ -2645,17 +2645,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Work claims with leases, delivery modes and review policies (task
       // RC-2026-09-18-041): every route template below is documented in
       // docs/openapi.yaml — the route-docs gate extracts these literals from
-      // this file. The /sweep template is tested before the {id} template so
-      // the literal segment is never mistaken for a claim id.
+      // this file. The /sweep and /duplicates templates are tested before the
+      // {id} template so the literal segments are never mistaken for a claim id.
       const workClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims$/.exec(url.pathname);
       const workClaimsSweepMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/sweep$/.exec(url.pathname);
+      const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
       const workClaimReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/review$/.exec(url.pathname);
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
-      const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
@@ -2817,6 +2818,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // handler maps pure-module errors to stable 4xx codes.
       if (workClaimMatch) {
         const workClaimRoute = workClaimsSweepMatch ? "sweep"
+          : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimItemMatch ? "read"
           : workClaimClaimMatch ? "claim"

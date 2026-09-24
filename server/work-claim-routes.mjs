@@ -34,6 +34,7 @@ import {
   createWork, claimWork, updateWork, attestWork, reassignWork, releaseExpired, canCloseWork,
   roomWorkClaimConfig, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
+import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -134,6 +135,34 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     const data = await body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     return json(res, 200, { roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString() });
+  }
+  if (workClaimRoute === "duplicates" && req.method === "GET") {
+    // Linear-style "similar issues": fuzzy match over the room's claim
+    // registry. Read-only — suggests candidates, never merges or closes.
+    const params = url.searchParams;
+    for (const key of params.keys()) {
+      if (!["q", "limit"].includes(key) || params.getAll(key).length !== 1) {
+        invalidInput(reject, "only single q and limit query parameters");
+      }
+    }
+    const q = params.get("q");
+    if (typeof q !== "string" || q.length === 0 || q.length > 512) {
+      invalidInput(reject, "a q query parameter of 1..512 characters");
+    }
+    let limit = 5;
+    if (params.has("limit")) {
+      const raw = params.get("limit");
+      if (!/^[1-9]\d*$/.test(raw) || Number(raw) > 20) invalidInput(reject, "limit as an integer 1..20");
+      limit = Number(raw);
+    }
+    let duplicates;
+    try {
+      duplicates = findDuplicates(registry.list(roomId), q, { limit });
+    } catch (error) {
+      if (error instanceof DuplicateError) reject(422, error.code, error.message);
+      throw error;
+    }
+    return json(res, 200, { roomId, query: q, duplicates });
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = await body(req);
