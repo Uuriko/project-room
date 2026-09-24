@@ -32,6 +32,7 @@ import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 // identity comparison injects the members array on every alias.
 const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
+import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -662,7 +663,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
         rate(`mcp-join:${remoteAddress}`, 60);
         if (req.method === "POST") {
-          const text = await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          // Join traffic stays on the small JSON cap. A live identity secret
+          // may stage one room file (base64, at most attachmentLimits.fileBytes).
+          const fileBody = typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer pri_");
+          const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
         return writeRoomMcpNode(req, res, url);

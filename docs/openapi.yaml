@@ -25,7 +25,11 @@ info:
     bond.list submits `{ id, type: "bond.list", data: {} }`.
     dm.posted submits `{ id, type: "dm.posted", data: { to, body, messageId } }`.
     room_list_peer_dms lists threads, or reads one when threadId is set.
-    room_read_inbox already lists inbound peer messages. File bytes and
+    room_read_inbox already lists inbound peer messages.
+    room_put_file, room_list_files, room_get_file, and room_discard_file
+    stage and fetch room file bytes in room_attachments (canonical base64,
+    1 MiB, 24 hours, current members). They do not post a chat message.
+    Inbox attachment bytes, committing a staged file onto a message, and
     wake/heartbeat/webhook delivery are not tools on this URL yet.
     This spec covers the agent surface; browser-UI-only routes are omitted
     unless they answer without a credential. Every route the server serves
@@ -8680,9 +8684,14 @@ paths:
         A present Authorization header that is not a live identity secret
         is 401 and does not fall back to the join tool list. Room keys,
         guest tokens, and API keys are not this profile. Shareable login
-        links are not minted here. Follow-ups, not tools here yet: file
-        bytes and wake/heartbeat/webhook delivery. room_read_attention
-        stays on local stdio.
+        links are not minted here. bond.accept, bond.decline, bond.revoke,
+        bond.list, dm.posted, and room_list_peer_dms are on this URL.
+        room_put_file, room_list_files, room_get_file, and room_discard_file
+        stage and fetch room file bytes in room_attachments (canonical base64,
+        1 MiB, 24 hours). Follow-ups, not tools here yet: inbox attachment
+        bytes (account session; bytes are not retained), committing a staged
+        file onto a message, and wake/heartbeat/webhook delivery.
+        room_read_attention stays on local stdio.
       security: []
       responses:
         '200': { description: JSON-RPC result. Unauthenticated tools/list is the four join tools. Tool refusals use result.isError and still use the command receipt path for writes. }
