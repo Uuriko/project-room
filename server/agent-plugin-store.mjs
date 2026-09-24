@@ -871,12 +871,21 @@ export class AgentPluginStore {
   }
 
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
-  // subscription whose event filter matches. Called from the room store's
-  // command() inside the same transaction as the event insert, so a
-  // delivery is never journaled without its triggering event.
+  // subscription whose event filter matches. RC-2026-09-24 fanout scope:
+  // delivery is scoped to room membership — only subscriptions whose
+  // agent_id is linked to the event's room (identity_links) are
+  // considered. A subscription that never joined the room hears nothing
+  // from it, the same way the /events and /stream read paths behave.
+  // Called from the room store's command() inside the same transaction as
+  // the event insert, so a delivery is never journaled without its
+  // triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
-      "SELECT subscription_id AS subscriptionId, agent_id AS agentId, events_json AS eventsJson FROM agent_webhook_subs WHERE enabled=1").all();
+      `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
+              s.events_json AS eventsJson, l.member_id AS memberId
+       FROM agent_webhook_subs s
+       JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
+       WHERE s.enabled = 1`).all(roomId);
     let created = 0;
     for (const row of rows) {
       let events = [];
@@ -886,17 +895,13 @@ export class AgentPluginStore {
       // (RC-2026-09-18-012, server/store.mjs). A message.posted event
       // carrying data.toMemberId is a direct message, visible only to its
       // sender and its addressed member — never to third-party push
-      // subscribers. The subscription's agent_id is an identity id; resolve
-      // it to this room's member id via identity_links and apply the same
-      // rule the /events and /stream read paths use. No link means no
-      // delivery (fail closed): an unlinkable subscriber is neither sender
-      // nor addressee. Non-targeted events fan out unchanged.
+      // subscribers. The JOIN above already resolved the subscription's
+      // agent_id to this room's member id; apply the same rule the
+      // /events and /stream read paths use. (Every candidate row has a
+      // link by construction, so an unlinkable subscriber can never
+      // reach this branch as sender or addressee.)
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        const link = this.db.prepare(
-          "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?")
-          .get(roomId, row.agentId);
-        const viewerId = link?.memberId ?? null;
-        if (event.actorId !== viewerId && event.data.toMemberId !== viewerId) continue;
+        if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, data: event.data ?? {}, eventId: event.id, roomId });
@@ -937,6 +942,14 @@ export class AgentPluginStore {
       return "deadLettered";
     }
     if (!sub.enabled) return "skipped";
+    // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
+    // identity lost its room link between fan-out and dispatch is skipped,
+    // not sent. Fail closed at the last moment too. The delivery stays
+    // pending, so a re-linked identity still receives it on a later drain.
+    const link = this.db.prepare(
+      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
+      .get(row.room_id, row.agent_id);
+    if (!link && row.room_id) return "skipped";
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     const signature = signDelivery(sub.secret,

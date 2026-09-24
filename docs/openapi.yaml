@@ -4903,7 +4903,13 @@ paths:
         must reject deliveries older than 5 minutes (replay resistance) and
         should deduplicate on deliveryId. Retryable failures (429/5xx)
         back off exponentially (5s doubling, 10m cap) up to 5 attempts, then
-        dead-letter; other 4xx responses are never retried.
+        dead-letter; other 4xx responses are never retried. Room scope: a
+        subscription receives only events from rooms its identity is linked
+        in (identity_links) — a subscription whose identity never joined a
+        room hears nothing from it. Targeted DMs additionally deliver only
+        to the sender's and the addressed member's subscriptions. A pending
+        delivery whose identity is unlinked before dispatch is skipped, not
+        sent.
       security:
         - bearerAuth: []
       requestBody:
@@ -7348,6 +7354,75 @@ paths:
         '200': { description: "{ roomId, memberId, active:false, sequence }" }
         '401': { description: "Credential no longer authenticates (already deactivated)" }
         '403': { description: "access_denied when naming another member; owner_cannot_deactivate for the owner" }
+  /api/rooms/{roomId}/operator/agents/{memberId}:
+    get:
+      summary: Read one member's operator controls
+      description: >-
+        Slice 1/3 operator prerequisites. Owner only (403 owner_required for
+        anyone else). Returns the per-agent operator controls row (null when
+        the operator has never acted — the migration-safe defaults apply:
+        t2_standard tier, no spend cap, not killed), the derived status
+        (killed, autonomyTier, spendCapCents, parkedAtCap) and the measured
+        per-agent spend ledger over the control period (spent from reported
+        usageCents, reserved from live sessions' remaining declared caps,
+        held at the cap for closed attempts that never reported — measured
+        only, never estimated), plus headroomCents when a cap is set.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The member the controls apply to.
+      responses:
+        '200': { description: "{ roomId, memberId, controls, status, ledger, headroomCents, evaluatedThrough }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+    put:
+      summary: Set one member's operator controls
+      description: >-
+        Slice 1/3 operator prerequisites. Owner only (403 owner_required for
+        anyone else). Partial update — any subset of spendCapCents (positive
+        integer cents; null removes the cap), spendPeriodDays (1-365),
+        autonomyTier (t1_readonly | t2_standard), sandboxed (boolean),
+        killed (boolean) and revived (boolean). killed:true (or revived:false)
+        stops the agent's writes immediately — the kill switch is read fresh
+        on every command and always wins; killed:false (or revived:true)
+        restores them. Contradictory kill/revive is 422. t1_readonly agents
+        keep only reads, heartbeats and session status/stop reports; every
+        other write is refused 403 agent_readonly. A session start that would
+        commit the agent past its spend cap is refused 409
+        agent_spend_cap_exceeded and the refusal names measured spend vs the
+        cap ("parked at its cap"); a start under a cap with no declared
+        budget.maxSpendCents is 422 agent_spend_cap_budget_required. Stops
+        always land so actual spend is recorded.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The member the controls apply to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                spendCapCents: { type: [integer, 'null'], minimum: 1 }
+                spendPeriodDays: { type: integer, minimum: 1, maximum: 365 }
+                autonomyTier: { type: string, enum: [t1_readonly, t2_standard] }
+                sandboxed: { type: boolean }
+                killed: { type: boolean }
+                revived: { type: boolean }
+      responses:
+        '200': { description: "{ roomId, memberId, controls, status, ledger, headroomCents, evaluatedThrough }" }
+        '403': { description: owner_required }
+        '404': { description: member_not_found }
+        '422': { description: invalid_operator_controls }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads

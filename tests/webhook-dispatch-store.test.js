@@ -28,8 +28,17 @@ function freshFixture(t) {
   return f;
 }
 
-function subscribe(t, store, name = "hook-agent", events = ["message.posted"]) {
+function subscribe(t, f, name = "hook-agent", events = ["message.posted"]) {
+  const store = f.store;
   const identity = store.identities.create(name);
+  // RC-2026-09-24 fanout scope: room events only reach room-linked
+  // subscriptions, so the default helper links the identity to "commons"
+  // with the fixture's owner key (issuing a fresh key would revoke it).
+  // Tests for the denial case (unlinked identities hear nothing) create
+  // identities without linking.
+  store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, permissions: [],
+  });
   const { subscription } = store.agentPlugin.subscribeWebhook({
     identityId: identity.identityId, url: "https://hooks.example.test/agent",
     events, secret: SECRET,
@@ -46,7 +55,7 @@ function postMessage(store, keys, body = "hello world") {
 
 test("fan-out journals one pending delivery per matching event, idempotently", t => {
   const f = freshFixture(t);
-  const { identity, subscription } = subscribe(t, f.store);
+  const { identity, subscription } = subscribe(t, f);
   const { event } = postMessage(f.store, f.keys);
   const journal = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.equal(journal.length, 1);
@@ -67,14 +76,14 @@ test("fan-out journals one pending delivery per matching event, idempotently", t
   assert.equal(fanout.deliveries, 0);
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 1);
   // Non-matching events and disabled subscriptions produce nothing.
-  const other = subscribe(t, f.store, "other-agent", ["work.completed"]);
+  const other = subscribe(t, f, "other-agent", ["work.completed"]);
   assert.equal(f.store.agentPlugin.webhookJournal(other.subscription.subscriptionId).length, 0);
   assert.equal(identity.identityId.length > 0, true);
 });
 
 test("drain signs each delivery per the wire contract", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   const captured = [];
   await drain(f.store, {
@@ -112,7 +121,7 @@ test("drain signs each delivery per the wire contract", async t => {
 
 test("drain delivers with a fake fetch and records delivered", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   const summary = await drain(f.store, { fetchImpl: okFetch(200) });
   assert.deepEqual(summary, { processed: 1, delivered: 1, retried: 0, deadLettered: 0, skipped: 0 });
@@ -124,7 +133,7 @@ test("drain delivers with a fake fetch and records delivered", async t => {
 
 test("retryable failures back off and then deliver within 3 attempts", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   let calls = 0;
   const flaky = async () => (++calls <= 2
@@ -157,7 +166,7 @@ test("retryable failures back off and then deliver within 3 attempts", async t =
 
 test("permanent rejections dead-letter immediately without retry", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   const summary = await drain(f.store, { fetchImpl: okFetch(400) });
   assert.deepEqual(summary, { processed: 1, delivered: 0, retried: 0, deadLettered: 1, skipped: 0 });
@@ -169,7 +178,7 @@ test("permanent rejections dead-letter immediately without retry", async t => {
 
 test("drain dead-letters a delivery whose hostname resolves private at dispatch (DNS rebinding)", async t => {
   const f = freshFixture(t);
-  const { identity, subscription } = subscribe(t, f.store);
+  const { identity, subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   // The name passed the subscribe-time checks; at dispatch it resolves to
   // the cloud metadata address. The fetch must never fire.
@@ -188,7 +197,7 @@ test("drain dead-letters a delivery whose hostname resolves private at dispatch 
 
 test("drain never follows a redirect downgrade to an internal http target", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   const seen = [];
   const summary = await drain(f.store, {
@@ -211,7 +220,7 @@ test("drain never follows a redirect downgrade to an internal http target", asyn
 
 test("exhausted retries dead-letter after 5 attempts", async t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store);
+  const { subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   let now = Date.now();
   let summary;
@@ -232,7 +241,7 @@ test("exhausted retries dead-letter after 5 attempts", async t => {
 
 test("network failures are retryable and counted as attempts", async t => {
   const f = freshFixture(t);
-  subscribe(t, f.store);
+  subscribe(t, f);
   postMessage(f.store, f.keys);
   const summary = await drain(f.store, { fetchImpl: errorFetch("connect ECONNREFUSED") });
   assert.equal(summary.retried, 1);
@@ -240,7 +249,7 @@ test("network failures are retryable and counted as attempts", async t => {
 
 test("redrive returns a dead letter to pending with a clean counter", async t => {
   const f = freshFixture(t);
-  const { identity, subscription } = subscribe(t, f.store);
+  const { identity, subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   await drain(f.store, { fetchImpl: okFetch(400) });
   const [dead] = f.store.agentPlugin.deadLettersFor({ identityId: identity.identityId });
@@ -253,7 +262,7 @@ test("redrive returns a dead letter to pending with a clean counter", async t =>
   const summary = await drain(f.store, { fetchImpl: okFetch(200) });
   assert.equal(summary.delivered, 1);
   // Redriving a live delivery is rejected; cross-identity reads 404.
-  const { identity: stranger } = subscribe(t, f.store, "stranger-agent");
+  const { identity: stranger } = subscribe(t, f, "stranger-agent");
   const [entry] = f.store.agentPlugin.webhookJournal(subscription.subscriptionId);
   assert.throws(() => f.store.agentPlugin.redriveDeadLetter({ identityId: identity.identityId, deliveryId: entry.deliveryId }),
     error => error.status === 422 && error.code === "not_dead_letter");
@@ -265,7 +274,7 @@ test("redrive returns a dead letter to pending with a clean counter", async t =>
 
 test("metrics measure the falsifiable claim; zero-sample is honestly null", async t => {
   const f = freshFixture(t);
-  const { identity } = subscribe(t, f.store);
+  const { identity } = subscribe(t, f);
   const empty = f.store.agentPlugin.deliveryMetricsFor({ identityId: identity.identityId });
   assert.equal(empty.totalTerminal, 0);
   assert.equal(empty.deliveryRateWithin3Attempts, null);
@@ -284,7 +293,7 @@ test("metrics measure the falsifiable claim; zero-sample is honestly null", asyn
 
 test("deliveries survive a store restart", async t => {
   const f = createAcceptanceFixture();
-  const { identity, subscription } = subscribe(t, f.store);
+  const { identity, subscription } = subscribe(t, f);
   postMessage(f.store, f.keys);
   await drain(f.store, { fetchImpl: okFetch(500) });
   f.store.close();
@@ -304,8 +313,8 @@ test("deliveries survive a store restart", async t => {
 
 test("delivery log scopes to the calling identity", async t => {
   const f = freshFixture(t);
-  const a = subscribe(t, f.store, "agent-a");
-  const b = subscribe(t, f.store, "agent-b");
+  const a = subscribe(t, f, "agent-a");
+  const b = subscribe(t, f, "agent-b");
   postMessage(f.store, f.keys);
   assert.equal(f.store.agentPlugin.deliveryLogFor({ identityId: a.identity.identityId }).length, 1);
   assert.equal(f.store.agentPlugin.deliveryLogFor({ identityId: b.identity.identityId }).length, 1);
@@ -343,6 +352,10 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
   const identity = f.store.identities.create("http-hook-agent");
   const stranger = f.store.identities.create("http-stranger");
   const secret = identity.secret;
+  // Room scope: the subscriber must be linked to the room to hear its events.
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, permissions: [],
+  });
 
   // Unauthenticated reads are rejected.
   assert.equal((await get(origin, "/api/agent-webhooks/deliveries")).status, 401);
@@ -413,7 +426,7 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
 
 test("fan-out kicks prompt dispatch after the request path returns", t => {
   const f = freshFixture(t);
-  subscribe(t, f.store);
+  subscribe(t, f);
   const kicks = [];
   f.store.agentPlugin.setDispatchKick(() => { kicks.push(Date.now()); });
   postMessage(f.store, f.keys);
@@ -429,7 +442,7 @@ test("fan-out kicks prompt dispatch after the request path returns", t => {
 
 test("fan-out stays quiet when no subscription matches", t => {
   const f = freshFixture(t);
-  const { subscription } = subscribe(t, f.store, "quiet-agent", ["work.completed"]);
+  const { subscription } = subscribe(t, f, "quiet-agent", ["work.completed"]);
   const kicks = [];
   f.store.agentPlugin.setDispatchKick(() => { kicks.push(Date.now()); });
   postMessage(f.store, f.keys);
@@ -439,7 +452,7 @@ test("fan-out stays quiet when no subscription matches", t => {
 
 test("wake pings also POST to registered wakeUrls via the same signed sender", async t => {
   const f = freshFixture(t);
-  const { identity, subscription } = subscribe(t, f.store, "wake-agent", ["agent.wake"]);
+  const { identity, subscription } = subscribe(t, f, "wake-agent", ["agent.wake"]);
   // Two hosts share one wakeUrl; a third has its own. Dedupe by URL.
   f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "h1",
     mode: "wakeable", wakeUrl: "https://host.example.test/wake" });
@@ -484,7 +497,7 @@ test("wake pings also POST to registered wakeUrls via the same signed sender", a
 
 test("deliverWakePing still works with no wakeable hosts and no kick", t => {
   const f = freshFixture(t);
-  const { identity, subscription } = subscribe(t, f.store, "wake-agent", ["agent.wake"]);
+  const { identity, subscription } = subscribe(t, f, "wake-agent", ["agent.wake"]);
   const { deliveries } = f.store.agentPlugin.deliverWakePing({
     identityId: identity.identityId, signal: { signalId: "sig-2", kind: "dm", messageId: "m2" } });
   assert.equal(deliveries.length, 1);
@@ -555,7 +568,7 @@ test("targeted DMs fan out only to sender and addressee subscriptions", async t 
   }
 });
 
-test("non-targeted messages still fan out to every matching subscription", t => {
+test("non-targeted messages fan out only to room-linked subscriptions", t => {
   const f = freshFixture(t);
   const a = subscribeLinked(f, "room-a", "https://hooks.example.test/room-a");
   const b = subscribeLinked(f, "room-b", "https://hooks.example.test/room-b");
@@ -567,5 +580,43 @@ test("non-targeted messages still fan out to every matching subscription", t => 
   postMessage(f.store, f.keys, "hello room");
   assert.equal(journalCount(f.store, a.subscription), 1);
   assert.equal(journalCount(f.store, b.subscription), 1);
-  assert.equal(journalCount(f.store, unlinkedSub), 1);
+  // Room scope (RC-2026-09-24): a subscription whose identity is not linked
+  // to the event's room hears nothing from it — fail closed.
+  assert.equal(journalCount(f.store, unlinkedSub), 0);
+});
+
+test("a subscription linked in room A gets nothing from room B's events", t => {
+  const f = freshFixture(t);
+  const a = subscribeLinked(f, "room-a-agent", "https://hooks.example.test/room-a");
+  // A room-B event fanned out directly: a's identity has no link in
+  // "other-room", so nothing is journaled even though the event filter
+  // matches.
+  const fanout = f.store.agentPlugin.fanoutRoomEvent({
+    roomId: "other-room",
+    event: { id: randomUUID(), type: "message.posted", actorId: "someone-else",
+      data: { messageId: randomUUID(), body: "hello from room b" } },
+  });
+  assert.equal(fanout.deliveries, 0);
+  assert.equal(journalCount(f.store, a.subscription), 0);
+  // Sanity: the same subscription still hears its own room.
+  postMessage(f.store, f.keys, "hello commons");
+  assert.equal(journalCount(f.store, a.subscription), 1);
+});
+
+test("dispatch skips a delivery whose identity was unlinked after fan-out", async t => {
+  const f = freshFixture(t);
+  const { identity, subscription } = subscribe(t, f);
+  postMessage(f.store, f.keys, "hello");
+  assert.equal(journalCount(f.store, subscription), 1);
+  // Unlink between fan-out and dispatch: the drain must not POST.
+  f.store.identities.unlink(f.keys.owner, "commons", identity.identityId);
+  let posted = 0;
+  const summary = await drain(f.store, {
+    fetchImpl: async () => { posted++; return { status: 200, text: async () => "ok" }; },
+  });
+  assert.equal(posted, 0);
+  assert.equal(summary.skipped, 1);
+  assert.equal(summary.delivered, 0);
+  // The delivery stays pending: a re-linked identity still receives it.
+  assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId)[0].state, "pending");
 });
