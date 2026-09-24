@@ -122,3 +122,27 @@ test("claim --bogus still names the unknown flag", () => {
   assert.equal(res.calls.includes("-X POST"), false);
   rmSync(res.dir, { recursive: true, force: true });
 });
+
+test("claim --lane with a space dies before any board read", () => {
+  const res = run([
+    "claim", "--task-id", "RC-2026-09-23-001", "--lane", "Grok Bot",
+    "--files", "x", "--lease", "6h", "--reason", "t",
+  ]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /claim: --lane must match \[A-Za-z0-9_-\]\+/);
+  assert.equal(res.calls, "", res.calls);
+  rmSync(res.dir, { recursive: true, force: true });
+});
+
+test("claim --lane quill-s2 still passes the charset check", () => {
+  const res = run([
+    "claim", "--task-id", "RC-2026-09-24-001", "--lane", "quill-s2",
+    "--files", "scripts/room", "--lease", "6h", "--reason", "inspect only",
+    "--dry-run",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stderr.includes("--lane must match"), false);
+  assert.match(res.stdout, /\[quill-s2\]\[claim\]/);
+  assert.equal(res.calls.includes("-X POST"), false, res.calls);
+  rmSync(res.dir, { recursive: true, force: true });
+});
