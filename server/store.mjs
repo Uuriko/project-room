@@ -717,7 +717,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL, display_name TEXT, avatar_url TEXT, onboarded INTEGER NOT NULL DEFAULT 1, ever_had_room INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE member_accounts (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, account_id TEXT NOT NULL REFERENCES accounts(id), origin TEXT NOT NULL, PRIMARY KEY(room_id,member_id), UNIQUE(room_id,account_id));
       CREATE TABLE account_access_events (account_id TEXT NOT NULL REFERENCES accounts(id), revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), auth_epoch INTEGER NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(account_id,revision));
-      CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, account_id TEXT REFERENCES accounts(id), account_auth_epoch INTEGER);
+      CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, account_id TEXT REFERENCES accounts(id), account_auth_epoch INTEGER, identity_secret_hash TEXT);
       CREATE INDEX credential_member ON credentials(room_id, member_id);
       CREATE INDEX credential_account ON credentials(account_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
@@ -767,13 +767,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
-      // RC-2026-09-23-106: agent browser sessions record the identity secret
-      // hash at creation time. If the secret is rotated or revoked, sessions
-      // minted with the old secret are rejected at authenticate() time.
-      // Additive column; existing rows backfill NULL (no secret binding).
-      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
-        this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
-      }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
@@ -2255,6 +2248,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // the room and member, with the same 8-hour expiry as human sessions.
   createAgentSession(identityId, roomId) {
     return this.transaction(() => {
+      // RC-2026-09-23-106: ensure the identity_secret_hash column exists.
+      // Added lazily (not during migration) to preserve upgrade atomicity:
+      // the v8→v36 rollback test requires a failed migration to leave the
+      // database untouched, and DDL inside the migration transaction is not
+      // reliably rolled back.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
+        this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
+      }
       const link = this.identities.resolveIdentityLink(identityId, roomId);
       if (!link) fail(403, "access_denied", "This agent identity is not linked to that room");
       if (link.member.kind !== "agent") fail(403, "access_denied", "Browser sessions require an agent room member");
