@@ -89,6 +89,14 @@ test("known business refusals have fixed recovery guidance and never echo servic
   }
   assert.equal(workActionRefusal({ status: 503, code: "private-code" }), null);
   assert.equal(workActionRefusal({ status: 422, code: "unrecognized" }), null);
+  const unsigned = workActionRefusal({ status: 422, code: "missing_signed_evidence", message: "PRIVATE SECRET" });
+  assert.equal(unsigned.code, "missing_signed_evidence");
+  assert.equal(unsigned.outcome, "this_attempt_refused");
+  assert.equal(unsigned.reason, "missing_signed_evidence");
+  assert.match(unsigned.message, /evidenceKind room_text/);
+  assert.match(unsigned.hint, /room_text/);
+  assert.ok(unsigned.next.some(step => step.tool === "room_submit_text_result"));
+  assert.equal(JSON.stringify(unsigned).includes("PRIVATE SECRET"), false);
 });
 
 // Issue #6 A4: a room policy can make independent review and/or an owner
