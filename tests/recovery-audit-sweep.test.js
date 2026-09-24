@@ -70,6 +70,7 @@ function sweep() {
   step(T.ROOM_CHARTER_UPDATED, "owner", () => ({ expectedRevision: state().room.charter?.revision ?? 0, purpose: "Coordinate the pilot.", outputs: "An agenda.", boundaries: "No spend.", escalation: "Ask the owner." }));
   step(T.ROOM_POLICY_SET, "owner", { requireIndependentReview: true, requireOwnerDecision: true });
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
+  step(T.ROOM_TRUST_SET, "owner", { enabled: false });
   step(T.NOTIFICATION_PREFERENCES_SET, "producer", { preferences: { mentions: "all" } });
   step(T.MEMBER_STATUS_UPDATED, "producer", { memberId: "producer", message: "Working on the agenda" });
   step(T.CAPABILITIES_ADVERTISED, "producer", { capabilities: ["text"] });
@@ -256,6 +257,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 50,
+  assert.equal(Object.values(T).length, 51,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
