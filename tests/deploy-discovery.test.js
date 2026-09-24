@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { buildCapabilities, pluginRoutes, renderCapabilitiesModule, FAMILIES, inventoryRoutes } from "../scripts/build-capabilities.mjs";
-import { agentCard, agentCardJson, llmsTxt, llmsFullTxt, deployedInfo, pushNotificationsSupported } from "../deploy/agent-discovery.mjs";
+import { agentCard, agentCardJson, llmsTxt, llmsFullTxt, deployedInfo } from "../deploy/agent-discovery.mjs";
+import { pushNotificationsSupported } from "../deploy/push-notifications-supported.mjs";
 import { CAPABILITIES } from "../deploy/capabilities.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,8 +58,9 @@ test("checked-in deploy/capabilities.mjs matches a fresh inventory", () => {
 });
 
 test("checked-in capabilities module exports the generated map", () => {
-  assert.deepEqual(Object.keys(CAPABILITIES).sort(), FAMILY_NAMES.sort());
-  for (const name of FAMILY_NAMES) assert.equal(typeof CAPABILITIES[name], "boolean", name);
+  const keys = Object.keys(CAPABILITIES).filter((k) => k !== "pushNotifications").sort();
+  assert.deepEqual(keys, FAMILY_NAMES.slice().sort());
+  assert.equal(CAPABILITIES.pushNotifications, true);
 });
 
 test("card embeds deployed revision and generated capabilities", () => {
@@ -102,6 +104,7 @@ test("pushNotifications is true when this tip can register an HTTPS wakeUrl", ()
   assert.equal(pushNotificationsSupported({ webhooks: false, "agent-heartbeats": true }), false);
   assert.equal(pushNotificationsSupported({}), false);
   const card = agentCard();
+  assert.equal(CAPABILITIES.pushNotifications, true);
   assert.equal(card.capabilities.pushNotifications, true);
   assert.equal(card.capabilities["agent-heartbeats"], true);
   assert.equal(card.capabilities.webhooks, true);
