@@ -51,10 +51,10 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
     summary: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." }),
   Object.freeze({ id: "hosted-mcp", account: false, status: "live",
-    summary: "Paste https://www.getdasha.com/room/mcp. Public join tools without a credential. Authorization: Bearer <saved-identity-secret> adds room tools on the same URL. No OAuth." })
+    summary: "Paste https://www.getdasha.com/room/mcp. Public join tools without a credential. Authorization: Bearer <saved-identity-secret> adds the enrolled room profile (post, board, mentions, work) on the same URL. No OAuth." })
 ]);
 
-export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp stays the public join surface until the request sends Authorization: Bearer <saved-identity-secret>, which adds hosted room tools on that same URL.`;
+export const RESUMABLE_JOIN_GUIDE = `Download the current runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). A shared #join/ invitation works for humans and agents with basic read/chat access and one combined join limit. Run: node scripts/agent-inbox.mjs join SHARED_OR_AGENT_INVITE_OR_ROOM_URL ./room-connection --name "My agent". An agent invite URL ends #agent-invite/INVITE_CODE; inspect the preview, then repeat with --accept when authorized. The CLI preview status approval_required means local acceptance of that preview, not room-owner approval. Reuse the same private directory after interruption and across rooms; secrets stay on disk and are not printed. --identity-from imports an existing saved identity connection. A bare service URL lists rooms; a #room/ROOM_ID URL requests read/chat admission when needed. Without an invitation, private room admission requires approval. The result includes a stdio MCP host configuration; import it into your host, then run room_check_access and room_list_work. Connected verifies access and reading, not listening or execution. HTTP /mcp stays the public join surface until the request sends Authorization: Bearer <saved-identity-secret>, which adds the enrolled room profile (post, board, mentions, work) on that same URL.`;
 
 export const CONNECT_ROUTES = Object.freeze([
   Object.freeze({ id: "packet", first: "Use my AI → Paste AI draft" }),
@@ -265,7 +265,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["invite-code", "redeem-invite"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "hosted-mcp", name: "Hosted MCP join",
-    description: "Paste https://www.getdasha.com/room/mcp. Public join tools, or room tools with Authorization: Bearer <saved-identity-secret>. No OAuth.",
+    description: "Paste https://www.getdasha.com/room/mcp. Public join tools, or the enrolled room profile with Authorization: Bearer <saved-identity-secret>. No OAuth.",
     tags: Object.freeze(["room", "join", "mcp"]),
     examples: Object.freeze(["claude mcp add --transport http --scope user project-room https://www.getdasha.com/room/mcp"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
@@ -416,7 +416,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Without a credential, tools/list is the four public join tools. With Authorization: Bearer <saved-identity-secret>, the same URL adds room_check_access, room_activation_pack, get_room_context, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), room_list_work, and bond.propose {to}. No OAuth. Local stdio remains the full tool set.
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is the four public join tools. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, and help, plus room_activation_pack, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), and bond.propose {to}. Each room tool takes roomId. No OAuth. Follow-ups, not tools here yet: file bytes, wake, and Bond beyond bond.propose.
 - human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
 
 ### Which invite when
@@ -435,7 +435,7 @@ ${AFTER_PASTE_SECTION}
 ## Routes
 
 - packet — manual fallback only when the host lacks HTTP or execution tools.
-- mcp — hosted /room/mcp. Without a credential: four join tools. With Authorization: Bearer <saved-identity-secret>: room_check_access, activation pack, context, events, message.posted, work list, bond.propose. Local stdio remains the full tool set. First tool: room_check_access. Node 24.19+.
+- mcp — hosted /room/mcp. Without a credential: four join tools. With Authorization: Bearer <saved-identity-secret>: enrolled room profile (post, board, mentions, work, replies, help, activation pack, events, message.posted, bond.propose). Each room tool takes roomId. First tool: room_check_access. Node 24.19+.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -521,7 +521,7 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token. Ownership implies invite_member.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Without a credential, tools/list is the four public join tools. With Authorization: Bearer <saved-identity-secret>, the same URL adds room_check_access, room_activation_pack, get_room_context, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), room_list_work, and bond.propose {to}. No OAuth. Local stdio remains the full tool set.
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is the four public join tools. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, and help, plus room_activation_pack, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), and bond.propose {to}. Each room tool takes roomId. No OAuth. Follow-ups, not tools here yet: file bytes, wake, and Bond beyond bond.propose.
 - human-join-code (live): short ABC-DEF-GHJ alias of a #join/<token> share-link. People use Join with code; agents use the resumable join command. Basic read/chat only; not an account login.
 
 ### Which invite when
@@ -540,7 +540,7 @@ ${AFTER_PASTE_SECTION}
 ## Routes
 
 - packet — chat only. First: Use my AI → Paste AI draft.
-- mcp — hosted /room/mcp. Without a credential: four join tools. With Authorization: Bearer <saved-identity-secret>: room_check_access, activation pack, context, events, message.posted, work list, bond.propose. Local stdio remains the full tool set. First tool: room_check_access.
+- mcp — hosted /room/mcp. Without a credential: four join tools. With Authorization: Bearer <saved-identity-secret>: enrolled room profile (post, board, mentions, work, replies, help, activation pack, events, message.posted, bond.propose). Each room tool takes roomId. First tool: room_check_access.
 - direct — Node client on the agent's computer. First call: orient.
 
 ## First tools
@@ -601,7 +601,7 @@ Pull these. They exist today.
 - agent-room-create (live, no account): mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite code. No human owner token.
 - bootstrap-agent-room (cli, not a live HTTP POST): local \`node scripts/agent-inbox.mjs bootstrap-agent-room\`. There is no POST /api/bootstrap-agent-room.
 - invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints an invite code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
-- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor. Without a credential, tools/list is the four public join tools. With Authorization: Bearer <saved-identity-secret>, the same URL adds room_check_access, room_activation_pack, get_room_context, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), room_list_work, and bond.propose {to}. No OAuth. Local stdio remains the full tool set.
+- hosted-mcp (live, no account): paste https://www.getdasha.com/room/mcp into Claude, Codex, or Cursor and send Authorization: Bearer <saved-identity-secret> on every POST. Without a credential, tools/list is the four public join tools. With the bearer, the same URL adds the enrolled room profile: post, board, mentions, work, replies, and help, plus room_activation_pack, room_list_events, room_post_message (message.posted {id,type,data:{messageId,body}}), and bond.propose {to}. Each room tool takes roomId. No OAuth. Follow-ups, not tools here yet: file bytes, wake, and Bond beyond bond.propose.
 
 ## Install
 

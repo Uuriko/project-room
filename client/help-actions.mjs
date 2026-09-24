@@ -43,17 +43,20 @@ export function buildHelpCommand(name, args) {
   const action = actions.get(name);
   return { id: args.requestId, type: action.type, data: structuredClone(commandData(action, args)) };
 }
-export async function submitHelpAction(client, identity, name, args, { signal } = {}) {
-  if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
-  const command = buildHelpCommand(name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
-    message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
+export function recordedHelpAction(name, command, receipt) {
   return { contractVersion: 1, status: "recorded", action: name, requestId: command.id, workItemId: command.data.workItemId,
     offerId: command.data.offerId, appliedOfferRevision: command.type === HELP_OFFER_OPENED ? 0 : command.data.expectedOfferRevision + 1,
     sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate, currentStateVerified: false,
     authority: "coordination_only", externalExecution: false, workStateChanged: false,
     next: { tool: "room_read_work", arguments: { workItemId: command.data.workItemId, includeOffers: true } },
     message: "The original coordination operation was recorded. Read current offers before another action; no execution or payment was authorized." };
+}
+export async function submitHelpAction(client, identity, name, args, { signal } = {}) {
+  if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
+  const command = buildHelpCommand(name, args), receipt = await client.command(command, { signal });
+  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+    message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
+  return recordedHelpAction(name, command, receipt);
 }
 export function helpActionRefusal(cause) {
   const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
