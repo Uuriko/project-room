@@ -250,3 +250,157 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const missingRoom = await call(origin, "room_read_inbox", {}, owner.secret);
   assert.equal(missingRoom.body.error.code, -32602);
 });
+
+const BOND_DM_TOOLS = ["bond.accept", "bond.decline", "bond.revoke", "bond.list", "dm.posted", "room_list_peer_dms"];
+
+test("bond accept decline revoke and peer DM require the identity bearer and call through", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Bond owner");
+  const peer = store.identities.create("Bond peer");
+  const stranger = store.identities.create("Bond stranger");
+  const created = rooms.create(owner.secret, {
+    roomId: "bond-den", title: "Bond den", purpose: "Hosted bond tools", kind: "personal", displayName: "Bond owner"
+  });
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: peer.identityId, displayName: "Bond peer", permissions: []
+  });
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: stranger.identityId, displayName: "Bond stranger", permissions: []
+  });
+
+  const openList = await rpc(origin, "tools/list");
+  const openNames = (await openList.json()).result.tools.map(tool => tool.name);
+  for (const name of BOND_DM_TOOLS) assert.equal(openNames.includes(name), false, name);
+
+  for (const name of BOND_DM_TOOLS) {
+    assert.equal(HOSTED_ROOM_MCP_TOOLS.includes(name), true, name);
+    const open = await call(origin, name, { roomId: created.roomId, id: "nope", bondId: "bond-x", to: peer.identityId, body: "no", messageId: "m" });
+    assert.equal(open.status, 200, name);
+    assert.equal(open.body.error.code, -32602, name);
+    const bad = await call(origin, name, { roomId: created.roomId }, "pri_" + "z".repeat(43));
+    assert.equal(bad.status, 401, name);
+    assert.equal(bad.body.result, undefined, name);
+    const roomKey = store.issueAccessKey(created.roomId, created.ownerMemberId);
+    const keyed = await call(origin, name, { roomId: created.roomId, id: "key", bondId: "bond-x" }, roomKey);
+    assert.equal(keyed.status, 401, name);
+    assert.equal(keyed.body.result, undefined, name);
+  }
+
+  const proposed = await call(origin, "bond.propose", {
+    roomId: created.roomId, id: "bond-propose-1", to: peer.identityId
+  }, owner.secret);
+  const firstBond = proposed.value.event.data.bondId;
+  const selfAccept = await call(origin, "bond.accept", {
+    roomId: created.roomId, id: "bond-accept-self", bondId: firstBond
+  }, owner.secret);
+  assert.equal(selfAccept.body.result.isError, true);
+  assert.equal(selfAccept.value.code, "bond_not_recipient");
+
+  const declined = await call(origin, "bond.decline", {
+    roomId: created.roomId, id: "bond-decline-1", bondId: firstBond
+  }, peer.secret);
+  assert.equal(declined.value.status, "declined");
+  assert.equal(declined.value.command.type, "bond.decline");
+  assert.deepEqual(declined.value.command.data, { bondId: firstBond });
+  assert.equal(declined.value.event.type, "bond.revoked");
+  assert.equal(declined.value.event.data.reason, "declined");
+  const declineRetry = await call(origin, "bond.decline", {
+    roomId: created.roomId, id: "bond-decline-1", bondId: firstBond
+  }, peer.secret);
+  assert.equal(declineRetry.value.duplicate, true);
+  assert.equal(declineRetry.value.sequence, declined.value.sequence);
+
+  const again = await call(origin, "bond.propose", {
+    roomId: created.roomId, id: "bond-propose-2", to: peer.identityId
+  }, owner.secret);
+  const bondId = again.value.event.data.bondId;
+  assert.notEqual(bondId, firstBond);
+  const shaped = await call(origin, "bond.accept", {
+    roomId: created.roomId, id: "bond-accept-1", bondId, scopes: ["peer.dm"], note: "no"
+  }, peer.secret);
+  assert.equal(shaped.body.error.code, -32602);
+
+  const accepted = await call(origin, "bond.accept", {
+    roomId: created.roomId, id: "bond-accept-1", bondId, scopes: ["peer.dm"]
+  }, peer.secret);
+  assert.equal(accepted.value.status, "accepted");
+  assert.equal(accepted.value.command.type, "bond.accept");
+  assert.deepEqual(accepted.value.command.data, { bondId, scopes: ["peer.dm"] });
+  assert.equal(accepted.value.event.type, "bond.activated");
+  assert.deepEqual(accepted.value.event.data.acceptedScopes, ["peer.dm"]);
+  const acceptRetry = await call(origin, "bond.accept", {
+    roomId: created.roomId, id: "bond-accept-1", bondId, scopes: ["peer.dm"]
+  }, peer.secret);
+  assert.equal(acceptRetry.value.status, "duplicate");
+  assert.equal(acceptRetry.value.duplicate, true);
+  assert.equal(acceptRetry.value.sequence, accepted.value.sequence);
+
+  const listed = await call(origin, "bond.list", { roomId: created.roomId, id: "bond-list-1" }, peer.secret);
+  assert.equal(listed.value.status, "listed");
+  assert.equal(listed.value.command.type, "bond.list");
+  assert.deepEqual(listed.value.command.data, {});
+  assert.equal(listed.value.event, null);
+  assert.equal(listed.value.bonds.find(bond => bond.id === bondId).state, "active");
+
+  const sent = await call(origin, "dm.posted", {
+    roomId: created.roomId, id: "dm-1", to: peer.identityId, messageId: "dm-msg-1", body: "peer hello"
+  }, owner.secret);
+  assert.equal(sent.value.status, "posted");
+  assert.equal(sent.value.command.type, "dm.posted");
+  assert.deepEqual(sent.value.command.data, { to: peer.identityId, body: "peer hello", messageId: "dm-msg-1" });
+  assert.equal(sent.value.event.type, "dm.posted");
+  assert.equal(sent.value.event.data.body, "peer hello");
+  const dmRetry = await call(origin, "dm.posted", {
+    roomId: created.roomId, id: "dm-1", to: peer.identityId, messageId: "dm-msg-1", body: "peer hello"
+  }, owner.secret);
+  assert.equal(dmRetry.value.duplicate, true);
+  assert.equal(dmRetry.value.sequence, sent.value.sequence);
+  const dmConflict = await call(origin, "dm.posted", {
+    roomId: created.roomId, id: "dm-1", to: peer.identityId, messageId: "dm-msg-1", body: "different"
+  }, owner.secret);
+  assert.equal(dmConflict.body.result.isError, true);
+  assert.equal(dmConflict.value.code, "idempotency_conflict");
+
+  const inbox = await call(origin, "room_read_inbox", { roomId: created.roomId }, peer.secret);
+  assert.equal(inbox.value.peerMessages[0].body, "peer hello");
+  assert.equal(inbox.value.peerMessages[0].fromIdentityId, owner.identityId);
+
+  const threads = await call(origin, "room_list_peer_dms", { roomId: created.roomId }, peer.secret);
+  assert.equal(threads.value.threads.length, 1);
+  const threadId = threads.value.threads[0].threadId;
+  const history = await call(origin, "room_list_peer_dms", { roomId: created.roomId, threadId }, owner.secret);
+  assert.equal(history.value.threadId, threadId);
+  assert.equal(history.value.messages[0].body, "peer hello");
+  assert.equal(history.value.untrusted, true);
+
+  const hiddenList = await call(origin, "room_list_peer_dms", { roomId: created.roomId }, stranger.secret);
+  assert.deepEqual(hiddenList.value.threads, []);
+  const hiddenThread = await call(origin, "room_list_peer_dms", { roomId: created.roomId, threadId }, stranger.secret);
+  assert.equal(hiddenThread.body.result.isError, true);
+  assert.equal(hiddenThread.value.code, "thread_not_found");
+  assert.equal(JSON.stringify(hiddenThread.body).includes("peer hello"), false);
+  assert.equal(JSON.stringify(history.body).includes(owner.secret), false);
+
+  const revoked = await call(origin, "bond.revoke", {
+    roomId: created.roomId, id: "bond-revoke-1", bondId
+  }, owner.secret);
+  assert.equal(revoked.value.status, "revoked");
+  assert.equal(revoked.value.command.type, "bond.revoke");
+  assert.equal(revoked.value.event.type, "bond.revoked");
+  const after = await call(origin, "dm.posted", {
+    roomId: created.roomId, id: "dm-2", to: owner.identityId, messageId: "dm-msg-2", body: "too late"
+  }, peer.secret);
+  assert.equal(after.body.result.isError, true);
+  assert.equal(after.value.code, "bond_revoked");
+  const still = await call(origin, "room_list_peer_dms", { roomId: created.roomId, threadId }, peer.secret);
+  assert.equal(still.value.messages[0].body, "peer hello");
+  assert.equal(JSON.stringify(still.body).includes("too late"), false);
+
+  const page = await (await fetch(`${origin}/room/mcp`)).text();
+  assert.match(page, /bond\.accept submits/);
+  assert.match(page, /dm\.posted submits/);
+  assert.match(page, /room_list_peer_dms lists/);
+  assert.match(page, /file bytes and inbox attachments/);
+  assert.match(page, /wake, heartbeats, and webhook delivery/);
+  assert.doesNotMatch(page, /Bond beyond/);
+});
