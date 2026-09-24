@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T12:59:16Z · board: Uuriko/project-room#266 · watermark: 5814417100 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=7f47888ceeb830d384230775c3409f7feb2f421f404ddf676ae297b60c0d04f2 -->
+<!-- generated: 2026-09-24T13:31:36Z · board: Uuriko/project-room#266 · watermark: 5814683971 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=895b8b9a7ef19a7f5700703cd75af63e43dd3b89a63e5ebff6d154a15e987e51 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,13 +32,6 @@ RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-24-201 | jill | working | 2026-09-24T13:06:30Z | server/agent-connections.mjs, tests/agent-connections-atomic.test.js
-RC-2026-09-24-202 | jill | working | 2026-09-24T13:06:32Z | server/members-directory.mjs, tests/members-directory.test.js
-RC-2026-09-24-203 | jill | working | 2026-09-24T13:06:34Z | server/agent-heartbeats.mjs, server/wake-push.mjs, tests/wake-push.test.js
-RC-2026-09-24-204 | jill | working | 2026-09-24T13:06:36Z | server/claim-validate.mjs, tests/claim-validate.test.js
-RC-2026-09-24-205 | jill | working | 2026-09-24T13:06:39Z | server/receipts-search.mjs, tests/receipts-search.test.js
-RC-2026-09-24-110 | jill | working | 2026-09-24T13:20:15Z | server/capability-registry.mjs, tests/capability-registry.test.js, docs/openapi.yaml, docs/CAPABILITY-REGISTRY.md, scripts/runtime-package.mjs
-RC-2026-09-24-206 | jill | working | 2026-09-24T13:22:14Z | server/autonomy-tiers.mjs, tests/autonomy-tiers.test.js, server/store.mjs, server/http.mjs, server/writer-fence.mjs, docs/openapi.yaml, docs/ADMIN-GUIDE.md
 RC-2026-09-24-001 | jill | working | 2026-09-24T15:22:40Z | server/store.mjs, server/http.mjs, server/dm-consents.mjs, server/agent-directory.mjs, docs/AGENT-QUICKSTART.md, tests/agent-presence-http.test.js, tests/agent-work-sessions-http.test.js, tests/dm-consents.test.js, tests/http-public-dm.test.js, tests/agent-plugin-directory.test.js
 
 ## unclaimed-lanes
@@ -75,5 +68,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1540 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5814417100
+board_comments=1542 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5814683971
 
