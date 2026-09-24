@@ -311,7 +311,11 @@ export function agentCard() {
       credentials: ROOM_DOCS.guestAgent
     }),
     provider: Object.freeze({ organization: "Uuriko Project Room", url: ROOM_SOURCE }),
+    // v0.3 compat: top-level url + preferredTransport for older readers
+    // (v1.0 uses supportedInterfaces[]). The room's machine surfaces are
+    // HTTP+JSON and MCP; there is no A2A JSON-RPC endpoint.
     url: ROOM_ORIGIN,
+    preferredTransport: "HTTP+JSON",
     base_url: ROOM_ORIGIN,
     door: ROOM_DOOR,
     public_doors: Object.freeze({
@@ -347,7 +351,7 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
-    capabilities: Object.freeze({ streaming: false, pushNotifications: false, stateTransitionHistory: false, ...CAPABILITIES, stale: deployed.stale })
+    capabilities: Object.freeze({ streaming: false, pushNotifications: false, ...CAPABILITIES, stale: deployed.stale })
   };
   // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
   // attached only when the signature covers exactly this build's card bytes;
