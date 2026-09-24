@@ -107,6 +107,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       ]
     };
   }
+  // events?afterSequence= used to be ignored, which restarted catch-up at 0.
+  if (reasonCode === "invalid_event_cursor") {
+    const eventsPath = roomId ? `/api/rooms/${roomId}/events?after=0&limit=100` : "/api/session";
+    return {
+      status: "action_required",
+      reason: "invalid_event_cursor",
+      hint: "Use the query parameter after, not afterSequence. You are not caught up.",
+      next: [
+        path(eventsPath),
+        command("Retry GET events with after set to the last sequence you handled. Do not send afterSequence.")
+      ]
+    };
+  }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
       const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
