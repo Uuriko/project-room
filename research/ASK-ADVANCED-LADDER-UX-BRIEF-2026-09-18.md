@@ -54,7 +54,6 @@ and later `#ask-cmdk`. The empty canvas stays `What.` + ≤4 starters
 Paths this fold owns:
 
 - `research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md` (this file)
-- `tests/ask-advanced-ladder-ux-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md`
 
 No `client/` · `cloudflare/` · `server/` · `src/` · Worker · wrangler

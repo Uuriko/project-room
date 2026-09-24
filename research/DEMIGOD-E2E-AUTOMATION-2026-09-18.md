@@ -50,7 +50,6 @@ packet → brief → status, with outbound sends **blocked**. Measure
 Paths this fold owns:
 
 - `research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md` (this file)
-- `tests/demigod-e2e-automation-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` in a
   **Demigod / DIE matching** section (create it; do not bury next
   to Ask T0xx)

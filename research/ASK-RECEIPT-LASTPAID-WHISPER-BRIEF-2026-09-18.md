@@ -104,7 +104,6 @@ T045 still owns the fold. T087 owns the **Job whisper** and the
 Paths this fold owns:
 
 - `research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md` (this file)
-- `tests/ask-receipt-lastpaid-whisper-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` **next to
   the T045 receipt rows** (not the T085 markdown rows, not the T084
   New-chat rows, not the T086 export-format rows)
