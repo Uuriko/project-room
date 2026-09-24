@@ -2530,6 +2530,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           throw error;
         }
       }
+      // Room-side knowledge router (RC-2026-09-24-310): POST /api/web/research.
+      // An agent asks a question; the room plans which sources to consult (its own
+      // fetch memory, local docs corpus, explicit URLs, env-configured provider)
+      // and returns evidence with provenance receipts. Same auth posture as
+      // /api/web/fetch: owner + full members, #798 guest gate. Planning
+      // (planOnly) is free; execution bills research quota, and fetch-leg URLs
+      // additionally bill web-fetch quota (credit semantics, Alexandria-style).
+      if (url.pathname === "/api/web/research") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        const researchIsBearer = Boolean(req.headers.authorization);
+        const researchToken = bearer(req) ?? cookie(req, roomCookieName);
+        const researchAuth = store.authenticate(researchToken, undefined, expectedBinding(req), { allowAccountSession: false });
+        if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        protectWrite(req, researchAuth, researchIsBearer);
+        rate(`write:${researchAuth.credentialHash}`, 60);
+        const researchData = await body(req);
+        try {
+          return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
+        } catch (error) {
+          if (error instanceof WebFetchError) {
+            const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
+            if (error.code === "rate_limited") {
+              res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
+              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+            }
+            return json(res, error.status, payload);
+          }
+          throw error;
+        }
+      }
       // Synchronous claim-block validation (RC-2026-09-24-204):
       // POST /api/claims/validate. Agents validate the ```room-claim block
       // they intend to post on the #266 coordination board BEFORE posting —

@@ -206,6 +206,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // code path to them, and the module verifies its own schema on open.
   "web_fetch_cache",
   "web_fetch_log",
+  // web_research_log (knowledge router, RC-2026-09-24-310): per-request
+  // research journal (question hash, never the question). Purely additive and
+  // intentionally NOT fenced — older writers have no code path to it, and the
+  // module verifies its own schema on open.
+  "web_research_log",
   // thread_mutes (per-thread mutes): one row per (room, member, thread
   // root). Purely additive and intentionally NOT fenced — older writers have
   // no code path to it, and muting is a private read-time filter, never a

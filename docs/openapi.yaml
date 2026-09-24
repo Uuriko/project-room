@@ -749,6 +749,99 @@ paths:
           description: The page could not be fetched (fetch_failed)
         '504':
           description: Fetching exceeded the 15s limit (timeout)
+  /api/web/research:
+    post:
+      summary: Ask a question; the room routes it to the best sources and returns evidence with provenance
+      description: |
+        Room-side knowledge router (mined from Firecrawl's Alexandria launch). An agent
+        asks a natural-language question; the room plans which sources to consult and
+        returns ranked evidence, every item carrying a provenance receipt
+        (source, url, final_url, retrieved_at, content_sha256, bytes, cache,
+        request_id) so facts are citable. Sources: `room` (the room's own fetch
+        history — keyword search over web_fetch_cache), `docs` (local markdown
+        corpus: docs/, README.md, CHANGELOG.md; Node only), `fetch` (explicit
+        `urls[]` through the SSRF-hardened web-fetch service), `provider`
+        (env-pluggable external knowledge, e.g. Alexandria via ALEXANDRIA_API_KEY;
+        reported as unconfigured when no key is set — never an error).
+        Plan-first disclosure: `planOnly: true` returns the plan with per-source
+        cost notes without spending quota or fetching (planning is free, execution
+        costs — the Alexandria pattern). Otherwise the plan executes: research
+        quota is 50/day per member and 500/day per room; fetch-leg URLs
+        additionally bill web-fetch quota. One failing source or URL degrades to
+        a note in `fetch_errors`/`provider_errors`, never a 500. Typed errors:
+        `invalid_research_input`, `rate_limited`, `provider_failed`. The question
+        itself is never journaled — only its sha256.
+        Auth: owner + full members; guests refused (guest_scope_denied), like
+        /api/web/fetch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, description: Natural-language question (1-2000 chars) }
+                sources: { type: array, items: { type: string, enum: [room, docs, fetch, provider] }, description: Sources to consult (default all four) }
+                urls: { type: array, items: { type: string }, description: Explicit URLs for the fetch leg (max 10) }
+                maxEvidence: { type: integer, description: Max evidence items (1-20, default 5) }
+                maxAgeMs: { type: integer, description: Freshness passthrough for the fetch leg }
+                planOnly: { type: boolean, description: Return the plan without executing (free, no quota spent) }
+                tags: { type: array, items: { type: string }, description: Journal tags (max 20) }
+      responses:
+        '200':
+          description: The plan and ranked evidence with provenance receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source: { type: string }
+                        status: { type: string, enum: [planned, skipped, unconfigured] }
+                        reason: { type: string }
+                        cost: { type: string }
+                  evidence:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank: { type: integer }
+                        source: { type: string, enum: [room, docs, fetch, provider] }
+                        id: { type: string, description: Typed stable id, e.g. room:ab12cd34, doc:docs/x.md, fetch:ab12cd34, alexandria:ab12cd34 }
+                        url: { type: string, nullable: true }
+                        title: { type: string }
+                        excerpt: { type: string, description: Matched passages in markdown }
+                        provenance:
+                          type: object
+                          properties:
+                            source: { type: string }
+                            url: { type: string, nullable: true }
+                            final_url: { type: string, nullable: true }
+                            retrieved_at: { type: number }
+                            content_sha256: { type: string }
+                            bytes: { type: number }
+                            cache: { type: object, nullable: true, properties: { status: { type: string }, age_ms: { type: number } } }
+                            request_id: { type: string }
+                  fetch_errors: { type: array, items: { type: object } }
+                  provider_errors: { type: array, items: { type: object } }
+                  provider_status: { type: object }
+                  request_id: { type: string }
+                  plan_only: { type: boolean }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Guest members are refused (guest_scope_denied)
+        '405':
+          description: Only POST is served on this route
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Daily research quota exceeded (rate_limited); Retry-After header + retryAfterMs/resetAt body
   /api/claims/validate:
     post:
       summary: Synchronously validate a coordination-board claim block before posting

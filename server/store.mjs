@@ -61,6 +61,7 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
+import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -698,6 +699,7 @@ export class RoomStore {
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.guestInvites = new GuestInvites(this);
     this.webFetch = new WebFetch(this);
+    this.webResearch = new WebResearch(this); // RC-2026-09-24-310: knowledge router (additive)
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
     this.dmConsents = new DmConsents(this);
@@ -767,6 +769,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
+        this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
@@ -941,6 +944,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
       migrateWebFetchLogColumns(this.db);
+      // RC-2026-09-24-310: web-research per-request journal — purely additive
+      // side table (no events, no projection impact), same pattern.
+      this.db.exec(webResearchSchema);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
