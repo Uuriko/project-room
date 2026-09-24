@@ -5,9 +5,10 @@
 // the caller. There is no new permission rule.
 //
 // GitHub access reuses a token already present in the environment
-// (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. When a
-// token is required and missing, callers get 503 github_unconfigured. The
-// token is never logged and never copied onto an item or a room event.
+// (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. A 401,
+// or a 403 that is not a rate limit when no token is set, is 503
+// github_unconfigured. A 404 is pr_not_found and is not stored. The token is
+// never logged and never copied onto an item or a room event.
 //
 // There is no inbound GitHub webhook receiver in this service. Refresh runs
 // on the existing scheduled tick (cloudflare/room.mjs scheduled), which is
@@ -190,16 +191,17 @@ async function githubJson(fetchImpl, url, token, { missingOk = false } = {}) {
     fail(502, "github_unavailable", "GitHub could not be reached");
   }
   if (response.status === 404 && missingOk) return null;
-  if (!token && (response.status === 401 || response.status === 403 || response.status === 404)) {
-    // A rate-limit 403 is not a missing token. The GitHub message is not
-    // copied onto the error and is not logged.
-    if (response.status === 403 && /rate limit/i.test(await responseMessage(response))) {
-      fail(503, "github_unavailable", "GitHub refused the pull request read");
-    }
-    fail(503, "github_unconfigured", "GitHub access is not configured. A token is required to read this pull request and none is set.");
+  // A rate-limit 403 is not a missing token. The GitHub message is not
+  // copied onto the error and is not logged. 404 is a missing pull request
+  // even when no token is configured; private-repo hiding uses the same
+  // status, and a real auth failure is 401 or a non-limit 403.
+  if (response.status === 403 && /rate limit/i.test(await responseMessage(response))) {
+    fail(503, "github_unavailable", "GitHub refused the pull request read");
   }
-  if (token && response.status === 401) {
-    fail(503, "github_unconfigured", "GitHub rejected the configured token.");
+  if (response.status === 401 || (!token && response.status === 403)) {
+    fail(503, "github_unconfigured", token
+      ? "GitHub rejected the configured token."
+      : "GitHub access is not configured. A token is required to read this pull request and none is set.");
   }
   if (response.status === 404) fail(404, "pr_not_found", "Pull request was not found");
   if (response.status === 403 || response.status === 429) {
@@ -313,6 +315,17 @@ export class LandQueue {
     }
     const count = this.db.prepare("SELECT COUNT(*) AS n FROM land_queue WHERE room_id=?").get(roomId).n;
     if (count >= MAX_ITEMS) fail(409, "land_queue_full", "This room's land queue is full");
+    let snapshot = null;
+    let pendingError = null;
+    try {
+      snapshot = await fetchPullSnapshot({
+        repo: parsedRepo, prNumber: parsedPr, token: this.token, fetchImpl: this.fetchImpl
+      });
+    } catch (error) {
+      if (error?.code === "pr_not_found") throw error;
+      if (error?.code !== "github_unconfigured" && error?.code !== "github_unavailable") throw error;
+      pendingError = error;
+    }
     const now = this.store.now();
     const itemId = `lq_${randomBytes(12).toString("base64url")}`;
     this.store.transaction(() => {
@@ -320,11 +333,15 @@ export class LandQueue {
         (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, title, head_sha,
          mergeable, behind, checks_state, merged_sha, tip_source_revision, tip_build_id, last_error, observed,
          created_at, updated_at)
-        VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,NULL,0,?,?)`)
-        .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, now, now);
+        VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,?,0,?,?)`)
+        .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, pendingError?.code ?? null, now, now);
     });
     const item = viewFromRow(this.#row(roomId, itemId));
-    return this.#refreshRow(item, { duplicate: false });
+    if (pendingError) {
+      if (pendingError.code === "github_unconfigured") pendingError.item = item;
+      throw pendingError;
+    }
+    return this.#saveSnapshot(item, snapshot, { duplicate: false });
   }
 
   remove(roomId, memberId, { itemId } = {}) {
@@ -412,6 +429,10 @@ export class LandQueue {
       }
       throw error;
     }
+    return this.#saveSnapshot(item, snapshot, { duplicate });
+  }
+
+  #saveSnapshot(item, snapshot, { duplicate }) {
     const row = this.#row(item.roomId, item.itemId);
     const changed = landTransition(row.observed ? observedFromRow(row) : null, snapshot);
     const now = this.store.now();

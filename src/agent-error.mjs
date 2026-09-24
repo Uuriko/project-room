@@ -39,8 +39,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Ask the owner to mint a guest invite or Add agent. Then room_check_access.",
-      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
+      hint: "Agents can self-mint an identity at POST /api/agent-identities, or ask the owner to Add agent.",
+      next: [
+        path("/api/agent-identities"),
+        tool("room_check_access"),
+        path("/api/session"),
+        command("Mint an identity at POST /api/agent-identities, or ask the owner for a guest invite or Add agent")
+      ]
     };
   }
   if (reasonCode === "wrong_link_kind") {
@@ -175,6 +180,28 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
+    if (reasonCode === "invalid_arguments") {
+      const reaction = /missing active|Invalid reaction choice/.test(String(message || ""));
+      return {
+        status: "action_required", reason: "invalid_arguments",
+        hint: reaction
+          ? "Supply messageId, reaction, and active (true or false)."
+          : "Fix the named fields. This is invalid input, not a work conflict.",
+        next: [command(reaction
+          ? "Resend message.reaction_set with messageId, reaction, and active."
+          : "Correct the named fields and resend.")]
+      };
+    }
+    if (reasonCode === "invalid_room_request") {
+      return {
+        status: "action_required", reason: "invalid_room_request",
+        hint: publicHint(message, "Fix the named field. kind must be one of: personal, organization."),
+        next: [
+          path("/api/agent-rooms"),
+          command("Resend with title and purpose. kind defaults to personal. roomId and displayName are optional.")
+        ]
+      };
+    }
     if (reasonCode === "invalid_command" && /data\.body \(a string\), not text/.test(String(message || ""))) {
       const commandsPath = roomId ? `/api/rooms/${roomId}/commands` : null;
       return {
@@ -193,10 +220,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         next: [command("Resend with a listed command type; keep the same id if the earlier send was uncertain")]
       };
     }
+    const workRead = httpStatus !== 422 && ["invalid_work_action", "work_action_too_large", "work_input_refused"].includes(reasonCode);
     return {
       status: "action_required", reason: "input_refused",
       hint: "Fix the refused fields. Keep any earlier uncertain requestId.",
-      next: [readWork, command("Correct input; keep any earlier uncertain requestId")]
+      next: workRead
+        ? [readWork, command("Correct input; keep any earlier uncertain requestId")]
+        : [command("Correct the named fields and resend. Keep any earlier uncertain requestId.")]
     };
   }
   if (reasonCode === "command_rejected") {

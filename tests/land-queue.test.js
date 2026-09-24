@@ -251,7 +251,7 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
 test("a missing token is 503 github_unconfigured and is not logged", async t => {
   const { store, clock } = fixture(t);
   const wake = spyWake(t, store);
-  const github = mockGitHub(() => ({ http: 404, message: "Not Found" }));
+  const github = mockGitHub(() => ({ http: 401, message: "Requires authentication" }));
   store.landQueue.configure({ fetchImpl: github.fetchImpl });
   await assert.rejects(
     () => store.landQueue.add("commons", "owner", { repo: "acme/private", prNumber: 3 }),
@@ -386,6 +386,18 @@ test("REST add, list, tip, and remove match the tool names", async t => {
 
   f.store.landQueue.configure({
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => ({ message: "Not Found" }) })
+  });
+  const missing = await fetch(`${origin}/api/rooms/commons/add_land_item`, {
+    method: "POST", headers, body: JSON.stringify({ repo: "acme/demo", prNumber: 99999 })
+  });
+  assert.equal(missing.status, 404);
+  const missingBody = await missing.json();
+  assert.equal(missingBody.error.code, "pr_not_found");
+  assert.equal(missingBody.item, undefined);
+  assert.equal(f.store.landQueue.list("commons", "owner").items.some(item => item.prNumber === 99999), false);
+
+  f.store.landQueue.configure({
+    fetchImpl: async () => ({ status: 401, ok: false, json: async () => ({ message: "Requires authentication" }) })
   });
   const hidden = await fetch(`${origin}/api/rooms/commons/add_land_item`, {
     method: "POST", headers, body: JSON.stringify({ repo: "acme/private", prNumber: 3 })

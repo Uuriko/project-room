@@ -16,6 +16,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "get_room_context",
   "room_list_events",
   "room_post_message",
+  "room_react",
   "room_list_work",
   "bond.propose",
   "bond.accept",

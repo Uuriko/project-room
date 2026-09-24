@@ -48,12 +48,15 @@ test("unauthenticated hosted MCP stays the four join tools", async t => {
   const body = await listed.json();
   assert.deepEqual(body.result.tools.map(tool => tool.name), JOIN_TOOLS);
   const denied = await call(origin, "room_check_access", {});
-  assert.equal(denied.status, 200);
-  assert.equal(denied.body.error.code, -32602);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.error.code, -32001);
+  assert.equal(denied.body.error.data.reason, "auth_required");
   const board = await call(origin, "room_read_board", { roomId: "mcp-den" });
-  assert.equal(board.body.error.code, -32602);
+  assert.equal(board.body.error.code, -32001);
+  assert.equal(board.body.error.data.reason, "auth_required");
   const inbox = await call(origin, "room_read_inbox", { roomId: "mcp-den" });
-  assert.equal(inbox.body.error.code, -32602);
+  assert.equal(inbox.body.error.code, -32001);
+  assert.equal(inbox.body.error.data.reason, "auth_required");
   const onShortPath = await fetch(`${origin}/mcp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -99,6 +102,8 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const listed = await rpc(origin, "tools/list", undefined, owner.secret);
   assert.equal(listed.status, 200);
   const names = (await listed.json()).result.tools.map(tool => tool.name);
+  assert.equal(names.length, 74);
+  assert.equal(names.includes("room_react"), true);
   assert.deepEqual(names.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
   assert.deepEqual(names.slice(HOSTED_ROOM_MCP_TOOLS.length), JOIN_TOOLS);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
@@ -283,8 +288,9 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   for (const name of BOND_DM_TOOLS) {
     assert.equal(HOSTED_ROOM_MCP_TOOLS.includes(name), true, name);
     const open = await call(origin, name, { roomId: created.roomId, id: "nope", bondId: "bond-x", to: peer.identityId, body: "no", messageId: "m" });
-    assert.equal(open.status, 200, name);
-    assert.equal(open.body.error.code, -32602, name);
+    assert.equal(open.status, 401, name);
+    assert.equal(open.body.error.code, -32001, name);
+    assert.equal(open.body.error.data.reason, "auth_required", name);
     const bad = await call(origin, name, { roomId: created.roomId }, "pri_" + "z".repeat(43));
     assert.equal(bad.status, 401, name);
     assert.equal(bad.body.result, undefined, name);

@@ -6,8 +6,10 @@
 import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
-  isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME
+  isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
+  HOSTED_ROOM_MCP_TOOLS
 } from "../src/room-mcp-join.js";
+import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -79,11 +81,14 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     return { jsonrpc: "2.0", id: requestId, result: { tools: MCP_JOIN_TOOLS } };
   }
   if (message.method === "tools/call") {
-    const selected = MCP_JOIN_TOOLS.find(tool => tool.name === message.params?.name);
+    const name = message.params?.name;
     const args = message.params?.arguments ?? {};
-    if (!selected || !object(args) || Object.keys(args).length) {
-      return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "Unknown tool or invalid arguments" } };
-    }
+    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...HOSTED_ROOM_MCP_TOOLS];
+    if (HOSTED_ROOM_MCP_TOOLS.includes(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
+    const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
+    if (!selected) return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: closestToolName(name, known) });
+    const problems = diagnoseArguments(selected.inputSchema, args);
+    if (problems) return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...problems });
     const value = selected.name === "room_join_packet" ? llmsTxt()
       : selected.name === "room_join_kits" ? kitsTxt()
         : selected.name === "room_join_prompt" ? joinPrompt()

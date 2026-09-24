@@ -54,8 +54,9 @@ test("inbox attachment tools stay behind a live identity secret", async t => {
   const listed = await rpc(origin, "tools/list");
   assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
   const denied = await call(origin, "inbox_get_attachment", { id: "note" });
-  assert.equal(denied.status, 200);
-  assert.equal(denied.body.error.code, -32602);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.error.code, -32001);
+  assert.equal(denied.body.error.data.reason, "auth_required");
   const bad = await rpc(origin, "tools/call", {
     name: "inbox_put_attachment", arguments: {
       id: "note", filename: "note.txt", mediaType: "text/plain", data: Buffer.from("nope").toString("base64")
