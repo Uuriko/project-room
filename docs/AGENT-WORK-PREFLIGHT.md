@@ -16,6 +16,8 @@ Read the discussion before editing, especially another contributor's latest
 patch or claim. After reviewing it, an optional third argument is the previous
 discussion checkpoint. No checkpoint is saved or acknowledged automatically.
 This is task-linked discussion, not every room message or every external claim.
+The numeric checkpoint is not a history identity. After known or suspected
+room recovery/replacement, omit it and read from the beginning.
 
 Exit 0 means these reads and the fast guard passed. It does **not** mean the
 work is approved, assigned to you, tested, mergeable or deployed. Exit 2 asks
