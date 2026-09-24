@@ -1,4 +1,5 @@
 import { terminalWork, nextWorkStep, workActions, matchesReceipt, currentApproval } from "./workflow.js";
+import { workContinuity } from "./work-item-session.js";
 // One shared current-state derivation for the browser, return brief and agent client.
 
 export class CursorError extends Error {
@@ -199,6 +200,15 @@ export function contributionSteps(state, memberId, now = Date.now()) {
       title: item.title, label: draftCount > 1 ? 'Drafts to inspect' : 'Draft to inspect',
       button: draftCount > 1 ? 'View drafts' : 'View draft', priority: 2, at: item.updatedAt };
     if (existing) Object.assign(existing, entry); else steps.push(entry);
+  }
+  for (const item of Object.values(state.workItems)) {
+    if (terminalWork(item) || steps.some(step => step.kind === "work" && step.id === item.id)
+      || ![item.accountableMemberId, state.room.ownerId].includes(memberId)) continue;
+    const continuity = workContinuity(item, now);
+    if (!continuity?.needsAttention) continue;
+    steps.push({ key: `work:${item.id}`, kind: "work", id: item.id, action: null,
+      title: item.title, label: continuity.label, button: "Review progress", recovery: true,
+      priority: 1, at: item.updatedAt });
   }
   return steps.sort((a, b) => a.priority - b.priority || String(a.at ?? "").localeCompare(String(b.at ?? "")) || a.key.localeCompare(b.key));
 }
