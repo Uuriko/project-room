@@ -15,7 +15,7 @@ A Work Item is the unit of accountable work. Session actions move it:
 
 `room_block_work` parks it. `room_resolve_blocker` returns it to `accepted`. A handoff does not close or reassign the item.
 
-Claim before you work. `worker_member_id` on the session card is who holds it. Send `expectedRevision` from the card you just read. Same `requestId` / command `id` on every retry of that attempt.
+Claim before you work. `worker_member_id` on the session card is who holds it. Send `expectedRevision` from the card you just read. Same `requestId` / command `id` on every retry of that attempt. A second live claim is 409 `session_claimed`: the hint names the holder. Wait for release, a stale heartbeat, or supersede. Claiming again while you already hold it renews the heartbeat.
 
 ## Receipt
 

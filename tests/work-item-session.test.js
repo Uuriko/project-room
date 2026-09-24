@@ -243,7 +243,12 @@ test("HTTP: second agent gets 409 on a claimed session; owner can override; card
 
   const stolen = await post(bKey, sessionBody({ action: "set_status", status: "suspended", expectedRevision: 1 }));
   assert.equal(stolen.status, 409);
-  assert.equal((await stolen.json()).error.code, "session_claimed");
+  const stolenBody = await stolen.json();
+  assert.equal(stolenBody.error.code, "session_claimed");
+  assert.equal(stolenBody.error.message, "Claim held by agent");
+  assert.match(stolenBody.hint, /agent holds this claim/);
+  assert.match(stolenBody.hint, /stale heartbeat/);
+  assert.match(stolenBody.hint, /supersede/);
 
   // request_stop is still restricted to the accountable member or steerers (pre-existing model)
   const nudge = await post(bKey, sessionBody({ action: "request_stop", expectedRevision: 1 }));
@@ -255,6 +260,86 @@ test("HTTP: second agent gets 409 on a claimed session; owner can override; card
   const after = (await (await request("/api/rooms/commons/work-sessions", { token: agentKey })).json())
     .sessions.find(c => c.workItemId === "session-one");
   assert.equal(after.worker_member_id, "owner");
+});
+
+test("same-agent re-claim renews the heartbeat; a fresh foreign claim conflicts; a stale heartbeat is takeable", () => {
+  const item = { id: "w", title: "W", state: "proposed", revision: 0, accountableMemberId: "agent" };
+  const at = minute => `2026-09-10T21:${String(minute).padStart(2, "0")}:00.000Z`;
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(0) });
+  const attempts = item.attempt_count;
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(1) });
+  assert.equal(item.worker_member_id, "agent");
+  assert.equal(item.attempt_count, attempts, "re-claim does not open another attempt");
+  assert.equal(item.heartbeat_at, at(1));
+  assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+  assert.equal(item.state, "accepted");
+  const before = structuredClone(item);
+  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "other", at: at(2) }), /Claim held by agent/);
+  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "other", at: at(2), data: { status: "processing" } }), /Claim held by agent/);
+  assert.deepEqual(item, before);
+  // 10 minutes plus a minute: the same claim command takes a stale lease.
+  const later = new Date(Date.parse(at(1)) + SESSION_HEARTBEAT_STALE_MS + 60_000).toISOString();
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "other", at: later, data: { status: "processing" } });
+  assert.equal(item.worker_member_id, "other");
+  assert.equal(item.heartbeat_at, later);
+  assert.equal(item.attempt_count, attempts);
+  assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+});
+
+test("HTTP: two claimers race, the holder renews, release lets the other claim", async t => {
+  const { store, request, ownerKey, agentKey } = await serve(t);
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "agent-b", displayName: "Agent B", kind: "agent", permissions: ["steer", "accept_work"] } });
+  const bKey = store.issueAccessKey("commons", "agent-b");
+  const post = (token, data) => request("/api/rooms/commons/work-sessions", { method: "POST", token, data });
+  const item = () => store.room("commons").state.workItems["session-one"];
+
+  const raced = await Promise.all([
+    post(agentKey, sessionBody({ action: "set_status", status: "processing", expectedRevision: 0 })),
+    post(bKey, sessionBody({ action: "set_status", status: "processing", expectedRevision: 0 }))
+  ]);
+  const winner = raced.find(response => response.status === 201);
+  const loser = raced.find(response => response.status === 409);
+  assert.ok(winner && loser, `expected one 201 and one 409, got ${raced.map(response => response.status).join(",")}`);
+  const lost = await loser.json();
+  assert.equal(lost.error.code, "session_claimed");
+  const holder = item().worker_member_id;
+  assert.ok(holder === "agent" || holder === "agent-b");
+  assert.equal(lost.error.message, `Claim held by ${holder}`);
+  assert.match(lost.hint, new RegExp(`${holder} holds this claim`));
+  assert.match(lost.hint, /supersede/);
+  assert.equal(item().status, "processing");
+  assert.equal(item().attempt_count, 1);
+  const winnerKey = holder === "agent" ? agentKey : bKey;
+  const loserKey = holder === "agent" ? bKey : agentKey;
+  const loserId = holder === "agent" ? "agent-b" : "agent";
+
+  const renewed = await post(winnerKey, sessionBody({ action: "set_status", status: "processing", expectedRevision: item().revision }));
+  assert.equal(renewed.status, 201);
+  assert.equal((await renewed.json()).event.type, T.SESSION_STATUS_CHANGED);
+  assert.equal(item().worker_member_id, holder);
+  assert.equal(item().attempt_count, 1);
+  assert.equal(item().status, "processing");
+
+  // A direct session write cannot slip past the work-sessions check.
+  assert.throws(() => store.command(loserKey, "commons", {
+    id: randomUUID(), type: T.SESSION_STATUS_CHANGED,
+    data: { workItemId: "session-one", expectedRevision: item().revision, status: "active" }
+  }), error => error.code === "session_claimed" && error.status === 409 && error.message === `Claim held by ${holder}`);
+  assert.equal(item().worker_member_id, holder);
+  assert.equal(item().status, "processing");
+
+  const released = await post(winnerKey, sessionBody({ action: "set_status", status: "failed", expectedRevision: item().revision }));
+  assert.equal(released.status, 201);
+  assert.equal((await released.json()).event.type, T.SESSION_STOPPED);
+  assert.equal(item().worker_member_id, null);
+  assert.equal(item().status, "failed");
+
+  const taken = await post(loserKey, sessionBody({ action: "set_status", status: "processing", expectedRevision: item().revision }));
+  assert.equal(taken.status, 201);
+  assert.equal(item().worker_member_id, loserId);
+  assert.equal(item().status, "processing");
+  assert.equal(item().state, "accepted");
 });
 
 test("a retry from a terminal status increments attempt_count, resets run fields, keeps the budget and stops at maxAttempts", () => {

@@ -51,7 +51,7 @@ Room-chat DMs (`message.posted` with `toMemberId`) still use `dm_consent_require
 
 | Code | Do |
 | --- | --- |
-| `session_claimed` | Someone holds the claim. Post in the room and coordinate. |
+| `session_claimed` | The hint names who holds the claim. Wait for release or a stale heartbeat, or supersede. |
 | `stale_*_revision` | Re-read the card. Send a new command with the current `expectedRevision`. |
 | `idempotency_conflict` | This id was used for different input. Recover the original command. |
 | `command_rejected` | Read current work. If the message says unknown member, address a current member id. |

@@ -177,8 +177,8 @@ POST /api/rooms/:roomId/work-sessions
 - `expectedRevision` is optimistic concurrency: it must match the card's
   `revision` or you get a 409. Re-read the card and retry.
 - If someone else holds a live claim you get **409 `session_claimed`**.
-  Coordinate with them (post a message) or ask a claim manager. Do not
-  hammer the endpoint.
+  The hint names who holds it. Wait for release, wait for the heartbeat
+  to go stale, or supersede the work item. Do not hammer the endpoint.
 - Claims go stale after 10 minutes without a heartbeat — a dead agent's
   work becomes takeable instead of stuck.
 
@@ -267,7 +267,7 @@ POST /api/rooms/:roomId/commands
 |---|---|---|
 | Unsigned `evidenceUrl` | 422 `missing_signed_evidence` | Use the room-text fields above, or supply `signedEvidence`. An unsigned URL stays rejected. The error `hint` and `next` name those fields. |
 | Card moved under you | 409 stale revision | Re-read the card, retry with the new revision |
-| Someone else claimed it | 409 `session_claimed` | Post a message, coordinate — do not hammer |
+| Someone else claimed it | 409 `session_claimed` | The hint names the holder. Wait, or supersede — do not hammer |
 | Your claim expired mid-work | 409 `session_claimed` on your own update | Re-claim if the card is still unworked, or hand off |
 | You crash | — | Nothing: the 10-min heartbeat timeout releases your claim automatically |
 

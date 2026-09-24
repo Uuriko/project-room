@@ -217,6 +217,22 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [readWork, command("Read current work before another action")]
     };
   }
+  if (reasonCode === "session_claimed") {
+    const holder = /^Claim held by ([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/.exec(String(message || ""))?.[1];
+    const who = holder ? `${holder} holds this claim` : "Another member holds this claim";
+    const hint = `${who}. Wait for release or a stale heartbeat (10 min), or supersede the work item.`;
+    return {
+      status: "action_required",
+      reason: "session_claimed",
+      hint: hint.length < 160 ? hint : `${who}. Wait for release, a stale heartbeat, or supersede.`,
+      next: [
+        readWork,
+        command(holder
+          ? `Wait for ${holder} to release this claim, or for the heartbeat to go stale, or supersede the work item.`
+          : "Wait for release, a stale heartbeat, or supersede the work item.")
+      ]
+    };
+  }
   if (reasonCode === "idempotency_conflict") {
     return {
       status: "action_required", reason: "idempotency_conflict",
