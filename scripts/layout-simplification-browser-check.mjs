@@ -77,7 +77,14 @@ for (const [width, account] of [[1440, false], [390, false], [320, false], [1440
       assert.ok(box.scrollWidth <= box.clientWidth + 1, 'composer action label fits its button');
       if (index) assert.ok(composerControls[index - 1].right <= box.left || composerControls[index - 1].bottom <= box.top, 'composer actions do not overlap at large text');
     }
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'large text reflows without horizontal overflow');
+    const overflow = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll("body *")].filter(node => node.getBoundingClientRect().right > innerWidth + 1).slice(0, 6).map(node => {
+        const r = node.getBoundingClientRect();
+        return `${node.id || node.className || node.tagName} right=${Math.round(r.right)} w=${Math.round(r.width)}`;
+      });
+      return { ok: document.documentElement.scrollWidth <= innerWidth + 1, scroll: document.documentElement.scrollWidth, inner: innerWidth, nodes };
+    });
+    assert.equal(overflow.ok, true, `large text reflows without horizontal overflow (scroll ${overflow.scroll} inner ${overflow.inner}${overflow.nodes.length ? `; ${overflow.nodes.join("; ")}` : ""})`);
     await page.evaluate(() => document.documentElement.style.fontSize = '');
     await page.locator('#session-menu-button').click();
     await page.locator('#signout-button').click();
