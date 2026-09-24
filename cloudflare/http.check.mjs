@@ -124,6 +124,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(kitsBody, await (await call('/room/apps')).text());
     assert.equal(kitsBody, await (await call('/room/tools')).text());
     assert.equal(kitsBody, await (await call('/kits.txt')).text());
+    assert.equal(kitsBody, await (await call('/kits.json')).text());
+    assert.equal(kitsBody, await (await call('/room/kits.json')).text());
     assert.equal(kitsBody, await (await call('/kits')).text());
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
     const cookie = login.headers.get('set-cookie');

@@ -287,7 +287,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.equal(KITS_CATALOG_PATH, "/kits.txt");
   assert.deepEqual([...KITS_CATALOG_SYNONYMS], ["/room/kit", "/room/kits", "/room/apps", "/room/tools"]);
   assert.deepEqual([...KITS_CATALOG_FILES], [
-    "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
+    "kits.json", "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
   ]);
   const catalog = discoveryDoc("/kits.txt");
   const short = discoveryDoc("/llms.txt");
