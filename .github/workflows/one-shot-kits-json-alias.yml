@@ -1,0 +1,102 @@
+name: one-shot-kits-json-alias
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply kits.json catalog alias
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def must_replace(path, old, new, label):
+            p = Path(path)
+            t = p.read_text(encoding="utf-8")
+            if new in t and old not in t:
+              print(f"already applied: {label}")
+              return False
+            if old not in t:
+              raise SystemExit(f"pattern not found in {label}: {path}")
+            p.write_text(t.replace(old, new, 1), encoding="utf-8")
+            print(f"patched: {label}")
+            return True
+
+          must_replace(
+            "deploy/agent-discovery.mjs",
+            'export const KITS_CATALOG_FILES = Object.freeze([\n  "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"\n]);',
+            'export const KITS_CATALOG_FILES = Object.freeze([\n  "kits.json", "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"\n]);',
+            "discovery",
+          )
+          must_replace(
+            "tests/agent-discovery.test.js",
+            '  assert.deepEqual([...KITS_CATALOG_FILES], [\n    "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"',
+            '  assert.deepEqual([...KITS_CATALOG_FILES], [\n    "kits.json", "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"',
+            "test",
+          )
+          must_replace(
+            "cloudflare/http.check.mjs",
+            "assert.equal(kitsBody, await (await call('/kits.txt')).text());",
+            "assert.equal(kitsBody, await (await call('/kits.txt')).text());\n    assert.equal(kitsBody, await (await call('/kits.json')).text());\n    assert.equal(kitsBody, await (await call('/room/kits.json')).text());",
+            "http.check",
+          )
+          docs = Path("docs/ROOM-KITS-CATALOG.md")
+          dt = docs.read_text(encoding="utf-8")
+          if "`/kits.json`" in dt or "/kits.json" in dt:
+            print("already applied: docs")
+          else:
+            # Prefer a precise doc touch near the catalog path mention
+            old = "`/kits.txt`"
+            if old in dt:
+              docs.write_text(dt.replace(old, "`/kits.txt` (`.json` mirrors: `/kits.json`, `/room/kits.json`)", 1), encoding="utf-8")
+              print("patched: docs")
+            else:
+              print("WARN: docs path mention not found; skipping docs")
+          PY
+      - name: Open PR from patched branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="grok/kits-json-leftover-alias"
+          git config user.name "grok-swarm-bot"
+          git config user.email "grok-swarm@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add deploy/agent-discovery.mjs tests/agent-discovery.test.js cloudflare/http.check.mjs docs/ROOM-KITS-CATALOG.md
+          if git diff --cached --quiet; then
+            echo "No file changes to commit"
+            exit 0
+          fi
+          git commit -m "$(cat <<'EOF'
+Alias /room/kits.json to kits catalog
+
+Add kits.json to KITS_CATALOG_FILES so /kits.json and /room/kits.json serve the same text/plain catalog as /kits.txt (Motley leftover).
+EOF
+)"
+          git push -f origin "$BRANCH"
+          if [ "$(gh pr list --head "$BRANCH" --json number --jq 'length')" = "0" ]; then
+            gh pr create --base main --head "$BRANCH" --title "Alias /room/kits.json to kits catalog" --body "$(cat <<'EOF'
+## Summary
+- Agents (Motley) still probe `/room/kits.json` and get 404.
+- Canonical catalog stays text/plain `/kits.txt`; this adds `.json` filename mirrors with the same bytes (same leftover-alias pattern).
+
+## Test plan
+- [ ] CI green
+- [ ] After tip: `/kits.json` and `/room/kits.json` match `/kits.txt` on both doors
+EOF
+)"
+          else
+            echo "PR already open for $BRANCH"
+            gh pr list --head "$BRANCH"
+          fi
