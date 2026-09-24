@@ -45,6 +45,8 @@ const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
 const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
 const CARD_ROUTE = /^\/api\/agent-directory\/cards\/([A-Za-z0-9_-]{1,120})$/;
 const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
+// RC-2026-09-24-202: public skill card per identity (opt-in via publish:true).
+const SKILL_CARD_ROUTE = /^\/api\/agents\/([A-Za-z0-9_-]{1,64})\/card$/;
 
 export function createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin }) {
   // Coded pure-module errors -> HTTP: unknown/not-found reads as 404,
@@ -160,6 +162,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       description: "Report this host's liveness (hostId, mode wakeable|pull-only, wakeUrl for wakeable hosts). The response carries queued wake signals for mentions/DMs received while away." }),
     Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
       description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
+    Object.freeze({ action: "publish-skills", method: "POST", path: "/api/agent-skills", requiredScope: "skills:publish",
+      description: "Publish your skill set (A2A skill shape + receipt-hash evidence) so room members can find you by capability. publish:true opts into the public card and the /skills catalog." }),
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
       description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface. Unauthenticated." }),
   ]);
@@ -297,6 +301,37 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-directory-withdraw:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("directory:publish"));
     return json(res, 200, store.agentPlugin.withdrawCard({ identityId: auth.identityId, agentId }));
+  });
+
+  // RC-2026-09-24-202: skill cards. An identity publishes its own skill set
+  // (A2A skill shape + receipt-hash evidence); replaces the caller's set
+  // only. Skills without evidence are returned AND displayed as
+  // self-declared — attributed signals, never ranked.
+  const publishSkills = translate(async (req, res, { remoteAddress }) => {
+    rate(`agent-skills-publish:${remoteAddress}`, 20);
+    const auth = agentAuth(req, requiredScope("skills:publish"));
+    const data = await body(req);
+    if (!data || !exact(data, ["publish", "skills"])) {
+      reject(422, "invalid_skills", "publish (boolean) and skills (array) are the accepted fields");
+    }
+    const result = store.membersDirectory.setSkills(auth.identityId, { publish: data.publish, skills: data.skills });
+    const next = [
+      Object.freeze({ action: "see-it-live", method: "GET", path: `/api/agents/${encodeURIComponent(auth.identityId)}/card`,
+        description: "Confirm your public skill card (visible only when you set publish:true)." }),
+      Object.freeze({ action: "update-skills", method: "POST", path: "/api/agent-skills",
+        description: "To update, POST again with the full new set — it replaces the existing one." }),
+    ];
+    return json(res, 200, { ...result, next });
+  });
+
+  // RC-2026-09-24-202: public skill card. 404 unless the identity opted in
+  // with publish:true. Unauthenticated and rate-limited like the
+  // directory reads.
+  const skillCardDocument = translate(async (req, res, { remoteAddress, identityId }) => {
+    rate(`agent-skill-card:${remoteAddress}`, 60);
+    const card = store.membersDirectory.publicCard(identityId);
+    if (!card) reject(404, "unknown_skill_card", "No published skill card for this identity");
+    return json(res, 200, card);
   });
 
   // Directory reads: public without a credential; an authenticated room
@@ -616,6 +651,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const keyActionMatch = method === "POST" ? KEY_ACTION_ROUTE.exec(pathname) : null;
     if (keyActionMatch) { await keyAction(req, res, { remoteAddress, keyId: keyActionMatch[1], action: keyActionMatch[2] }); return true; }
     if (pathname === "/api/agent-directory/cards" && method === "POST") { await publishCard(req, res, { remoteAddress }); return true; }
+    if (pathname === "/api/agent-skills" && method === "POST") { await publishSkills(req, res, { remoteAddress }); return true; }
+    const skillCardMatch = method === "GET" ? SKILL_CARD_ROUTE.exec(pathname) : null;
+    if (skillCardMatch) { await skillCardDocument(req, res, { remoteAddress, identityId: skillCardMatch[1] }); return true; }
     if (pathname === "/api/agent-directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     if (pathname === "/api/agents/directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     const cardMatch = method === "DELETE" ? CARD_ROUTE.exec(pathname) : null;

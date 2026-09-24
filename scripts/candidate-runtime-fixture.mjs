@@ -107,6 +107,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
+  paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
   paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)

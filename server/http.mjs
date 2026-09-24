@@ -25,6 +25,12 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
+// RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
+// deploy/agent-discovery.mjs). Aliases (/room/skills, /project-room/skills,
+// trailing-slash twins) resolve to this same object via discoveryDoc, so
+// identity comparison injects the members array on every alias.
+const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
@@ -1396,7 +1402,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks());
-        const bytes = Buffer.from(discovery.body);
+        let docBody = discovery.body;
+        // RC-2026-09-24-202: the skills catalog gains a `members` array of
+        // opted-in member skill cards (publish:true). The static deploy
+        // asset carries the base catalog; the node server injects the live
+        // member layer. Skills without evidence render "self-declared".
+        if (discovery === SKILLS_CATALOG_DOC) {
+          try {
+            const catalog = JSON.parse(docBody);
+            catalog.members = store.membersDirectory.publishedMembers();
+            docBody = JSON.stringify(catalog, null, 2) + "\n";
+          } catch { /* static body keeps its shape on parse failure */ }
+        }
+        const bytes = Buffer.from(docBody);
         res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
@@ -2598,7 +2616,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|members|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3575,6 +3593,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 200, store.roomDirectory.set(roomId, auth.member.id, data.discoverable));
       }
+      // RC-2026-09-24-202: members directory — any room member can see who
+      // they share the room with: identity, presence (shared heartbeat
+      // rule), and skill ids. Replaces downloading the whole public
+      // directory and parsing it client-side.
+      if (route === "members" && req.method === "GET") {
+        return json(res, 200, store.membersDirectory.list(roomId));
+      }
+      if (route === "members") reject(405, "method_not_allowed", "Method not allowed");
       // Public-face controls: owner only (enforced in the module). Status is
       // visible to the owner alone; the public reads the face at /p/{code}.
       if (route === "public-face" && req.method === "GET") {
