@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T16:14:57Z · board: Uuriko/project-room#266 · watermark: 5817800411 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=56f10f9dc1c9372d1b963e5a65bc971b098f4e641dd4235bd7000b89d3cd8c23 -->
+<!-- generated: 2026-09-24T16:29:29Z · board: Uuriko/project-room#266 · watermark: 5818014948 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0dd6311a12186044b3a31e666ba59245ed6d838f6222d213afab7ce37de3b0a2 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,12 +28,15 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +35 more
+… +38 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-24-210 | jill | working | 2026-09-24T19:43:22Z | server/agent-connections.mjs, server/agent-identities.mjs, server/store.mjs, docs/openapi.yaml
 RC-2026-09-24-010 | instinct | working | 2026-09-24T22:10:23Z | deploy/agent-discovery.mjs, tests/agent-discovery.test.js
+RC-2026-09-24-212 | jill | working | 2026-09-24T22:16:27Z | scripts/release-evidence.mjs, scripts/claims-index.mjs, scripts/access-review.mjs, scripts/room
+RC-2026-09-24-214 | jill | working | 2026-09-24T22:16:30Z | scripts/runtime-package.mjs, server/channel-adapters/telegram-config.mjs, server/channel-send-budgets.mjs, server/http.mjs, server/token-bucket.mjs
+RC-2026-09-24-213 | jill | working | 2026-09-24T22:21:40Z | server/dm-consents.mjs, server/store.mjs, server/request-runs.mjs, src/agent-signin-ui.js, src/agent-first-run.js, src/app.js, src/dm-consents.js, src/styles.css, docs/openapi.yaml, scripts/dm-consent-browser-check.mjs, scripts/agent-signin-browser-check.mjs, tests/agent-signin-onboarding.test.js, tests/dm-consents.test.js, tests/dm-consent-ui.test.js, tests/http-public-dm.test.js, tests/room-trust.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -43,6 +46,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5817941300
 RC-2026-09-24-001 | 93b392a56efafdfa931d7ffca32922e14b52673c | 5817416328
 RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
 RC-2026-09-23-105 | none | 5813311676
@@ -52,7 +56,6 @@ RC-2026-09-24-203 | none | 5811586904
 unknown | none | 5810730195
 RC-2026-09-23-100 | 66d32255e70b232ccf51c3628861aff96cd8f265 | 5809527250
 RC-2026-09-23-952 | 4ba96ca1 | 5807924226
-RC-2026-09-23-951 | 2d07ab0c | 5807924125
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -69,5 +72,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1570 threshold=1500 rotation_due=yes watcher=active open_claims=60 prose_open=2 unfenced_prose=63 watermark=5817800411
+board_comments=1577 threshold=1500 rotation_due=yes watcher=active open_claims=63 prose_open=2 unfenced_prose=63 watermark=5818014948
 
