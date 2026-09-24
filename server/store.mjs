@@ -3496,7 +3496,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId, eventType: "message.posted",
+        // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
+        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
+          eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
     }
