@@ -266,6 +266,34 @@ test("the review shares the per-credential read allowance with sibling room read
   assert.equal(limited.headers.get("retry-after"), "60");
 });
 
+test("the review command records one revoke that removes both administration stores", async t => {
+  const f = await fixture(t);
+  const identityId = f.identity.identityId;
+  const member = f.store.room("commons").state.members[identityId];
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+    memberId: identityId, expectedMemberRevision: member.revision,
+    permissions: [...member.permissions, "manage_members"], active: true
+  } });
+  f.store.delegation.grant(f.ownerKey, "commons", { identityId });
+  const run = (args, env = {}) => execFileAsync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 30000, cwd: checkout,
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("ROOM_"))), ...env } })
+    .then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }), error => ({ status: error.code ?? 1, stdout: error.stdout ?? "", stderr: error.stderr ?? String(error) }));
+  const cleared = await run(["--db", f.filename, "--room", "commons", "--revoke-identity", identityId, "--json", "--key-env", "REVIEW_OWNER_KEY"], { REVIEW_OWNER_KEY: f.ownerKey });
+  assert.equal(cleared.status, 0, cleared.stderr);
+  const report = JSON.parse(cleared.stdout);
+  const row = report.members.find(item => item.memberId === identityId);
+  assert.equal(row.delegatedAdmin, false);
+  assert.equal(row.dualGrantHazard, false);
+  assert.deepEqual(row.authorityPaths, []);
+  assert.equal(report.membershipDelegations.length, 0);
+  assert.ok(!cleared.stdout.includes(f.ownerKey));
+  assert.ok(!cleared.stderr.includes(f.ownerKey));
+  const viaOrigin = await run(["--origin", f.origin, "--room", "commons", "--revoke-identity", identityId], { ROOM_OWNER_KEY: f.ownerKey });
+  assert.equal(viaOrigin.status, 1);
+  assert.match(viaOrigin.stderr, /--db/);
+  assert.ok(!viaOrigin.stderr.includes(f.ownerKey));
+});
+
 test("a review of one identity shows both administration stores, and one revoke removes the effective permission", async t => {
   const f = await fixture(t);
   const identityId = f.identity.identityId;
