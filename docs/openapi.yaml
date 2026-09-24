@@ -7926,7 +7926,7 @@ paths:
         heartbeats and session status/stop reports; every other write is
         refused 403 agent_readonly. New agent members enroll at t2_standard
         (full member access) on owner add, invite redeem, share link, and
-        access-request approve. The owner can still restrict one agent to
+        an approved join request. The owner can still restrict one agent to
         t1_readonly. Spend stays governed by the room-level spend allowance;
         Room Trust stays the owner kill-switch. Ownership, not human-ness,
         is what authorizes this route.
