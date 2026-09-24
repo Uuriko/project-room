@@ -115,15 +115,23 @@ export class AgentConnections {
   }
   validate(details) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
-    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType } = details;
+    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
-    const createFields = [...common, "displayName", "access", "keyHash", "expiresAt", ...(agentType !== undefined ? ["agentType"] : [])];
+    // RC-2026-09-24-201: optional identityId makes enrollment atomic — the
+    // membership, credential AND identity link land in one transaction, so
+    // the agent can use bonds/peer-DMs immediately without a second
+    // owner step. Unknown keys are still rejected, so this stays explicit.
+    const createFields = [...common, "displayName", "access", "keyHash", "expiresAt",
+      ...(agentType !== undefined ? ["agentType"] : []),
+      ...(identityId !== undefined ? ["identityId"] : [])];
     const fields = action === "create" ? createFields
       : [...common, "expectedGeneration", "expectedMemberRevision", ...(action === "rotate" ? ["keyHash", "expiresAt"] : [])];
+    const IDENTITY_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
     if (!["create", "rotate", "disconnect"].includes(action) || Object.keys(details).some(k => !fields.includes(k))
       || !validId(requestId) || !validId(memberId) || !integer(expectedOwnerRevision)
       || (action !== "create" && (!integer(expectedGeneration) || expectedGeneration < 1 || !integer(expectedMemberRevision)))
       || (action !== "disconnect" && (typeof keyHash !== "string" || !/^[0-9a-f]{64}$/.test(keyHash) || !integer(expiresAt)))
+      || (action === "create" && identityId !== undefined && (typeof identityId !== "string" || !IDENTITY_ID_RE.test(identityId)))
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
         || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
@@ -163,7 +171,10 @@ export class AgentConnections {
       let membership = null;
       if (action === "create") membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ADDED,
         data: { memberId, displayName: request.displayName.trim(), kind: "agent", permissions: access[request.access], accountableHumanId: auth.member.id,
-          ...(request.agentType ? { agentType: request.agentType } : {}) } }, binding);
+          ...(request.agentType ? { agentType: request.agentType } : {}),
+          // RC-2026-09-24-201: stamp the identity on the member record so
+          // the room state is self-describing (agent-rooms.mjs already does).
+          ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding);
       if (action === "disconnect" && this.store.room(roomId).state.members[memberId].active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
         data: { memberId, expectedMemberRevision, active: false, permissions: this.store.room(roomId).state.members[memberId].permissions } }, binding);
       const member = this.store.room(roomId).state.members[memberId];
@@ -171,6 +182,27 @@ export class AgentConnections {
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
       if (action !== "disconnect") this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)").run(keyHash, roomId, memberId, expiresAt);
+      // RC-2026-09-24-201: atomic identity link. The same transaction that
+      // creates the membership and credential also writes identity_links,
+      // so the new agent can use bonds/peer-DMs immediately — no second
+      // owner step. On disconnect the link is removed so a disconnected
+      // identity can't keep acting through the bond surface.
+      if (action === "create" && request.identityId) {
+        const identity = this.store.identities.get(request.identityId);
+        if (!identity) fail(404, "identity_not_found", "No such agent identity");
+        const plugin = this.store.agentPlugin;
+        if (plugin && plugin.roomVerificationPolicy(roomId).requireVerified
+          && plugin.verificationLevel(request.identityId) !== "verified") {
+          fail(403, "unverified_identity", "This room only admits verified agents; have a room owner verify the identity first");
+        }
+        const already = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, request.identityId);
+        if (already) fail(409, "identity_already_linked", "This identity is already linked to this room");
+        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+          .run(roomId, request.identityId, memberId, now);
+      }
+      if (action === "disconnect") {
+        this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND member_id=?").run(roomId, memberId);
+      }
       const row = { room_id: roomId, member_id: memberId, generation: (before?.generation ?? 0) + 1,
         status: action === "disconnect" ? "disconnected" : "issued", credential_hash: keyHash ?? before.credential_hash, expires_at: expiresAt ?? before.expires_at,
         sponsor_account_id: auth.account.id, sponsor_member_id: auth.member.id, sponsor_auth_epoch: auth.account.authEpoch,
@@ -179,7 +211,8 @@ export class AgentConnections {
         .run(...Object.entries(row).filter(([k]) => !["room_id", "member_id", "created_at"].includes(k)).map(([, v]) => v), roomId, memberId);
       else this.db.prepare(`INSERT INTO agent_connections(${Object.keys(row).join(",")}) VALUES(${Object.keys(row).map(() => "?").join(",")})`).run(...Object.values(row));
       const receipt = { version: 1, action, requestId, roomId, memberId, generation: row.generation, status: row.status,
-        expiresAt: row.expires_at, at: now, membershipEventId: membership?.event.id ?? null, membershipSequence: membership?.sequence ?? null };
+        expiresAt: row.expires_at, at: now, membershipEventId: membership?.event.id ?? null, membershipSequence: membership?.sequence ?? null,
+        ...(request.identityId ? { identityId: request.identityId } : {}) };
       this.db.prepare("INSERT INTO agent_connection_operations VALUES(?,?,?,?,?,?,?,?,?)").run(roomId, memberId, row.generation, auth.account.id, requestId, requestJSON, fingerprint, JSON.stringify(receipt), JSON.stringify(row));
       return { receipt, connection: this.view(row), duplicate: false };
     });
@@ -215,7 +248,9 @@ export class AgentConnections {
         const account = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(state.sponsor_account_id);
         const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, state.sponsor_member_id);
         if (Object.keys(state).sort().join() !== Object.keys(row).sort().join()
-          || Object.keys(receipt).sort().join() !== "version,action,requestId,roomId,memberId,generation,status,expiresAt,at,membershipEventId,membershipSequence".split(",").sort().join()
+          // RC-2026-09-24-201: atomic enrollment receipts may carry the
+          // optional identityId echo; the key set is exact either way.
+          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
           || state.sponsor_member_id !== room.room.ownerId || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
