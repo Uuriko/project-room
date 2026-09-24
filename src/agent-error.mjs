@@ -59,13 +59,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   // https://www.getdasha.com (or that host plus /room) is the browser door.
-  // Agents retry with Origin: https://room.trydemigod.com or omit Origin.
+  // A route that requires Origin must not be told to omit the header.
   if (reasonCode === "origin_denied") {
+    const required = /Origin header is required/.test(String(message || ""));
     return {
       status: "action_required",
       reason: "origin_denied",
-      hint: "Use Origin: https://room.trydemigod.com or omit the Origin header.",
-      next: [command("Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
+      hint: required
+        ? "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header."
+        : "Use Origin: https://room.trydemigod.com or omit the Origin header.",
+      next: [command(required
+        ? "Retry with Origin: https://room.trydemigod.com. Do not omit the Origin header."
+        : "Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
     };
   }
   // A DM refusal is about the recipient's consent, not the caller's access:
