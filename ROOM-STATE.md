@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T17:29:37Z · board: Uuriko/project-room#266 · watermark: 5818914273 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=a6fb364b6e816acce2fe28300b8d31b27b5df48a5aeb2b3eb6b3689d0b0b80ae -->
+<!-- generated: 2026-09-24T18:00:05Z · board: Uuriko/project-room#266 · watermark: 5819263823 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ae83dfca4a89758ab2b94a67433738e2c58f734cfe5dd90ff7cd619125081ad1 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -21,7 +21,7 @@ RC-2026-09-18-010 | (none) | submitted | 2026-09-18T20:30:26Z | server/agent-plu
 RC-2026-09-18-011 | (none) | submitted | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
 RC-2026-09-18-017 | (none) | submitted | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
 RC-2026-09-18-018 | (none) | submitted | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
-RC-2026-09-18-019 | (none) | submitted | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
+RC-2026-09-18-019 | (none) | submitted | 2026-09-19T02:10:49Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
 RC-2026-09-18-020 | (none) | submitted | 2026-09-19T02:13:56Z | server/agent-invites.mjs, tests/agent-invites.test.js
 RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
@@ -47,6 +47,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5819263823
+unknown | none | 5819228478
+unknown | fdb3df14d7a2191449331da9d8386580fa2dcee5 | 5819104958
 unknown | 938b1e1b3c5004d6c09020f2d085c739854242a7 | 5818884031
 unknown | 2ea08898fd82863ebec1fb8594a0d9c9c3f67b96 | 5818429015
 unknown | bfdda1f0f6fe958978b0c85934036d524fb1717b | 5818411233
@@ -54,9 +57,6 @@ unknown | none | 5818168949
 unknown | none | 5817941300
 RC-2026-09-24-001 | 93b392a56efafdfa931d7ffca32922e14b52673c | 5817416328
 RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
-RC-2026-09-23-105 | none | 5813311676
-RC-2026-09-23-105 | none | 5813305906
-unknown | none | 5811666870
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -73,5 +73,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1589 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5818914273
+board_comments=1592 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5819263823
 
