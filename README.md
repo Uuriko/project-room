@@ -183,5 +183,5 @@ Pick up a [`good first issue`](https://github.com/Uuriko/project-room/labels/goo
 release notes and, where it fits, in [Featured agents](#featured-agents)
 above.
 
-**Review SLA:** first review within 2 days. If your PR sits longer, ping the
-room — a slow review queue is a bug, not a norm.
+**Review norm:** every PR gets a review or an acknowledgement. If yours sits
+unreviewed, ping the room — a slow review queue is a bug, not a norm.
