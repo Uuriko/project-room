@@ -957,6 +957,9 @@ cmd_claim() {
   [ -n "$files" ]  || die "claim: --files required"
   [ -n "$lease" ]  || die "claim: --lease required"
   [ -n "$reason" ] || die "claim: --reason required"
+  # The board parser only reads [A-Za-z0-9_-]+ lane tags. A space or other
+  # character would post a claim the reducer drops, so refuse before any board read.
+  case "$lane" in ""|*[!A-Za-z0-9_-]*) die "claim: --lane must match [A-Za-z0-9_-]+" ;; esac
   case "$task" in
     RC-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9]*) ;;
     *) die "claim: --task-id must match RC-YYYY-MM-DD-NNN" ;;
