@@ -33,6 +33,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   const complete = (version = "v1", producerId = "owner") => mutate(T.WORK_COMPLETED, { summary: `Synthetic result ${version}`, evidenceUrl: `https://example.invalid/result/${version}`, evidenceVersion: version, producerId, nextAction: "Review this version" });
   if (["verify", "decide"].includes(action)) complete();
   if (action === "decide") mutate(T.VERIFICATION_RECORDED, { ...evidence(), result: "pass", summary: "Checked v1" }, "human-reviewer");
+  if (action === "decide") send(T.MESSAGE_POSTED, { messageId: "rationale-browser", body: "Rationale: accept this exact result." });
   const server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -71,7 +72,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
         // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.
         signedEvidence: JSON.stringify(signEvidence()) }
       : action === "claim" ? { repository: "test/project", ref: "synthetic", paths: "src/app.js\ntest/**", expiresAt: new Date(Date.now() + 3600000).toISOString() }
-        : action === "verify" ? { result: "pass", summary: "Checked this exact result" } : { decision: "approved", reason: "Accept this exact result" };
+        : action === "verify" ? { result: "pass", summary: "Checked this exact result" } : { decision: "approved", reason: "Accept this exact result", sourceMessageId: "rationale-browser" };
     for (const [name, value] of Object.entries(values)) {
       if (["producerId", "result", "decision"].includes(name)) await input(name).selectOption(value); else await input(name).fill(value);
     }

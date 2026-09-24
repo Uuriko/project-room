@@ -49,8 +49,9 @@ test("outside credit survives native result reads, replay, review and exact retr
   send("reviewer", "verification.recorded", { workItemId, expectedRevision: 2, result: "pass", completionEventId: receipt.event.id,
     evidenceVersion: textVersion(body), summary: "The text meets the brief; identity unverified." });
   assert.equal(f.store.room("commons").state.workItems[workItemId].verification.independenceConfirmed, false);
+  send("owner", "message.posted", { messageId: "rationale-external", body: "Rationale: attempted approval." });
   assert.throws(() => send("owner", "owner.decision_recorded", { workItemId, expectedRevision: 3, decision: "approved",
-    completionEventId: receipt.event.id, evidenceVersion: textVersion(body), reason: "Attempted approval" }), /independent/);
+    completionEventId: receipt.event.id, evidenceVersion: textVersion(body), reason: "Attempted approval", sourceMessageId: "rationale-external" }), /independent/);
   assert.equal(f.store.command(f.keys.producer, "commons", command).event.id, receipt.event.id);
   assert.equal(f.store.command(f.keys.producer, "commons", command).duplicate, true);
   const final = f.store.room("commons").state;
