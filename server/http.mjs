@@ -34,6 +34,8 @@ import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
+import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
+import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
@@ -613,6 +615,38 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
+      // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): score
+      // the join with the cheap classifier, journal the would-be decision,
+      // then proceed unchanged. Shadow mode never enforces — this helper
+      // never throws, so a scoring or journal failure cannot break admission.
+      const jevShadowAdmission = (path, { roomId, identityId = null, memberId = null, displayName = "", card = null } = {}) => {
+        try {
+          if (typeof roomId !== "string" || !roomId) return;
+          const now = store.now();
+          const members = Object.values(store.room(roomId).state.members ?? {});
+          let resolvedIdentityId = identityId;
+          const member = memberId ? members.find(m => m && m.id === memberId) : null;
+          if (!resolvedIdentityId && member) resolvedIdentityId = member.identityId ?? null;
+          const resolvedDisplayName = displayName
+            || (typeof member?.displayName === "string" ? member.displayName : "");
+          const identity = resolvedIdentityId ? store.identities.get(resolvedIdentityId) : null;
+          const ipHash = rateHash(String(remoteAddress ?? ""));
+          const decision = evaluateAdmission({
+            identityId: resolvedIdentityId, displayName: resolvedDisplayName, path,
+            identityAgeMs: identity && Number.isFinite(identity.createdAt) ? Math.max(0, now - identity.createdAt) : null,
+            existingDisplayNames: members
+              .filter(m => m && m.active !== false && typeof m.displayName === "string")
+              .map(m => m.displayName),
+            recentJoins: {
+              byIdentity: resolvedIdentityId ? store.jevShadow.recentJoinCount({ identityId: resolvedIdentityId, windowMs: jevVelocityWindowMs }) : 0,
+              byIp: store.jevShadow.recentJoinCount({ ipHash, windowMs: jevVelocityWindowMs }),
+            },
+            card, at: now,
+          });
+          store.jevShadow.record({ gate: "admission", roomId, identityId: resolvedIdentityId, ipHash, path,
+            score: decision.score, decision: decision.decision, escalate: false, signals: decision.signals, at: now });
+        } catch { /* shadow-only: never break the join */ }
+      };
       const inboundPath = url.pathname;
       if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
         rate(`mcp-join:${remoteAddress}`, 60);
@@ -2114,7 +2148,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`guest-agent-join:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        return json(res, 200, store.guestAgentLinks.join(data.linkToken));
+        const joinedLink = store.guestAgentLinks.join(data.linkToken);
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway. This
+        // path carries no signed card at join time (the card is checked at
+        // link mint), so the card component stays inactive.
+        jevShadowAdmission("guest-agent-link:join", { roomId: joinedLink.room?.id, memberId: joinedLink.memberId,
+          displayName: "", card: null });
+        return json(res, 200, joinedLink);
       }
       // GX-… guest invites (RC-2026-09-23-100): the public-handoff flow.
       // The invite code is public-safe (single-use, hash-stored, grants
@@ -2141,6 +2182,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["inviteCode", "card"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Supply the invite code and a signed agent card");
         rate(`guest-invite-redeem-code:${rateHash(data.inviteCode)}`, 5);
         const result = store.guestInvites.redeem(data.inviteCode, identitySecret, data.card);
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway. The
+        // redeem verifies the signed card signature and rejects invalid
+        // cards, so a successful redeem means the card was present+valid.
+        jevShadowAdmission("guest-invite:redeem", { roomId: result.room?.id,
+          identityId: store.identities.resolveGlobalIdentitySecret(identitySecret)?.identityId ?? null,
+          displayName: result.member?.displayName ?? "", card: { present: true, valid: true } });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
@@ -2168,6 +2216,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
         const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName);
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway.
+        jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
+          displayName: data.displayName, card: null });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
@@ -2266,6 +2318,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
         if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
           const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
+          // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+          // score the join, journal the would-be decision, admit anyway.
+          jevShadowAdmission("join:invite", { roomId: redeemed.roomId, identityId: redeemed.identityId,
+            displayName: redeemed.displayName ?? name, card: null });
           // The browser that just joined gets a working session cookie, so the
           // join page lands the recipient inside the room — no CLI, no docs.
           const joined = store.createJoinSession(redeemed.roomId, redeemed.memberId);
@@ -2304,6 +2360,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Same working session as the invite branch: the browser that just
         // created this room lands inside it.
         const firstJoined = store.createJoinSession(room.roomId, room.ownerMemberId);
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway.
+        jevShadowAdmission("join:first-room", { roomId: room.roomId, identityId: identity.identityId,
+          displayName: name, card: null });
         setCookie(res, roomCookieName, firstJoined.token, Math.max(0, Math.floor((firstJoined.expiresAt - store.now()) / 1000)));
         return json(res, 201, {
           identityId: identity.identityId,
@@ -2421,7 +2481,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
-        return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) }));
+        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway.
+        jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
+          displayName: redeemedInvite.displayName ?? data.displayName, card: null });
+        return json(res, 201, redeemedInvite);
       }
       if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
@@ -2490,7 +2555,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3147,6 +3212,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // #662: owner-only rollup of everything awaiting an owner decision.
         return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence));
       }
+      if (route === "jev-shadow" && req.method === "GET") {
+        // Jev-harness shadow-review surface (docs/JEV-GATES.md): owner-only,
+        // read-only listing of recent shadow decisions with scores for hand
+        // review. Shadow data is measurement, never membership — nothing here
+        // mutates state.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["gate", "escalate", "limit"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_jev_shadow_query", "gate, escalate and limit are the accepted query parameters");
+        }
+        const gate = params.get("gate");
+        if (gate !== null && !["admission", "receipt"].includes(gate)) reject(422, "invalid_jev_shadow_query", "gate must be admission or receipt");
+        const escalateParam = params.get("escalate");
+        if (escalateParam !== null && !["true", "false"].includes(escalateParam)) reject(422, "invalid_jev_shadow_query", "escalate must be true or false");
+        const limitParam = params.get("limit");
+        const limit = limitParam === null ? 50 : Number(limitParam);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) reject(422, "invalid_jev_shadow_query", "limit must be 1..500");
+        return json(res, 200, jevShadowReport({ store }, selected.token, roomId,
+          { gate, escalate: escalateParam === null ? null : escalateParam === "true", limit }, fence));
+      }
       if (route === "mentions" && req.method === "GET") {
         // #658: member-readable mention list. memberId defaults to the
         // caller; an owner may query another member (feeds #662's card).
@@ -3264,7 +3348,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["decision", "permissions", "note"])) {
           reject(422, "invalid_request", "decision, permissions, note are the accepted fields");
         }
-        return json(res, 200, accessRequests.decide(selected.token, roomId, accessRequestId, data, fence));
+        const decided = accessRequests.decide(selected.token, roomId, accessRequestId, data, fence);
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): an
+        // approved access request is an admission — score it, journal the
+        // would-be decision, keep the approval unchanged.
+        if (data.decision === "approve") {
+          jevShadowAdmission("access-request:approve", { roomId, identityId: decided.identityId ?? null,
+            displayName: decided.displayName ?? "", card: null });
+        }
+        return json(res, 200, decided);
       }
       // RC-2026-09-18-038: owner-granted membership administration for agent
       // identities. Grant/revoke/list are owner-only; a grant lets the
