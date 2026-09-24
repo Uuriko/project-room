@@ -40,6 +40,7 @@ export const ALLOWLIST = [
   /SHARE_CODE_ALPHABET\s*=\s*"/, // Crockford 9-char human join-code alphabet demo, not a credential
   /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
   /password:\s*form\.querySelector/, // src/auth-signin-ui.js: reads the user's typed password back from the DOM to preserve it across signup/login mode toggles — not a hardcoded secret
+  /secret = \(data\.secret \|\| ""\)\.trim\(\)/, // src/agent-signin-ui.js: reads the user's typed identity secret back from the sign-in form's FormData — runtime input, not a hardcoded secret
   /webhookSecret:\s*"TELEGRAM_WEBHOOK_SECRET"/, // env var NAME as string
   /insertCredential\(/, // `token = this.insertCredential(...)` — credential store API
   /base64url\(randomBytes\(/, // runtime-generated random values

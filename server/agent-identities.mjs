@@ -368,5 +368,37 @@ export class AgentIdentities {
     if (!member || member.active === false) return null;
     return { identityId, member };
   }
+
+  // Lists all rooms where an identity is linked as an active member.
+  // Used by the agent browser sign-in flow: after verifying the identity
+  // secret, the agent picks which room to open. Returns [{ roomId, title,
+  // memberId }] for active links only.
+  roomsForIdentity(identityId) {
+    if (typeof identityId !== "string" || !identityId) return [];
+    const rows = this.db.prepare(`
+      SELECT l.room_id AS roomId, l.member_id AS memberId
+      FROM identity_links l
+      WHERE l.identity_id = ?
+      ORDER BY l.linked_at DESC
+    `).all(identityId);
+    // Filter to active members only, and get room titles from projection
+    return rows.filter(row => {
+      try {
+        const member = this.store.roomAuthority(row.roomId).members[row.memberId];
+        if (!member || member.active === false) return false;
+        // Get title from room projection
+        const roomRow = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.roomId);
+        if (roomRow) {
+          const proj = JSON.parse(roomRow.projection);
+          row.title = proj?.room?.title || row.roomId;
+        } else {
+          row.title = row.roomId;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
 }
 

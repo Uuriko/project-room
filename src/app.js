@@ -23,6 +23,7 @@ import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
+import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
@@ -443,6 +444,25 @@ const signinUI = createAuthSigninUI({
 });
 signinUI.mount($("#auth-signin-ui"));
 if ($("#session-hint")) $("#session-hint").textContent = SESSION_HINT_COPY;
+// Agent sign-in (RC-2026-09-23): agents choose their own account (identity
+// ID + secret) or fall back to human account sign-in. On success the room
+// cookie is set, so restore the client session for that room.
+const agentSigninUI = createAgentSigninUI({
+  onSignedIn: async (session) => {
+    const roomId = session?.roomId;
+    if (!roomId) return;
+    const identity = await client.restore(roomId);
+    if (!identity || !state) return;
+    $("#message-input").focus();
+    if (state) revealLocationHash();
+  },
+  onUseHumanAccount: () => {
+    // Agent chose the human path: hide agent UI, ensure human UI visible.
+    // The human sign-in UI (signinUI) is already mounted; just scroll to it.
+    $("#auth-signin-ui")?.scrollIntoView({ block: "nearest" });
+  }
+});
+agentSigninUI.mount($("#agent-signin-ui"));
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;

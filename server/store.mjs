@@ -768,6 +768,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
+      // RC-2026-09-23-106: agent browser sessions record the identity secret
+      // hash at creation time. If the secret is rotated or revoked, sessions
+      // minted with the old secret are rejected at authenticate() time.
+      // Additive column; existing rows backfill NULL (no secret binding).
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
+        this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
+      }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
@@ -2186,7 +2193,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
     });
   }
-  insertCredential(roomId, memberId, kind, parent, expiresAt) {
+  insertCredential(roomId, memberId, kind, parent, expiresAt, identitySecretHash = null) {
     if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
@@ -2195,7 +2202,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const account = member.kind === "human" ? this.ensureHumanAccountBinding(roomId, memberId) : null;
     if (account && !account.active) fail(403, "access_denied", "Active account required");
     const token = key();
-    this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null);
+    this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch,identity_secret_hash) VALUES(?,?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null, identitySecretHash);
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
@@ -2251,6 +2258,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       account = { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch };
     } else if (row.account_id !== null || row.account_auth_epoch !== null) fail(401, "unauthenticated", "Agent credential has an invalid human account binding");
     if (member.kind === "agent") this.agentConnections.assertCredential(row);
+    // RC-2026-09-23-106: agent browser sessions are bound to the identity
+    // secret hash at creation time. If the secret was rotated or revoked
+    // since, the session is rejected.
+    if (row.identity_secret_hash !== null && row.identity_secret_hash !== undefined) {
+      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
+      if (!linkRow) fail(401, "unauthenticated", "Agent session identity link not found");
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkRow.identityId);
+      if (!secretRow || secretRow.revokedAt !== null || secretRow.secretHash !== row.identity_secret_hash) {
+        fail(401, "unauthenticated", "Agent identity secret was rotated or revoked; sign in again");
+      }
+    }
     const auth = {
       account, member, roomId: row.room_id, credentialHash: row.hash, credentialScope: "room", kind: row.kind, expiresAt: row.expires_at,
       csrf: row.kind === "session" ? hash(`csrf:${token}`) : null,
@@ -2284,6 +2302,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const expiresAt = this.now() + 8 * 3600000;
       const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
       return { token, expiresAt };
+    });
+  }
+  // Creates a browser session for an agent identity linked to a room member.
+  // The identity secret must already be verified by the caller via
+  // identities.authenticateIdentitySecret. The session is scoped to
+  // the room and member, with the same 8-hour expiry as human sessions.
+  createAgentSession(identityId, roomId) {
+    return this.transaction(() => {
+      const link = this.identities.resolveIdentityLink(identityId, roomId);
+      if (!link) fail(403, "access_denied", "This agent identity is not linked to that room");
+      if (link.member.kind !== "agent") fail(403, "access_denied", "Browser sessions require an agent room member");
+      // RC-2026-09-23-106: bind the session to the current secret hash.
+      // If the secret is rotated or revoked, authenticate() rejects sessions
+      // carrying the old hash.
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
+      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      return { token, session: this.authenticate(token) };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
