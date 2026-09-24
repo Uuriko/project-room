@@ -24,6 +24,8 @@ test('explicit stop, failure and owner round limit remain distinct in saved cont
   assert.equal(workContinuity({ ...item, status: 'failed' }, now).state, 'interrupted');
   const paused = { ...item, status: 'suspended', suspended_by: 'round_limit', heartbeat_at: new Date(now).toISOString() };
   assert.match(workContinuity(paused, now).next, /owner can resume/);
+  assert.equal(workContinuity(paused, now + 3600000).state, "paused");
+  assert.match(workContinuity(paused, now + 3600000).next, /owner can resume/);
   assert.match(resumeMarkdown(workProgress(paused, now)), /Run paused/);
   assert.equal(workContinuity({ ...item, status: 'done' }, now).needsAttention, false);
 });

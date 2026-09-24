@@ -305,10 +305,10 @@ export function workContinuity(item, nowMs = Date.now()) {
   const flags = cancellationState(item, { nowMs });
   if (flags.stopRequested) return { ...common, state: "stopping", label: "Stop requested", needsAttention: true,
     next: "Confirm the worker stopped before starting another run." };
-  if (flags.unresponsive || !session.heartbeat_at) return { ...common, state: "unknown", label: "Waiting for a worker update", needsAttention: true,
-    next: "Process state is unknown. Check the worker and saved progress before resuming." };
   if (session.status === "suspended") return { ...common, state: "paused", label: "Run paused", needsAttention: true,
     next: session.suspended_by === "round_limit" ? "The owner can resume this run after reviewing its round limit." : "Read saved progress to continue or hand off." };
+  if (flags.unresponsive || !session.heartbeat_at) return { ...common, state: "unknown", label: "Waiting for a worker update", needsAttention: true,
+    next: "Process state is unknown. Check the worker and saved progress before resuming." };
   return { ...common, state: "running", label: "Worker checked in", needsAttention: false };
 }
 
