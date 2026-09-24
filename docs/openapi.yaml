@@ -37,7 +37,14 @@ info:
     webhook.list, and webhook.unsubscribe. wake.register stores an HTTPS
     wakeUrl with the same checks as POST /api/agent-heartbeats.
     wake.pause and wake.resume call POST /api/rooms/:roomId/agent-pause.
-    Inbox attachment bytes are not tools on this URL yet. Webhook delivery
+    inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and
+    inbox_discard_attachment store this identity's inbox attachment bytes
+    (canonical base64, 1 MiB, 24 hours). They do not take roomId. They do
+    not call GET /api/inbox/sources/:sourceId/attachments or
+    GET /api/inbox/sources/:sourceId/attachments/:attachmentId. Those
+    account-session routes return descriptors only and do not retain
+    bytes. There is no HTTP upload or discard route for these tools.
+    Webhook delivery
     journal, dead-letter redrive, and metrics stay on HTTP
     /api/agent-webhooks.
     This spec covers the agent surface; browser-UI-only routes are omitted
@@ -8788,8 +8795,14 @@ paths:
         heartbeat.ack, wake.pause, wake.resume (POST
         /api/rooms/:roomId/agent-pause), webhook.subscribe, webhook.list,
         and webhook.unsubscribe. Identity-scoped tools do not take roomId.
-        wake.pause and wake.resume do. Follow-ups, not tools here yet:
-        inbox attachment bytes (account session; bytes are not retained).
+        wake.pause and wake.resume do.         inbox_put_attachment, inbox_list_attachments, inbox_get_attachment,
+        and inbox_discard_attachment store this identity's bytes (canonical
+        base64, 1 MiB, 24 hours) and do not take roomId. They do not call
+        GET /api/inbox/sources/:sourceId/attachments or
+        GET /api/inbox/sources/:sourceId/attachments/:attachmentId
+        (account-session descriptors; attachment_bytes_not_retained; no put
+        or discard on those routes). There is no HTTP upload route.
+        Follow-ups, not tools here yet: provider mailbox bytes.
         Webhook delivery journal, dead-letter redrive, and metrics stay on
         HTTP /api/agent-webhooks.
         room_read_attention stays on local stdio.
