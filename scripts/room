@@ -646,10 +646,56 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                   .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                             ignored:($k + " ignored: claim not working/held")}]
                 elif $k == "strike_one" and ((.tasks[$tid] // null) != null) then
-                  .tasks[$tid].strike_one_at = ($m.ts // $at)
+                  # F1/F2: strike-one is set-once. Strike stamps are
+                  # unauthenticated comment text: anyone who can post can
+                  # forge or replay them. A replay must never move
+                  # strike_one_at backwards (a stale stamp shortens the
+                  # documented 4h grace) or forwards past a recorded
+                  # heartbeat (a fresh stamp nullifies the heartbeat
+                  # defense and can extend the grace indefinitely). The
+                  # first stamp wins; later ones are logged and ignored.
+                  # The stamp is clamped to not-after the comment timestamp
+                  # itself: a future-dated stamp is inherently forged.
+                  # An unparseable stamp is refused, never recorded.
+                  if ((.tasks[$tid].strike_one_at // null) != null) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:("strike-one replay ignored: strike already recorded at "
+                                       + (.tasks[$tid].strike_one_at | tostring))}]
+                  elif (epoch($m.ts // "") | . == 0) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:false,
+                              errors:["strike-one refused: unparseable stamp " + ($m.ts // "(none)")]}]
+                  else
+                    (($m.ts // $at) as $stamp
+                     | (if (epoch($stamp) > epoch($at)) then $at else $stamp end) as $clamped
+                     | .tasks[$tid].strike_one_at = $clamped
+                     | .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                 note:("strike-one recorded at " + $clamped)}])
+                  end
                 elif $k == "strike_two" and ((.tasks[$tid] // null) != null) then
-                  .tasks[$tid] |= (.state = "submitted" | .lane = null | .released_at = $at
-                                   | .strike_one_at = null | .last_at = $at | .pending_handoff = null)
+                  # F3: a strike-two stamp alone must never release a claim.
+                  # The reducer now enforces the strike lifecycle the sweep
+                  # used to carry alone: a recorded strike-one, the full 4h
+                  # grace elapsed since it (measured on reducer timestamps),
+                  # and no heartbeat after the nudge. A lone forged
+                  # strike-two, an early one, or one racing the heartbeat
+                  # of a live agent is logged and ignored.
+                  (.tasks[$tid]) as $t
+                  | if (($t.strike_one_at // null) == null) then
+                      .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                ignored:"strike-two without a prior strike-one: ignored"}]
+                    elif (epoch($at) - epoch($t.strike_one_at) < 14400) then
+                      .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                ignored:"strike-two before the 4h strike grace elapsed: ignored"}]
+                    elif ((($t.heartbeat_at // null) != null)
+                          and (epoch($t.heartbeat_at) > epoch($t.strike_one_at))) then
+                      .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                ignored:"strike-two after a post-nudge heartbeat: ignored"}]
+                    else
+                      .tasks[$tid] |= (.state = "submitted" | .lane = null | .released_at = $at
+                                       | .strike_one_at = null | .last_at = $at | .pending_handoff = null)
+                      | .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                  note:"strike-two release: 4h grace elapsed, no post-nudge heartbeat"}]
+                    end
                 elif $k == "dup_refusal" then
                   .log += [{id:$cid, at:$at, kind:"duplicate-refusal", task_id:$tid, ok:true}]
                 elif $k == "illegal_rej" then
@@ -699,6 +745,13 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                       errors:["needs fencing: no extractable files or task-id"]}]
         elif $e.kind == "ack" then
           ack_check($e; $at)
+        elif $e.kind == "malformed" then
+          # F5: a STATUS: with no fenced room-claim block and no ACK was
+          # the only claim-path input the board absorbed silently. Log it
+          # loudly (refusal-style) so the poster sees it registered
+          # nothing, instead of vanishing into `else . end`.
+          .log += [{id:$cid, at:$at, kind:"malformed", ok:false,
+                    errors:["STATUS: with no room-claim fenced block and no ACK: refused; nothing registered"]}]
         else . end
     ))
     # un-ACKed handoffs older than 4h are void: claim stays with handing lane
@@ -710,9 +763,12 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
       | to_entries
       | map(.value as $v
             | $v + {lease_expires_at:
-                (if $v.lease_h
-                 then ((epoch($v.claim_at) + $v.lease_h * 3600) | iso(.))
-                 else null end),
+                # Heartbeat-aware: lease_exp() extends expiry from the last
+                # heartbeat (F4). The old claim_at-based value fired
+                # spurious strike-one nudges for actively heartbeating
+                # claims and misreported their expiry on every surface
+                # that reads this field.
+                (lease_exp($v) | if . then iso(.) else null end),
                     # Terminal claims are never eligible for sweep action:
                     # done (completed/cancelled) or carrying a merge receipt.
                     terminal:
