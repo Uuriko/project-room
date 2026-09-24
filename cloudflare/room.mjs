@@ -132,9 +132,10 @@ export class ProjectRoom {
     if (this.paused) throw new Error('Room paused');
     return this.store.agentPlugin.drainWebhookDeliveries();
   }
-  // Land queue: cheap GitHub poll. No inbound GitHub webhook exists, so the
-  // cron tick is the refresh. A missing token is counted, not thrown, and
-  // the token itself is never logged.
+  // Land queue: gentle GitHub poll on the per-minute cron. Merged and closed
+  // items are skipped, unchanged items back off, and a rate-limit response
+  // waits until the reset. A missing token is counted, not thrown, and the
+  // token itself is never logged.
   async refreshLandQueue() {
     if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
     this.store.landQueue.configure({ env: this.env });
