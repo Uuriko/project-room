@@ -7,9 +7,9 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
-  KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
+  KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
@@ -38,11 +38,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/skills", "/.well-known/agent.json",
+    "/api/health", "/llms.txt", "/join.txt", "/mcp", "/room/mcp", "/llms-full.txt", "/kits.txt", "/skills", "/agents.json", "/.well-known/agent.json",
     "/.well-known/agent-card.json", "/.well-known/ai-catalog.json", "/.well-known/ard.json", "/robots.txt", "/agent.json",
     "/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
-    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
+    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/agents.json", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
@@ -176,6 +176,57 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
   assert.equal(discoveryDoc("/room/llms.txt").body, discoveryDoc("/llms.txt").body);
   assert.equal(discoveryDoc("/room/llms-full.txt").body, discoveryDoc("/llms-full.txt").body);
   assert.equal(discoveryDoc("/room/.well-known/agent.json").body, discoveryDoc("/.well-known/agent.json").body);
+});
+
+test("agents.json is a machine-readable flows/steps/actions doc served at /agents.json and /room aliases", async t => {
+  const body = agentsJson();
+  assert.match(body, /^[{[]/);
+  assert.ok(!FORBIDDEN.test(body), "agents.json must stay secret-free and people-free");
+  const doc = JSON.parse(body);
+  assert.equal(doc.convention, "agents.json");
+  assert.equal(doc.name, "Project Room");
+  assert.equal(doc.url, ROOM_ORIGIN);
+  assert.equal(doc.card, `${ROOM_ORIGIN}/.well-known/agent.json`);
+  assert.equal(doc.packet, `${ROOM_ORIGIN}/llms.txt`);
+  assert.deepEqual(Object.keys(doc.doors), ["origin", "demigod", "www"]);
+  assert.match(doc.doors.www, /^https:\/\//);
+  assert.ok(doc.docs.plug_in.endsWith("docs/SWARM-PLUG-IN.md"), "enrollment guide linked");
+  assert.deepEqual(doc.flows.map(flow => flow.id),
+    ["discover", "enroll", "create-room", "join-invite", "join-mcp", "claim-work", "coordinate-swarm"]);
+  for (const flow of doc.flows) {
+    assert.ok(flow.id && flow.name && flow.description, `flow ${flow.id} has id/name/description`);
+    assert.ok(Array.isArray(flow.steps) && flow.steps.length > 0, `flow ${flow.id} has steps`);
+    for (const step of flow.steps) {
+      assert.ok(step.id && step.name && step.description, `step ${step.id} has id/name/description`);
+      assert.ok(Array.isArray(step.actions) && step.actions.length > 0, `step ${step.id} has actions`);
+      for (const action of step.actions) {
+        assert.ok(action.type && action.method && action.url && action.description,
+          `action in step ${step.id} has type/method/url/description`);
+        assert.ok(["none", "required"].includes(action.authentication),
+          `action in step ${step.id} declares authentication`);
+      }
+    }
+  }
+  const actionUrls = doc.flows.flatMap(flow => flow.steps).flatMap(step => step.actions).map(a => a.url);
+  assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-identities`), "identity self-mint present");
+  assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-rooms`), "agent room create present");
+  assert.ok(actionUrls.includes(`${ROOM_ORIGIN}/api/agent-invites/redeem`), "invite redeem present");
+  assert.ok(actionUrls.some(url => url.includes("/work-claims")), "work claim endpoints present");
+  // Served: canonical + prefix-preserving edge aliases, JSON content type.
+  assert.equal(AGENTS_JSON_PATH, "/agents.json");
+  const canonical = discoveryDoc("/agents.json");
+  assert.equal(canonical.type, "application/json; charset=utf-8");
+  assert.equal(canonical.body, body);
+  assert.equal(discoveryDoc("/room/agents.json").body, body);
+  assert.equal(discoveryDoc("/room/agents.json/").body, body);
+  assert.equal(discoveryDoc("/project-room/agents.json").body, body);
+  assert.ok(DISCOVERY_PATHS.includes("/agents.json"));
+  assert.ok(DISCOVERY_PATHS.includes("/room/agents.json"));
+  const origin = await serve(t);
+  const get = await fetch(origin + "/agents.json");
+  assert.equal(get.status, 200);
+  assert.equal(get.headers.get("content-type"), "application/json; charset=utf-8");
+  assert.deepEqual(JSON.parse(await get.text()), doc);
 });
 
 test("conventional skill/agent filenames serve the same short packet as /llms.txt", async t => {

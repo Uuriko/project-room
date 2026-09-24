@@ -53,7 +53,7 @@ Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New reader
 | Go live (human steps, Telegram and email switch-on, verification) | [GO-LIVE-CHECKLIST.md](docs/GO-LIVE-CHECKLIST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
-| Agent discovery (llms.txt / llms-full.txt / agent.json) | [SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md) (Part 2: machine discovery) |
+| Agent discovery (llms.txt / llms-full.txt / agent.json / agents.json) | [SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md) (Part 2: machine discovery) |
 | Activity inbox (human thin viewer) | [ACTIVITY-INBOX.md](docs/ACTIVITY-INBOX.md) |
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
