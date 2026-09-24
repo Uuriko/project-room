@@ -10,8 +10,13 @@
 // token is never logged and never copied onto an item or a room event.
 //
 // There is no inbound GitHub webhook receiver in this service. Refresh runs
-// on the existing scheduled tick (cloudflare/room.mjs scheduled), which is
-// the Durable Object cron path. A missing token does not fail that tick.
+// on the existing per-minute scheduled tick (cloudflare/room.mjs scheduled).
+// With no token GitHub allows 60 requests an hour, so the tick is gentle:
+// merged and closed items are not polled, an unchanged item waits 1, 2, 4,
+// 8, then 10 minutes, and each read sends the cached ETag so a 304 is not a
+// billed request. A 403 or 429 rate limit records rateLimitedUntil from the
+// reset header and the tick skips until then. A missing token does not fail
+// the tick. No new secret is added.
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
@@ -25,13 +30,15 @@ const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const TIP_MAX = 200;
 const TITLE_MAX = 300;
-// Unauthenticated GitHub allows 60 requests an hour. With a token the budget
-// is much larger, so the tick can look more often. Either way the tick is
-// capped so one room cannot drain the budget.
-const REFRESH_MIN_MS = 5 * 60 * 1000;
-const REFRESH_MIN_WITH_TOKEN_MS = 60 * 1000;
+// 1, 2, 4, 8 minutes, then a 10 minute cap. The first look schedules the
+// one-minute step; each unchanged look takes the next step.
+export const POLL_BACKOFF_STEPS_MS = Object.freeze([60_000, 120_000, 240_000, 480_000, 600_000]);
 const REFRESH_LIMIT = 4;
 const REFRESH_LIMIT_NO_TOKEN = 1;
+const CHECK_RUN_PAGE = 100;
+const CHECK_RUN_PAGES = 3;
+const RED_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out"]);
+const IGNORED_CONCLUSIONS = new Set(["neutral", "skipped"]);
 
 export const landQueueSchema = `
   CREATE TABLE IF NOT EXISTS land_queue (
@@ -51,6 +58,11 @@ export const landQueueSchema = `
     tip_build_id TEXT,
     last_error TEXT,
     observed INTEGER NOT NULL DEFAULT 0,
+    closed INTEGER NOT NULL DEFAULT 0,
+    next_poll_at INTEGER,
+    backoff_ms INTEGER NOT NULL DEFAULT 60000,
+    poll_etag TEXT,
+    rate_limited_until INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (room_id, item_id),
@@ -60,6 +72,27 @@ export const landQueueSchema = `
 `;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// A queue created before the check-run poll has no poll columns. The
+// statement above already includes them on a fresh database.
+export function migrateLandQueueColumns(db) {
+  const exists = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='land_queue'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('land_queue')").all().map(row => row.name));
+  if (!columns.has("closed")) db.exec("ALTER TABLE land_queue ADD COLUMN closed INTEGER NOT NULL DEFAULT 0");
+  if (!columns.has("next_poll_at")) db.exec("ALTER TABLE land_queue ADD COLUMN next_poll_at INTEGER");
+  if (!columns.has("backoff_ms")) db.exec("ALTER TABLE land_queue ADD COLUMN backoff_ms INTEGER NOT NULL DEFAULT 60000");
+  if (!columns.has("poll_etag")) db.exec("ALTER TABLE land_queue ADD COLUMN poll_etag TEXT");
+  if (!columns.has("rate_limited_until")) db.exec("ALTER TABLE land_queue ADD COLUMN rate_limited_until INTEGER");
+}
+
+export function nextPollBackoff(currentMs) {
+  const current = Number(currentMs) || 0;
+  for (const step of POLL_BACKOFF_STEPS_MS) {
+    if (step > current) return step;
+  }
+  return POLL_BACKOFF_STEPS_MS[POLL_BACKOFF_STEPS_MS.length - 1];
+}
 
 export function githubAccessToken(env = {}) {
   if (!env || typeof env !== "object") return null;
@@ -95,18 +128,36 @@ function parseTipField(value, name) {
   return value.trim();
 }
 
-export function rollupChecks({ statusState = null, checkRuns = [] } = {}) {
-  const runs = Array.isArray(checkRuns) ? checkRuns : [];
-  const failedRun = runs.some(run => ["failure", "cancelled", "timed_out", "action_required", "startup_failure"].includes(run?.conclusion));
-  const failedStatus = statusState === "failure" || statusState === "error";
-  if (failedRun || failedStatus) return "red";
-  const pendingRun = runs.some(run => run && run.status && run.status !== "completed");
-  const pendingStatus = statusState === "pending";
-  if (pendingRun || pendingStatus) return "pending";
+// Check runs are the rollup. Neutral and skipped conclusions do not count,
+// including a neutral Cursor Approval Agent. The legacy combined status is
+// "pending" whenever total_count is 0, so it is merged only when it actually
+// lists statuses. Green means every counted signal succeeded. Any failure,
+// cancelled, or timed_out run is red. Anything else, including no counted
+// signal at all, stays pending.
+export function rollupChecks({ status = null, checkRuns = [] } = {}) {
+  const runs = (Array.isArray(checkRuns) ? checkRuns : []).filter(run => !IGNORED_CONCLUSIONS.has(run?.conclusion));
+  let red = false;
+  let pending = false;
+  let succeeded = 0;
+  for (const run of runs) {
+    const conclusion = run?.conclusion;
+    if (RED_CONCLUSIONS.has(conclusion)) red = true;
+    else if (conclusion === "success") succeeded += 1;
+    else pending = true;
+  }
+  const total = status && typeof status === "object" ? Number(status.total_count) : 0;
+  if (Number.isFinite(total) && total > 0) {
+    const state = status.state;
+    if (state === "failure" || state === "error") red = true;
+    else if (state === "success") succeeded += 1;
+    else pending = true;
+  }
+  if (red) return "red";
+  if (pending || succeeded === 0) return "pending";
   return "green";
 }
 
-export function normalizePull(pr, { statusState = null, checkRuns = [] } = {}) {
+export function normalizePull(pr, { status = null, checkRuns = [] } = {}) {
   if (!pr || typeof pr !== "object") fail(502, "github_unavailable", "GitHub returned an unreadable pull request");
   const headSha = typeof pr.head?.sha === "string" && SHA_PATTERN.test(pr.head.sha) ? pr.head.sha : null;
   const merged = pr.merged === true;
@@ -119,13 +170,15 @@ export function normalizePull(pr, { statusState = null, checkRuns = [] } = {}) {
   else if (pr.mergeable === true) mergeable = "mergeable";
   else if (pr.mergeable === false && pr.mergeable_state === "dirty") mergeable = "conflict";
   const title = typeof pr.title === "string" ? pr.title.slice(0, TITLE_MAX) : null;
+  const closed = merged || pr.state === "closed";
   return {
     title,
     headSha,
     mergeable,
     behind,
-    checks: rollupChecks({ statusState, checkRuns }),
-    mergedSha
+    checks: rollupChecks({ status, checkRuns }),
+    mergedSha,
+    closed
   };
 }
 
@@ -173,6 +226,23 @@ function githubHeaders(token) {
   return headers;
 }
 
+function responseHeader(response, name) {
+  const headers = response?.headers;
+  if (!headers) return null;
+  if (typeof headers.get === "function") {
+    const value = headers.get(name);
+    return value == null ? null : String(value);
+  }
+  const found = Object.keys(headers).find(key => key.toLowerCase() === name.toLowerCase());
+  if (!found || headers[found] == null) return null;
+  return String(headers[found]);
+}
+
+function usableEtag(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && /^[\x21-\x7E]+$/.test(value)
+    ? value : null;
+}
+
 async function responseMessage(response) {
   try {
     const body = await response.json();
@@ -182,20 +252,51 @@ async function responseMessage(response) {
   }
 }
 
-async function githubJson(fetchImpl, url, token, { missingOk = false } = {}) {
+// x-ratelimit-reset is a UTC epoch in seconds. retry-after is a delta. A
+// missing or already-passed reset waits one minute so the tick does not
+// hammer the same 403.
+export function readRateLimitReset(response, now) {
+  const reset = responseHeader(response, "x-ratelimit-reset");
+  let until = null;
+  if (reset != null && /^\d+$/.test(reset.trim())) {
+    const value = Number(reset.trim());
+    until = value > 1e12 ? value : value * 1000;
+  } else {
+    const retry = responseHeader(response, "retry-after");
+    if (retry != null && /^\d+$/.test(retry.trim())) until = now + Number(retry.trim()) * 1000;
+  }
+  if (!until || until <= now) until = now + 60_000;
+  return until;
+}
+
+function isRateLimitResponse(response, message) {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  if (responseHeader(response, "x-ratelimit-remaining") === "0") return true;
+  return /rate limit/i.test(message);
+}
+
+async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now() } = {}) {
+  const headers = githubHeaders(token);
+  const cached = usableEtag(etag);
+  if (cached) headers["If-None-Match"] = cached;
   let response;
   try {
-    response = await fetchImpl(url, { headers: githubHeaders(token) });
+    response = await fetchImpl(url, { headers });
   } catch {
     fail(502, "github_unavailable", "GitHub could not be reached");
   }
-  if (response.status === 404 && missingOk) return null;
+  const nextEtag = usableEtag(responseHeader(response, "etag")) || cached;
+  if (response.status === 304) return { notModified: true, etag: nextEtag, body: null };
+  if (response.status === 404 && missingOk) return { missing: true, etag: nextEtag, body: null };
+  // The GitHub message is not copied onto the error and is not logged.
+  const message = response.ok ? "" : await responseMessage(response);
+  if (isRateLimitResponse(response, message)) {
+    const error = new ServiceError(503, "github_rate_limited", "GitHub refused the pull request read");
+    error.rateLimitedUntil = readRateLimitReset(response, now);
+    throw error;
+  }
   if (!token && (response.status === 401 || response.status === 403 || response.status === 404)) {
-    // A rate-limit 403 is not a missing token. The GitHub message is not
-    // copied onto the error and is not logged.
-    if (response.status === 403 && /rate limit/i.test(await responseMessage(response))) {
-      fail(503, "github_unavailable", "GitHub refused the pull request read");
-    }
     fail(503, "github_unconfigured", "GitHub access is not configured. A token is required to read this pull request and none is set.");
   }
   if (token && response.status === 401) {
@@ -206,24 +307,126 @@ async function githubJson(fetchImpl, url, token, { missingOk = false } = {}) {
     fail(503, "github_unavailable", "GitHub refused the pull request read");
   }
   if (!response.ok) fail(502, "github_unavailable", "GitHub could not be read");
-  try { return await response.json(); }
+  try { return { notModified: false, missing: false, etag: nextEtag, body: await response.json() }; }
   catch { fail(502, "github_unavailable", "GitHub returned an unreadable pull request"); }
 }
 
-export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch } = {}) {
+function readPollCache(raw) {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function slimStatus(status) {
+  if (!status || typeof status !== "object") return null;
+  const total = Number(status.total_count);
+  return {
+    state: typeof status.state === "string" ? status.state : null,
+    total_count: Number.isFinite(total) ? total : 0
+  };
+}
+
+function slimRuns(runs) {
+  return (Array.isArray(runs) ? runs : []).slice(0, CHECK_RUN_PAGE * CHECK_RUN_PAGES).map(run => ({
+    status: typeof run?.status === "string" ? run.status : null,
+    conclusion: typeof run?.conclusion === "string" ? run.conclusion : null,
+    name: typeof run?.name === "string" ? run.name.slice(0, 200) : null
+  }));
+}
+
+// Latest attempt of every check run on the head SHA. One page is 100; a
+// further page is only requested when the first page says there are more.
+// filter=latest is the rollup set: a rerun replaces the earlier attempt.
+async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
+  const runs = [];
+  let etag = null;
+  for (let page = 1; page <= CHECK_RUN_PAGES; page += 1) {
+    const url = `${base}/commits/${sha}/check-runs?per_page=${CHECK_RUN_PAGE}&page=${page}&filter=latest`;
+    const result = await githubFetch(fetchImpl, url, token, {
+      etag: page === 1 ? cached?.etag ?? null : null,
+      missingOk: true,
+      now
+    });
+    if (page === 1) etag = result.etag ?? null;
+    if (page === 1 && result.notModified) {
+      return { notModified: true, etag, runs: Array.isArray(cached?.runs) ? cached.runs : [], incomplete: false };
+    }
+    if (result.missing) return { notModified: false, etag, runs: [], incomplete: false };
+    const batch = Array.isArray(result.body?.check_runs) ? result.body.check_runs : [];
+    runs.push(...batch);
+    const total = Number(result.body?.total_count);
+    if (!Number.isFinite(total) || runs.length >= total || batch.length < CHECK_RUN_PAGE) {
+      return { notModified: false, etag, runs, incomplete: false };
+    }
+  }
+  return { notModified: false, etag, runs, incomplete: true };
+}
+
+export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now() } = {}) {
   const [owner, name] = parseRepo(repo).split("/");
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-  const pr = await githubJson(fetchImpl, `${base}/pulls/${parsePrNumber(prNumber)}`, token);
-  const sha = typeof pr?.head?.sha === "string" && SHA_PATTERN.test(pr.head.sha) ? pr.head.sha : null;
-  let statusState = null;
-  let checkRuns = [];
-  if (sha) {
-    const status = await githubJson(fetchImpl, `${base}/commits/${sha}/status`, token, { missingOk: true });
-    const checks = await githubJson(fetchImpl, `${base}/commits/${sha}/check-runs`, token, { missingOk: true });
-    statusState = typeof status?.state === "string" ? status.state : null;
-    checkRuns = Array.isArray(checks?.check_runs) ? checks.check_runs : [];
+  const cache = previous?.cache && typeof previous.cache === "object" ? previous.cache : null;
+  const prResult = await githubFetch(fetchImpl, `${base}/pulls/${parsePrNumber(prNumber)}`, token, {
+    etag: cache?.etags?.pr ?? null, now
+  });
+  let sha = null;
+  let prFields = null;
+  if (prResult.notModified) {
+    sha = typeof cache?.sha === "string" && SHA_PATTERN.test(cache.sha) ? cache.sha : previous?.headSha ?? null;
+    prFields = previous;
+  } else {
+    sha = typeof prResult.body?.head?.sha === "string" && SHA_PATTERN.test(prResult.body.head.sha) ? prResult.body.head.sha : null;
+    prFields = normalizePull(prResult.body, {});
   }
-  return normalizePull(pr, { statusState, checkRuns });
+  let statusBody = cache?.status ?? null;
+  let runs = Array.isArray(cache?.runs) ? cache.runs : [];
+  let statusEtag = cache?.etags?.status ?? null;
+  let checksEtag = cache?.etags?.checks ?? null;
+  let statusNotModified = true;
+  let checksNotModified = true;
+  let incomplete = false;
+  if (sha) {
+    const sameSha = cache?.sha === sha;
+    const statusResult = await githubFetch(fetchImpl, `${base}/commits/${sha}/status`, token, {
+      etag: sameSha ? statusEtag : null, missingOk: true, now
+    });
+    statusNotModified = statusResult.notModified === true;
+    statusEtag = statusResult.etag ?? null;
+    if (!statusNotModified) statusBody = statusResult.missing ? null : statusResult.body;
+    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now);
+    checksNotModified = checksResult.notModified === true;
+    checksEtag = checksResult.etag ?? null;
+    incomplete = checksResult.incomplete === true;
+    if (!checksNotModified) runs = checksResult.runs;
+  }
+  const nextCache = {
+    sha,
+    etags: { pr: prResult.etag ?? null, status: statusEtag, checks: checksEtag },
+    status: slimStatus(statusBody),
+    runs: slimRuns(runs)
+  };
+  if (prResult.notModified && statusNotModified && checksNotModified) {
+    return { unchanged: true, cache: nextCache };
+  }
+  let checks = rollupChecks({ status: statusBody, checkRuns: runs });
+  if (incomplete && checks !== "red") checks = "pending";
+  return {
+    unchanged: false,
+    cache: nextCache,
+    snapshot: {
+      title: prFields?.title ?? null,
+      headSha: sha,
+      mergeable: prFields?.mergeable ?? "unknown",
+      behind: prFields?.behind === true,
+      checks,
+      mergedSha: prFields?.mergedSha ?? null,
+      closed: prFields?.closed === true || Boolean(prFields?.mergedSha)
+    }
+  };
 }
 
 const viewFromRow = row => ({
@@ -370,16 +573,25 @@ export class LandQueue {
   }
 
   async refreshDue({ now = this.store.now() } = {}) {
-    const minAge = this.token ? REFRESH_MIN_WITH_TOKEN_MS : REFRESH_MIN_MS;
+    const limited = this.db.prepare("SELECT MAX(rate_limited_until) AS until FROM land_queue").get();
+    if (limited?.until != null && limited.until > now) {
+      return { checked: 0, updated: 0, unconfigured: 0, rateLimited: 1 };
+    }
     const limit = this.token ? REFRESH_LIMIT : REFRESH_LIMIT_NO_TOKEN;
     const due = this.db.prepare(`SELECT * FROM land_queue
-      WHERE merged_sha IS NULL AND updated_at <= ?
-      ORDER BY updated_at ASC LIMIT ?`).all(now - minAge, limit);
-    const summary = { checked: 0, updated: 0, unconfigured: 0 };
+      WHERE merged_sha IS NULL AND closed = 0
+        AND (next_poll_at IS NULL OR next_poll_at <= ?)
+      ORDER BY next_poll_at ASC
+      LIMIT ?`).all(now, limit);
+    const summary = { checked: 0, updated: 0, unconfigured: 0, rateLimited: 0 };
     for (const row of due) {
       summary.checked += 1;
       try {
-        const result = await this.#refreshRow(viewFromRow(row), { duplicate: false });
+        const result = await this.#refreshRow(viewFromRow(row), { duplicate: false, cron: true });
+        if (result.rateLimited) {
+          summary.rateLimited += 1;
+          break;
+        }
         if (result.changed?.length) summary.updated += 1;
       } catch (error) {
         if (error?.code === "github_unconfigured") summary.unconfigured += 1;
@@ -390,21 +602,64 @@ export class LandQueue {
     return summary;
   }
 
-  async #refreshRow(item, { duplicate }) {
-    let snapshot;
+  #stampRateLimit(item, until) {
+    const stamp = Number(until);
+    if (!Number.isFinite(stamp)) return;
+    this.store.transaction(() => {
+      this.db.prepare("UPDATE land_queue SET rate_limited_until=? WHERE room_id=? AND item_id=?")
+        .run(stamp, item.roomId, item.itemId);
+    });
+  }
+
+  #schedule(itemId, roomId, { backoff, cache, now }) {
+    this.db.prepare(`UPDATE land_queue SET backoff_ms=?, next_poll_at=?, poll_etag=?, updated_at=?
+      WHERE room_id=? AND item_id=?`)
+      .run(backoff, now + backoff, cache ? JSON.stringify(cache) : null, now, roomId, itemId);
+  }
+
+  async #refreshRow(item, { duplicate, cron = false }) {
+    const row = this.#row(item.roomId, item.itemId);
+    const now = this.store.now();
+    let poll;
     try {
-      snapshot = await fetchPullSnapshot({
-        repo: item.repo, prNumber: item.prNumber, token: this.token, fetchImpl: this.fetchImpl
+      const cache = readPollCache(row?.poll_etag);
+      poll = await fetchPullSnapshot({
+        repo: item.repo,
+        prNumber: item.prNumber,
+        token: this.token,
+        fetchImpl: this.fetchImpl,
+        now,
+        previous: row ? {
+          title: row.title ?? null,
+          headSha: row.head_sha ?? null,
+          mergeable: row.mergeable,
+          behind: row.behind === 1,
+          checks: row.checks_state,
+          mergedSha: row.merged_sha ?? null,
+          closed: row.closed === 1,
+          cache
+        } : null
       });
     } catch (error) {
+      if (error?.code === "github_rate_limited") {
+        this.#stampRateLimit(item, error.rateLimitedUntil);
+        if (cron) return { item: viewFromRow(this.#row(item.roomId, item.itemId)), duplicate, changed: [], rateLimited: true };
+        this.store.transaction(() => {
+          this.db.prepare("UPDATE land_queue SET last_error=?, updated_at=? WHERE room_id=? AND item_id=?")
+            .run("github_unavailable", now, item.roomId, item.itemId);
+        });
+        fail(503, "github_unavailable", "GitHub refused the pull request read");
+      }
       if (error?.code === "pr_not_found" && !duplicate) {
         this.store.transaction(() => {
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
         });
       } else if (error?.code === "github_unconfigured" || error?.code === "github_unavailable") {
+        const backoff = nextPollBackoff(row?.backoff_ms);
         this.store.transaction(() => {
-          this.db.prepare("UPDATE land_queue SET last_error=?, updated_at=? WHERE room_id=? AND item_id=?")
-            .run(error.code, this.store.now(), item.roomId, item.itemId);
+          this.db.prepare(`UPDATE land_queue SET last_error=?, backoff_ms=?, next_poll_at=?, updated_at=?
+            WHERE room_id=? AND item_id=?`)
+            .run(error.code, backoff, now + backoff, now, item.roomId, item.itemId);
         });
         if (error.code === "github_unconfigured") {
           error.item = viewFromRow(this.#row(item.roomId, item.itemId));
@@ -412,15 +667,34 @@ export class LandQueue {
       }
       throw error;
     }
-    const row = this.#row(item.roomId, item.itemId);
-    const changed = landTransition(row.observed ? observedFromRow(row) : null, snapshot);
-    const now = this.store.now();
+    if (poll.unchanged) {
+      const backoff = nextPollBackoff(row?.backoff_ms);
+      let saved;
+      this.store.transaction(() => {
+        this.#schedule(item.itemId, item.roomId, { backoff, cache: poll.cache, now });
+        this.db.prepare("UPDATE land_queue SET last_error=NULL WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
+        saved = viewFromRow(this.#row(item.roomId, item.itemId));
+      });
+      return { item: saved, duplicate, changed: [] };
+    }
+    const snapshot = poll.snapshot;
+    const identical = row?.observed === 1 && (row.title ?? null) === (snapshot.title ?? null)
+      && (row.head_sha ?? null) === (snapshot.headSha ?? null)
+      && row.mergeable === snapshot.mergeable
+      && (row.behind === 1) === snapshot.behind
+      && row.checks_state === snapshot.checks
+      && (row.merged_sha ?? null) === (snapshot.mergedSha ?? null)
+      && (row.closed === 1) === snapshot.closed;
+    const backoff = identical ? nextPollBackoff(row?.backoff_ms) : POLL_BACKOFF_STEPS_MS[0];
+    const changed = landTransition(row?.observed ? observedFromRow(row) : null, snapshot);
+    const closed = snapshot.closed || snapshot.mergedSha ? 1 : 0;
     let saved;
     this.store.transaction(() => {
       this.db.prepare(`UPDATE land_queue SET title=?, head_sha=?, mergeable=?, behind=?, checks_state=?,
-        merged_sha=?, last_error=NULL, observed=1, updated_at=? WHERE room_id=? AND item_id=?`)
+        merged_sha=?, closed=?, last_error=NULL, observed=1, backoff_ms=?, next_poll_at=?, poll_etag=?, updated_at=?
+        WHERE room_id=? AND item_id=?`)
         .run(snapshot.title, snapshot.headSha, snapshot.mergeable, snapshot.behind ? 1 : 0, snapshot.checks,
-          snapshot.mergedSha, now, item.roomId, item.itemId);
+          snapshot.mergedSha, closed, backoff, now + backoff, JSON.stringify(poll.cache), now, item.roomId, item.itemId);
       saved = viewFromRow(this.#row(item.roomId, item.itemId));
       if (changed.length > 0) this.#emit(item.roomId, saved, changed);
     });

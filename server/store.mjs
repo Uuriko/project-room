@@ -66,7 +66,7 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensur
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
-import { LandQueue, landQueueSchema } from "./land-queue.mjs";
+import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
@@ -915,6 +915,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // writer fence. The table is the source of truth; land.updated events
       // are thin wake receipts and do not copy the row into the projection.
       this.db.exec(landQueueSchema);
+      migrateLandQueueColumns(this.db);
       // Identity-scoped inbox attachment bytes: purely additive, no schema
       // version bump, outside the writer fence. Account-session descriptor
       // routes are unchanged and still do not retain provider bytes.
