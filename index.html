@@ -27,6 +27,7 @@
             <div id="session-menu-panel" class="session-menu-panel">
               <p id="session-expiry" class="form-hint" hidden></p>
               <button id="account-settings-button" class="button ghost" type="button" hidden>Sign-in &amp; security</button>
+              <button id="create-account-button" class="button ghost" type="button" hidden>Create an account</button>
               <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
               <button id="clear-session-menu" class="button ghost" type="button" hidden>Clear saved session</button>
             </div>
@@ -388,6 +389,10 @@
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <ul id="emoji-list" class="mention-list emoji-list" role="listbox" aria-label="Emoji" hidden></ul>
             <p id="composer-status" class="status form-status" role="status"></p>
+            <div id="guest-upgrade-hint" class="guest-upgrade-hint" hidden>
+              <p>You're in as <strong id="guest-upgrade-name"></strong>. <button id="guest-upgrade-link" class="link-button" type="button">Create an account</button> to keep this name on any device.</p>
+              <button id="guest-upgrade-dismiss" class="button ghost" type="button" aria-label="Dismiss">×</button>
+            </div>
           </form>
           <span id="cursor-label" class="sr-only"></span>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
