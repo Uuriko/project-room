@@ -226,6 +226,24 @@ function sweep() {
     auditRecovery(fixture.store);
   } catch (error) { broke.push(`bond: ${error.message}`); }
 
+  // land.updated is not a command. Reporting a tip on a queued pull request
+  // emits it, so the auditors meet the thin wake receipt before the room ends.
+  try {
+    const itemId = "lq_sweep";
+    const now = Date.now();
+    fixture.store.db.prepare(`INSERT INTO land_queue
+      (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, title, head_sha,
+       mergeable, behind, checks_state, merged_sha, tip_source_revision, tip_build_id, last_error, observed,
+       created_at, updated_at)
+      VALUES ('commons', ?, 'acme/widgets', 7, 'owner', 'owner', 'Sweep PR', ?, 'mergeable', 0, 'pending', NULL, NULL, NULL, NULL, 1, ?, ?)`)
+      .run(itemId, "a".repeat(40), now, now);
+    fixture.store.landQueue.reportTip("commons", "owner", { itemId, sourceRevision: "rev-sweep" });
+    exercised.add(T.LAND_UPDATED);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`${T.LAND_UPDATED}: ${error.message}`); }
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.LAND_UPDATED))
+    broke.push(`${T.LAND_UPDATED}: the sweep never got this event into the log, so nothing was audited`);
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -258,11 +276,12 @@ test("the event surface has not grown without this sweep noticing", () => {
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
   //
-  // claim.renewed (52) is not exercised here: it needs a leased write-claim
+  // claim.renewed is not exercised here: it needs a leased write-claim
   // plus the holder's public progress message, and the sweep fixture's
   // producer holds no write_external grant, so claim.acquired is refused
   // before a renewal is even reachable. The reducer's validation is covered
   // by tests/lease-renewal.test.js instead.
-  assert.equal(Object.values(T).length, 52,
+  // land.updated is exercised above via report_tip (it is not a command).
+  assert.equal(Object.values(T).length, 53,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

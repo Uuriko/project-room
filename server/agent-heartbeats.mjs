@@ -45,7 +45,7 @@ const PUSH_TOKEN_MIN = 1;
 const PUSH_TOKEN_MAX = 500;
 const PUSH_DELIVERY_TIMEOUT_MS = 5000;
 const PUSH_SUSPEND_AFTER_FAILURES = 3;
-const PUSH_EVENT_TYPES = Object.freeze(["message.posted", "dm.posted", "bond.proposed", "assignment.created"]);
+const PUSH_EVENT_TYPES = Object.freeze(["message.posted", "dm.posted", "bond.proposed", "assignment.created", "land.updated"]);
 
 // RC-2026-09-24-203: agent_push_configs carries per-host push-notification
 // subscriptions and poll cadence. Purely additive: agent_hosts is never

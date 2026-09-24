@@ -47,6 +47,7 @@ export class ProjectRoom {
       queueMicrotask(() => { this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
     });
     bootstrapRoom(this.store, env);
+    this.store.landQueue.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials
     // disable the /api/auth/google routes (503) instead of breaking the room.
     let googleAuth = null;
@@ -130,6 +131,14 @@ export class ProjectRoom {
   async drainWebhookDeliveries() {
     if (this.paused) throw new Error('Room paused');
     return this.store.agentPlugin.drainWebhookDeliveries();
+  }
+  // Land queue: cheap GitHub poll. No inbound GitHub webhook exists, so the
+  // cron tick is the refresh. A missing token is counted, not thrown, and
+  // the token itself is never logged.
+  async refreshLandQueue() {
+    if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
+    this.store.landQueue.configure({ env: this.env });
+    return this.store.landQueue.refreshDue();
   }
   // Records an analytics/audit retention plan. The tick passes no live rows
   // and no deleter, so a config flag cannot delete production room data.
@@ -230,6 +239,8 @@ export default {
       .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
     ctx.waitUntil(room.drainWebhookDeliveries()
       .catch(error => console.warn(`[webhook-dispatch] cron tick failed: ${error?.message ?? error}`)));
+    ctx.waitUntil(room.refreshLandQueue()
+      .catch(error => console.warn(`[land-queue] cron tick failed: ${error?.message ?? error}`)));
     ctx.waitUntil(Promise.resolve().then(() => room.planRetention())
       .catch(error => console.warn(`[retention] plan failed: ${error?.message ?? error}`)));
   }

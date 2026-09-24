@@ -2682,6 +2682,67 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
+      // Land queue. Any member can add, list, or remove a pull request, and
+      // report the tip they are landing. Names match the hosted MCP tools.
+      // A missing GitHub token that the read requires is 503 github_unconfigured.
+      const landAdd = /^\/api\/rooms\/([^/]{1,384})\/add_land_item$/.exec(url.pathname);
+      const landList = /^\/api\/rooms\/([^/]{1,384})\/list_land_queue$/.exec(url.pathname);
+      const landRemove = /^\/api\/rooms\/([^/]{1,384})\/remove_land_item$/.exec(url.pathname);
+      const landTip = /^\/api\/rooms\/([^/]{1,384})\/report_tip$/.exec(url.pathname);
+      const landMatch = landAdd || landList || landRemove || landTip;
+      if (landMatch) {
+        const roomId = pathId(landMatch[1]);
+        const action = landAdd ? "add_land_item" : landList ? "list_land_queue" : landRemove ? "remove_land_item" : "report_tip";
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+        const auth = selected.mode === "account"
+          ? store.authenticateAccountSession(selected.token, roomId, fence)
+          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        if (auth.kind === "api-key") {
+          const requiredScope = action === "list_land_queue" ? "rooms:read" : "rooms:write";
+          const granted = (auth.apiKeyScopes ?? []).some(scope =>
+            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+        }
+        rate(`read:${auth.credentialHash}`, 600);
+        if (action === "list_land_queue") {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
+          return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD");
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        protectWrite(req, auth, selected.bearer);
+        rate(`write:${auth.credentialHash}`, 60);
+        const data = await body(req);
+        try {
+          if (action === "add_land_item") {
+            if (!data || typeof data !== "object" || Array.isArray(data)) reject(422, "invalid_land_item", "repo and prNumber are required");
+            const claimant = Object.hasOwn(data, "claimantMemberId") ? data.claimantMemberId : null;
+            const allowed = claimant === null ? ["repo", "prNumber"] : ["repo", "prNumber", "claimantMemberId"];
+            if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
+              reject(422, "invalid_land_item", "repo and prNumber are required");
+            }
+            const result = await store.landQueue.add(roomId, auth.member.id, {
+              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant
+            });
+            return json(res, result.duplicate ? 200 : 201, result);
+          }
+          if (action === "remove_land_item") {
+            if (!exact(data, ["itemId"]) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
+            return json(res, 200, store.landQueue.remove(roomId, auth.member.id, { itemId: data.itemId }));
+          }
+          const tipKeys = Object.keys(data ?? {});
+          const tipAllowed = tipKeys.every(key => ["itemId", "sourceRevision", "buildId"].includes(key)) && tipKeys.includes("itemId");
+          if (!tipAllowed || typeof data.itemId !== "string") reject(422, "invalid_land_tip", "itemId and a tip field are required");
+          return json(res, 200, store.landQueue.reportTip(roomId, auth.member.id, data));
+        } catch (error) {
+          if (error instanceof ServiceError && error.code === "github_unconfigured") {
+            return json(res, 503, { error: { code: error.code, message: error.message }, ...(error.item ? { item: error.item } : {}) });
+          }
+          throw error;
+        }
+      }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);

@@ -66,6 +66,7 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensur
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { LandQueue, landQueueSchema } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
@@ -722,6 +723,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
+    this.landQueue = new LandQueue(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
@@ -909,6 +911,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
       this.db.exec(agentHeartbeatSchema);
+      // Land queue: purely additive, no schema version bump, outside the
+      // writer fence. The table is the source of truth; land.updated events
+      // are thin wake receipts and do not copy the row into the projection.
+      this.db.exec(landQueueSchema);
       // Identity-scoped inbox attachment bytes: purely additive, no schema
       // version bump, outside the writer fence. Account-session descriptor
       // routes are unchanged and still do not retain provider bytes.

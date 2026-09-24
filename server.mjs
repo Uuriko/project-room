@@ -43,6 +43,7 @@ try {
 // the cron tick (which stays the restart-safe backstop). The kick never
 // blocks the request path — the drain runs on a microtask and failures
 // stay in the durable retry queue.
+if (store) store.landQueue.configure({ env: process.env });
 if (store) store.agentPlugin.setDispatchKick(() => {
   queueMicrotask(() => { store.agentPlugin.drainWebhookDeliveries().catch(() => {}); });
 });

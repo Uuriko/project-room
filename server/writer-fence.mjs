@@ -250,7 +250,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to it, rows are scoped to one agent identity, and
   // InboxAttachmentBytes.verifySchema() is the integrity gate. This is not
   // the account-session inbox descriptor table.
-  "inbox_attachment_bytes"
+  "inbox_attachment_bytes",
+  // land_queue (per-room pull-request land queue). Purely additive and
+  // intentionally NOT fenced — older writers have no code path to it, and
+  // the module verifies its own schema on open. Rows never grant permission.
+  "land_queue"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
