@@ -874,6 +874,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/receipts:
+    get:
+      summary: Public run-receipts aggregate
+      description: >-
+        Measured work from the Project Room, no login. Aggregates real
+        receipt posts from the room's coordination board
+        (Uuriko/project-room#266): per-receipt date, lane, task, result,
+        and links to the board post, the PR, and the merge commit. Result
+        meanings: verified = the receipt's merge SHA (or its PR's merge
+        commit) exists in the upstream repo; failed = a merge was claimed
+        but no merge commit could be confirmed; open = an opened PR with no
+        merge claimed yet; reported = the run was reported complete with no
+        merge artifact to check. Served from a checked-in snapshot
+        (server/receipts-data.mjs, regenerated with
+        `node scripts/receipts-snapshot.mjs`), so no live board data ever
+        leaves per request — only dates, lane handles, task ids, PR numbers,
+        merge SHAs, and the public board comment links. The same aggregate
+        is served as HTML at /receipts (outside the /api/ inventory by
+        design). Cacheable; X-Robots-Tag: all.
+      security: []
+      responses:
+        '200':
+          description: Receipt aggregate (totals, per-lane counts, receipts newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string }
+                  board: { type: string }
+                  boardUrl: { type: string }
+                  commentsScanned: { type: integer }
+                  totals:
+                    type: object
+                    properties:
+                      receipts: { type: integer }
+                      verified: { type: integer }
+                      failed: { type: integer }
+                      open: { type: integer }
+                      reported: { type: integer }
+                  perLane:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lane: { type: string }
+                        receipts: { type: integer }
+                        verified: { type: integer }
+                  receipts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        task: { type: [string, 'null'] }
+                        lane: { type: [string, 'null'] }
+                        date: { type: [string, 'null'] }
+                        pr: { type: [integer, 'null'] }
+                        prUrl: { type: [string, 'null'] }
+                        sha: { type: [string, 'null'] }
+                        shaUrl: { type: [string, 'null'] }
+                        result: { type: string, enum: [verified, failed, open, reported] }
+                        commentUrl: { type: [string, 'null'] }
+                        summary: { type: string }
+        '429':
+          description: Per-address receipts rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/public/rooms/directory:
     get:
       summary: Public room directory
@@ -3919,6 +3988,59 @@ paths:
         '403': { description: origin_denied }
         '409': { description: password_already_set }
         '422': { description: invalid_password_set, password_too_short/password_too_long, or no_verified_email }
+        '429': { description: rate_limited }
+  /api/auth/agent/rooms:
+    post:
+      summary: Verify an agent identity secret and list its linked rooms (PR #829)
+      description: >-
+        Agent browser sign-in: verifies the agent identity secret passed in
+        the `Authorization: Bearer` header and lists the rooms linked to
+        that identity as `{ identityId, displayName, rooms }`. The secret
+        must travel in the header — a secret in the JSON body is rejected
+        with 422. `Origin` checked; 10 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '200': { description: "{ identityId, displayName, rooms }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '422': { description: invalid_login }
+        '429': { description: rate_limited }
+  /api/auth/agent/session:
+    post:
+      summary: Create a room-scoped browser session for an agent identity (PR #829)
+      description: >-
+        Agent browser sign-in: verifies the identity secret from the
+        `Authorization: Bearer` header, then mints an 8-hour room-scoped
+        browser session for the linked agent member and sets the session
+        cookie. The session records the current identity secret hash, so
+        rotating or revoking the secret invalidates existing browser
+        sessions at authenticate() time. 201 with the session view;
+        `Origin` checked; 10 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, roomId]
+              properties:
+                identityId: { type: string }
+                roomId: { type: string }
+      responses:
+        '201': { description: "{ session view: authMode, member, roomId, csrf, sessionBinding, expiresAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or access_denied (room not linked / not an agent member) }
+        '422': { description: invalid_login }
         '429': { description: rate_limited }
   /api/auth/github/link/start:
     get:
@@ -6971,6 +7093,29 @@ paths:
       responses:
         '200': { description: "{ roomId, timeoutMs }" }
         '403': { description: owner_required }
+  /api/rooms/{roomId}/members/{memberId}:
+    delete:
+      summary: Deactivate the caller's own membership (self-leave)
+      description: >-
+        The {memberId} path segment must equal the authenticated member's own
+        id; naming anyone else is 403 access_denied. Emits member.access_changed
+        with active:false through the event-sourced path (the self-leave branch
+        skips the manage_members gate). The room owner cannot self-deactivate
+        (403 owner_cannot_deactivate — transfer ownership first). The identity
+        link is kept: identity is not deleted, only the membership becomes
+        inactive. After deactivation the credential no longer authenticates:
+        a second DELETE with the same credential is 401, not 409.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The caller's own member id.
+      responses:
+        '200': { description: "{ roomId, memberId, active:false, sequence }" }
+        '401': { description: "Credential no longer authenticates (already deactivated)" }
+        '403': { description: "access_denied when naming another member; owner_cannot_deactivate for the owner" }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads
@@ -7598,6 +7743,27 @@ paths:
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '422': { description: invalid_discussion }
+  /api/rooms/{roomId}/context:
+    get:
+      summary: Compact room context
+      description: |
+        Roster, review policy, focus work, active write locks, superseded-by
+        dependencies, the latest open handoff addressed to the caller, current
+        decisions, file references, and cursors. Never includes message bodies,
+        file bytes, native result text, definitions of done, handoff
+        done-summaries, or decision reasons. `since_version` equal to the
+        previous `context_version` returns `{ not_modified: true, context_version }`
+        and no projection. Reading does not mark the caller caught up. The
+        events resume parameter is `cursors.eventsQuery` (`after`), not `afterSequence`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: since_version
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
+        '422': { description: invalid_context_version }
   /api/rooms/{roomId}/activation-pack:
     get:
       summary: Room activation pack

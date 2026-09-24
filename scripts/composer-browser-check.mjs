@@ -146,8 +146,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
     await page.locator("#thread-back").click();
     assert.match(await input.getAttribute("placeholder"), /Message #/);
-    await page.locator("#composer-options > summary").click();
-    await page.locator("#remember-drafts").check();
+    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.equal(await page.locator("#remember-drafts").count(), 0);
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
@@ -200,12 +200,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.reload();
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await input.inputValue(), "Recover this thread after reload");
-    assert.equal(await page.locator("#remember-drafts").isChecked(), true);
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "A separate room draft");
-    await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
-    await page.locator("#composer-options > summary").click();
-    await page.locator("#remember-drafts").uncheck();
+    const stored = await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v3"));
+    assert.match(stored, /A separate room draft/);
     assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v2")), null);
 
     // Moving to search while a send is waiting is intentional focus movement.

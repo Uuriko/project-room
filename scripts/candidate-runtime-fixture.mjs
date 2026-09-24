@@ -31,6 +31,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-roster.js');
   paths.add('src/account-settings-ui.js');
   paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
+  paths.add('src/agent-signin-ui.js'); // Agent browser sign-in choice UI (imported by src/app.js, RC-2026-09-23)
   paths.add('src/room-deep-link.js');
   paths.add('src/browser-session.js');
   paths.add('src/session-expiry.js'); // Session-expiry locale rendering (imported by src/app.js + src/join.js)
@@ -89,6 +90,7 @@ paths.add('server/attachment-schema.mjs');
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
+  paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs)
   for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
@@ -100,6 +102,8 @@ paths.add('server/attachment-schema.mjs');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
+  paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
+  paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

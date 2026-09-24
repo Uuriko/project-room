@@ -376,7 +376,7 @@ function validateEnvelope(incoming) {
     if (key === "segments" && (!Array.isArray(value) || value.length === 0 || value.length > 20
       || value.some(segment => !segment || typeof segment !== "object" || Array.isArray(segment)
         || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -922,6 +922,18 @@ function proposeWork(state, incoming) {
   if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
   if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
+  // RC-2026-09-23: optional machine-readable labels (e.g. "friction" for
+  // friction reports from agent feedback). Validated as an array of short
+  // slugs; stored on the projection for filtering and digests. The field is
+  // omitted entirely when the event lacks it, so pre-label legacy rows replay
+  // to a projection without the key (recovery audit byte-compatibility).
+  let labels;
+  if (incoming.data.labels !== undefined) {
+    if (!Array.isArray(incoming.data.labels) || incoming.data.labels.length > 10
+      || incoming.data.labels.some(l => typeof l !== "string" || !/^[a-z0-9-]{1,32}$/.test(l)))
+      throw new Error("labels must be an array of up to 10 slugs ([a-z0-9-], max 32 chars)");
+    labels = [...incoming.data.labels];
+  }
   // Room policy overrides the proposer's choice: altered client fields cannot
   // disable a mandatory gate. The recorded event keeps what the client sent;
   // the projection (and every replay) applies the policy in force at this point
@@ -957,6 +969,7 @@ function proposeWork(state, incoming) {
     humanDecisionMakerId,
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
+    ...(labels !== undefined ? { labels } : {}),
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
     // wherever the envelope exists; it is never read from data and never inferred from the
     // source message's author. Pre-field legacy rows simply lack the key and render unknown.

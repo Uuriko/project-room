@@ -49,7 +49,6 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     if (!await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
   };
   await input.fill("Keep ordinary room writing.");
-  await page.locator("#composer-options > summary").click(); await page.locator("#remember-drafts").check();
   await page.locator("#request-reply").click(); await input.fill("Keep my general question.");
   await page.locator("#request-exit").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
   await openWork(); await card.locator("[data-ask-credit]").click();
@@ -61,7 +60,6 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   await page.screenshot({ path: join(directory, "question.png") });
   await page.locator("#request-exit").click(); await page.locator("#thread-back").click();
   assert.equal(await input.inputValue(), "Keep ordinary room writing.");
-  if (!await page.locator("#composer-options").evaluate(node => node.open)) await page.locator("#composer-options > summary").click();
   await page.locator("#request-reply").click(); assert.equal(await input.inputValue(), "Keep my general question.");
   await page.locator("#request-exit").click(); await openWork(); await card.locator("[data-ask-credit]").click();
   assert.equal(await input.inputValue(), "Who wrote the original draft, and which parts used AI?");

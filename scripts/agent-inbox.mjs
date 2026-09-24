@@ -238,7 +238,7 @@ if (action === "join") {
   node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers] [--brief]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
-  node scripts/agent-inbox.mjs [orient|next|brief|changes CHECKPOINT|packet WORK_ID]
+  node scripts/agent-inbox.mjs [orient|next|brief|context [CONTEXT_VERSION]|changes CHECKPOINT|packet WORK_ID]
   node scripts/agent-inbox.mjs presence
   node scripts/agent-inbox.mjs capabilities [QUERY]
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
@@ -261,6 +261,7 @@ if (action === "join") {
   (omit permissions for a read/chat-only link)
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
+  node scripts/agent-inbox.mjs leave-room
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
@@ -347,7 +348,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         ? { toMemberId: extra[0], words: extra.slice(1) }
         : { words: [checkpoint, ...extra] })
       : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -364,6 +365,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
+        : action === "context" ? extra.length > 0 || (checkpoint !== undefined && !/^[a-f0-9]{64}$/.test(checkpoint))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
@@ -383,6 +385,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "membership-grants" && (checkpoint !== undefined || extra.length))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
+      || (action === "leave-room" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
     const config = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
       client = ["identity-create", "rooms", "room-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
@@ -399,6 +402,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
+      : action === "context" ? await client.roomContext(checkpoint === undefined ? {} : { sinceVersion: checkpoint })
       : action === "presence" ? await client.presence()
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
       : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
@@ -420,6 +424,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
+      : action === "leave-room" ? await client.deactivateMembership()
       : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint.startsWith("profile:")
             ? { profile: checkpoint.slice("profile:".length) }
             : { permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean) }),

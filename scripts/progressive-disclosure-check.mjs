@@ -12,7 +12,8 @@ import { openCatchUp, openSettings } from "./room-chrome.mjs";
 
 // In-room section disclosures that still use the shared .section-summary anatomy.
 // People is sidebar chrome (`sidebar-label`), not a section summary.
-const SHARED = ["#composer-options", "#record-panel", "#decision-section"];
+// The chat composer no longer has an Options disclosure.
+const SHARED = ["#record-panel", "#decision-section"];
 
 async function setup(t, { mobile = false } = {}) {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -69,7 +70,7 @@ test("section summaries share one anatomy: chevron, label, flex row, 44px target
 test("chevron direction reflects open state identically across sections", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
   for (const id of SHARED) {
-    if (id !== "#composer-options") await openSettings(page, "record-panel");
+    await openSettings(page, "record-panel");
     const summary = page.locator(`${id} > summary`);
     await summary.evaluate(node => { node.parentElement.open = false; });
     const closedTransform = await summary.evaluate(node => getComputedStyle(node, "::before").transform);
@@ -77,7 +78,7 @@ test("chevron direction reflects open state identically across sections", { time
     const openTransform = await summary.evaluate(node => getComputedStyle(node, "::before").transform);
     assert.notEqual(openTransform, closedTransform, `${id} chevron rotates on open`);
     await summary.evaluate(node => { node.parentElement.open = false; });
-    if (id !== "#composer-options" && await page.locator("#settings-dialog").evaluate(node => node.open)) {
+    if (await page.locator("#settings-dialog").evaluate(node => node.open)) {
       await page.locator("#settings-close").click();
     }
   }
@@ -85,8 +86,8 @@ test("chevron direction reflects open state identically across sections", { time
 
 test("keyboard toggling never moves focus off the summary", { timeout: 30000 }, async t => {
   const { page } = await setup(t);
-  for (const id of ["#composer-options", "#record-panel"]) {
-    if (id === "#record-panel") await openSettings(page, "record-panel");
+  for (const id of ["#record-panel"]) {
+    await openSettings(page, "record-panel");
     const summary = page.locator(`${id} > summary`);
     await summary.scrollIntoViewIfNeeded();
     await summary.focus();
@@ -129,7 +130,8 @@ test("trailing chips align to the summary's right edge", { timeout: 30000 }, asy
 
 test("the same anatomy holds on mobile", { timeout: 30000 }, async t => {
   const { page } = await setup(t, { mobile: true });
-  for (const id of ["#composer-options", "#record-panel"]) {
+  for (const id of ["#record-panel"]) {
+    await openSettings(page, "record-panel");
     const info = await page.locator(`${id} > summary`).evaluate(node => {
       const cs = getComputedStyle(node);
       return { display: cs.display, minHeight: parseFloat(cs.minHeight), chevron: getComputedStyle(node, "::before").content !== "none" };

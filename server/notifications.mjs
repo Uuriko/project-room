@@ -115,6 +115,17 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       continue;
     }
     if (preferences.work_updates === "none") continue;
+    // Respect an explicit work-update mute. A friction completion is a
+    // direct response to its reporter, so mentions_only may include it;
+    // unlike an access decision, it is not a required-action notification.
+    if (event.type === T.WORK_COMPLETED && event.data?.workItemId) {
+      const item = state.workItems?.[event.data.workItemId];
+      if (item && Array.isArray(item.labels) && item.labels.includes("friction")
+        && item.proposedById === member.id) {
+        put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type, closeLoop: true });
+        continue;
+      }
+    }
     if (event.type === T.WORK_PROPOSED) {
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
       continue;

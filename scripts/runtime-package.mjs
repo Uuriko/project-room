@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -111,6 +111,7 @@ optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by s
 optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)
 optional.push("server/handoff-case.mjs"); // CASE handoff contract (imported by server/inbox-handoff.mjs; pure, imports ServiceError from store.mjs)
 optional.push("server/work-handoff.mjs"); // RC-2026-09-19-062: typed handoff envelopes (imported by server/store.mjs; pure, imports ServiceError from store.mjs)
+optional.push("server/room-context.mjs"); // Compact agent room context (imported by server/store.mjs; pure, imports events.js and workflow.js)
 optional.push("server/inbox-assign.mjs"); // Lane C: pure assignment logic (imported by server/inbox-collab-store.mjs; pure, no imports)
 optional.push("server/inbox-internal-notes.mjs"); // Lane C: pure internal-notes logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)
 optional.push("server/inbox-collision.mjs"); // Lane C: pure draft-collision logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)
@@ -160,6 +161,7 @@ optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (i
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
+optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/app.js, RC-2026-09-23)
 optional.push("src/invite-context.js"); // Invitation context stashed at OAuth start (imported by src/app.js, RC-2026-09-18-007)
 optional.push("src/room-deep-link.js"); // #room/{roomId} Open/People deep-link
 optional.push("src/browser-session.js"); // Last-room + Sign out session-hint clear
@@ -174,6 +176,7 @@ optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
+optional.push("server/receipts-page.mjs", "server/receipts-data.mjs"); // public run-receipts page + generated board snapshot (imported by server/http.mjs)
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/pins.mjs");

@@ -8,7 +8,7 @@
 // the same secret. Rooms keep full sovereignty — linking and unlinking
 // are owner-only, and unlinking deactivates the room member.
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
@@ -55,8 +55,26 @@ export function isIdentitySecret(token) {
     && /^[A-Za-z0-9_-]{43,128}$/.test(token.slice(IDENTITY_SECRET_PREFIX.length));
 }
 
-const hash = text => createHash("sha256").update(text).digest("hex");
+const legacyHash = text => createHash("sha256").update(text).digest("hex");
 const base64url = bytes => Buffer.from(bytes).toString("base64url");
+
+// v2 identity-secret hashes (RC-2026-09-23): a deterministic scrypt — lookup
+// by hash still works and no deployment secret is needed — that costs orders
+// of magnitude more per guess than the legacy bare sha256 (invite v2 pattern:
+// deterministic salt, no random per-row salt). Stored with a "v2:" prefix so
+// legacy rows (bare 64-hex sha256) are distinguishable. Legacy hashes are
+// upgraded to v2 on the next successful verification (upgrade-on-login), so
+// no mass rehash and no secret rotation is required.
+const IDENTITY_HASH_SALT = "project-room-agent-identity-v2";
+const IDENTITY_HASH_PARAMS = { N: 16384, r: 8, p: 1 };
+const IDENTITY_HASH_PREFIX = "v2:";
+const v2Hash = secret => `${IDENTITY_HASH_PREFIX}${scryptSync(secret, IDENTITY_HASH_SALT, 32, IDENTITY_HASH_PARAMS).toString("hex")}`;
+// Stored-format hash for a newly issued secret.
+const hashIdentitySecret = secret => v2Hash(secret);
+// Every stored-format candidate for a presented secret: v2 first, legacy
+// second for upgrade-on-login.
+const hashCandidates = secret => [v2Hash(secret), legacyHash(secret)];
+const isV2Hash = stored => typeof stored === "string" && stored.startsWith(IDENTITY_HASH_PREFIX);
 
 // Identity creation is unauthenticated (an identity alone grants nothing),
 // so the table is bounded like the credentials table in store.mjs: a hard
@@ -97,12 +115,19 @@ export class AgentIdentities {
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
-      const recoveredId = suppliedSecret === undefined ? null : `ai_${hash(suppliedSecret).slice(0, 40)}`;
+      const recoveredId = suppliedSecret === undefined ? null : `ai_${legacyHash(suppliedSecret).slice(0, 40)}`;
       if (recoveredId) {
         const existing = this.db.prepare("SELECT * FROM agent_identities WHERE identity_id=?").get(recoveredId);
         if (existing) {
-          if (existing.revoked_at !== null || existing.secret_hash !== hash(suppliedSecret))
+          const [v2, legacy] = hashCandidates(suppliedSecret);
+          if (existing.revoked_at !== null || (existing.secret_hash !== v2 && existing.secret_hash !== legacy))
             fail(409, "identity_credential_changed", "Identity credential changed; use the current saved identity");
+          // Upgrade-on-login: a legacy-hash row verified here is rehashed
+          // to v2 before returning, so the next verification is v2-only.
+          if (!isV2Hash(existing.secret_hash)) {
+            this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
+              .run(v2, recoveredId, existing.secret_hash);
+          }
           return { identityId: recoveredId, displayName: existing.display_name, duplicate: true, next: SIGNUP_NEXT };
         }
       }
@@ -112,7 +137,7 @@ export class AgentIdentities {
       const identityId = recoveredId ?? `ai_${base64url(randomBytes(12))}`;
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
-        .run(identityId, hash(secret), name, now);
+        .run(identityId, hashIdentitySecret(secret), name, now);
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
       // operator-attested binding — see server/agent-key-registry.mjs) and
@@ -214,6 +239,19 @@ export class AgentIdentities {
     });
   }
 
+  // Upgrade-on-login: after a legacy-hash row verifies, rehash it to v2.
+  // Conditional on the exact legacy value just verified, so a concurrent
+  // rotate/revoke that lands first wins and is never clobbered.
+  upgradeLegacyHash(identityId, secret) {
+    // Legacy credentials remain valid on read-only paths. Defer this
+    // opportunistic migration until a later write-capable authentication;
+    // no success on a read requires changing persisted authentication state.
+    if (this.store.readOnly || this.store.readTransactionDepth > 0) return;
+    const [v2, legacy] = hashCandidates(secret);
+    this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
+      .run(v2, identityId, legacy);
+  }
+
   // Proves ownership of an identity secret: the presented secret must be
   // the identity's CURRENT, unrevoked secret. Used by rotate/revoke; a
   // revoked secret fails here, so revoke is final — there is no other
@@ -221,10 +259,12 @@ export class AgentIdentities {
   authenticateIdentitySecret(identityId, secret) {
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(401, "unauthenticated", "Unknown agent identity");
     if (!isIdentitySecret(secret)) fail(401, "unauthenticated", "Unknown agent identity");
-    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE identity_id=? AND secret_hash=? AND revoked_at IS NULL")
-      .get(identityId, hash(secret));
+    const [v2, legacy] = hashCandidates(secret);
+    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash FROM agent_identities WHERE identity_id=? AND secret_hash IN (?, ?) AND revoked_at IS NULL")
+      .get(identityId, v2, legacy);
     if (!row) fail(401, "unauthenticated", "Unknown or revoked agent identity secret");
-    return row;
+    if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(identityId, secret);
+    return { identityId: row.identityId, displayName: row.displayName };
   }
 
   // Owner-only: rotate an identity secret. The old secret stops working
@@ -235,15 +275,16 @@ export class AgentIdentities {
   rotate(identityId, secret) {
     const identity = this.authenticateIdentitySecret(identityId, secret);
     return this.store.transaction(() => {
-      const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
+      const row = this.db.prepare("SELECT revoked_at AS revokedAt, secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
       if (!row) fail(404, "identity_not_found", "No such agent identity");
       if (row.revokedAt !== null) fail(409, "identity_revoked", "This identity's secret is revoked; it cannot rotate");
       const newSecret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
-      // Conditional update: a concurrent revoke/rotate that lands first
-      // must win — the stale rotation is rejected instead of resurrecting
-      // a revoked secret or double-issuing.
+      // Conditional update on the CURRENT stored hash (authenticate above
+      // already upgraded a legacy row to v2): a concurrent revoke/rotate
+      // that lands first must win — the stale rotation is rejected instead
+      // of resurrecting a revoked secret or double-issuing.
       const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
-        .run(hash(newSecret), identityId, hash(secret));
+        .run(hashIdentitySecret(newSecret), identityId, row.secretHash);
       if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
       return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now() };
     });
@@ -295,9 +336,12 @@ export class AgentIdentities {
   // "unknown secret".
   resolveGlobalIdentitySecret(secret) {
     if (!isIdentitySecret(secret)) return null;
-    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL")
-      .get(hash(secret));
-    return row ?? null;
+    const [v2, legacy] = hashCandidates(secret);
+    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName, secret_hash AS secretHash FROM agent_identities WHERE secret_hash IN (?, ?) AND revoked_at IS NULL")
+      .get(v2, legacy);
+    if (!row) return null;
+    if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(row.identityId, secret);
+    return { identityId: row.identityId, displayName: row.displayName };
   }
 
   // Resolves an identity secret to the linked room member, or null. Called
@@ -306,8 +350,10 @@ export class AgentIdentities {
   // with no cache in between (resolution is a fresh DB read every call).
   resolveIdentityAuth(secret, roomId) {
     if (!roomId) return null;
-    const row = this.db.prepare("SELECT identity_id FROM agent_identities WHERE secret_hash=? AND revoked_at IS NULL").get(hash(secret));
+    const [v2, legacy] = hashCandidates(secret);
+    const row = this.db.prepare("SELECT identity_id, secret_hash AS secretHash FROM agent_identities WHERE secret_hash IN (?, ?) AND revoked_at IS NULL").get(v2, legacy);
     if (!row) return null;
+    if (!isV2Hash(row.secretHash)) this.upgradeLegacyHash(row.identity_id, secret);
     return this.resolveIdentityLink(row.identity_id, roomId);
   }
 
@@ -321,6 +367,38 @@ export class AgentIdentities {
     const member = this.store.roomAuthority(roomId).members[link.member_id];
     if (!member || member.active === false) return null;
     return { identityId, member };
+  }
+
+  // Lists all rooms where an identity is linked as an active member.
+  // Used by the agent browser sign-in flow: after verifying the identity
+  // secret, the agent picks which room to open. Returns [{ roomId, title,
+  // memberId }] for active links only.
+  roomsForIdentity(identityId) {
+    if (typeof identityId !== "string" || !identityId) return [];
+    const rows = this.db.prepare(`
+      SELECT l.room_id AS roomId, l.member_id AS memberId
+      FROM identity_links l
+      WHERE l.identity_id = ?
+      ORDER BY l.linked_at DESC
+    `).all(identityId);
+    // Filter to active members only, and get room titles from projection
+    return rows.filter(row => {
+      try {
+        const member = this.store.roomAuthority(row.roomId).members[row.memberId];
+        if (!member || member.active === false) return false;
+        // Get title from room projection
+        const roomRow = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.roomId);
+        if (roomRow) {
+          const proj = JSON.parse(roomRow.projection);
+          row.title = proj?.room?.title || row.roomId;
+        } else {
+          row.title = row.roomId;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 }
 

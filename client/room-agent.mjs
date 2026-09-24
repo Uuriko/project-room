@@ -294,7 +294,7 @@ export class RoomAgentClient {
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -630,6 +630,14 @@ export class RoomAgentClient {
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
   activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
+  // Compact catch-up. sinceVersion is the previous context_version. An exact
+  // match returns { not_modified: true } and no room projection. This read
+  // never returns message or file bodies.
+  roomContext({ sinceVersion, signal } = {}) {
+    if (sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)) throw new RoomClientError(0, "invalid_context_version", "since_version must be the 64-character context_version");
+    const query = sinceVersion === undefined ? "" : `?since_version=${sinceVersion}`;
+    return this.#request(`/context${query}`, undefined, signal);
+  }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });
     for (const [name, value] of Object.entries({ horizon, after, cursor })) if (value !== undefined) query.set(name, value);
@@ -714,6 +722,13 @@ export class RoomAgentClient {
   }
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
+  }
+  // Self-deactivation: the caller deactivates its own membership.
+  // memberId must be the caller's own member id; the server rejects anyone
+  // else with 403. The identity link is kept — only the membership goes inactive.
+  deactivateMembership({ signal } = {}) {
+    if (!this.#memberId) throw new Error("A pinned memberId is required to deactivate your own membership");
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/members/${encodeURIComponent(this.#memberId)}`, undefined, signal);
   }
   // One-time agent invite codes. Issuance is owner, manage_members, or
   // invite_member (agents may hold invite_member without manage_members).

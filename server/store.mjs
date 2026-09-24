@@ -32,6 +32,7 @@ import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journa
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
+import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
@@ -382,7 +383,7 @@ const shapes = {
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
   [T.CHANNEL_ARCHIVED]: "channelId",
-  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
+  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId labels",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
   [HELP_OFFER_OPENED]: `${work} offerId expectedHelpRevision helpEventId plan`,
@@ -452,7 +453,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -767,6 +768,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
+      // RC-2026-09-23-106: agent browser sessions record the identity secret
+      // hash at creation time. If the secret is rotated or revoked, sessions
+      // minted with the old secret are rejected at authenticate() time.
+      // Additive column; existing rows backfill NULL (no secret binding).
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
+        this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
+      }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
@@ -1223,6 +1231,56 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
     }
   }
+  // RC-2026-09-23: stale-member listing for the zombie-member cleanup.
+  // Token-free and read-only: for the trusted local operator
+  // (scripts/room-hygiene.mjs member-sweep), like verifyInvitationAudit.
+  // Lists ACTIVE members whose last observed activity (last command `at`,
+  // work-session heartbeat, or member.added) is older than `days` (default
+  // 30), or never observed. Read-only: the operator reviews the list and
+  // deactivates via the owner path; nothing here writes.
+  staleMembers(roomId, { days = 30, now = null } = {}) {
+    return this.readTransaction(() => {
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const nowMs = now ?? this.now();
+      const cutoff = nowMs - days * 24 * 60 * 60 * 1000;
+      // Event `at` values are ISO strings; parse to ms for comparison.
+      const asMs = value => {
+        if (typeof value === "number" && Number.isFinite(value)) return value;
+        if (typeof value === "string") { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : 0; }
+        return 0;
+      };
+      const heartbeats = new Map();
+      for (const item of Object.values(room.state.workItems ?? {})) {
+        const session = sessionRecord(item);
+        if (session.worker_member_id && session.heartbeat_at) {
+          const ms = asMs(session.heartbeat_at);
+          const prev = heartbeats.get(session.worker_member_id) ?? 0;
+          if (ms > prev) heartbeats.set(session.worker_member_id, ms);
+        }
+      }
+      const lastCommandAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? GROUP BY actor`
+      ).all(roomId).filter(row => row.actor).map(row => [row.actor, asMs(row.at)]));
+      const addedAt = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+      ).all(roomId).filter(row => row.member).map(row => [row.member, asMs(row.at)]));
+      const stale = [];
+      for (const [memberId, member] of Object.entries(members)) {
+        if (member.active === false) continue;
+        const lastSeenAt = Math.max(lastCommandAt.get(memberId) ?? 0, heartbeats.get(memberId) ?? 0, addedAt.get(memberId) ?? 0) || null;
+        if (lastSeenAt === null || lastSeenAt < cutoff) {
+          stale.push({ memberId, displayName: member.displayName ?? memberId, kind: member.kind ?? "unknown",
+            lastSeenAt, daysSinceSeen: lastSeenAt === null ? null : Math.floor((nowMs - lastSeenAt) / 86400000) });
+        }
+      }
+      stale.sort((a, b) => (a.lastSeenAt ?? 0) - (b.lastSeenAt ?? 0));
+      return { roomId, days, cutoff, now: nowMs, stale,
+        activeCount: Object.values(members).filter(m => m.active !== false).length };
+    });
+  }
   // Deterministic upgrade repair: persisted projections are not replayed on startup. Recover
   // proposers and authenticated completion reporters from their own authoritative envelopes,
   // then backfill verification independence only where explicit producer attribution proves it.
@@ -1375,8 +1433,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   readTransaction(fn) {
     const outermost = !this.db.isTransaction;
+    // Shared across storage platforms: opportunistic auth migrations must
+    // not turn a read into a write (including nested read transactions).
+    this.readTransactionDepth = (this.readTransactionDepth ?? 0) + 1;
     try { return this.storagePlatform.transaction(this.db, fn, true); }
     catch (error) { throw this.storageFailure(error, outermost); }
+    finally { this.readTransactionDepth -= 1; }
   }
   // Maps one storage failure to the typed refusal and counts it. Only the
   // outermost transaction counts, so one nested failure is one refusal;
@@ -2131,7 +2193,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
     });
   }
-  insertCredential(roomId, memberId, kind, parent, expiresAt) {
+  insertCredential(roomId, memberId, kind, parent, expiresAt, identitySecretHash = null) {
     if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
@@ -2140,7 +2202,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const account = member.kind === "human" ? this.ensureHumanAccountBinding(roomId, memberId) : null;
     if (account && !account.active) fail(403, "access_denied", "Active account required");
     const token = key();
-    this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null);
+    this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch,identity_secret_hash) VALUES(?,?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null, identitySecretHash);
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
@@ -2196,6 +2258,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       account = { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch };
     } else if (row.account_id !== null || row.account_auth_epoch !== null) fail(401, "unauthenticated", "Agent credential has an invalid human account binding");
     if (member.kind === "agent") this.agentConnections.assertCredential(row);
+    // RC-2026-09-23-106: agent browser sessions are bound to the identity
+    // secret hash at creation time. If the secret was rotated or revoked
+    // since, the session is rejected.
+    if (row.identity_secret_hash !== null && row.identity_secret_hash !== undefined) {
+      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
+      if (!linkRow) fail(401, "unauthenticated", "Agent session identity link not found");
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkRow.identityId);
+      if (!secretRow || secretRow.revokedAt !== null || secretRow.secretHash !== row.identity_secret_hash) {
+        fail(401, "unauthenticated", "Agent identity secret was rotated or revoked; sign in again");
+      }
+    }
     const auth = {
       account, member, roomId: row.room_id, credentialHash: row.hash, credentialScope: "room", kind: row.kind, expiresAt: row.expires_at,
       csrf: row.kind === "session" ? hash(`csrf:${token}`) : null,
@@ -2229,6 +2302,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const expiresAt = this.now() + 8 * 3600000;
       const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
       return { token, expiresAt };
+    });
+  }
+  // Creates a browser session for an agent identity linked to a room member.
+  // The identity secret must already be verified by the caller via
+  // identities.authenticateIdentitySecret. The session is scoped to
+  // the room and member, with the same 8-hour expiry as human sessions.
+  createAgentSession(identityId, roomId) {
+    return this.transaction(() => {
+      const link = this.identities.resolveIdentityLink(identityId, roomId);
+      if (!link) fail(403, "access_denied", "This agent identity is not linked to that room");
+      if (link.member.kind !== "agent") fail(403, "access_denied", "Browser sessions require an agent room member");
+      // RC-2026-09-23-106: bind the session to the current secret hash.
+      // If the secret is rotated or revoked, authenticate() rejects sessions
+      // carrying the old hash.
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
+      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      return { token, session: this.authenticate(token) };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
@@ -2748,6 +2838,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       providers.sort((a, b) => (b.lastHeartbeatAt ?? "") < (a.lastHeartbeatAt ?? "") ? -1 : 1);
       return { roomId, evaluatedAt: new Date(now).toISOString(), providers };
+    });
+  }
+  // Compact catch-up. sinceVersion equal to context_version returns
+  // { not_modified: true } and no roster, work, or refs. Message and file
+  // bodies are never part of either shape.
+  roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
+        fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
+      }
+      const room = this.room(roomId);
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const built = buildRoomContext({
+        state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
+      });
+      const identity = {
+        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
+      };
+      if (sinceVersion === built.context_version) {
+        return { not_modified: true, context_version: built.context_version, roomId, ...identity };
+      }
+      return { ...built, ...identity };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {

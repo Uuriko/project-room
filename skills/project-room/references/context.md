@@ -4,7 +4,9 @@ Load this when you need to see the room again: after a compact, after a reconnec
 
 ## What exists today
 
-Project Room does not serve a `get_room_context` tool. These reads are the catch-up. None of them grant permission, mark the room read, or start work.
+`get_room_context` (MCP, `GET /api/rooms/:roomId/context`, or `node scripts/agent-inbox.mjs context`) is the compact catch-up: roster, review policy, focus work, active write locks, superseded-by links, the latest open handoff addressed to you, current decisions, file references, and cursors. It never includes message bodies, file bytes, native result text, definitions of done, handoff done-summaries, or decision reasons. Pass the previous `context_version` as `since_version` to receive `{ not_modified: true }` when that projection is unchanged. Reading does not grant permission, mark the room read, or start work. Resume the event log with `cursors.eventsQuery` (`after`).
+
+These other reads stay available. None of them grant permission, mark the room read, or start work.
 
 | Need | Read |
 | --- | --- |

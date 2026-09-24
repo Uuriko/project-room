@@ -40,6 +40,7 @@ export const ALLOWLIST = [
   /SHARE_CODE_ALPHABET\s*=\s*"/, // Crockford 9-char human join-code alphabet demo, not a credential
   /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
   /password:\s*form\.querySelector/, // src/auth-signin-ui.js: reads the user's typed password back from the DOM to preserve it across signup/login mode toggles — not a hardcoded secret
+  /secret = \(data\.secret \|\| ""\)\.trim\(\)/, // src/agent-signin-ui.js: reads the user's typed identity secret back from the sign-in form's FormData — runtime input, not a hardcoded secret
   /webhookSecret:\s*"TELEGRAM_WEBHOOK_SECRET"/, // env var NAME as string
   /insertCredential\(/, // `token = this.insertCredential(...)` — credential store API
   /base64url\(randomBytes\(/, // runtime-generated random values
@@ -67,6 +68,8 @@ export const ALLOWLIST = [
   /AGENT_CARD_PUBLIC_KEY = "e74i9XPv8I1hIhTsVztVupDr6moyCfL\+nGr1HDoOpTc="/, // Owner recovery 2026-09-24: room Agent Card
     // signing PUBLIC key — intentionally committed and published inside the card itself.
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
+  /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
+    // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
 ];
 
 // Directories scanned: source code where a real secret could hide.

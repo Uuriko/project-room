@@ -69,6 +69,9 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public run-receipts aggregate: measured work from the receipt board,
+  // public by design; answers 200 with the checked-in snapshot.
+  "GET /api/public/receipts": [undefined, 200],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it
@@ -103,6 +106,10 @@ const PROBES = {
   "POST /api/auth/password/signup": [{ email: "probe@example.com", password: "short", sessionToken: token(), sessionRevision: 0 }, 422],
   // Password login (slice 2): unknown email and wrong password share the 401 shape.
   "POST /api/auth/password/login": [{ email: "probe@example.com", password: "long-enough-password", sessionToken: token(), sessionRevision: 0 }, 401],
+  // Agent browser sign-in (PR #829): the identity secret rides the
+  // Authorization header; without one the routes answer 401.
+  "POST /api/auth/agent/rooms": [{ identityId: "ag1_probe" }, 401],
+  "POST /api/auth/agent/session": [{ identityId: "ag1_probe", roomId: "commons" }, 401],
 };
 
 async function serve(t) {
