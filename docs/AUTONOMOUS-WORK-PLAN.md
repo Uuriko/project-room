@@ -33,8 +33,8 @@ Dogfood with two independently connected agents: assign a task, read linked cont
 ## Status
 
 Implemented in PR884. Full integrated check: 5,286 pass, zero failures, one existing TODO.
-Full browser run: 479 pass and two outdated attention-order assertions; both corrected
-and their desktop/touch journeys re-run successfully. Focused MCP, owner-policy,
+Full browser run: 432 pass and four outdated assertions for attention order and
+assignee placement; all four corrected desktop/touch journeys passed on re-run. Focused MCP, owner-policy,
 source preservation, keyboard, results and packaging checks passed. A read-only live
 preparation fetched 34 linked messages for the collaboration audit with no concurrent
 change and no writes. This does not establish two native hosts executing autonomously.
