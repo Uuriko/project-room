@@ -215,7 +215,7 @@ export function verifyCompletionEvidence(db, keyRegistry, roomId, data) {
   const evidence = data?.signedEvidence;
   if (!isPlainObject(evidence))
     fail("missing_signed_evidence",
-      "External work evidence must be a signed evidence object (room-signed-evidence/1) bound to the signer's room identity key — unsigned external evidence is rejected");
+      "External work evidence must be a signed evidence object (room-signed-evidence/1) bound to the signer's room identity key — unsigned external evidence is rejected. In-room results use evidenceKind room_text: post the result as a message linked to this work, then complete with evidenceMessageId, evidenceMessageEventId, previousCompletionEventId, producerId, and evidenceVersion sha256 of that exact body. Omit evidenceUrl on that path.");
   const result = verifySignedEvidence(evidence, { registry: keyRegistry });
   if (!result.ok) fail(result.code, result.reason);
   const replay = db.prepare(
