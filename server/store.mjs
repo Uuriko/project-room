@@ -458,7 +458,9 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
       action: "reply-mention",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}"${latest.toMemberId ? `, toMemberId: "${latest.toMemberId}"` : ""} } }. ${latest.toMemberId ? "Include toMemberId so the answer stays in the original private audience." : "This mention was public, so the reply is public."} Only a reply to this message marks it responded. Send your identity secret as the Bearer token.`,
+      description: latest.private
+        ? `Answer the private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. Replying to that message marks the mention responded. Send your identity secret as the Bearer token.`
+        : `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. Replying to that message marks the mention responded; an unrelated post does not. Send your identity secret as the Bearer token.`,
     }));
   }
   if (directMessages.length > 0) {
@@ -2921,20 +2923,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (/no such table/i.test(error?.message ?? "")) return [];
       throw error;
     }
+    // timed_out is terminal, so a late reply does not flip the row. Once this
+    // member has replied to that message, it is no longer waiting in the inbox.
+    const answeredBy = new Map();
+    if (rows.some(row => row.state === "timed_out")) {
+      for (const message of this.room(roomId).state.messages ?? []) {
+        if (message.authorId === memberId && message.replyToId) answeredBy.set(message.replyToId, true);
+      }
+    }
     return rows.map(row => ({ row, event: JSON.parse(row.body) }))
       .filter(({ event }) => event?.type === T.MESSAGE_POSTED
         && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
+      .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
       .map(({ row, event }) => Object.freeze({
         sequence: row.sequence,
         eventId: row.eventId,
         messageId: event.data.messageId ?? null,
         replyToId: event.data.messageId ?? row.eventId,
-        toMemberId: event.data.toMemberId ?? null,
         from: event.actorId,
         body: event.data.body,
         at: event.at,
         state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
         channel: event.data.channelId ?? "general",
+        private: Boolean(event.data.toMemberId),
+        ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
       }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
@@ -3131,8 +3143,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // #658: mention lifecycle tracking. Called inside command()'s transaction
   // for every message.posted. Two jobs:
-  //   1. A reply to one mention marks that mention responded, including a
-  //      timed-out row. An unrelated post leaves the other mentions waiting.
+  //   1. A reply to one mention marks that mention responded. An unrelated
+  //      post leaves the others waiting. timed_out stays terminal; a late
+  //      reply only removes it from the waiting inbox.
   //   2. @names in the body resolve to room members (never the sender);
   //      each resolved member gets one delivered row for this message event.
   // Unresolved names get no row — never invent a recipient.
@@ -3143,19 +3156,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const pending = this.db.prepare(
         `SELECT m.message_event_id AS eventId, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
-         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')`
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
       ).all(roomId, senderMemberId);
-      const resolve = this.db.prepare(
-        `UPDATE mention_states SET state='responded', decided_at=?
-         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged','timed_out')`
-      );
-      for (const row of pending) {
+      const answered = pending.find(row => {
         let event = null;
         try { event = JSON.parse(row.body); } catch { event = null; }
-        if (event?.data?.messageId === replyToId || row.eventId === replyToId) {
-          resolve.run(nowMs, roomId, row.eventId, senderMemberId);
-        }
-      }
+        return (event?.data?.messageId || row.eventId) === replyToId;
+      });
+      if (answered) this.db.prepare(
+        `UPDATE mention_states SET state='responded', decided_at=?
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
+      ).run(nowMs, roomId, answered.eventId, senderMemberId);
     }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return;
