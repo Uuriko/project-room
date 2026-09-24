@@ -107,11 +107,13 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   const original = console.warn;
   console.warn = (...args) => { warnings.push(args.join(" ")); };
   try {
-    await worker.scheduled({ cron: "* * * * *" }, {
+    // #992: a failing job is recorded in the heartbeat and then rethrown so
+    // the scheduled event reports an exception instead of a silent "ok".
+    await assert.rejects(worker.scheduled({ cron: "* * * * *" }, {
       ROOM_MAINTENANCE: "0",
       ROOM_ORIGIN: "https://room.example.test",
       ROOM: namespace
-    }, { waitUntil(promise) { pending.push(promise); } });
+    }, { waitUntil(promise) { pending.push(promise); } }), /cron jobs failed: channel-drain, webhook-dispatch/);
     await Promise.all(pending);
   } finally {
     console.warn = original;
@@ -122,7 +124,8 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "refreshLandQueue",
-    "planRetention"
+    "planRetention",
+    "recordCronTick"
   ]);
   assert.deepEqual(warnings.map(line => line.slice(0, line.indexOf("]"))), [
     "[channel-drain",
