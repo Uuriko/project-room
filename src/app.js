@@ -27,11 +27,12 @@ import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { installReferralBoard } from "./referral-board.js";
 import { installLandQueueBoard } from "./land-queue-board.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
+import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
@@ -55,6 +56,8 @@ function consumeInvitationFragment() {
     : { valid: false, secret: null };
 }
 function selectedRoomFromLocation() {
+  const nextRoom = roomIdFromNext(new URLSearchParams(location.search).get("next"));
+  if (nextRoom) return nextRoom;
   return roomFromLocation({ search: location.search, hash: location.hash });
 }
 function accountHomeFromLocation() {
@@ -186,6 +189,8 @@ document.addEventListener("keydown", event => {
 });
 let recovery;
 let leavingPage = false;
+let composerFiles = [];
+let roomFilesByMessage = new Map();
 try { recovery = new DraftRecovery(window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -225,6 +230,10 @@ const client = new RoomClient({
     landQueueUI?.sync();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
+      const accountId = accountClient.session?.account?.id ?? session?.account?.id;
+      if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
+      if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
+      void refreshRoomFiles();
       showRoomGuide();
       void refreshDmConsents();
       void refreshFriendBonds();
@@ -322,6 +331,14 @@ const client = new RoomClient({
     for (const form of document.querySelectorAll("form")) {
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
+    signinUI?.clear();
+    agentSigninUI?.clear();
+    clearStoredPasswords();
+    const accessKey = $("#access-key");
+    if (accessKey) accessKey.value = "";
+    composerFiles = [];
+    roomFilesByMessage = new Map();
+    renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
     $("#room-overview-title").textContent = "Room overview";
@@ -444,12 +461,7 @@ const signinUI = createAuthSigninUI({
   onSignedIn: async () => {
     await accountClient.restore();
     if (await shareLinksUI?.resumeSignedIn()) return;
-    const requestedRoom = selectedRoomFromLocation();
-    if (!requestedRoom) { showAccountWorkspace(); return; }
-    const identity = await client.restore(requestedRoom);
-    if (!identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
-    $("#message-input").focus();
-    if (state) revealLocationHash();
+    await landAfterSignIn();
   }
 });
 signinUI.mount($("#auth-signin-ui"));
@@ -504,6 +516,64 @@ function endAccountAccess() {
   $(".connection-bar").hidden = false;
   accessEndContext = "account-switch"; client.endAccess();
   configureAuthPanel();
+}
+function rememberedRoomId() {
+  const accountId = accountClient.session?.account?.id;
+  const fromAccount = accountId ? readMemberRoom(accountId)?.roomId : null;
+  if (fromAccount) return fromAccount;
+  const memberId = session?.member?.id;
+  return (memberId ? readMemberRoom(memberId)?.roomId : null) || readLastRoom();
+}
+function showRoomAccessNotice() {
+  const status = $("#account-status");
+  if (!status) return;
+  status.textContent = ROOM_ACCESS_NOTICE;
+  status.hidden = false;
+}
+async function openRememberedRoomOrInbox() {
+  const roomId = rememberedRoomId();
+  if (!roomId) { showAccountWorkspace(); return false; }
+  try {
+    history.replaceState(history.state, "", roomHandoffLocation(roomId));
+    configureAuthPanel(roomId);
+    const identity = await client.restore(roomId);
+    if (!identity || !state) throw Object.assign(new Error("Room unavailable"), { status: 403 });
+    return true;
+  } catch (error) {
+    if (![401, 403].includes(error.status)) throw error;
+    history.replaceState(history.state, "", `${location.pathname}?account=1`);
+    showAccountWorkspace();
+    return false;
+  }
+}
+async function landAfterSignIn() {
+  const target = signInRoomTarget({
+    nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
+    deepLinkRoom: roomFromLocation({ search: location.search, hash: location.hash }),
+    rememberedRoom: rememberedRoomId()
+  });
+  if (!target.explicit) {
+    if (target.roomId) await openRememberedRoomOrInbox();
+    else showAccountWorkspace();
+    return;
+  }
+  try {
+    const identity = await client.restore(target.roomId);
+    if (!identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) {
+      showAccountWorkspace();
+      showRoomAccessNotice();
+      return;
+    }
+    $("#message-input").focus();
+    if (state) revealLocationHash();
+  } catch (error) {
+    if ([401, 403].includes(error.status)) {
+      showAccountWorkspace();
+      showRoomAccessNotice();
+      return;
+    }
+    setFormStatus($("#auth-error"), unreachableRoomMessage(error), true);
+  }
 }
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
@@ -1785,8 +1855,14 @@ function renderMessages() {
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
+          if (selector === ".message-files") {
+            if (!after) before?.remove();
+            else if (!before) node.querySelector(".message-body")?.insertAdjacentElement("afterend", after);
+            else if (before.innerHTML !== after.innerHTML) before.innerHTML = after.innerHTML;
+            continue;
+          }
           if (!before && !after) continue;
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
           if (!after) { before.remove(); continue; }
@@ -1926,6 +2002,93 @@ function reactionButtonsFor(m) {
     return `<button type="button" class="reaction${pill.count ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${pill.count}" title="${esc(who || `React with ${labelName}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${esc(pill.key)}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${pill.symbol}</span><span>${pill.count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
 }
+function messageFileChips(messageId) {
+  const files = roomFilesByMessage.get(messageId) ?? [];
+  if (!files.length) return "";
+  return `<div class="message-files">${files.map(file => `<span class="file-chip">${esc(fileChipLabel(file.filename))}</span>`).join("")}</div>`;
+}
+function renderComposerFiles() {
+  const host = $("#composer-attachments");
+  if (!host) return;
+  host.replaceChildren();
+  if (!composerFiles.length) { host.hidden = true; return; }
+  host.hidden = false;
+  for (const file of composerFiles) {
+    const chip = document.createElement("span");
+    chip.className = "file-chip";
+    const name = fileChipLabel(file.filename);
+    const label = document.createElement("span");
+    label.textContent = file.status === "uploading" ? `Uploading ${name}…` : file.status === "error" ? `${name} failed` : name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${name}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+      renderComposerFiles();
+    });
+    chip.append(label, remove);
+    host.append(chip);
+  }
+}
+async function refreshRoomFiles() {
+  if (!state || !session || !client.session) return;
+  const generation = client.generation;
+  const roomId = state.room?.id;
+  try {
+    const body = await client.request(client.path("/files"));
+    if (generation !== client.generation || state?.room?.id !== roomId) return;
+    const next = new Map();
+    for (const file of body.files ?? []) {
+      if (file.state !== "committed" || !file.messageId) continue;
+      const list = next.get(file.messageId) ?? [];
+      list.push(file);
+      next.set(file.messageId, list);
+    }
+    roomFilesByMessage = next;
+    if (state) renderMessages();
+  } catch { /* The last chips stay until the next successful read. */ }
+}
+async function attachComposerFiles(fileList) {
+  if (!state || !client.session || isRoomArchived(state)) return;
+  for (const file of [...(fileList ?? [])]) {
+    if (file.size > COMPOSER_FILE_BYTES) {
+      setComposerError("That file is larger than 1 MB.");
+      continue;
+    }
+    const id = crypto.randomUUID();
+    const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
+    composerFiles = [...composerFiles, entry];
+    renderComposerFiles();
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
+      await client.request(client.path("/files"), { method: "POST", data: payload });
+      const current = composerFiles.find(item => item.id === id);
+      if (current) current.status = "staged";
+    } catch (error) {
+      const current = composerFiles.find(item => item.id === id);
+      if (current) current.status = "error";
+      setComposerError(error?.code === "file_too_large" ? "That file is larger than 1 MB." : (error?.message || "Couldn’t attach that file."));
+    }
+    renderComposerFiles();
+  }
+}
+async function commitComposerFiles(messageId) {
+  const pending = composerFiles.filter(file => file.status === "staged");
+  if (!pending.length || !messageId) return;
+  for (const file of pending) {
+    try {
+      await client.request(client.path(`/files/${encodeURIComponent(file.id)}/commit`), { method: "POST", data: { messageId } });
+      composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+    } catch (error) {
+      file.status = "error";
+      setComposerError(error?.message || "Couldn’t attach that file to the message.");
+    }
+  }
+  renderComposerFiles();
+  await refreshRoomFiles();
+}
 function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
@@ -1943,7 +2106,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -2773,6 +2936,13 @@ $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
   setSigninExtra(extra ? extra.hidden : false);
 });
+function openEmailAuth(mode) {
+  const panel = $("#email-auth-panel");
+  signinUI.openEmail(mode, panel);
+  panel?.querySelector('[name="email"]')?.focus();
+}
+$("#email-signup")?.addEventListener("click", () => openEmailAuth("signup"));
+$("#email-signin")?.addEventListener("click", () => openEmailAuth("login"));
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
@@ -2872,7 +3042,7 @@ $("#auth-form").addEventListener("submit", async e => {
       await ensureAccountSession();
       const account = await accountClient.login(accessKey);
       if (!account) return;
-      if (!requestedRoom) { $("#access-key").value = ""; showAccountWorkspace(); return; }
+      if (!requestedRoom) { $("#access-key").value = ""; await openRememberedRoomOrInbox(); return; }
       identity = await client.restore(requestedRoom);
     } else identity = await client.login(accessKey);
     if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
@@ -3021,6 +3191,7 @@ $("#message-form").addEventListener("submit", e => {
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
+  if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
   // message in the channel (server-side, same event). Only offered for
   // public thread replies — never for DMs or top-level messages.
@@ -3045,6 +3216,8 @@ $("#message-form").addEventListener("submit", e => {
       throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
+    await commitComposerFiles(data.messageId);
+    if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
@@ -3052,6 +3225,31 @@ $("#message-form").addEventListener("submit", e => {
     dismissRoomGuide();
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
+});
+$("#composer-attach")?.addEventListener("click", () => $("#composer-file")?.click());
+$("#composer-file")?.addEventListener("change", event => {
+  const input = event.currentTarget;
+  void attachComposerFiles(input.files);
+  input.value = "";
+});
+$("#message-form")?.addEventListener("dragover", event => {
+  if (![...(event.dataTransfer?.items ?? [])].some(item => item.kind === "file")) return;
+  event.preventDefault();
+  $("#message-form").classList.add("composer-drop");
+});
+$("#message-form")?.addEventListener("dragleave", () => $("#message-form").classList.remove("composer-drop"));
+$("#message-form")?.addEventListener("drop", event => {
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  event.preventDefault();
+  $("#message-form").classList.remove("composer-drop");
+  void attachComposerFiles(files);
+});
+$("#message-input")?.addEventListener("paste", event => {
+  const files = [...(event.clipboardData?.files ?? [])];
+  if (!files.length) return;
+  event.preventDefault();
+  void attachComposerFiles(files);
 });
 // Channel creation and management: any member can create a channel; only the
 // room owner renames or archives. Archive is a two-click arm, never a native dialog.
@@ -6052,7 +6250,14 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
       return;
     }
     if (!requestedRoom) showAccountWorkspace();
-    else await client.restore(requestedRoom);
+    else {
+      try { await client.restore(requestedRoom); }
+      catch (error) {
+        if (![401, 403].includes(error.status)) throw error;
+        showAccountWorkspace();
+        showRoomAccessNotice();
+      }
+    }
     return;
   }
   // QAU-006: only probe for a session when a browser hint says one could
@@ -6070,18 +6275,8 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     let account = null;
     try { account = await ensureAccountSession(); } catch { account = null; }
     if (account?.authenticated) {
-      const lastRoom = readLastRoom();
-      if (lastRoom) {
-        try {
-          history.replaceState(history.state, "", roomHandoffLocation(lastRoom));
-          configureAuthPanel(lastRoom);
-          await client.restore(lastRoom);
-          return;
-        } catch (error) {
-          if (![401, 403].includes(error.status)) throw error;
-        }
-      }
-      showAccountWorkspace();
+      const opened = await openRememberedRoomOrInbox();
+      if (opened) return;
       syncSessionRestore();
       return;
     }
@@ -6090,7 +6285,10 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   throw Object.assign(new Error("sign in required"), { status: 401 });
 })().catch(error => {
   if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
-    showAccountWorkspace(); confirmAccount(); return;
+    showAccountWorkspace();
+    if (selectedRoomFromLocation()) showRoomAccessNotice();
+    confirmAccount();
+    return;
   }
   const signedOut = [401, 403].includes(error.status);
   if (signedOut) recovery.clear();

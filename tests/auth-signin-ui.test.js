@@ -86,7 +86,7 @@ function mount(routes = {}) {
   });
   const container = fakeContainer();
   ui.mount(container);
-  return { client, signins, container };
+  return { client, signins, container, ui };
 }
 
 test("mount renders the method chooser, GitHub button, and no form by default", () => {
@@ -238,6 +238,25 @@ test("magic manual-code toggle reveals and hides the code field", async () => {
   assert.equal(signins.length, 1);
   container.fire("click", clickOnDataset("magic-manual-code"));
   assert.ok(!container.innerHTML.includes('name="code"'), "toggle hides the code field again");
+});
+
+test("password markup never includes a password value, and clear() drops the email form", () => {
+  const { container, ui } = mount();
+  container.fire("click", clickOnDataset("method", { method: "password" }));
+  assert.match(container.innerHTML, /autocomplete="new-password"/);
+  assert.doesNotMatch(container.innerHTML, /name="password"[^>]*\svalue=/);
+  container.fire("click", clickOnDataset("password-mode", { passwordMode: "login" }));
+  assert.match(container.innerHTML, /autocomplete="current-password"/);
+  assert.doesNotMatch(container.innerHTML, /name="password"[^>]*\svalue=/);
+  const panel = { hidden: false, innerHTML: "leftover", dataset: {}, addEventListener() {} };
+  ui.openEmail("login", panel);
+  assert.equal(panel.hidden, false);
+  assert.match(panel.innerHTML, /autocomplete="current-password"/);
+  assert.doesNotMatch(panel.innerHTML, /name="password"[^>]*\svalue=/);
+  ui.clear();
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.innerHTML, "");
+  assert.doesNotMatch(container.innerHTML, /name="password"/);
 });
 
 test("sign-in failure does not call onSignedIn", async () => {
