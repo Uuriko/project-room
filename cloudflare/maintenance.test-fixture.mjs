@@ -2,6 +2,12 @@
 import assert from 'node:assert/strict';
 import worker, { ProjectRoom } from './room.mjs';
 
+// ProjectRoom extends DurableObject, whose workerd constructor only accepts a
+// real DurableObjectState. These checks build the object directly with a
+// hostile stand-in, so point super() at a plain base that stores ctx and env
+// the same way. Test entrypoint only; production gets the real base.
+Object.setPrototypeOf(ProjectRoom, class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } });
+
 export default { async fetch(request, env) {
   const direct = new URL(request.url).pathname === '/direct';
   const guarded = { get storage() { throw new Error('Maintenance must precede storage initialization'); } };
