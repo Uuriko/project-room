@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -68,6 +69,10 @@ test("capabilities next[] teaches delegate-work for a listed member", async t =>
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  // PR #953: new agent members enroll at t1_readonly; promote to t2_standard
+  // so the friend can advertise capabilities (a write).
+  setTier(fixture.store.db, roomId, memberId, "t2_standard",
+    { updatedBy: "owner", nowMs: fixture.store.now() });
   const advRes = await post(origin, `/api/rooms/${roomId}/commands`, {
     id: "00000000-0000-4000-8000-000000000055",
     type: "capabilities.advertised",
