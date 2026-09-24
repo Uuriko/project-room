@@ -623,3 +623,28 @@ test("dispatch skips a delivery whose identity was unlinked after fan-out", asyn
   // The delivery stays pending: a re-linked identity still receives it.
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId)[0].state, "pending");
 });
+
+test("skipped deliveries do not starve newer deliveries at the head of the due queue", async t => {
+  // Live 2026-09-24: 25+ deliveries whose identity had lost its room link
+  // kept their original next_attempt_at, so every cron drain (LIMIT 25)
+  // re-read the same rows, skipped them, and never reached anything newer.
+  const f = freshFixture(t);
+  const stale = subscribe(t, f, "unlinked-agent");
+  for (let i = 0; i < 25; i++) postMessage(f.store, f.keys, `backlog ${i}`);
+  assert.equal(journalCount(f.store, stale.subscription), 25);
+  f.store.identities.unlink(f.keys.owner, "commons", stale.identity.identityId);
+  const live = subscribe(t, f, "live-agent");
+  postMessage(f.store, f.keys, "fresh");
+  assert.equal(journalCount(f.store, live.subscription), 1);
+  const posted = [];
+  const fetchImpl = async url => { posted.push(String(url)); return { status: 200, text: async () => "ok" }; };
+  const first = await drain(f.store, { fetchImpl });
+  assert.equal(first.skipped, 25);
+  const second = await drain(f.store, { fetchImpl });
+  assert.equal(second.delivered, 1, "the fresh delivery must not be starved by skipped rows");
+  assert.equal(second.skipped, 0);
+  assert.equal(posted.length, 1);
+  assert.equal(f.store.agentPlugin.webhookJournal(live.subscription.subscriptionId)[0].state, "delivered");
+  // Skipped rows stay pending (a re-linked identity still receives them).
+  assert.ok(f.store.agentPlugin.webhookJournal(stale.subscription.subscriptionId).every(d => d.state === "pending"));
+});
