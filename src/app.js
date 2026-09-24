@@ -958,7 +958,12 @@ function maybeShowGuestUpgradeHint() {
   try {
     if (localStorage.getItem("pr-guest-upgrade-hint-seen") === "1") return;
   } catch { return; }
-  const hasAccount = Boolean(accountClient.session?.authenticated && accountClient.session.account);
+  // Don't show while the account session is still loading: an authenticated
+  // user looks like a guest until restore() completes, and flashing the hint
+  // for them is wrong (it also broke the quiet-design large-text layout check
+  // in CI by squeezing #message-list).
+  if (!accountClient.session) return;
+  const hasAccount = Boolean(accountClient.session.authenticated && accountClient.session.account);
   if (hasAccount || !state || !session?.member) return;
   const hint = $("#guest-upgrade-hint");
   if (!hint) return;
