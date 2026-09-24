@@ -403,7 +403,7 @@ export class Bonds {
       kind: "event",
       eventType: "bond.proposed",
       data: {
-        bondId, agentAId: agentA, agentBId: agentB, proposedById: identityId, scopes,
+        bondId, agentAId: agentA, agentBId: agentB, proposerIdentityId: identityId, scopes,
         ...(note ? { note } : {})
       }
     };
@@ -448,7 +448,7 @@ export class Bonds {
         bondId: row.id,
         agentAId: row.agent_a,
         agentBId: row.agent_b,
-        proposedById: row.proposed_by,
+        proposerIdentityId: row.proposed_by,
         acceptedScopes: accepted
       }
     };

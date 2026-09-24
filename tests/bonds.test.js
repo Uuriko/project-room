@@ -289,8 +289,10 @@ test("peer DM wakes an offline recipient through agent.wake and does not room-br
   const journal = await jsonOf(await get(origin,
     `/api/agent-webhooks/${wakeSub.body.subscriptionId}/deliveries`, friend.secret));
   const wakeDeliveries = journal.body.deliveries.filter(row => row.eventType === "agent.wake");
-  assert.equal(wakeDeliveries.length, 1);
-  assert.equal(wakeDeliveries[0].state, "pending");
+  // deliverWakePing journals the subscription URL and the host wakeUrl.
+  // Both are agent.wake. Neither is a room broadcast of dm.posted.
+  assert.equal(wakeDeliveries.length, 2);
+  assert.ok(wakeDeliveries.every(row => row.state === "pending"));
 
   const broadcast = await jsonOf(await get(origin,
     `/api/agent-webhooks/${roomSub.body.subscriptionId}/deliveries`, stranger.secret));

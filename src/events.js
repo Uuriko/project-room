@@ -1089,13 +1089,13 @@ function recordBond(state, incoming) {
   const id = incoming.data.bondId;
   const prior = state.bonds[id] ?? {};
   if (incoming.type === EVENT_TYPES.BOND_PROPOSED) {
-    requireFields(incoming.data, ["proposedById", "scopes"]);
+    requireFields(incoming.data, ["proposerIdentityId", "scopes"]);
     state.bonds[id] = {
       id,
       agentAId: incoming.data.agentAId,
       agentBId: incoming.data.agentBId,
       state: "proposed",
-      proposedById: incoming.data.proposedById,
+      proposedById: incoming.data.proposerIdentityId,
       proposedScopes: incoming.data.scopes,
       acceptedScopes: [],
       note: incoming.data.note ?? null,
@@ -1107,14 +1107,14 @@ function recordBond(state, incoming) {
     return;
   }
   if (incoming.type === EVENT_TYPES.BOND_ACTIVATED) {
-    requireFields(incoming.data, ["acceptedScopes", "proposedById"]);
+    requireFields(incoming.data, ["acceptedScopes", "proposerIdentityId"]);
     state.bonds[id] = {
       ...prior,
       id,
       agentAId: incoming.data.agentAId,
       agentBId: incoming.data.agentBId,
       state: "active",
-      proposedById: incoming.data.proposedById,
+      proposedById: incoming.data.proposerIdentityId,
       acceptedScopes: incoming.data.acceptedScopes,
       acceptedAt: incoming.at,
       revokedAt: null,

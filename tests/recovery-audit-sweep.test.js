@@ -189,6 +189,42 @@ function sweep() {
     } else broke.push(`${T.MEMBER_JOINED_VIA_INVITATION}: the late join never reached the log, so nothing was audited`);
   } catch (error) { broke.push(`${T.MEMBER_JOINED_VIA_INVITATION}: the late join was refused (${error.message}), so nothing was audited`); }
 
+  // Bond receipts are command types that differ from the ledger type
+  // (bond.propose → bond.proposed). Exercise them with two linked identities
+  // so the auditors meet the four new event types before the room ends.
+  try {
+    const left = fixture.store.identities.create("Sweep bond left");
+    const right = fixture.store.identities.create("Sweep bond right");
+    fixture.store.identities.link(fixture.keys.owner, "commons", {
+      identityId: left.identityId, displayName: "Sweep bond left", permissions: ["accept_work"]
+    });
+    fixture.store.identities.link(fixture.keys.owner, "commons", {
+      identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
+    });
+    const proposed = fixture.store.command(left.secret, "commons", {
+      id: randomUUID(), type: "bond.propose", data: { to: right.identityId, scopes: ["peer.dm"] }
+    });
+    exercised.add(proposed.event.type);
+    auditRecovery(fixture.store);
+    const bondId = proposed.event.data.bondId;
+    const accepted = fixture.store.command(right.secret, "commons", {
+      id: randomUUID(), type: "bond.accept", data: { bondId, scopes: ["peer.dm"] }
+    });
+    exercised.add(accepted.event.type);
+    auditRecovery(fixture.store);
+    const posted = fixture.store.command(left.secret, "commons", {
+      id: randomUUID(), type: "dm.posted",
+      data: { to: right.identityId, messageId: randomUUID(), body: "Synthetic peer DM" }
+    });
+    exercised.add(posted.event.type);
+    auditRecovery(fixture.store);
+    const revoked = fixture.store.command(left.secret, "commons", {
+      id: randomUUID(), type: "bond.revoke", data: { bondId }
+    });
+    exercised.add(revoked.event.type);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`bond: ${error.message}`); }
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -220,6 +256,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // A deliberate tripwire. When someone adds an event type, this fails and they
   // decide: teach the sweep to exercise it, or record that it cannot be. Either
   // is fine. Silently adding an event no auditor models is what is not.
-  assert.equal(Object.values(T).length, 46,
+  assert.equal(Object.values(T).length, 50,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
