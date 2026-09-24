@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T00:59:58Z · board: Uuriko/project-room#266 · watermark: 5805540410 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=b7a19ff70f806c065908cba82e07e40e281a351acac53bbd69e432575eff6159 -->
+<!-- generated: 2026-09-24T01:05:08Z · board: Uuriko/project-room#266 · watermark: 5805587776 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=b7a19ff70f806c065908cba82e07e40e281a351acac53bbd69e432575eff6159 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +32 more
+… +31 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -44,6 +44,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-23-104 | 5a3a751a | 5805587776
 RC-2026-09-23-103 | none | 5805539631
 RC-2026 | none | 5805464939
 RC-2026 | none | 5805172361
@@ -53,7 +54,6 @@ RC-2026 | none | 5804591267
 RC-2026 | none | 5804279456
 RC-2026 | none | 5803928175
 RC-2026 | none | 5803709894
-RC-2026-09-23-106 | none | 5801273424
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -70,5 +70,5 @@ comment-id | lane | task | at
 … +52 more
 
 ## signals
-board_comments=1390 threshold=1500 rotation_due=no watcher=active open_claims=57 prose_open=2 unfenced_prose=62 watermark=5805540410
+board_comments=1392 threshold=1500 rotation_due=no watcher=active open_claims=56 prose_open=2 unfenced_prose=62 watermark=5805587776
 
