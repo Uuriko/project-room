@@ -67,7 +67,7 @@ test("fan-out journals one pending delivery per matching event, idempotently", t
   assert.equal(fanout.deliveries, 0);
   assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 1);
   // Non-matching events and disabled subscriptions produce nothing.
-  const other = subscribe(t, f.store, "other-agent", ["thread.created"]);
+  const other = subscribe(t, f.store, "other-agent", ["work.completed"]);
   assert.equal(f.store.agentPlugin.webhookJournal(other.subscription.subscriptionId).length, 0);
   assert.equal(identity.identityId.length > 0, true);
 });
@@ -409,4 +409,84 @@ test("HTTP: deliveries, dead-letter, redrive, metrics, process routes", async t 
   await drain(f.store, { fetchImpl: okFetch(200) });
   const redelivered = await (await get(origin, "/api/agent-webhooks/deliveries?state=delivered", secret)).json();
   assert.equal(redelivered.deliveries.length, 2);
+});
+
+test("fan-out kicks prompt dispatch after the request path returns", t => {
+  const f = freshFixture(t);
+  subscribe(t, f.store);
+  const kicks = [];
+  f.store.agentPlugin.setDispatchKick(() => { kicks.push(Date.now()); });
+  postMessage(f.store, f.keys);
+  // The kick fires synchronously inside fan-out; the actual drain runs on
+  // the entry point's microtask, so the commit never waits on HTTP.
+  assert.equal(kicks.length, 1);
+  // Without a registered kick the fan-out still journals; the cron sweep
+  // stays the backstop.
+  f.store.agentPlugin.setDispatchKick(null);
+  postMessage(f.store, f.keys, "second hello");
+  assert.equal(kicks.length, 1);
+});
+
+test("fan-out stays quiet when no subscription matches", t => {
+  const f = freshFixture(t);
+  const { subscription } = subscribe(t, f.store, "quiet-agent", ["work.completed"]);
+  const kicks = [];
+  f.store.agentPlugin.setDispatchKick(() => { kicks.push(Date.now()); });
+  postMessage(f.store, f.keys);
+  assert.equal(kicks.length, 0);
+  assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 0);
+});
+
+test("wake pings also POST to registered wakeUrls via the same signed sender", async t => {
+  const f = freshFixture(t);
+  const { identity, subscription } = subscribe(t, f.store, "wake-agent", ["agent.wake"]);
+  // Two hosts share one wakeUrl; a third has its own. Dedupe by URL.
+  f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "h1",
+    mode: "wakeable", wakeUrl: "https://host.example.test/wake" });
+  f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "h2",
+    mode: "wakeable", wakeUrl: "https://host.example.test/wake" });
+  f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "h3",
+    mode: "wakeable", wakeUrl: "https://other.example.test/wake" });
+  const signal = { signalId: "sig-1", kind: "mention", messageId: "m1" };
+  const { deliveries } = f.store.agentPlugin.deliverWakePing({ identityId: identity.identityId, signal });
+  assert.equal(deliveries.length, 3); // subscription URL + 2 distinct wakeUrls
+  const captured = [];
+  await drain(f.store, {
+    fetchImpl: async (url, opts) => {
+      captured.push({ url, signature: opts.headers["x-webhook-signature"], body: JSON.parse(opts.body) });
+      return { status: 200, text: async () => "ok" };
+    },
+  });
+  assert.equal(captured.length, 3);
+  const urls = captured.map(c => c.url).sort();
+  assert.deepEqual(urls, [
+    "https://hooks.example.test/agent",
+    "https://host.example.test/wake",
+    "https://other.example.test/wake",
+  ]);
+  // WakeUrl rows ride the subscription's journal and secret.
+  assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 3);
+  for (const { url, signature, body } of captured) {
+    assert.equal(body.eventType, "agent.wake");
+    assert.equal(verifyDeliverySignature(SECRET, signature, {
+      deliveryId: body.deliveryId, eventType: body.eventType,
+      issuedAt: Date.parse(body.issuedAt), data: body.data,
+    }), true);
+  }
+  // A repeat wake with the same signal is idempotent — no new rows, no new POSTs.
+  const again = f.store.agentPlugin.deliverWakePing({ identityId: identity.identityId, signal });
+  assert.ok(again.deliveries.every(d => d.duplicate));
+  assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 3);
+  captured.length = 0;
+  await drain(f.store, { fetchImpl: okFetch(200) });
+  assert.equal(captured.length, 0);
+});
+
+test("deliverWakePing still works with no wakeable hosts and no kick", t => {
+  const f = freshFixture(t);
+  const { identity, subscription } = subscribe(t, f.store, "wake-agent", ["agent.wake"]);
+  const { deliveries } = f.store.agentPlugin.deliverWakePing({
+    identityId: identity.identityId, signal: { signalId: "sig-2", kind: "dm", messageId: "m2" } });
+  assert.equal(deliveries.length, 1);
+  assert.equal(f.store.agentPlugin.webhookJournal(subscription.subscriptionId).length, 1);
 });

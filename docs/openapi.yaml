@@ -4566,8 +4566,9 @@ paths:
         `webhooks:manage` scope. A server-generated signing secret is shown
         exactly once in the response; a caller-supplied secret is never
         echoed back. 20 per address per minute. The identity-scoped event
-        `agent.wake` is also subscribable: a pending journal entry is written
-        whenever this identity is mentioned or DM'd while offline.
+        `agent.wake` is also subscribable: it fires whenever this identity
+        is mentioned or DM'd while offline, POSTing to the subscription URL
+        and to each registered wakeable host's wakeUrl.
         Deliveries are POSTed as JSON
         { deliveryId, subscriptionId, eventType, issuedAt, roomId, data }
         with headers x-webhook-delivery, x-webhook-subscription,
