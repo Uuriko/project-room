@@ -46,6 +46,36 @@ export function ensureIdentitySecretSchema(db) {
   if (!columns.has("revoked_at")) db.exec("ALTER TABLE agent_identities ADD COLUMN revoked_at INTEGER");
 }
 
+// RC-2026-09-24-210: identity-holder proof-of-possession for identityId
+// enrollment (Uuriko/project-room#942, replacing the #948 interim disable).
+// The identity HOLDER mints a single-use enrollment code with their own
+// secret; a sponsor presents it on agent-connections create. Only the
+// SHA-256 hash is stored — the raw code is returned once, never logged,
+// never persisted. 10-minute TTL, bound to the minting identityId.
+export const LINK_CODE_TTL_MS = 10 * 60 * 1000;
+export const LINK_CODE_BYTES = 16; // 128 bits of entropy
+export const LINK_CODE_RE = /^[A-Za-z0-9_-]{22}$/; // base64url(16 bytes)
+const MAX_OUTSTANDING_LINK_CODES = 10;
+
+export const identityLinkCodeSchema = `
+  CREATE TABLE IF NOT EXISTS identity_link_codes (
+    code_hash TEXT PRIMARY KEY,
+    identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id),
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS identity_link_codes_identity ON identity_link_codes(identity_id, expires_at);
+`;
+
+// Purely additive — IF NOT EXISTS is idempotent, no schema version bump,
+// and the table is intentionally outside the writer fence (see
+// unfencedAdditiveTables): older writers have no code path to it, rows are
+// hash-only, and mint/consume verify their own shape on open.
+export function ensureIdentityLinkCodeSchema(db) {
+  db.exec(identityLinkCodeSchema);
+}
+
 export const IDENTITY_SECRET_PREFIX = "pri_";
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -316,6 +346,71 @@ export class AgentIdentities {
   secretRevoked(identityId) {
     const row = this.db.prepare("SELECT revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(identityId);
     return row ? row.revokedAt !== null : null;
+  }
+
+  // RC-2026-09-24-210: mint a single-use identity link code.
+  //
+  // The caller proves possession of the identity's CURRENT, unrevoked
+  // secret — the mint IS the holder's consent to enroll this identity
+  // (no separate consent step; a sponsor's credential or scoped API key
+  // can never mint). The raw code is returned once; only its SHA-256 hash
+  // is stored, bound to the identityId, with a 10-minute TTL. Unknown
+  // identityIds 404 (no secret can ever authenticate for them, so the
+  // check order leaks nothing).
+  mintLinkCode(identityId, secret) {
+    if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)
+      || !this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=?").get(identityId)) {
+      fail(404, "identity_not_found", "No such agent identity");
+    }
+    const identity = this.authenticateIdentitySecret(identityId, secret);
+    return this.store.transaction(() => {
+      const now = this.store.now();
+      // Sweep expired rows on every mint: consumed rows die with their TTL,
+      // so the table stays bounded without a background job.
+      this.db.prepare("DELETE FROM identity_link_codes WHERE expires_at <= ?").run(now);
+      const outstanding = this.db.prepare(
+        "SELECT count(*) AS n FROM identity_link_codes WHERE identity_id=? AND consumed_at IS NULL").get(identityId).n;
+      if (outstanding >= MAX_OUTSTANDING_LINK_CODES) {
+        fail(429, "too_many_link_codes", "Too many outstanding link codes; use one or let it expire");
+      }
+      const code = base64url(randomBytes(LINK_CODE_BYTES));
+      this.db.prepare("INSERT INTO identity_link_codes(code_hash,identity_id,created_at,expires_at,consumed_at) VALUES(?,?,?,?,NULL)")
+        .run(legacyHash(code), identityId, now, now + LINK_CODE_TTL_MS);
+      return { identityId: identity.identityId, displayName: identity.displayName,
+        linkCode: code, expiresAt: now + LINK_CODE_TTL_MS };
+    });
+  }
+
+  // RC-2026-09-24-210: verify a presented link code and consume it
+  // atomically (single-use). Called inside the enrolling transaction, so a
+  // create that fails later never burns a code it didn't use.
+  //
+  // Every failure reads as 422 identity_link_proof_required — the checks
+  // (exists, bound to the claimed identityId, unexpired, unused, identity
+  // not revoked) share one code so there is no oracle for which of them
+  // failed. The raw code is never logged or persisted by the caller.
+  consumeLinkCode(identityId, code) {
+    if (typeof code !== "string" || !LINK_CODE_RE.test(code)) {
+      fail(422, "identity_link_proof_required",
+        "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
+    }
+    const now = this.store.now();
+    const row = this.db.prepare(
+      "SELECT identity_id AS identityId, expires_at AS expiresAt, consumed_at AS consumedAt FROM identity_link_codes WHERE code_hash=?")
+      .get(legacyHash(code));
+    const proofFailed = () => fail(422, "identity_link_proof_required",
+      "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
+    if (!row || row.identityId !== identityId || row.expiresAt <= now || row.consumedAt !== null) proofFailed();
+    // A code minted before a revocation dies with the identity: revocation
+    // stops the secret authenticating everywhere, and its delegations with it.
+    const live = this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NULL").get(identityId);
+    if (!live) proofFailed();
+    // Conditional consume: a concurrent consume that lands first wins —
+    // single-use is enforced by the row, not by the check above.
+    const changed = this.db.prepare("UPDATE identity_link_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL")
+      .run(now, legacyHash(code));
+    if (changed.changes !== 1) proofFailed();
+    return { identityId, consumedAt: now };
   }
   // Owner-only, like the sibling audit lists (agent-invites, agent-connections,
   // share-links): which identities are plugged into a room is membership

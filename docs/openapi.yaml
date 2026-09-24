@@ -3761,6 +3761,10 @@ paths:
       description: >-
         History for both parties of the thread only. Other members receive
         404 thread_not_found. Readable after the bond is revoked; new sends are not.
+        Message bodies are ROOM-SCOPED: only messages posted in {roomId} are
+        returned — a linked identity cannot be leveraged cross-room to read
+        another room's DM traffic. Thread/bond metadata (who you bonded
+        with) stays identity-visible; bodies never cross rooms.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: threadId
@@ -7387,10 +7391,17 @@ paths:
         `requestId`, `memberId` and `expectedOwnerRevision`. The server stores
         only the SHA-256 key hash the browser generated; expiry is at most 30
         days. The same requestId returns the earlier receipt (200).
-        `create` accepted an optional `identityId` (atomic enrollment), but
-        the field is temporarily disabled: any request carrying `identityId`
-        is rejected with 422 `identity_link_disabled` until enrollment
-        requires identity-holder proof-of-possession (Uuriko/project-room#942).
+        `create` accepts an optional `identityId` for atomic enrollment of an
+        agent identity — but only together with `identityLinkCode`, the
+        single-use 128-bit proof minted by the IDENTITY HOLDER with their
+        own `pri_` secret at `POST /api/identities/{identityId}/link-code`
+        (10-minute TTL, consumed atomically on enrollment). Minting IS the
+        holder's consent: a sponsor's credential or scoped API key can never
+        mint, and presenting `identityId` without a valid code fails closed
+        with 422 `identity_link_proof_required` (missing, malformed,
+        wrong-bound, expired, reused, tampered, or revoked-identity proof —
+        all one error, no oracle). The raw code is never stored or logged.
+        (Uuriko/project-room#942; replaces the #948 interim disable.)
       security:
         - accountSession: []
       parameters:
@@ -7407,12 +7418,14 @@ paths:
                 requestId: { type: string }
                 memberId: { type: string }
                 expectedOwnerRevision: { type: integer }
+                identityId: { type: string, description: "optional on create: the agent identity to link; requires identityLinkCode" }
+                identityLinkCode: { type: string, description: "optional on create with identityId: single-use 22-char proof minted by the identity holder (POST /api/identities/{identityId}/link-code); never stored" }
       responses:
-        '201': { description: "{ receipt, connection, duplicate: false }" }
+        '201': { description: "{ receipt, connection, duplicate: false } — receipt echoes identityId on linked creates, unlinkedIdentityId on disconnects that removed a link" }
         '200': { description: Exact retry (duplicate true) }
         '403': { description: owner_required or csrf_denied }
         '409': { description: idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit }
-        '422': { description: invalid_connection or invalid_expiry }
+        '422': { description: invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof) }
   /api/rooms/{roomId}/agent-invites:
     get:
       summary: Audit the room's one-time agent invite codes
@@ -8559,6 +8572,36 @@ paths:
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
         '429': { description: rate_limited }
+  /api/identities/{identityId}/link-code:
+    post:
+      summary: Mint a single-use identity link code (holder proof-of-possession)
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity — one identity can
+        never mint for another, and a sponsor's credential can never mint).
+        Minting IS the holder's consent for a room owner to enroll this
+        identity via `agent-connections create` with `identityId`. Returns
+        the raw 22-character (128-bit, base64url) code ONCE with a
+        10-minute `expiresAt`; only its SHA-256 hash is stored, and the raw
+        code is never logged or persisted. The code is bound to this
+        identityId and consumed atomically on enrollment — presenting it
+        without a valid code fails closed with 422
+        `identity_link_proof_required` (missing, malformed, wrong-bound,
+        expired, reused, tampered, or revoked-identity proof all read as
+        the one error — no oracle). At most 10 outstanding codes per
+        identity (429 `too_many_link_codes`); expired rows are pruned on
+        mint. 20 per address per minute. (Uuriko/project-room#942;
+        replaces the #948 interim disable.)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: "{ identityId, linkCode (shown once), expiresAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '429': { description: "rate_limited or too_many_link_codes" }
   /api/agent-identities/{identityId}/keys:
     get:
       summary: List an agent identity's registered public keys

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
@@ -113,22 +114,27 @@ export class AgentConnections {
       return { connections: this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? ORDER BY created_at,member_id").all(roomId).map(row => this.view(row)) };
     });
   }
-  validate(details) {
+  validate(details, { historyReplay = false } = {}) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_connection", "Invalid connection request");
-    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId } = details;
+    const { action, requestId, memberId, expectedOwnerRevision, expectedGeneration, expectedMemberRevision, displayName, access: preset, keyHash, expiresAt, agentType, identityId, identityLinkCode } = details;
     const common = ["action", "requestId", "memberId", "expectedOwnerRevision"];
     // RC-2026-09-24-201: optional identityId made enrollment atomic — the
     // membership, credential AND identity link landed in one transaction, so
     // the agent could use bonds/peer-DMs immediately without a second
     // owner step. Unknown keys are still rejected, so this stays explicit.
-    // INTERIM DISABLE (issue #942): identityId linking is turned off until
-    // enrollment requires identity-holder proof-of-possession — the sponsor
-    // could link ANY identity with no proof from its holder. Rejected
-    // outright below so callers learn immediately; every accepted request
-    // behaves exactly as before #931.
+    // RC-2026-09-24-210 (issue #942, replaces the #948 interim disable):
+    // identityId enrollment requires identity-holder proof-of-possession —
+    // a single-use link code minted by the holder with their own secret
+    // (POST /api/identities/{identityId}/link-code). Minting is the
+    // consent; a sponsor's credential can never mint. Without a valid code
+    // the request fails closed with 422 identity_link_proof_required — the
+    // code is verified before the identity is looked up, so there is no
+    // identity oracle. historyReplay covers rows written by apply(), which
+    // strips the raw code before persisting (hash-only storage, like every
+    // other secret in this service).
     const createFields = [...common, "displayName", "access", "keyHash", "expiresAt",
       ...(agentType !== undefined ? ["agentType"] : []),
-      ...(identityId !== undefined ? ["identityId"] : [])];
+      ...(identityId !== undefined ? ["identityId", ...(!historyReplay ? ["identityLinkCode"] : [])] : [])];
     const fields = action === "create" ? createFields
       : [...common, "expectedGeneration", "expectedMemberRevision", ...(action === "rotate" ? ["keyHash", "expiresAt"] : [])];
     const IDENTITY_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -140,15 +146,29 @@ export class AgentConnections {
       || (action === "create" && (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80
         || /[\u0000-\u001f\u007f]/.test(displayName) || typeof preset !== "string" || !Object.hasOwn(access, preset)
         || (agentType !== undefined && !isCatalogAgentType(agentType))))) fail(422, "invalid_connection", "Choose a name, access and expiry");
-    // Interim disable (issue #942): the identityId link path is rejected
-    // outright until enrollment requires identity-holder proof-of-possession.
-    if (action === "create" && identityId !== undefined) fail(422, "identity_link_disabled",
-      "identityId linking is temporarily disabled pending identity-holder proof-of-possession (see Uuriko/project-room#942)");
+    // The proof requirement is the fail-closed gate: no code, or a
+    // malformed one, reads as identity_link_proof_required (never
+    // invalid_connection) so clients can tell "mint a code" apart from
+    // "fix the request shape". apply() verifies and consumes the code;
+    // without a valid one it throws the same 422.
+    if (action === "create" && identityId !== undefined && !historyReplay
+      && (typeof identityLinkCode !== "string" || !LINK_CODE_RE.test(identityLinkCode))) {
+      fail(422, "identity_link_proof_required",
+        "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
+    }
     // A fixed field order makes request identity independent of JSON key order.
     return Object.fromEntries(fields.map(k => [k, details[k]]));
   }
   apply(token, roomId, details, binding) {
-    const request = this.validate(details), requestJSON = JSON.stringify(request), fingerprint = hash(requestJSON);
+    const request = this.validate(details);
+    // RC-2026-09-24-210: the raw link code is verified and consumed below
+    // but NEVER persisted — the operations history keeps only the code-free
+    // request (hash-only storage for secrets, like every key hash here).
+    // Stripping also keeps the idempotency fingerprint code-independent: a
+    // retry with the same requestId replays the earlier receipt instead of
+    // burning a fresh code.
+    const { identityLinkCode, ...persisted } = request;
+    const requestJSON = JSON.stringify(persisted), fingerprint = hash(requestJSON);
     return this.store.transaction(() => {
       const auth = this.owner(token, roomId, binding);
       // Connection sponsorship is account-bound by schema (sponsor_account_id
@@ -194,9 +214,15 @@ export class AgentConnections {
       // RC-2026-09-24-201: atomic identity link. The same transaction that
       // creates the membership and credential also writes identity_links,
       // so the new agent can use bonds/peer-DMs immediately — no second
-      // owner step. On disconnect the link is removed so a disconnected
-      // identity can't keep acting through the bond surface.
+      // owner step. RC-2026-09-24-210: the link additionally requires the
+      // holder's proof-of-possession — the code is verified and consumed
+      // atomically here, before the identity is even looked up (no
+      // oracle), and every verification failure reads as 422
+      // identity_link_proof_required. On disconnect the link is removed
+      // so a disconnected identity can't keep acting through the bond
+      // surface; the removed identity is echoed on the receipt for audit.
       if (action === "create" && request.identityId) {
+        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode);
         const identity = this.store.identities.get(request.identityId);
         if (!identity) fail(404, "identity_not_found", "No such agent identity");
         const plugin = this.store.agentPlugin;
@@ -209,7 +235,10 @@ export class AgentConnections {
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, request.identityId, memberId, now);
       }
+      let unlinkedIdentityId = null;
       if (action === "disconnect") {
+        unlinkedIdentityId = this.db.prepare("SELECT identity_id FROM identity_links WHERE room_id=? AND member_id=?")
+          .get(roomId, memberId)?.identity_id ?? null;
         this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND member_id=?").run(roomId, memberId);
       }
       const row = { room_id: roomId, member_id: memberId, generation: (before?.generation ?? 0) + 1,
@@ -221,7 +250,11 @@ export class AgentConnections {
       else this.db.prepare(`INSERT INTO agent_connections(${Object.keys(row).join(",")}) VALUES(${Object.keys(row).map(() => "?").join(",")})`).run(...Object.values(row));
       const receipt = { version: 1, action, requestId, roomId, memberId, generation: row.generation, status: row.status,
         expiresAt: row.expires_at, at: now, membershipEventId: membership?.event.id ?? null, membershipSequence: membership?.sequence ?? null,
-        ...(request.identityId ? { identityId: request.identityId } : {}) };
+        ...(request.identityId ? { identityId: request.identityId } : {}),
+        // RC-2026-09-24-210: auditable unlink — the immutable operations
+        // history records which identity a disconnect unlinked (null when
+        // the connection carried no link).
+        ...(unlinkedIdentityId ? { unlinkedIdentityId } : {}) };
       this.db.prepare("INSERT INTO agent_connection_operations VALUES(?,?,?,?,?,?,?,?,?)").run(roomId, memberId, row.generation, auth.account.id, requestId, requestJSON, fingerprint, JSON.stringify(receipt), JSON.stringify(row));
       return { receipt, connection: this.view(row), duplicate: false };
     });
@@ -243,7 +276,11 @@ export class AgentConnections {
       let previous = null;
       for (const [index, operation] of operations.entries()) {
         const request = JSON.parse(operation.request_json), receipt = JSON.parse(operation.receipt_json), state = JSON.parse(operation.state_json);
-        if (JSON.stringify(this.validate(request)) !== operation.request_json || hash(operation.request_json) !== operation.fingerprint
+        // RC-2026-09-24-210: history rows persist the code-free request
+        // (the raw link code is verified, consumed, and never stored), so
+        // replay skips the proof requirement — the code was proven when
+        // the row was written.
+        if (JSON.stringify(this.validate(request, { historyReplay: true })) !== operation.request_json || hash(operation.request_json) !== operation.fingerprint
           || operation.generation !== index + 1 || state.generation !== operation.generation || receipt.generation !== operation.generation
           || request.memberId !== row.member_id || receipt.memberId !== row.member_id || state.member_id !== row.member_id
           || receipt.roomId !== row.room_id || state.room_id !== row.room_id || receipt.requestId !== operation.request_id
@@ -259,7 +296,9 @@ export class AgentConnections {
         if (Object.keys(state).sort().join() !== Object.keys(row).sort().join()
           // RC-2026-09-24-201: atomic enrollment receipts may carry the
           // optional identityId echo; the key set is exact either way.
-          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : [])].sort().join()
+          // RC-2026-09-24-210: disconnect receipts may carry the optional
+          // unlinkedIdentityId echo (auditable unlink).
+          || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
           || state.sponsor_member_id !== room.room.ownerId || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision

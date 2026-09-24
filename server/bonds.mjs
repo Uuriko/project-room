@@ -262,15 +262,26 @@ export class Bonds {
       })));
   }
 
-  recentMessagesFor(identityId, limit) {
+  // RC-2026-09-24-210: peer-DM message bodies are room-scoped. The link
+  // that authorizes "acting as this identity" is per-room (identity_links
+  // is keyed by room), and the dm.posted ledger receipts are already
+  // participant-visible only in the room where the DM was posted — so the
+  // table reads match the ledger: a room's surface returns only messages
+  // posted in that room. A linked identity can never be leveraged
+  // cross-room to read another room's DM traffic. Thread/bond metadata
+  // (who you bonded with) stays identity-visible; bodies do not cross rooms.
+  recentMessagesFor(identityId, roomId, limit) {
     if (!identityId) return Object.freeze([]);
     return Object.freeze(this.db.prepare(
-      `SELECT * FROM peer_dm_messages WHERE to_identity_id=? ORDER BY created_at DESC LIMIT ?`
-    ).all(identityId, limit).map(row => this._publicMessage(row)));
+      `SELECT * FROM peer_dm_messages WHERE to_identity_id=? AND room_id=? ORDER BY created_at DESC LIMIT ?`
+    ).all(identityId, roomId, limit).map(row => this._publicMessage(row)));
   }
 
   listThreads(roomId, memberId) {
     const identityId = this._requireIdentity(roomId, memberId);
+    // Thread listing stays identity-global metadata (thread id, peer,
+    // bond, timestamps — no bodies); readThread below scopes the bodies
+    // to the requesting room.
     return Object.freeze(this.db.prepare(
       "SELECT * FROM peer_dm_threads WHERE agent_a=? OR agent_b=? ORDER BY created_at DESC"
     ).all(identityId, identityId).map(row => Object.freeze({
@@ -288,9 +299,10 @@ export class Bonds {
     if (!thread || (thread.agent_a !== identityId && thread.agent_b !== identityId)) {
       fail(404, "thread_not_found", "No such peer DM thread");
     }
+    // RC-2026-09-24-210: room-scoped bodies (see recentMessagesFor).
     const messages = this.db.prepare(
-      "SELECT * FROM peer_dm_messages WHERE thread_id=? ORDER BY created_at ASC"
-    ).all(threadId).map(row => this._publicMessage(row));
+      "SELECT * FROM peer_dm_messages WHERE thread_id=? AND room_id=? ORDER BY created_at ASC"
+    ).all(threadId, roomId).map(row => this._publicMessage(row));
     return Object.freeze({
       threadId: thread.thread_id,
       bondId: thread.bond_id,

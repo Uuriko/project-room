@@ -60,7 +60,7 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
@@ -843,6 +843,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // databases via ALTER TABLE; old rows backfill NULL and keep reading
       // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
       ensureIdentitySecretSchema(this.db);
+      // RC-2026-09-24-210: identity link codes (proof-of-possession for
+      // identityId enrollment) converge the same additive way — IF NOT
+      // EXISTS is idempotent, no schema version bump, intentionally
+      // outside the writer fence (see unfencedAdditiveTables).
+      ensureIdentityLinkCodeSchema(this.db);
       // Slice 1/3 operator prerequisites: per-agent controls table is purely
       // additive — IF NOT EXISTS is idempotent, no schema version bump.
       ensureOperatorControlsSchema(this.db);
@@ -3144,7 +3149,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // their own list — friend traffic is not a mention.
       const identityId = this.bonds.identityForMember(roomId, memberId);
       const bondProposals = identityId ? this.bonds.pendingProposalsFor(identityId) : [];
-      const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, limit) : [];
+      // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
+      // only messages posted in this room, never another room's DM traffic.
+      const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
       return Object.freeze({
         agentId: memberId,
         roomId,
