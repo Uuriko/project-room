@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 export async function startHelperAgentExercise({ humanReviewer = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-helper-exercise-"));
@@ -33,6 +34,12 @@ export async function startHelperAgentExercise({ humanReviewer = false } = {}) {
     store.agentConnections.apply(slot.token, "commons", { action: "create", requestId: randomUUID(), memberId: "helper",
       displayName: "Acceptance helper", access: "chat", keyHash: createHash("sha256").update(token).digest("hex"),
       expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, slot.session.sessionBinding);
+    // Graduated autonomy tiers: exercise agents are operator-promoted so the
+    // browser checks exercise them as working agents, not t1_readonly.
+    setTier(store.db, "commons", "helper", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+    if (!humanReviewer) {
+      setTier(store.db, "commons", "reviewer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+    }
     // Consent-bound DMs: the helper agent answers the reviewer directly,
     // and the owner addresses both in the credit-question flow.
     // Approve all directions among the three so UI journeys are not blocked.
