@@ -1144,6 +1144,13 @@ summary { overflow-wrap: anywhere; }
 .dm-requests ul { list-style: none; margin: 0; padding: 0; }
 .dm-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
 .dm-request-reason { margin: .15rem 0 0; font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }
+.friend-bond { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .2rem .45rem; }
+.friend-chip { font-size: .75rem; font-weight: 700; color: var(--muted); }
+.friend-chip[data-friend-state="active"] { color: var(--room-green); }
+.friend-dm-list { list-style: none; margin: .5rem 0 1rem; padding: 0; display: grid; gap: .75rem; max-height: 16rem; overflow: auto; }
+.friend-dm-meta { display: block; font-size: .75rem; color: var(--muted); }
+.friend-dm-message p { margin: .15rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.friend-dm-empty { color: var(--muted); font-size: .85rem; }
 
 .agent-invite-instructions { margin-top: 16px; }
 .agent-invite-instructions pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }

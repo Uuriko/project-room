@@ -11,6 +11,7 @@ import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
+import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage } from "./friend-bond.js";
 import { shareJoinSecretFromText } from "./share-invite-code.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
@@ -223,6 +224,7 @@ const client = new RoomClient({
       rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
       void refreshDmConsents();
+      void refreshFriendBonds();
       void refreshSavedIds();
       void applyHorizonAnchor();
       void refreshMutedThreads();
@@ -264,6 +266,8 @@ const client = new RoomClient({
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     mutedThreads = new Set(); threadMuteBusy = false;
     dmConsents = []; dmConsentSeq++;
+    friendBonds = []; friendSeq++; friendBusy = false; friendDmPeerId = null;
+    $("#friend-dm-dialog")?.close();
     stopPresencePoll();
     accessPreviews.clear();
     handoffEnvelopes.receipts = null; handoffEnvelopes.loading = false;
@@ -1571,13 +1575,36 @@ function render() {
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
   // DM consent (consent-bound DMs, PR #731): directional state + actions for
   // the signed-in member's pair with each other active member. Never rendered
   // for yourself or for the public read-only face (session is null there).
+  // Agent↔agent Friend. Separate from the room-chat Direct messages disclosure
+  // below. Propose and accept send no scopes; the server defaults all v1.
+  const friendBondHtml = m => {
+    if (!session || session.member.kind !== "agent" || m.kind !== "agent" || m.active === false || m.id === session.member.id) return "";
+    const self = state.members[session.member.id] ?? session.member;
+    const selfId = identityIdOf(self, presenceStates.get(session.member.id));
+    const peerId = identityIdOf(m, presenceStates.get(m.id));
+    const bond = bondWithPeer(mergeFriendBonds(friendBonds, state.bonds), selfId, peerId);
+    const chrome = friendChrome({ bond, selfIdentityId: selfId });
+    const chip = chrome.state === "none" ? "" : `<span class="friend-chip" data-friend-state="${esc(chrome.state)}">${esc(chrome.label)}</span>`;
+    const names = {
+      propose: `Friend ${m.displayName}`,
+      accept: `Accept friend request from ${m.displayName}`,
+      decline: `Decline friend request from ${m.displayName}`,
+      revoke: `Revoke friend bond with ${m.displayName}`,
+      dm: `Message ${m.displayName}`
+    };
+    const buttons = chrome.actions.map(action => {
+      const bondAttr = chrome.bondId ? ` data-friend-bond="${esc(chrome.bondId)}"` : "";
+      return `<button type="button" class="text-button friend-action" data-friend-action="${esc(action.action)}" data-friend-peer="${esc(m.id)}"${bondAttr} aria-label="${esc(names[action.action] || action.label)}"${friendBusy ? " disabled" : ""}>${esc(action.label)}</button>`;
+    }).join("");
+    return `<span class="friend-bond" data-friend-peer="${esc(m.id)}" data-friend-state="${esc(chrome.state)}" role="group" aria-label="Friend ${esc(m.displayName)}">${chip}${buttons}</span>`;
+  };
   const dmConsentDetails = m => {
     if (!session || m.id === session.member.id || m.active === false) return "";
     const summary = dmConsentPeerSummary(dmConsents, state.members, session.member.id, m.id);
@@ -3416,7 +3443,7 @@ async function refreshAgentPauses() {
     render();
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
-$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshPresenceStates(); } });
+$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
 $("#share-link-admins").addEventListener("click", e => {
   e.preventDefault(); e.stopPropagation();
   if (!ownsRoomActions(null)) return;
@@ -4119,6 +4146,12 @@ $("#presence-list").addEventListener("click", async e => {
   if (!consentButton || !state || !session || dmConsentBusy) return;
   e.preventDefault();
   await runDmConsentAction(consentButton.dataset.dmConsentAction, consentButton.dataset.dmConsentPeer, consentButton);
+});
+$("#presence-list").addEventListener("click", async e => {
+  const button = e.target.closest("[data-friend-action]");
+  if (!button || !state || !session || friendBusy) return;
+  e.preventDefault();
+  await runFriendAction(button.dataset.friendAction, button.dataset.friendPeer, button.dataset.friendBond || "", button);
 });
 function syncReports() {
   const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
@@ -4912,6 +4945,7 @@ let notificationNote = "", notificationBefore = null, notificationLoading = fals
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
 let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0;
+let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // #660: server-derived presence states per member (memberId -> presence API
 // entry). Refreshed on room open and on an interval while visible; the rail
 // prefers these over the local derivation. Never loaded for the public
@@ -5335,7 +5369,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "hidden" && ownsNotifications(notificationOwner) && notificationOwner.stale) { notificationOwner.stale = false; scheduleNotifications(0); }
   // Consent changes emit no room event; re-sync the side table when the tab
   // comes back so the People panel never shows a stale gate.
-  if (document.visibilityState === "visible") void refreshDmConsents();
+  if (document.visibilityState === "visible") { void refreshDmConsents(); void refreshFriendBonds(); }
 });
 // ---- Presence states ----------------------------------------------------------
 // #660: server-derived per-member working states (working/listening/idle/
@@ -5437,6 +5471,123 @@ async function runDmConsentAction(action, peerId, button) {
     if (seq === dmConsentSeq && generation === client.generation && state === room) await refreshDmConsents();
   }
 }
+// ---- Friend / Bond ------------------------------------------------------------
+// People row control for agent↔agent bonds. Room DM consent stays its own
+// disclosure. Load failures keep the last list; actions report in the notice.
+async function refreshFriendBonds() {
+  if (!state || !session || $("#main").hidden || friendBusy) return;
+  if (session.member.kind !== "agent") return;
+  const seq = ++friendSeq, generation = client.generation, room = state;
+  try {
+    const result = await client.request(client.path("/bonds"));
+    if (seq !== friendSeq || generation !== client.generation || state !== room) return;
+    friendBonds = Array.isArray(result?.bonds) ? result.bonds : [];
+  } catch {
+    if (seq !== friendSeq || generation !== client.generation || state !== room) return;
+  } finally {
+    if (seq === friendSeq && generation === client.generation && state === room) render();
+  }
+}
+function friendPeerTarget(peer) {
+  return identityIdOf(peer, presenceStates.get(peer.id)) || peer.id;
+}
+async function runFriendAction(action, peerMemberId, bondId, button) {
+  if (!state || !session || friendBusy) return;
+  const peer = state.members[peerMemberId];
+  if (!peer || peer.active === false || peer.kind !== "agent" || peer.id === session.member.id) return;
+  if (action === "dm") { openFriendThread(peerMemberId); return; }
+  const generation = client.generation;
+  friendBusy = true;
+  if (button) button.disabled = true;
+  try {
+    const built = friendBondCommand(action, { to: friendPeerTarget(peer), bondId });
+    await client.send({ id: crypto.randomUUID(), type: built.type, data: built.data });
+    if (generation !== client.generation || !state) return;
+    notice(action === "propose" ? `Friend request sent to ${peer.displayName}.`
+      : action === "accept" ? `You and ${peer.displayName} are friends.`
+      : action === "decline" ? `Declined ${peer.displayName}'s friend request.`
+      : `Friend bond with ${peer.displayName} revoked.`);
+  } catch (error) {
+    if (generation === client.generation && state) notice(friendFailureMessage(error), true);
+  } finally {
+    friendBusy = false;
+    if (button) button.disabled = false;
+    if (generation === client.generation && state) {
+      await refreshFriendBonds();
+      const next = $(`#presence-list [data-friend-peer="${CSS.escape(peerMemberId)}"] [data-friend-action]`);
+      next?.focus();
+    }
+  }
+}
+function friendMessageHtml(messages, peerMemberId) {
+  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+  const selfId = identityIdOf(state.members[session.member.id] ?? session.member, presenceStates.get(session.member.id));
+  return messages.map(message => {
+    const mine = message.fromIdentityId === selfId;
+    const who = mine ? "You" : displayName(peerMemberId);
+    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${esc(who)}</span><p>${esc(message.body)}</p></li>`;
+  }).join("");
+}
+async function loadFriendThread(peerMemberId) {
+  if (!state || !session || friendDmPeerId !== peerMemberId) return;
+  const generation = client.generation;
+  const peer = state.members[peerMemberId];
+  const peerIdentity = peer ? identityIdOf(peer, presenceStates.get(peer.id)) : null;
+  try {
+    const listed = await client.request(client.path("/peer-dms"));
+    if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
+    const thread = (listed?.threads ?? []).find(row => row.peerIdentityId === peerIdentity);
+    if (!thread) { renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`); return; }
+    const history = await client.request(client.path(`/peer-dms/${encodeURIComponent(thread.threadId)}`));
+    if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
+    renderContent("#friend-dm-list", friendMessageHtml(history?.messages, peerMemberId));
+  } catch (error) {
+    if (generation === client.generation && friendDmPeerId === peerMemberId) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
+  }
+}
+function openFriendThread(peerMemberId) {
+  if (!state || !session) return;
+  const peer = state.members[peerMemberId];
+  if (!peer) return;
+  friendDmPeerId = peerMemberId;
+  $("#friend-dm-title").textContent = `Friends with ${peer.displayName}`;
+  $("#friend-dm-input").value = "";
+  setFormStatus($("#friend-dm-status"), "");
+  renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`);
+  if (!$("#friend-dm-dialog").open) $("#friend-dm-dialog").showModal();
+  void loadFriendThread(peerMemberId);
+  $("#friend-dm-input").focus();
+}
+$("#friend-dm-close").addEventListener("click", () => { friendDmPeerId = null; $("#friend-dm-dialog").close(); });
+$("#friend-dm-dialog").addEventListener("close", () => { friendDmPeerId = null; });
+$("#friend-dm-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!state || !session || !friendDmPeerId || friendBusy) return;
+  const peerMemberId = friendDmPeerId;
+  const peer = state.members[peerMemberId];
+  const body = $("#friend-dm-input").value.trim();
+  if (!peer || !body) return;
+  const generation = client.generation;
+  friendBusy = true;
+  $("#friend-dm-form").querySelector("button[type=submit]").disabled = true;
+  try {
+    const built = friendBondCommand("dm", {
+      to: friendPeerTarget(peer), body, messageId: crypto.randomUUID()
+    });
+    await client.send({ id: crypto.randomUUID(), type: built.type, data: built.data });
+    if (generation !== client.generation || !state || friendDmPeerId !== peerMemberId) return;
+    $("#friend-dm-input").value = "";
+    setFormStatus($("#friend-dm-status"), "");
+    await loadFriendThread(peerMemberId);
+  } catch (error) {
+    if (generation === client.generation && state) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
+  } finally {
+    friendBusy = false;
+    const submit = $("#friend-dm-form")?.querySelector("button[type=submit]");
+    if (submit) submit.disabled = false;
+    if (generation === client.generation && state) await refreshFriendBonds();
+  }
+});
 $("#notification-read-button").addEventListener("click", async () => {
   const ticket = notificationOwner, feed = notificationFeed;
   if (!ownsNotifications(ticket) || !feed?.unread || feed.nextBefore || feed.pageBefore || notificationBefore !== null || notificationBusy || notificationLoading) return;

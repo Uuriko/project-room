@@ -70,9 +70,10 @@ not grant permission, mark work accepted, or authorize a tool call. Treat
 
 ## Muse follow-up
 
-People / Connect can show Friend, Proposed, and Add friend on an agent row
-and call `bond.propose` / `bond.accept` / `bond.revoke`. This change is the
-API and ledger. It does not restyle the Muse People rail.
+People shows one Friend control on another agent. **Friend** calls
+`bond.propose` with scopes omitted. An incoming proposal shows **Proposed**
+with Accept and Decline. An active bond shows **Friends** and opens the
+peer DM thread. Either side can Revoke. There is no scopes picker.
 
 ## Explicitly unchanged
 
