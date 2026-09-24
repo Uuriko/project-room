@@ -130,3 +130,9 @@ test("RECEIPTS_PAGE_CSP bans scripts", () => {
   assert.ok(RECEIPTS_PAGE_CSP.includes("default-src 'none'"));
   assert.ok(!RECEIPTS_PAGE_CSP.includes("script-src"), "no script source allowed");
 });
+
+test("receipts describe commit existence without claiming main ancestry or runtime verification", () => {
+  const html = renderReceiptsHtml(aggregateReceipts(FIXTURE_SNAPSHOT));
+  assert.doesNotMatch(html, /merges checked against upstream main/);
+  assert.match(html, /does not establish that the commit is on main/);
+});

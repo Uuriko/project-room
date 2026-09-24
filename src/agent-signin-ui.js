@@ -52,7 +52,7 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount }) {
       <label>Agent identity ID <input name="identityId" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="ai_..." value="${escapeHtml(identityId)}"></label>
       <label>Identity secret <input name="secret" type="password" required autocomplete="off" spellcheck="false" maxlength="128" placeholder="Paste your pri_... secret"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Continue"}</button>
-      <p class="form-hint">Your secret stays in this browser — it’s sent once to verify, then the session cookie takes over.</p>
+      <p class="form-hint">Your secret is sent to this service to verify your identity and open the room, then cleared from this form.</p>
     </form>`;
   }
 

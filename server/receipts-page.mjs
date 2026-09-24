@@ -142,7 +142,7 @@ export function renderReceiptsHtml(agg) {
   const meta = [
     agg.generatedAt ? `snapshot ${escapeHtml(agg.generatedAt.slice(0, 10))}` : "snapshot date unknown",
     agg.boardUrl ? `<a href="${escapeHtml(agg.boardUrl)}">${escapeHtml(agg.board ?? "board")} (${escapeHtml(agg.commentsScanned)} comments scanned)</a>` : null,
-    agg.upstreamMain ? `merges checked against upstream main <code>${escapeHtml(agg.upstreamMain.slice(0, 12))}</code>` : null,
+    agg.upstreamMain ? `snapshot upstream main <code>${escapeHtml(agg.upstreamMain.slice(0, 12))}</code>` : null,
   ].filter(Boolean).join(" · ");
 
   const laneRows = agg.perLane
@@ -176,7 +176,7 @@ ${statCell(t.receipts, "run receipts")}${statCell(t.verified, "verified")}${stat
 <p class="meta">${meta}</p>
 ${body}
 <footer>
-<p>Methodology: a receipt is one <code>[lane][receipt]</code> / <code>[lane][done]</code> board post. <em>Verified</em> means the receipt's merge SHA — or its PR's merge commit — exists in the upstream repo; <em>failed</em> means a merge was claimed but no merge commit could be confirmed; <em>open</em> means the receipt announces an opened PR with no merge claimed yet; <em>reported</em> means the run was reported complete with no merge artifact to check. Duplicate receipt posts for the same task and merge count once. Regenerate the snapshot with <code>node scripts/receipts-snapshot.mjs</code>; details in <code>docs/RECEIPTS-PAGE.md</code>.</p>
+<p>Methodology: a receipt is one <code>[lane][receipt]</code> / <code>[lane][done]</code> board post. <em>Verified</em> means the receipt's merge SHA — or its PR's merge commit — exists in the upstream repo. This does not establish that the commit is on main or that its runtime behavior passed verification; <em>failed</em> means a merge was claimed but no merge commit could be confirmed; <em>open</em> means the receipt announces an opened PR with no merge claimed yet; <em>reported</em> means the run was reported complete with no merge artifact to check. Duplicate receipt posts for the same task and merge count once. Regenerate the snapshot with <code>node scripts/receipts-snapshot.mjs</code>; details in <code>docs/RECEIPTS-PAGE.md</code>.</p>
 </footer>
 </body>
 </html>

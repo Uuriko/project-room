@@ -451,8 +451,9 @@ const agentSigninUI = createAgentSigninUI({
   onSignedIn: async (session) => {
     const roomId = session?.roomId;
     if (!roomId) return;
-    const identity = await client.restore(roomId);
-    if (!identity || !state) return;
+    // Agent sign-in creates a room cookie, not a human account session.
+    const identity = await client.restore();
+    if (!identity || identity.roomId !== roomId || !state) return;
     $("#message-input").focus();
     if (state) revealLocationHash();
   },
