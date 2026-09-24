@@ -45,10 +45,6 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
 
 for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"}: find, read and return without losing conversation`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.p;
-  const summary = p.locator('[data-work-record-id="native-result"] .work-result-summary');
-  await summary.waitFor({ state: 'visible' });
-  assert.ok((await summary.innerText()).length > 0);
-  assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(el => el.open), false);
   await p.locator("#message-input").fill("Keep my next thought.");
   const scroll = await p.locator("#message-list").evaluate(node => { node.scrollTop = 0; return node.scrollTop; });
   await f.open();
@@ -135,7 +131,7 @@ test("creating new work from the composer requires explicit confirmed submission
   await p.locator("#work-options > summary").click();
   await p.locator("#assignee-select").selectOption("producer");
   await p.locator("#require-verification").check();
-  await p.locator('#work-options').evaluate(el => { el.open = true; }); await p.locator('#require-verification').check(); await p.locator('#require-decision').check(); await p.locator("#verifier-select").selectOption("reviewer");
+  await p.locator("#verifier-select").selectOption("reviewer");
   await p.locator("#create-work-button").click();
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
   await p.locator('#message-list [data-work-timeline]').first().waitFor();

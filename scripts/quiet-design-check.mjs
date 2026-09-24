@@ -69,8 +69,8 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.matches(":modal")), true);
     assert.equal(await page.evaluate(() => document.activeElement.id), "work-title-input");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
-    assert.equal(await page.locator("#verifier-select").isVisible(), false);
-    assert.match(await page.locator("#work-options-summary").textContent(), /Evidence only/);
+    assert.equal(await page.locator("#verifier-select").isVisible(), true);
+    assert.match(await page.locator("#work-options-summary").textContent(), /Review \+ approval · read only/);
     await page.locator("#work-title-input").fill("Prepare the agenda");
     await page.locator("#work-done-input").fill("An agenda with an owner and a source for each decision.");
     await page.locator("#assignee-select").selectOption("producer");
@@ -84,8 +84,8 @@ for (const touch of [false, true]) {
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => document.activeElement.id === "new-work-button");
     await page.locator("#new-work-button").click();
-    assert.equal(await page.locator("#require-verification").isChecked(), false);
-    assert.equal(await page.locator("#require-decision").isChecked(), false);
+    assert.equal(await page.locator("#require-verification").isChecked(), true);
+    assert.equal(await page.locator("#require-decision").isChecked(), true);
     await page.locator("#cancel-work-button").click();
 
     const card = page.locator('[data-work-record-id="test-handoff"]');

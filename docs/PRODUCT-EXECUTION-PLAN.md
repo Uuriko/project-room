@@ -1,7 +1,5 @@
 # Project Room execution plan
 
-Current implementation: [Autonomous work with a quiet interface](AUTONOMOUS-WORK-PLAN.md) (September 24). Owner-selected restrictions, optional task reviews by default, composed agent context and compact human attention. Unified messaging remains shelved; the older Inbox sequence below is historical.
-
 Updated September 20, 2026. This is the consolidated working backlog and order of execution, not a commitment to implement every possible feature. Each slice must deliver an observable improvement before the next expands scope.
 
 The current human/agent interaction implementation sequence is detailed in [HUMAN-AGENT-EXECUTION-PLAN.md](HUMAN-AGENT-EXECUTION-PLAN.md). It starts by reusing Overview, the activation pack and existing catch-up APIs for arrival and resumption, then qualifies steering and the Inbox loop.
