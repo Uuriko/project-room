@@ -56,12 +56,10 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await openSearch(page);
   await page.locator('#message-search').fill('agenda');
   assert.equal(await page.locator('#clear-search').isVisible(), true);
-  await page.locator('#composer-options > summary').click();
-  await page.locator('#remember-drafts').check();
+  assert.equal(await page.locator('#composer-options').count(), 0);
   await settle(page);
   await page.evaluate(() => {
-    window.recoveryMutations = 0; window.searchMutations = 0;
-    new MutationObserver(() => window.recoveryMutations++).observe(document.querySelector('#draft-recovery-status'), { childList: true, characterData: true, subtree: true });
+    window.searchMutations = 0;
     new MutationObserver(() => window.searchMutations++).observe(document.querySelector('#search-count'), { childList: true, characterData: true, subtree: true });
   });
   await page.locator('#message-input').fill('Keep this draft while the room changes.');
@@ -78,11 +76,10 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await settle(page);
   assert.equal(await page.evaluate(() => window.getSelection().toString()), selection);
   assert.equal(await page.evaluate(() => window.retainedWork === document.querySelector('[data-work-record-id="test-handoff"]')), true);
-  assert.deepEqual(await page.evaluate(() => [window.recoveryMutations, window.searchMutations]), [0, 0]);
+  assert.equal(await page.evaluate(() => window.searchMutations), 0);
   await page.locator('#clear-search').click();
   assert.equal(await page.locator('#clear-search').isVisible(), false);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search');
-  await page.locator('#composer-options > summary').click();
   await work.locator('.work-details > summary').click();
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/release-polish-${touch ? 'touch' : 'desktop'}.png` });

@@ -175,13 +175,14 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await capture("");
 
-    // Reload warning is a best-effort guard, not persistent draft storage.
-    await input.fill("Reload discards this unsent thought");
+    // The leave-page warning still fires. This tab keeps the unsent text across reload.
+    await input.fill("Reload keeps this unsent thought");
     let warned = false;
     page.once("dialog", async dialog => { warned = dialog.type() === "beforeunload"; await dialog.accept(); });
     await page.reload();
     await page.locator("#main").waitFor({ state: "visible" });
-    assert.equal(warned, true); assert.equal(await input.inputValue(), "");
+    assert.equal(warned, true);
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "Reload keeps this unsent thought");
 
     // Revoking a session removes every private discussion and in-memory draft.
     await input.fill("Clear this private draft on revocation");

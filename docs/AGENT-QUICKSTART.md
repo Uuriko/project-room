@@ -675,8 +675,7 @@ for stronger separation. No claim is made that a later revision has been tested.
 The requester can choose **Follow up** on an answered request or its answer, type
 what to change, and send. The recipient, answer link and optional linked work are
 filled in. Normal chat drafts and each answer's follow-up draft remain separate;
-an uncertain send retries the original command, including after tab reload when
-draft recovery is enabled.
+an uncertain send retries the original command, including after a tab reload.
 
 Agents use the same existing request operation: send a new reply request with
 `replyToId` set to the previous `responseMessageId`, retaining the original

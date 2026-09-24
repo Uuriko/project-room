@@ -67,8 +67,15 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
     await page.locator('#main').waitFor({ state: 'visible' });
   };
   const remember = async () => {
-    if (!await page.locator('#remember-drafts').isVisible()) await page.locator('#composer-options > summary').click();
-    await page.locator('#remember-drafts').check();
+    const box = page.locator('#remember-drafts');
+    if (await box.count() === 0) return;
+    if (!(await box.isVisible())) await page.locator('#composer-options > summary').click();
+    await box.check();
+  };
+  const showRequestReply = async () => {
+    if (await page.locator('#request-reply').isVisible()) return;
+    const summary = page.locator('#composer-options > summary');
+    if (await summary.count()) await summary.click();
   };
   const switchTo = async name => {
     // Preserve the same page/sessionStorage/cookies and the same service origin.
@@ -78,6 +85,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.goto(origin); await enter(); await remember();
   const sequence = fixture.store.room('commons').sequence;
   await page.locator('#message-input').fill('Private ordinary draft');
+  await showRequestReply();
   await page.locator('#request-reply').click();
   await page.locator('#message-to-select').selectOption('guest');
   await page.locator('#message-input').fill('Private request draft');
@@ -94,7 +102,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await switchTo('candidate');
   if (await page.locator('#request-mode-bar').isVisible()) await page.locator('#request-exit').click();
   if (await page.locator('#message-input').inputValue() !== 'Ordinary draft edited on fallback') issues.push('fallback ordinary edit lost on return');
-  if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
+  await showRequestReply();
   await page.locator('#request-reply').click();
   assert.equal(await page.locator('#message-input').inputValue(), 'Private request draft', 'request draft remains separate from ordinary chat');
   assert.equal(fixture.store.room('commons').sequence, sequence, 'draft transitions never send messages');
@@ -118,7 +126,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.waitForFunction(() => document.querySelector('#message-input').value !== '');
   const barWasVisible = await page.locator('#request-mode-bar').isVisible();
   if (!barWasVisible) {
-    if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
+    await showRequestReply();
     await page.locator('#request-reply').click();
     // Wait for request mode to engage before submitting.
     await page.locator('#request-mode-bar').waitFor({ state: 'visible', timeout: 5000 });
@@ -165,7 +173,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   assert.equal(commands.length, 4); assert.deepEqual(commands[3], commands[2], 'ordinary unknown retry is exact on fallback');
   assert.equal(fixture.store.room('commons').sequence, seqAfterLost);
   await switchTo('candidate');
-  if (!await page.locator('#request-reply').isVisible()) await page.locator('#composer-options > summary').click();
+  await showRequestReply();
   await page.locator('#request-reply').click();
   await page.locator('#message-input').fill('Private request after exact retry');
   mkdirSync('test-results', { recursive: true });

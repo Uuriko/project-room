@@ -242,9 +242,7 @@ const client = new RoomClient({
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
         restoreComposer(draft);
-        $("#remember-drafts").checked = true;
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
-        $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
       }
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
@@ -326,7 +324,7 @@ const client = new RoomClient({
     // sign in on this browser with a collapsed rail and, for About, with the
     // room purpose, Room instructions, Archive and Leave hidden behind a
     // closed summary for the rest of the session.
-    for (const id of ["composer-options", "work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
+    for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     for (const id of ["people-panel", "room-about"]) $(`#${id}`).open = true;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     agentPauses = new Map(); armedRemoval = null;
@@ -2071,9 +2069,10 @@ document.addEventListener("click", event => {
 $("#request-exit").addEventListener("click", () => switchThread(currentThreadId, true));
 $("#request-refresh").addEventListener("click", () => { if (requestMode?.requestMessageId) openRequestMode(requestMode.kind, requestMode.requestMessageId); });
 function persistDrafts() {
-  if (!session || !$("#remember-drafts").checked) return;
-  const saved = recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
-  setText("#draft-recovery-status", saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.");
+  // The composer no longer asks. This tab keeps nonempty drafts until the
+  // 12-hour expiry or sign-out. In-memory drafts still work if storage fails.
+  if (!session) return;
+  recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
@@ -3212,10 +3211,6 @@ function syncAlsoSend() {
   label.hidden = !visible;
   if (!visible) box.checked = false;
 }
- $("#remember-drafts").addEventListener("change", () => {
-  if ($("#remember-drafts").checked) saveComposer();
-  else { recovery.clear(); $("#draft-recovery-status").textContent = "Draft recovery off. Drafts stay only while this page is open."; }
-});
 function rememberComposerSelection({ clearCollapsed = false } = {}) {
   const input = $("#message-input");
   if (input.selectionStart !== input.selectionEnd) {
@@ -3265,8 +3260,11 @@ $("#message-input").addEventListener("input", () => { lastComposerSelection = nu
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
-  $("#draft-hint").textContent = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
-  $("#message-input").enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
+  const input = $("#message-input");
+  input.title = hint;
+  input.setAttribute("aria-description", hint);
+  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();

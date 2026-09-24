@@ -68,8 +68,8 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await guestOption.waitFor({ state: 'attached' });
     const guestId = await guestOption.getAttribute('value');
     await context.request.post(origin + '/__test-dm-consent', { data: { fromMemberId: 'owner', toMemberId: guestId } });
-    const options = async () => { if (!await page.locator('#remember-drafts').isVisible()) await page.locator('#composer-options > summary').click(); };
-    await options(); await page.locator('#remember-drafts').check();
+    assert.equal(await page.locator('#composer-options').count(), 0);
+    assert.equal(await page.locator('#remember-drafts').count(), 0);
     const drafts = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)
       .filter(([key]) => /^project-room:drafts:v\d+$/.test(key)).map(([key, raw]) => {
         const saved = JSON.parse(raw);
@@ -82,7 +82,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
 
     for (const request of [false, true]) {
       if (request) {
-        await options(); await page.locator('#request-reply').click();
+        await page.locator('#request-reply').click();
         await page.locator('#message-to-select').selectOption(guestId);
       }
       const body = request ? 'Request awaiting exact receipt' : 'Ordinary send awaiting exact receipt';

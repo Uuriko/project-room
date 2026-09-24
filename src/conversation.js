@@ -338,7 +338,9 @@ export function draftRecoveryScope(identity) {
     identity.member.id, identity.sessionBinding]);
 }
 
-// Opt-in, tab-scoped recovery. Read only after an authenticated room snapshot.
+// Tab-scoped recovery. The composer used to hide this behind a checkbox; drafts
+// now save for this tab until the 12-hour expiry or sign-out. Read only after
+// an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
