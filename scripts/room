@@ -291,8 +291,11 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
 
     # prose receipt fields: [lane][receipt] A010-2 ... PR #392 ... Merge SHA: <hex>
     def first_task: ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t) // null;
+    # "pull" alone cannot see "pull request #392": the space is consumed and
+    # the next character is "r", so the number never matches. "pull request"
+    # has to be tried before the shorter "pull".
     def first_pr:
-      (([capture("(?:PR|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
+      (([capture("(?:(?i)PR|pull request|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
        // ([capture("project-room#(?<n>[0-9]+)")] | .[0] | .n)) // null;
     def first_sha:
       ([capture("(?<![A-Za-z0-9])[Mm]erge(?:d)?(?: SHA| commit)?[ \\t]*:[ \\t]*(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")]
