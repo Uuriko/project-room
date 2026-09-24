@@ -97,10 +97,20 @@ test("work awaiting verification and owner decision surfaces with review links",
   proposeWork(f, "w-clean");
   completeWork(f, "w-verify"); completeWork(f, "w-decide"); completeWork(f, "w-clean");
   const report = f.report();
-  assert.equal(report.itemCount, 2, "the item with no gates stays out");
+  // The three thin shadow receipts (short summary, no recognized artifact
+  // URL) also surface as informational jev_escalation items: the Jev
+  // receipt gate journals every legacy work.completed completion.
+  assert.equal(report.itemCount, 5, "verification + decision + 3 escalated shadow receipts");
   const kinds = report.items.map(i => i.kind).sort();
-  assert.deepEqual(kinds, ["decision", "verification"]);
+  assert.deepEqual(kinds, ["decision", "jev_escalation", "jev_escalation", "jev_escalation", "verification"]);
   for (const item of report.items) {
+    if (item.kind === "jev_escalation") {
+      assert.equal(item.severity, "info");
+      assert.equal(item.actions.length, 1);
+      assert.equal(item.actions[0].method, "GET");
+      assert.ok(item.actions[0].path.startsWith("/api/rooms/commons/jev-shadow"), "shadow deep-link");
+      continue;
+    }
     assert.equal(item.severity, "action");
     assert.equal(item.actions.length, 1);
     assert.equal(item.actions[0].method, "GET");
