@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity, listAgentRooms } from "../client/room-agent.mjs";
 import { AgentIdentities, IDENTITY_LIMIT } from "../server/agent-identities.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -40,6 +41,13 @@ async function serve(t) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, origin: `http://127.0.0.1:${server.address().port}`, ownerCommons, ownerLab };
+}
+
+// PR #953: new agent members enroll at t1_readonly; promote to t2_standard
+// so the agent can write (post messages, advertise, etc.).
+function promoteToStandard(store, roomId, memberId) {
+  setTier(store.db, roomId, memberId, "t2_standard",
+    { updatedBy: "owner", nowMs: store.now() });
 }
 
 test("multi-room agent identity: one secret works across linked rooms (round-2 #101)", async t => {
@@ -72,6 +80,9 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   // Same member id in both rooms: one identity, no re-provisioning.
   assert.equal(inCommons.memberId, inLab.memberId);
   assert.equal(inCommons.memberId, identityId);
+  // PR #953: new agent members enroll at t1_readonly; promote so the agent can post.
+  promoteToStandard(store, "commons", identityId);
+  promoteToStandard(store, "lab", identityId);
 
   // The agent uses its single secret in both rooms: snapshot + post a message.
   for (const roomId of ["commons", "lab"]) {
@@ -141,7 +152,7 @@ test("re-linking applies the permissions the owner supplies now, not the unlinke
 });
 
 test("identity-links accepts an empty permissions array: read/chat-only link", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { store, origin, ownerCommons } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Readonly Bot");
   const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
@@ -150,6 +161,8 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
   assert.equal(link.status, 201);
   const members = (await (await fetch(`${origin}/api/rooms/commons`, { headers: { Authorization: `Bearer ${ownerCommons}` } })).json()).state.members;
   assert.deepEqual(members[identityId].permissions, []);
+  // PR #953: new agent members enroll at t1_readonly; promote so read/chat works.
+  promoteToStandard(store, "commons", identityId);
   // Read + chat work with no grants…
   const client = new RoomAgentClient({ origin, roomId: "commons", token: secret, memberId: identityId });
   assert.equal((await client.checkConnection()).status, "credential_accepted");
@@ -172,7 +185,7 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
 });
 
 test("CLI plug-in loop: a new AI goes from no credential to connected member", async t => {
-  const { origin, ownerCommons } = await serve(t);
+  const { store, origin, ownerCommons } = await serve(t);
   const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };
 
   // 1. Minting needs only the service origin: no credential exists yet.
@@ -187,6 +200,8 @@ test("CLI plug-in loop: a new AI goes from no credential to connected member", a
   assert.equal(linked.status, 0, linked.stderr);
   assert.equal(linked.json.memberId, identityId);
   assert.equal(linked.json.roomId, "commons");
+  // PR #953: new agent members enroll at t1_readonly; promote so the agent can write.
+  promoteToStandard(store, "commons", identityId);
 
   // 3. The owner can list linked identities.
   const listed = await cli(origin, ["identity-links"], ownerEnv);

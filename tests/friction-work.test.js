@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { deriveNotifications } from "../server/notifications.mjs";
 import { getTemplate } from "../server/work-templates.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function setup() {
   const directory = mkdtempSync(join(tmpdir(), "friction-"));
@@ -17,6 +18,9 @@ function setup() {
   const ownerKey = store.issueAccessKey("commons", "owner");
   const send = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "reporter", displayName: "Reporter", kind: "agent", permissions: ["steer"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // friction tests exercise it as a working agent.
+  setTier(store.db, "commons", "reporter", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const reporterKey = store.issueAccessKey("commons", "reporter");
   return { directory, store, send, ownerKey, reporterKey,
     cleanup: () => { store.close(); rmSync(directory, { recursive: true, force: true }); } };

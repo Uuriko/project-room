@@ -10,6 +10,7 @@ import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenAcceptanceFixture, v13OfferBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { helpOfferContext } from "../src/help-offers.js";
@@ -32,6 +33,8 @@ function setup(t) {
   const add = name => {
     send("owner", command("member.added", { memberId: name, displayName: name, kind: "agent", permissions: [] }));
     f.keys[name] = f.store.issueAccessKey("commons", name);
+    // #953: new agent members default to t1_readonly; helpers need write access for offers
+    setTier(f.store.db, "commons", name, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   };
   return { ...f, filename: join(f.directory, "room.sqlite"), now, send, command, open, update, add };
 }

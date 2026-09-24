@@ -25,6 +25,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const ROOM = "commons";
 const script = fileURLToPath(new URL("../scripts/load-test.mjs", import.meta.url));
@@ -49,6 +50,9 @@ function openRoom({ members, prefix, workItems = false }) {
     const memberId = `${prefix}-${i}`;
     store.command(ownerKey, ROOM, { id: randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId, displayName: memberId, kind: "agent", permissions: ["accept_work", "complete_work"] } });
+    // Graduated autonomy tiers: the load agents are operator-promoted so the
+    // contention tests exercise them as working agents.
+    setTier(store.db, ROOM, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     if (workItems) store.command(ownerKey, ROOM, { id: randomUUID(), type: T.WORK_PROPOSED, data: {
       workItemId: `load10x-task-${i}`, title: `Load 10x task ${i}`, definitionOfDone: "Claimed under contention",
       accountableMemberId: memberId, mode: "read" } });

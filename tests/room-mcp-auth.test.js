@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { HOSTED_ROOM_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
@@ -81,6 +82,9 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
     identityId: stranger.identityId, displayName: "MCP stranger", permissions: []
   });
   assert.equal(linked.memberId, stranger.identityId);
+  // #953: new agent members default to t1_readonly; peer and stranger need write access for MCP replies/bonds
+  setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  setTier(store.db, created.roomId, stranger.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   const bad = await rpc(origin, "tools/list", undefined, "pri_" + "x".repeat(43));
   assert.equal(bad.status, 401);
@@ -280,6 +284,9 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   store.identities.link(owner.secret, created.roomId, {
     identityId: stranger.identityId, displayName: "Bond stranger", permissions: []
   });
+  // #953: new agent members default to t1_readonly; peer and stranger need write access for bond actions
+  setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  setTier(store.db, created.roomId, stranger.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   const openList = await rpc(origin, "tools/list");
   const openNames = (await openList.json()).result.tools.map(tool => tool.name);

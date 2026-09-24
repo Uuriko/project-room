@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { deriveNotifications, NOTIFICATION_TAIL } from "../server/notifications.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // B4: the feed is a read model over the event tail after the member's cursor.
 // Preferences filter it, edits never duplicate, the cursor expires it, ended
@@ -21,6 +22,9 @@ async function serve(t) {
   const send = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["steer", "accept_work", "complete_work", "verify"] });
   send(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // notification tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const mayaKey = store.issueAccessKey("commons", "maya"), agentKey = store.issueAccessKey("commons", "agent");
   // Consent-bound DMs: the owner's directed test message needs the agent's approval.
   store.dmConsents.request("commons", "owner", "agent", "test fixture");

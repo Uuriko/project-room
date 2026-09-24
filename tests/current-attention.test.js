@@ -12,6 +12,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { currentAttention } from "../client/attention-inbox.mjs";
 import { contextNotices, AssignmentWatcher } from "../client/assignment-watcher.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-current-attention-")), state = join(directory, "pull");
@@ -21,6 +22,9 @@ function fixture(t) {
   for (const id of ["agent", "other"]) {
     send("owner", T.MEMBER_ADDED, { memberId: id, displayName: id, kind: "agent", accountableHumanId: "owner", permissions: ["accept_work", "complete_work"] });
     keys[id] = store.issueAccessKey("commons", id);
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // attention tests exercise them as working agents.
+    setTier(store.db, "commons", id, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const client = { snapshot: async () => store.snapshot(keys.agent, "commons"), changes: async (after, limit) => store.eventsAfter(keys.agent, "commons", after, limit) };
   const config = { client, origin: "http://127.0.0.1:12345", roomId: "commons", directory: state };

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, PERMISSIONS, applyEvent, event, replay } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
@@ -125,6 +126,9 @@ test("reopening backfills verification independence only from explicit producer 
   const owner = store.issueAccessKey("commons", "owner");
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work"] } });
   store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "agent", displayName: "agent", kind: "agent", permissions: ["verify"] } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // proposed-by tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
 
@@ -159,6 +163,9 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
   const run = (token, type, data) => store.command(token, "commons", { id: crypto.randomUUID(), type, data });
   run(owner, T.MEMBER_ADDED, { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work", "complete_work", "write_external"] });
   run(owner, T.MEMBER_ADDED, { memberId: "agent", displayName: "agent", kind: "agent", permissions: ["verify"] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // proposed-by tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
 

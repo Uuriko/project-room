@@ -6,6 +6,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { reusableWorkDefinition, confirmsWorkProposal, workRecipeOptions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 test("reusable definition is an exact two-field projection, not cloned authority or state", () => {
   const content = { title: "  Repeat 🌱\nnext week  ", definitionOfDone: "One result\nwith its exact evidence.  " };
@@ -99,6 +100,8 @@ test("actual agent reuse creates fresh work, preserves source and exact retry, a
     memberId: "planner", displayName: "Test planner agent", kind: "agent", accountableHumanId: "owner", permissions: ["steer"]
   } });
   f.keys.planner = f.store.issueAccessKey("commons", "planner");
+  // #953: new agent members default to t1_readonly; planner needs write access for work.proposed
+  setTier(f.store.db, "commons", "planner", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const actor = f.client("planner"), receipt = await actor.command(command);
   assert.equal(confirmsWorkProposal(receipt, command, "commons", "planner"), true);
   const after = f.store.snapshot(f.keys.owner, "commons"), item = after.state.workItems[command.data.workItemId];

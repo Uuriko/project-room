@@ -16,6 +16,7 @@ import {
   presentedSessionStatus, SESSION_HEARTBEAT_STALE_MS,
   roundLimitExceeded, reportRounds, reportToolCalls
 } from "../src/work-item-session.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const PEOPLE = /@gmail|John |Potter |acct-|accountId|people-data/i;
 
@@ -26,6 +27,9 @@ async function serve(t) {
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"] } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // work-item-session tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
     workItemId: "session-one", title: "Draft the agenda", definitionOfDone: "Named next step",
     accountableMemberId: "agent", mode: "read"
@@ -231,6 +235,7 @@ test("HTTP: second agent gets 409 on a claimed session; owner can override; card
   const { store, request, ownerKey, agentKey } = await serve(t);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "agent-b", displayName: "Agent B", kind: "agent", permissions: ["accept_work", "complete_work"] } });
+  setTier(store.db, "commons", "agent-b", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const bKey = store.issueAccessKey("commons", "agent-b");
   const post = (token, data) => request("/api/rooms/commons/work-sessions", { method: "POST", token, data });
 
@@ -290,6 +295,7 @@ test("HTTP: two claimers race, the holder renews, release lets the other claim",
   const { store, request, ownerKey, agentKey } = await serve(t);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "agent-b", displayName: "Agent B", kind: "agent", permissions: ["steer", "accept_work"] } });
+  setTier(store.db, "commons", "agent-b", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const bKey = store.issueAccessKey("commons", "agent-b");
   const post = (token, data) => request("/api/rooms/commons/work-sessions", { method: "POST", token, data });
   const item = () => store.room("commons").state.workItems["session-one"];

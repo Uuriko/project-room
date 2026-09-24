@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-message-edit-"));
@@ -18,6 +19,10 @@ function fixture(t) {
     data: { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work"] } });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "other", displayName: "Other", kind: "agent", permissions: ["accept_work"] } });
+  // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+  // edit/delete tests exercise them as working agents.
+  for (const memberId of ["agent", "other"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agentKey = store.issueAccessKey("commons", "agent");
   const otherKey = store.issueAccessKey("commons", "other");
   const post = (token, body) => store.command(token, "commons",

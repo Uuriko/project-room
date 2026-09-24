@@ -11,6 +11,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { attentionReport } from "../server/owner-attention.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // #662: owner-only "needs your attention" rollup.
 function setup(t) {
@@ -24,6 +25,9 @@ function setup(t) {
   const send = (actor, type, data, id = randomUUID()) => store.command(keys[actor], "commons", { id, type, data });
   send("owner", T.MEMBER_ADDED, { memberId: "member", displayName: "Regular human", kind: "human", permissions: [] });
   send("owner", T.MEMBER_ADDED, { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work", "write_external"], accountableHumanId: "owner" });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // attention tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   keys.member = store.issueAccessKey("commons", "member");
   keys.agent = store.issueAccessKey("commons", "agent");
   const report = () => attentionReport({ store, accessRequests }, keys.owner, "commons", null, clock.now);

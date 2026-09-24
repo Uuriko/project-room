@@ -10,6 +10,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function fixture(t) {
   const f = await startWorkLifecycleFixture(), handles = new Set();
@@ -23,6 +24,9 @@ async function fixture(t) {
     const session = f.store.createSession(ownerToken), token = randomBytes(32).toString("base64url"), configDirectory = join(f.directory, memberId);
     f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: randomUUID(), memberId,
       displayName: memberId, access, keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+    // Graduated autonomy tiers: the enrolled agent is operator-promoted so the
+    // MCP tests exercise it as a working agent.
+    setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     const config = { version: 1, origin: f.origin, roomId: "commons", memberId, token };
     saveAgentConnection(configDirectory, config); return { mcp: await open(configDirectory), client: new RoomAgentClient(config), configDirectory };
   };
@@ -166,6 +170,9 @@ test("separate MCP processes serialize overlapping claims, hand off, and never r
 test("authorized coordinator proposes and supersedes work without transferring a claim or approval", { timeout: 30000 }, async t => {
   const f = await fixture(t), memberId = "coordinator";
   f.send(T.MEMBER_ADDED, { memberId, displayName: "Synthetic coordinator", kind: "agent", accountableHumanId: "owner", permissions: ["steer"] });
+  // Graduated autonomy tiers: the coordinator is operator-promoted so the MCP
+  // test exercises it as a working agent.
+  setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const configDirectory = join(f.directory, memberId);
   saveAgentConnection(configDirectory, { version: 1, origin: f.origin, roomId: "commons", memberId, token: f.store.issueAccessKey("commons", memberId) });
   const coordinator = await f.open(configDirectory), a = await f.open(f.participants[0].configDirectory);

@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { mutedEvent, reportLimits } from "../server/moderation.mjs";
 import { classifyCommand, surfaceClass } from "../server/action-classes.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { EVENT_TYPES as T, replay, isMutedBy, mutedMemberIds } from "../src/events.js";
 
 function fixture(t) {
@@ -24,6 +25,9 @@ function fixture(t) {
     send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // #953: new agent members default to t1_readonly; producer and reviewer need write access for message.posted
+  for (const memberId of ["producer", "reviewer"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: clock });
   const post = (actor, messageId, body = `message ${messageId}`) => { send(actor, T.MESSAGE_POSTED, { messageId, body }); return messageId; };
   const state = () => store.room("commons").state;
   const rejects = (fn, pattern, status) => {
