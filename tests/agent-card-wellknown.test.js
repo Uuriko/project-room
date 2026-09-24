@@ -53,6 +53,8 @@ test("supportedInterfaces declares versioned bindings", () => {
 
 test("skills are non-empty with id/name/description/tags", () => {
   const card = agentCard();
+  // v0.3 compat: preferredTransport names the transport older readers should use (#A2A-card-audit 2026-09-24).
+  assert.equal(card.preferredTransport, "HTTP+JSON");
   assert.ok(card.skills.length >= 1);
   for (const skill of card.skills) {
     assert.equal(typeof skill.id, "string");
@@ -69,7 +71,8 @@ test("capabilities carry the discovery capability flags and security is declared
   const card = agentCard();
   assert.equal(typeof card.capabilities.streaming, "boolean");
   assert.equal(typeof card.capabilities.pushNotifications, "boolean");
-  assert.equal(typeof card.capabilities.stateTransitionHistory, "boolean");
+  // A2A v1.0 removed the v0.3 stateTransitionHistory capability (#A2A-card-audit 2026-09-24).
+  assert.equal(card.capabilities.stateTransitionHistory, undefined, "v0.3 stateTransitionHistory must be dropped");
   assert.ok(card.securitySchemes.digestAuth, "digestAuth scheme declared");
   assert.ok(card.securitySchemes.guestLinkAuth, "guestLinkAuth scheme declared");
   assert.ok(card.securitySchemes.bearerAuth, "bearerAuth scheme declared");
