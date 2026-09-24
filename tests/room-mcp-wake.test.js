@@ -66,8 +66,9 @@ test("wake tools stay behind a live identity secret", async t => {
   const listed = await rpc(origin, "tools/list");
   assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
   const open = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL });
-  assert.equal(open.status, 200);
-  assert.equal(open.body.error.code, -32602);
+  assert.equal(open.status, 401);
+  assert.equal(open.body.error.code, -32001);
+  assert.equal(open.body.error.data.reason, "auth_required");
   assert.equal(open.body.result, undefined);
   const bad = await rpc(origin, "tools/list", undefined, "pri_" + "x".repeat(43));
   assert.equal(bad.status, 401);
@@ -270,6 +271,10 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   }, owner.secret);
   assert.equal(resumed.value.receipt.state, "active");
   assert.equal(store.wakeQueue.pauseStatus(created.roomId, created.ownerMemberId), null);
-  const missing = await call(origin, "wake.resume", { roomId: created.roomId, memberId: created.ownerMemberId }, owner.secret);
-  assert.equal(missing.body.error.code, -32602);
+  const missing = await call(origin, "wake.resume", { roomId: created.roomId }, owner.secret);
+  assert.equal(missing.body.error, undefined);
+  assert.equal(missing.value.receipt.state, "active");
+  const extra = await call(origin, "wake.resume", { roomId: created.roomId, note: "no" }, owner.secret);
+  assert.equal(extra.body.error.code, -32602);
+  assert.equal(extra.body.error.data.reason, "invalid_arguments");
 });

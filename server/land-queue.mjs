@@ -5,9 +5,10 @@
 // the caller. There is no new permission rule.
 //
 // GitHub access reuses a token already present in the environment
-// (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. When a
-// token is required and missing, callers get 503 github_unconfigured. The
-// token is never logged and never copied onto an item or a room event.
+// (GITHUB_TOKEN or GH_TOKEN). Public repositories answer without one. A 401,
+// or a 403 that is not a rate limit when no token is set, is 503
+// github_unconfigured. A 404 is pr_not_found and is not stored. The token is
+// never logged and never copied onto an item or a room event.
 //
 // There is no inbound GitHub webhook receiver in this service. Refresh runs
 // on the existing per-minute scheduled tick (cloudflare/room.mjs scheduled).
@@ -296,11 +297,13 @@ async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = fal
     error.rateLimitedUntil = readRateLimitReset(response, now);
     throw error;
   }
-  if (!token && (response.status === 401 || response.status === 403 || response.status === 404)) {
-    fail(503, "github_unconfigured", "GitHub access is not configured. A token is required to read this pull request and none is set.");
-  }
-  if (token && response.status === 401) {
-    fail(503, "github_unconfigured", "GitHub rejected the configured token.");
+  // 404 is a missing pull request even when no token is configured;
+  // private-repo hiding uses the same status, and a real auth failure is
+  // 401 or a non-limit 403.
+  if (response.status === 401 || (!token && response.status === 403)) {
+    fail(503, "github_unconfigured", token
+      ? "GitHub rejected the configured token."
+      : "GitHub access is not configured. A token is required to read this pull request and none is set.");
   }
   if (response.status === 404) fail(404, "pr_not_found", "Pull request was not found");
   if (response.status === 403 || response.status === 429) {

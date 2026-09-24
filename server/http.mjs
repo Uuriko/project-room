@@ -2350,7 +2350,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_login", "An agent identity ID is required");
         }
         const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required in Authorization header");
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         const identity = store.identities.authenticateIdentitySecret(data.identityId, secret);
         const rooms = store.identities.roomsForIdentity(data.identityId);
         return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
@@ -2363,7 +2363,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_login", "An agent identity ID and room are required");
         }
         const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required in Authorization header");
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         // Verify the secret before creating the session
         store.identities.authenticateIdentitySecret(data.identityId, secret);
         const { token, session } = store.createAgentSession(data.identityId, data.roomId);
@@ -2658,11 +2658,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-rooms" && req.method === "POST") {
         rate(`agent-room-create:${remoteAddress}`, 20);
         const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Identity secret required");
+        if (!secret) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         const data = await body(req);
-        if (!exact(data, ["roomId", "title", "purpose", "kind", "displayName"])) {
-          reject(422, "invalid_request", "roomId, title, purpose, kind and displayName are the accepted fields");
-        }
         const created = agentRooms.create(secret, data);
         return json(res, created.duplicate ? 200 : 201, created);
       }

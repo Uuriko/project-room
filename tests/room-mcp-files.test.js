@@ -55,11 +55,12 @@ test("room file tools stay behind a live identity secret", async t => {
   const listed = await rpc(origin, "tools/list");
   assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
   const denied = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" });
-  assert.equal(denied.status, 200);
-  assert.equal(denied.body.error.code, -32602);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.error.code, -32001);
+  assert.equal(denied.body.error.data.reason, "auth_required");
   const deniedCommit = await call(origin, "room_commit_file", { roomId: created.roomId, id: "note", messageId: "msg-1" });
-  assert.equal(deniedCommit.status, 200);
-  assert.equal(deniedCommit.body.error.code, -32602);
+  assert.equal(deniedCommit.status, 401);
+  assert.equal(deniedCommit.body.error.code, -32001);
   const bad = await rpc(origin, "tools/call", {
     name: "room_commit_file", arguments: { roomId: created.roomId, id: "note", messageId: "msg-1" }
   }, "pri_" + "x".repeat(43));

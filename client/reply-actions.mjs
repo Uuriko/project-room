@@ -1,5 +1,5 @@
 import { validateCharterContext } from "../src/room-charter.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { validId } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
@@ -22,7 +22,7 @@ const definitions = [
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
     { requestId: id, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["requestId", "toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
-    { requestId: id, replyToId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
+    { requestId: id, replyToId: id, body: text, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
     { requestId: id, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }],
@@ -42,7 +42,8 @@ export function validReplyArguments(name, args) {
 export function buildReplyCommand(identity, name, args) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null)
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
-  const { requestId, ...data } = structuredClone(args), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
+  const requestId = validId(args.requestId) ? args.requestId : randomUUID();
+  const { requestId: _requestId, ...data } = structuredClone(args), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
