@@ -14,9 +14,11 @@
 // design center. Every hop (initial URL + each redirect) is validated:
 // http/https only, no userinfo, ports 80/443 only, the host is DNS-resolved
 // and every resolved IP is checked against private/loopback/link-local/
-// multicast/reserved/CGNAT ranges. The node:dns pre-check is statically
-// imported (same as server/outbound-webhooks.mjs; the Worker build uses
-// nodejs_compat, so DNS resolution is available there too).
+// multicast/reserved/CGNAT ranges, including IPv4 embedded in IPv6 (mapped,
+// NAT64, 6to4, v4-compatible). On Node the check fails closed when a name
+// does not resolve, and the connection is pinned to the checked addresses so
+// DNS rebinding cannot swap in a private one. On Cloudflare Workers the
+// egress sandbox is the backstop and the pre-check is best-effort.
 //
 // Auth is owner + full members only; the HTTP layer applies the #798 guest
 // gate (403 guest_scope_denied) right after authentication. There is no
@@ -67,8 +69,25 @@ export const WEB_FETCH_TAG_CHARS = 64;
 // default: production never sets this. Only the loopback ranges are allowed —
 // every other private/reserved range stays blocked, so redirect-to-private
 // tests remain meaningful. Guarded for Workers (no process).
-const allowLoopback = () => typeof process !== "undefined"
-  && process?.env?.WEB_FETCH_ALLOW_LOOPBACK === "1";
+// Hardening (RC follow-up to #803 review): the flag alone is not enough. It
+// is honoured only inside a test context (node --test sets
+// NODE_TEST_CONTEXT; NODE_ENV=test covers other runners), so a stray
+// WEB_FETCH_ALLOW_LOOPBACK=1 in a self-hosted deploy's env cannot open
+// loopback. Outside a test context the flag is ignored and warned once.
+let loopbackWarned = false;
+export function webFetchTestContext() {
+  if (typeof process === "undefined" || !process?.env) return false;
+  return Boolean(process.env.NODE_TEST_CONTEXT) || process.env.NODE_ENV === "test";
+}
+const allowLoopback = () => {
+  if (typeof process === "undefined" || process?.env?.WEB_FETCH_ALLOW_LOOPBACK !== "1") return false;
+  if (webFetchTestContext()) return true;
+  if (!loopbackWarned) {
+    loopbackWarned = true;
+    console.warn("web-fetch: WEB_FETCH_ALLOW_LOOPBACK=1 ignored outside a test context");
+  }
+  return false;
+};
 
 export const webFetchSchema = `
   CREATE TABLE IF NOT EXISTS web_fetch_cache (
@@ -198,6 +217,18 @@ const IPV6_BLOCKS = [
   [0xfc000000000000000000000000000000n, 7], // fc00::/7 unique local
   [0xff000000000000000000000000000000n, 8], // ff00::/8 multicast
   [0x20010db8000000000000000000000000n, 32], // 2001:db8::/32 documentation
+  [0x20010000000000000000000000000000n, 32], // 2001::/32 Teredo (tunnels to arbitrary v4)
+  [0x0064ff9b000100000000000000000000n, 48], // 64:ff9b:1::/48 local-use NAT64 (RFC 8215)
+];
+// Prefixes that carry an IPv4 address inside the IPv6 one. The embedded
+// address inherits the IPv4 verdict, so 64:ff9b::a00:1 (NAT64 for 10.0.0.1)
+// or 2002:a00:1:: (6to4 for 10.0.0.1) cannot reach a private v4 host.
+// Each entry: [prefix, bits, extract(v6) -> embedded v4].
+const IPV6_EMBEDDED_V4 = [
+  [0xffff00000000n, 96, v6 => Number(v6 & 0xffffffffn)], // ::ffff:0:0/96 IPv4-mapped
+  [0x0064ff9b000000000000000000000000n, 96, v6 => Number(v6 & 0xffffffffn)], // 64:ff9b::/96 NAT64 (RFC 6052)
+  [0x20020000000000000000000000000000n, 16, v6 => Number((v6 >> 80n) & 0xffffffffn)], // 2002::/16 6to4
+  [0n, 96, v6 => Number(v6 & 0xffffffffn)], // ::/96 IPv4-compatible (deprecated)
 ];
 const ipv4In = (ip, [base, bits]) => (ip >>> (32 - bits)) === (base >>> (32 - bits));
 const ipv6In = (ip, [base, bits]) => (ip >> BigInt(128 - bits)) === (base >> BigInt(128 - bits));
@@ -216,44 +247,131 @@ export function ipLiteralBlocked(host) {
   const v6 = parseIpv6(host.replace(/^\[|\]$/g, ""));
   if (v6 !== null) {
     if (allowLoopback() && v6 === 1n) return false; // ::1
-    // IPv4-mapped IPv6 (::ffff:10.0.0.1) inherits the IPv4 verdict.
-    if ((v6 >> 32n) === 0xffffn) {
-      const mapped = Number(v6 & 0xffffffffn);
-      if (allowLoopback() && ipv4In(mapped, [0x7f000000, 8])) return false;
-      return IPV4_BLOCKS.some(block => ipv4In(mapped, block));
+    // :: and ::1 sit inside ::/96 but are their own blocked addresses.
+    if (v6 === 0n || v6 === 1n) return true;
+    // Embedded IPv4 (mapped, NAT64, 6to4, v4-compatible) inherits the IPv4 verdict.
+    for (const [prefix, bits, extract] of IPV6_EMBEDDED_V4) {
+      if (!ipv6In(v6, [prefix, bits])) continue;
+      const embedded = extract(v6) >>> 0;
+      if (allowLoopback() && ipv4In(embedded, [0x7f000000, 8])) return false;
+      return IPV4_BLOCKS.some(block => ipv4In(embedded, block));
     }
     return IPV6_BLOCKS.some(block => ipv6In(v6, block));
   }
   return false;
 }
 
-// Resolve the host and reject when every path leads somewhere private.
-// Returns the resolved address list (empty when the name was a literal IP).
-// node:dns is statically imported like server/outbound-webhooks.mjs — the
-// Worker build runs with nodejs_compat, so DNS is available there too.
-export async function assertPublicHost(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, "");
-  if (ipLiteralBlocked(host))
-    fail(403, "blocked_host", "Refusing to fetch a private, loopback, or otherwise reserved address");
+// Cloudflare Workers: outbound fetch() runs in the Workers egress sandbox,
+// which cannot reach the host's private network, and the Workers fetch API
+// has no way to pin a connection to an address. There the DNS pre-check is
+// best-effort. Everywhere else (Node / self-hosted) the checks below are
+// the whole SSRF defence, so they fail closed and the connection is pinned.
+export const isWorkersRuntime = () => typeof navigator !== "undefined"
+  && navigator?.userAgent === "Cloudflare-Workers";
+
+// Default resolver. On Node, dns.lookup is the same resolver the socket
+// would use (it honours /etc/hosts, so "localhost" and custom host entries
+// are caught). resolve4/resolve6 are the fallback where lookup is missing.
+async function defaultResolve(host) {
   const addresses = new Set();
-  for (const fn of ["resolve4", "resolve6"]) {
-    try { for (const ip of await dns[fn](host)) addresses.add(ip); } catch { /* NXDOMAIN etc: fetch reports it */ }
+  if (!isWorkersRuntime() && typeof dns.lookup === "function") {
+    try { for (const { address } of await dns.lookup(host, { all: true, verbatim: true })) addresses.add(address); }
+    catch { /* fall through to resolve4/resolve6 */ }
   }
-  for (const ip of addresses) {
-    if (ipLiteralBlocked(ip))
-      fail(403, "blocked_host", "Refusing to fetch a host that resolves to a private, loopback, or otherwise reserved address");
+  if (addresses.size === 0) {
+    const settled = await Promise.allSettled([dns.resolve4(host), dns.resolve6(host)]);
+    for (const result of settled) if (result.status === "fulfilled") for (const ip of result.value) addresses.add(ip);
   }
-  // Unresolvable here usually means NXDOMAIN; the fetch itself then produces
-  // the typed failure, so DNS quirks never become 500s either way.
   return [...addresses];
 }
 
+// Resolve the host and reject when any answer is private. Returns the
+// checked address list ([host] for a literal IP). Fails closed on Node when
+// the name does not resolve: an unresolvable name used to be passed to
+// fetch(), which then resolved it again with no check at all.
+// `resolve` is injectable so tests never touch the network.
+export async function assertPublicHost(hostname, { resolve = defaultResolve } = {}) {
+  const host = hostname.replace(/^\[|\]$/g, "");
+  if (ipLiteralBlocked(host))
+    fail(403, "blocked_host", "Refusing to fetch a private, loopback, or otherwise reserved address");
+  if (parseIpv4(host) !== null || parseIpv6(host) !== null) return [host];
+  let addresses = [];
+  try { addresses = await resolve(host); } catch { addresses = []; }
+  for (const ip of addresses) {
+    if (typeof ip !== "string" || (parseIpv4(ip) === null && parseIpv6(ip) === null) || ipLiteralBlocked(ip))
+      fail(403, "blocked_host", "Refusing to fetch a host that resolves to a private, loopback, or otherwise reserved address");
+  }
+  if (addresses.length === 0 && !isWorkersRuntime())
+    fail(502, "fetch_failed", "Could not resolve the host to a public address");
+  return addresses;
+}
+
 // Full per-hop SSRF validation: scheme/credentials/port plus host checks.
-export async function assertFetchableUrl(href) {
-  const normalized = normalizeUrl(href);
-  const { hostname } = new URL(normalized);
-  await assertPublicHost(hostname);
-  return normalized;
+export async function assertFetchableUrl(href, options) {
+  return (await resolveFetchTarget(href, options)).url;
+}
+
+// Same checks, also returning the addresses that passed, so the caller can
+// connect to exactly those (no second, unchecked resolution).
+export async function resolveFetchTarget(href, options) {
+  const url = normalizeUrl(href);
+  const addresses = await assertPublicHost(new URL(url).hostname, options);
+  return { url, addresses };
+}
+
+// A dns.lookup-compatible function that only ever answers with addresses
+// that already passed assertPublicHost, whatever name it is asked for. This
+// closes the rebinding window: a short-TTL record that flips to 127.0.0.1
+// after the check is never consulted again.
+export function pinnedLookup(addresses) {
+  const checked = addresses.map(address => ({ address, family: parseIpv4(address) !== null ? 4 : 6 }));
+  return (_hostname, options, callback) => {
+    const cb = typeof options === "function" ? options : callback;
+    const opts = typeof options === "object" && options ? options : {};
+    if (!checked.length) return cb(Object.assign(new Error("no checked address"), { code: "ENOTFOUND" }));
+    if (opts.all) return cb(null, checked);
+    return cb(null, checked[0].address, checked[0].family);
+  };
+}
+
+// Node transport: node:http/https with the pinned lookup. TLS still uses the
+// URL hostname for SNI and certificate checks. agent:false means no pooled
+// socket from an earlier resolution is ever reused. Returns the small subset of
+// the fetch Response shape that fetchPage reads.
+export async function pinnedRequest(href, addresses, { signal, headers }) {
+  const url = new URL(href);
+  const mod = url.protocol === "https:" ? await import("node:https") : await import("node:http");
+  const { Readable, pipeline } = await import("node:stream");
+  const { createGunzip, createInflate, createBrotliDecompress } = await import("node:zlib");
+  return new Promise((resolve, reject) => {
+    const req = mod.request(url, { method: "GET", headers, signal, agent: false, lookup: pinnedLookup(addresses) }, res => {
+      // Unlike fetch(), node:http exposes encoded bytes. Decode before
+      // readCapped so the same 2MB limit applies to expanded HTML. pipeline
+      // propagates cancellation/errors both ways, including the request timeout.
+      const encoding = String(res.headers["content-encoding"] || "identity").trim().toLowerCase();
+      const decoders = { gzip: createGunzip, deflate: createInflate, br: createBrotliDecompress };
+      let body = res;
+      // Redirect/error bodies are discarded by fetchPage, so do not reject
+      // their encodings before the existing status/redirect handling runs.
+      if (res.statusCode === 200 && encoding !== "identity") {
+        const createDecoder = Object.hasOwn(decoders, encoding) ? decoders[encoding] : null;
+        if (!createDecoder) {
+          res.destroy();
+          reject(new WebFetchError(415, "unsupported_content", "Unsupported response content encoding"));
+          return;
+        }
+        body = createDecoder();
+        pipeline(res, body, () => { /* body reader receives stream errors */ });
+      }
+      resolve({
+        status: res.statusCode,
+        headers: { get: name => { const v = res.headers[String(name).toLowerCase()]; return Array.isArray(v) ? v.join(", ") : (v ?? null); } },
+        body: Readable.toWeb(body),
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -290,19 +408,22 @@ function decodeBody(bytes, contentType) {
 
 const HTML_CONTENT = /text\/html|application\/xhtml\+xml/i;
 
-export async function fetchPage(startUrl) {
+export async function fetchPage(startUrl, options = {}) {
   const signal = AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS);
-  let current = await assertFetchableUrl(startUrl);
+  let target = await resolveFetchTarget(startUrl, options);
+  let current = target.url;
   const seen = new Set([current]);
+  const headers = { "User-Agent": WEB_FETCH_UA, "Accept": "text/html,application/xhtml+xml" };
   for (let hop = 0; hop <= WEB_FETCH_MAX_REDIRECTS; hop++) {
     let res;
     try {
-      res = await fetch(current, {
-        redirect: "manual",
-        signal,
-        headers: { "User-Agent": WEB_FETCH_UA, "Accept": "text/html,application/xhtml+xml" },
-      });
+      // Node: connect only to the addresses that passed the check.
+      // Workers: fetch() in the egress sandbox (no pinning API there).
+      res = isWorkersRuntime()
+        ? await fetch(current, { redirect: "manual", signal, headers })
+        : await pinnedRequest(current, target.addresses, { signal, headers });
     } catch (error) {
+      if (error instanceof WebFetchError) throw error;
       if (error?.name === "TimeoutError" || signal.aborted)
         fail(504, "timeout", "Fetching the page exceeded the 15 second limit");
       fail(502, "fetch_failed", "Could not fetch the page");
@@ -318,7 +439,7 @@ export async function fetchPage(startUrl) {
       try { next = new URL(location, current).href; }
       catch { fail(502, "fetch_failed", "Redirect location is not a valid URL"); }
       // Per-hop SSRF re-validation: a redirect to a private host is blocked.
-      try { current = await assertFetchableUrl(next); }
+      try { target = await resolveFetchTarget(next, options); current = target.url; }
       catch (error) {
         if (error instanceof WebFetchError) throw error;
         fail(403, "blocked_host", "Redirect target is not fetchable");
