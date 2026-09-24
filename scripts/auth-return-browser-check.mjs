@@ -71,9 +71,15 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   await page.locator("#composer-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello from the composer") });
   const uploaded = await upload;
   assert.equal(uploaded.status(), 201);
-  await page.locator("#composer-attachments .file-chip").waitFor();
+  await page.waitForFunction(() => {
+    const chip = document.querySelector("#composer-attachments .file-chip");
+    const text = chip?.textContent ?? "";
+    return text.includes("notes.txt") && !text.includes("Uploading") && !text.includes("failed");
+  });
   await page.locator("#message-input").fill("See the attached notes");
+  const commit = page.waitForResponse(response => response.request().method() === "POST" && /\/files\/[^/]+\/commit$/.test(new URL(response.url()).pathname));
   await page.locator("#message-form button[type=submit]").click();
+  assert.equal((await commit).ok(), true);
   await page.locator("#message-list .file-chip", { hasText: "notes.txt" }).waitFor();
 
   await page.locator("#session-menu-button").click();

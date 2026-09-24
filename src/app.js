@@ -1855,8 +1855,14 @@ function renderMessages() {
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
+          if (selector === ".message-files") {
+            if (!after) before?.remove();
+            else if (!before) node.querySelector(".message-body")?.insertAdjacentElement("afterend", after);
+            else if (before.innerHTML !== after.innerHTML) before.innerHTML = after.innerHTML;
+            continue;
+          }
           if (!before && !after) continue;
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
           if (!after) { before.remove(); continue; }

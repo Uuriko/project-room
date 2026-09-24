@@ -58,7 +58,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let magicManualCode = false; // link-first: code entry is an opt-in fallback
   let busy = false;
 
-  const statusNode = () => container?.querySelector("[data-signin-status]") ?? null;
+  const statusNode = () => (passwordHost === "email" ? emailPanel?.querySelector?.("[data-signin-status]") : null)
+    ?? container?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
     const node = statusNode();
     if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
@@ -142,7 +143,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function paintPassword() {
     if (passwordHost === "email" && emailPanel) {
       emailPanel.hidden = false;
-      emailPanel.innerHTML = passwordHtml();
+      let formHost = emailPanel.querySelector?.("[data-email-form]");
+      if (!formHost) {
+        emailPanel.innerHTML = `<div data-email-form></div><p class="status form-status" role="alert" data-signin-status></p>`;
+        formHost = emailPanel.querySelector?.("[data-email-form]");
+      }
+      if (formHost) formHost.innerHTML = passwordHtml();
+      else emailPanel.innerHTML = passwordHtml();
       return;
     }
     renderPanel();
@@ -214,7 +221,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
 
   const onSubmit = async event => {
     const form = event.target?.closest?.("[data-signin-form]");
-    if (!form || !container?.contains(form)) return;
+    if (!form || !(container?.contains?.(form) || emailPanel?.contains?.(form))) return;
     event.preventDefault();
     const kind = form.dataset.signinForm;
     if (kind === "password") {
