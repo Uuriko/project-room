@@ -1544,6 +1544,15 @@ function recordOwnerDecision(state, incoming) {
     reason: incoming.data.reason,
     eventId: incoming.id
   };
+  // F2: a decision must cite the public room message carrying its rationale —
+  // decisions get discussed in the channel, not handed down. Events recorded
+  // before the requirement carry no sourceMessageId and must still replay, so
+  // the reducer only validates a source when one is present; every new
+  // command is required to include one (see validateCommand).
+  if (incoming.data.sourceMessageId != null) {
+    requirePublicDecisionSource(state, incoming.data.sourceMessageId);
+    item.decision.sourceMessageId = incoming.data.sourceMessageId;
+  }
   if (incoming.data.decision !== "approved") {
     item.state = WORK_STATES.BLOCKED;
     item.blocker = {
@@ -1613,6 +1622,19 @@ function knownMember(state, memberId) {
   const member = Object.hasOwn(state.members, memberId) && state.members[memberId];
   if (!member) throw new Error(`Unknown member: ${memberId}`);
   return member;
+}
+
+// F2: the cited source must be a live public message in this room — the same
+// room's projection is the lookup, so a cross-room id never resolves, and a
+// DM (toMemberId) can never serve as the public rationale.
+function requirePublicDecisionSource(state, sourceMessageId) {
+  const message = state.messages.find(m => m.id === sourceMessageId);
+  if (!message || message.deletedAt) {
+    throw new Error("Decision source must be a message in this Room — post the rationale in the room first");
+  }
+  if (message.toMemberId) {
+    throw new Error("Decision source must be a public room message — post the rationale in the room first");
+  }
 }
 
 function requireWorkItem(state, workItemId) {

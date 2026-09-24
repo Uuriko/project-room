@@ -40,8 +40,10 @@ export function createResultsFixture() {
     const receipt = state().workItems[id].receipt;
     change(id, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: receipt.eventId,
       evidenceVersion: receipt.evidenceVersion, summary: "Checked this exact fictional version." }, "reviewer");
+    const rationaleId = `rationale-${id}`;
+    send("owner", T.MESSAGE_POSTED, { messageId: rationaleId, body: "Rationale: accepted for this fictional room." });
     change(id, T.OWNER_DECISION_RECORDED, { decision: "approved", completionEventId: receipt.eventId,
-      evidenceVersion: receipt.evidenceVersion, reason: "Accepted for this fictional room." }, "owner");
+      evidenceVersion: receipt.evidenceVersion, reason: "Accepted for this fictional room.", sourceMessageId: rationaleId }, "owner");
   };
   try {
     const body = create("native-result", "Café notes", { native: true });

@@ -116,9 +116,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
         await status(needsDecision ? "decide" : "complete", needsDecision ? "Awaiting decision" : "Completed", needsDecision ? "pending" : "completed");
       }
       if (needsDecision) {
+        fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED,
+          data: { messageId: `rationale-${id}`, body: "Rationale: accept this version." } });
         await card.locator('[data-action="decide"]').click();
         await page.locator('#action-fields select[name="decision"]').selectOption("approved");
         await page.locator('#action-fields textarea[name="reason"]').fill("Accept this version.");
+        await page.locator('#action-fields input[name="sourceMessageId"]').fill(`rationale-${id}`);
         await page.locator('#action-form button[type="submit"]').click();
         await page.locator("#action-dialog").waitFor({ state: "hidden" });
       }

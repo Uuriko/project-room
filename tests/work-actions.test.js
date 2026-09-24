@@ -142,7 +142,8 @@ test("room policy: altered client fields cannot disable the independent gate or 
   f.send("producer", T.WORK_ACCEPTED, { workItemId: "forced", expectedRevision: 0 });
   f.send("producer", T.WORK_COMPLETED, { workItemId: "forced", expectedRevision: 1, summary: "Done", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer", signedEvidence: f.signEvidence() });
   const completed = f.state().workItems.forced;
-  assert.throws(() => f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: "forced", expectedRevision: completed.revision, decision: "approved", completionEventId: completed.receipt.eventId, evidenceVersion: "v1", reason: "Looks fine" }), /independent PASS/);
+  const rationale = f.send("owner", T.MESSAGE_POSTED, { body: "Rationale: attempting to force approval." });
+  assert.throws(() => f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: "forced", expectedRevision: completed.revision, decision: "approved", completionEventId: completed.receipt.eventId, evidenceVersion: "v1", reason: "Looks fine", sourceMessageId: rationale.command.id }), /independent PASS/);
   assert.equal(f.state().workItems.forced.decision, null);
 });
 

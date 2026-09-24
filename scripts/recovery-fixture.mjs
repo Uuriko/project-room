@@ -126,8 +126,9 @@ export function createRecoveryFixture(filename) {
     producerId: "owner", summary: "Private reply", nextAction: "Review" });
   replyCommand(reviewerKey, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: item().receipt.eventId,
     evidenceVersion: item().receipt.evidenceVersion, summary: "Checked the exact text" });
+  send("commons", keys.owner, T.MESSAGE_POSTED, { messageId: "recovery-rationale", body: "Rationale: private draft only." });
   replyCommand(keys.owner, T.OWNER_DECISION_RECORDED, { decision: "approved", completionEventId: item().receipt.eventId,
-    evidenceVersion: item().receipt.evidenceVersion, reason: "Private draft only" });
+    evidenceVersion: item().receipt.evidenceVersion, reason: "Private draft only", sourceMessageId: "recovery-rationale" });
   const selected = store.inbox.results(owner.token, "recovery-source", "commons", owner.session.sessionBinding, workItemId).results[0];
   inboxRequests.push({ action: "draft.adopt", requestId: "recovery-inbox-adopt", sourceId: "recovery-source", expectedRevision: 1,
     sourceRevision: 1, roomId: "commons", workItemId, shareRequestId: "recovery-inbox-share", resultVersion: selected.resultVersion });

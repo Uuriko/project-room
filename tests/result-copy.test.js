@@ -90,7 +90,8 @@ test("reported copies never inherit review or approval across exact receipt/rewo
   f.mutate("producer", T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" }); complete("v2", "producer");
   work = f.snapshot().state.workItems["test-handoff"];
   f.mutate("reviewer", T.VERIFICATION_RECORDED, { result: "pass", completionEventId: work.receipt.eventId, evidenceVersion: "v2", summary: "Independent synthetic check" });
-  f.mutate("owner", T.OWNER_DECISION_RECORDED, { decision: "approved", completionEventId: work.receipt.eventId, evidenceVersion: "v2", reason: "Synthetic approval" });
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "rationale-result-copy", body: "Rationale: synthetic approval." } });
+  f.mutate("owner", T.OWNER_DECISION_RECORDED, { decision: "approved", completionEventId: work.receipt.eventId, evidenceVersion: "v2", reason: "Synthetic approval", sourceMessageId: "rationale-result-copy" });
   await draft("v2");
   f.mutate("producer", T.WORK_BLOCKED, { reason: "Reopened after approval", nextAction: "Revise again" });
   assert.equal(f.snapshot().state.workItems["test-handoff"].verification.result, "pass"); await draft("v2");
