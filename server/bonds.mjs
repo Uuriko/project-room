@@ -24,6 +24,7 @@ const fail = (status, code, message) => { throw new BondError(status, code, mess
 export const BOND_SCOPES = Object.freeze(["peer.wake", "peer.card", "peer.context", "peer.dm"]);
 export const BOND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_PENDING_PROPOSALS = 20;
+export const MAX_INCOMING_PROPOSALS = 20;
 export const MAX_BOND_NOTE_CHARS = 500;
 export const PEER_PRIVATE_EVENT_TYPES = Object.freeze(["bond.proposed", "bond.activated", "bond.revoked", "dm.posted"]);
 const BOND_COMMANDS = Object.freeze(["bond.propose", "bond.accept", "bond.decline", "bond.revoke", "bond.list", "dm.posted"]);
@@ -163,12 +164,25 @@ export class Bonds {
   }
 
   // `to` is an agent identity id, or a member id in this room that links to one.
+  _identityInRoom(roomId, identityId) {
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1"
+    ).get(roomId, identityId));
+  }
+
   _resolvePeer(roomId, to) {
     if (typeof to !== "string" || !to.trim()) fail(422, "invalid_bond", "to is the other agent identity");
     const raw = to.trim();
-    if (this._identityExists(raw)) return raw;
+    // M3: uniform answer + co-membership gate. Previously any existing identity
+    // id resolved, so the distinct peer_not_found made this route an existence
+    // oracle for ai_ ids, and proposals needed no shared room. Now the peer
+    // must be linked to a member of THIS room (directly, or as the identity
+    // behind a member id), and every refusal - nonexistent identity, roomless
+    // identity, unlinked member id - returns the same 404 peer_not_found so
+    // existence cannot be probed through the error shape.
     const linked = this.identityForMember(roomId, raw);
     if (linked && this._identityExists(linked)) return linked;
+    if (this._identityExists(raw) && this._identityInRoom(roomId, raw)) return raw;
     fail(404, "peer_not_found", "No such agent identity. to is an identity id (or a member id in this room linked to one).");
   }
 
@@ -402,6 +416,15 @@ export class Bonds {
     ).get(identityId, agentA, agentB).n;
     if (pending >= MAX_PENDING_PROPOSALS) {
       fail(429, "bond_rate_limited", "Too many pending bond proposals. Wait for a reply or revoke one.");
+    }
+    // M3: cap INCOMING pending proposals per recipient. The outgoing cap above
+    // bounds one proposer; a target could still be flooded by many distinct
+    // proposers. Refuse once the recipient's pending inbox is full.
+    const incoming = this.db.prepare(
+      "SELECT count(*) AS n FROM agent_bonds WHERE (agent_a=? OR agent_b=?) AND state='proposed' AND proposed_by<>?"
+    ).get(peerId, peerId, identityId).n;
+    if (incoming >= MAX_INCOMING_PROPOSALS) {
+      fail(429, "bond_rate_limited", "That agent already has too many pending bond proposals. Try again later.");
     }
     const bondId = `bond-${randomUUID()}`;
     const scopeJson = JSON.stringify(scopes);
