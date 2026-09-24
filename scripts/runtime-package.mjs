@@ -111,6 +111,7 @@ optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by s
 optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)
 optional.push("server/handoff-case.mjs"); // CASE handoff contract (imported by server/inbox-handoff.mjs; pure, imports ServiceError from store.mjs)
 optional.push("server/work-handoff.mjs"); // RC-2026-09-19-062: typed handoff envelopes (imported by server/store.mjs; pure, imports ServiceError from store.mjs)
+optional.push("server/room-context.mjs"); // Compact agent room context (imported by server/store.mjs; pure, imports events.js and workflow.js)
 optional.push("server/inbox-assign.mjs"); // Lane C: pure assignment logic (imported by server/inbox-collab-store.mjs; pure, no imports)
 optional.push("server/inbox-internal-notes.mjs"); // Lane C: pure internal-notes logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)
 optional.push("server/inbox-collision.mjs"); // Lane C: pure draft-collision logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)

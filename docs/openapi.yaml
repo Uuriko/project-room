@@ -7590,6 +7590,27 @@ paths:
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '422': { description: invalid_discussion }
+  /api/rooms/{roomId}/context:
+    get:
+      summary: Compact room context
+      description: |
+        Roster, review policy, focus work, active write locks, superseded-by
+        dependencies, the latest open handoff addressed to the caller, current
+        decisions, file references, and cursors. Never includes message bodies,
+        file bytes, native result text, definitions of done, handoff
+        done-summaries, or decision reasons. `since_version` equal to the
+        previous `context_version` returns `{ not_modified: true, context_version }`
+        and no projection. Reading does not mark the caller caught up. The
+        events resume parameter is `cursors.eventsQuery` (`after`), not `afterSequence`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: since_version
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: "Full context, or { not_modified: true, context_version, roomId } when since_version matches" }
+        '422': { description: invalid_context_version }
   /api/rooms/{roomId}/activation-pack:
     get:
       summary: Room activation pack

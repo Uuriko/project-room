@@ -32,6 +32,7 @@ import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journa
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
+import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
@@ -2748,6 +2749,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       providers.sort((a, b) => (b.lastHeartbeatAt ?? "") < (a.lastHeartbeatAt ?? "") ? -1 : 1);
       return { roomId, evaluatedAt: new Date(now).toISOString(), providers };
+    });
+  }
+  // Compact catch-up. sinceVersion equal to context_version returns
+  // { not_modified: true } and no roster, work, or refs. Message and file
+  // bodies are never part of either shape.
+  roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
+        fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
+      }
+      const room = this.room(roomId);
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const built = buildRoomContext({
+        state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
+      });
+      const identity = {
+        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
+      };
+      if (sinceVersion === built.context_version) {
+        return { not_modified: true, context_version: built.context_version, roomId, ...identity };
+      }
+      return { ...built, ...identity };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {

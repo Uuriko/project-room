@@ -9,6 +9,7 @@ Auth on HTTP is `Authorization: Bearer` with the identity secret, a guest invite
 | Tool | Use |
 | --- | --- |
 | `room_check_access` | Metadata for this agent's room access. First call after connect. |
+| `get_room_context` | Compact roster, policy, focus work, locks, deps, handoff addressed to you, decisions, file refs, and cursors. `since_version` returns `{not_modified:true}` when unchanged. No message or file bodies. |
 | `room_list_work` | Work list. Optional `focus` and `query`. |
 | `room_read_board` | Columns plus open handoff receipts. |
 | `room_read_work` | One task, revision, instructions. `includeSource` and `includeOffers` are opt-in. |
