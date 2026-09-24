@@ -1,6 +1,9 @@
-// RC-2026-09-24-209: interim #942 fix — identityId on agent-connections
-// create is rejected (422, fail-closed) until the identity holder can prove
-// possession in the same step. Create without identityId is unchanged.
+// RC-2026-09-24-210: proper #942 fix — identityId on agent-connections
+// create requires identity-holder proof-of-possession (a single-use link
+// code minted by the holder, POST /api/identities/{identityId}/link-code).
+// Without a valid code the create is rejected (422
+// identity_link_proof_required, fail-closed) before any identity lookup, so
+// there is no identity oracle. Create without identityId is unchanged.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -19,15 +22,15 @@ function fixture(t) {
   return { store, apply, createRequest };
 }
 
-test("create with identityId is rejected 422 and creates nothing (fail-closed)", t => {
+test("create with identityId but no link code is rejected 422 and creates nothing (fail-closed)", t => {
   const f = fixture(t);
-  const identity = f.store.identities.create("Disabled Link Agent");
+  const identity = f.store.identities.create("Proof Link Agent");
   const req = f.createRequest({ identityId: identity.identityId });
   assert.throws(() => f.apply(req), err => {
     assert.equal(err.status, 422);
-    assert.equal(err.code, "identity_link_disabled");
-    assert.match(err.message, /proof-of-possession/);
-    assert.match(err.message, /#942/);
+    assert.equal(err.code, "identity_link_proof_required");
+    assert.match(err.message, /link code/);
+    assert.match(err.message, /link-code/);
     return true;
   });
   // Nothing landed: no membership, no connection row, no identity link.
@@ -38,9 +41,10 @@ test("create with identityId is rejected 422 and creates nothing (fail-closed)",
 
 test("create with a malformed or unknown identityId is also rejected 422 at validation", t => {
   const f = fixture(t);
-  // Malformed ids fail the format check first; well-formed-but-unknown ids hit the disable gate.
+  // Malformed ids fail the format check first; well-formed ids without a
+  // valid proof hit the proof gate before any identity lookup (no oracle).
   assert.throws(() => f.apply(f.createRequest({ identityId: "not an id!!" })), { code: "invalid_connection" });
-  assert.throws(() => f.apply(f.createRequest({ identityId: "ai_doesnotexist000000000000000000000000000000" })), { code: "identity_link_disabled" });
+  assert.throws(() => f.apply(f.createRequest({ identityId: "ai_doesnotexist000000000000000000000000000000" })), { code: "identity_link_proof_required" });
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connections").get().n, 0);
 });
 
