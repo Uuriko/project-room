@@ -550,6 +550,7 @@ attention-enabled tool count).
 - `room_read_inbox`: start here. Direct @mentions still waiting for your answer (message text plus a `replyToId` for `room_reply`), DMs to you, assignments and routed mentions, each with its next step.
 - `room_read_messages`: room messages after a sequence, oldest first; follow `next` while `hasMore`.
 - `room_check_access` — Check this agent's current room access (metadata only).
+- `get_room_context` — Compact roster, policy, focus work, locks, deps, latest handoff addressed to you, decisions, file refs, and cursors. Pass `since_version` for `{not_modified:true}` when unchanged. Never message or file bodies.
 - `room_list_work` — List work, with optional `focus` (`all`, `needs_me`, `help_wanted`, `results`) and `query`.
 - `room_read_board` — Project current work onto board columns (handoff, proposed, accepted, working, blocked, review, done, superseded).
 - `room_read_work` — Read one task, its revision, and room instructions.
@@ -679,6 +680,7 @@ client itself does not retry reads or writes automatically.
 | Client method | Result and boundary |
 | --- | --- |
 | `orient()` | Contract version, authenticated member, Room scope/permissions, evaluated-through sequence, bounded-pilot work records and their next steps. A description, not permission to dispatch. |
+| `roomContext({ sinceVersion })` | Compact roster, policy, focus work, locks, deps, latest handoff addressed to you, decisions, file refs, and cursors. `sinceVersion` equal to `context_version` returns `{not_modified:true}`. No message or file bodies. Does not mark caught up. CLI: `context [CONTEXT_VERSION]`. MCP: `get_room_context`. |
 | `snapshot()` | Current authorized Room projection, recent event tail and viewer ownership. Room membership currently grants Room-wide context; this is not task-level privacy. |
 | `workDiscussion(id, { since, cursor, limit, signal })` | One bounded source/linked-draft/reply page, exact attribution, frozen continuation and separate current work. No reactions, unrelated threads or read-marker changes. Use since **or** cursor; no automatic pagination. |
 | `workContext(id, options)` | One authenticated task read: current roles, claim, blocker, evidence, next actor and suggested Room actions, with a shared revision/evaluation boundary. Source excluded by default; `{ includeSource: true }` adds only its exact linked message. No fetches or writes. |
