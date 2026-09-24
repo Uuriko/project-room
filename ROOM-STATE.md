@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T16:29:29Z · board: Uuriko/project-room#266 · watermark: 5818014948 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0dd6311a12186044b3a31e666ba59245ed6d838f6222d213afab7ce37de3b0a2 -->
+<!-- generated: 2026-09-24T17:01:34Z · board: Uuriko/project-room#266 · watermark: 5818429015 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=0dd6311a12186044b3a31e666ba59245ed6d838f6222d213afab7ce37de3b0a2 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +38 more
+… +39 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -46,6 +46,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 2ea08898fd82863ebec1fb8594a0d9c9c3f67b96 | 5818429015
+unknown | bfdda1f0f6fe958978b0c85934036d524fb1717b | 5818411233
+unknown | none | 5818168949
 unknown | none | 5817941300
 RC-2026-09-24-001 | 93b392a56efafdfa931d7ffca32922e14b52673c | 5817416328
 RC-2026-09-24-203 | e94dba11a22a390bb8dc77b674414391bf9a3e62 | 5815289834
@@ -53,9 +56,6 @@ RC-2026-09-23-105 | none | 5813311676
 RC-2026-09-23-105 | none | 5813305906
 unknown | none | 5811666870
 RC-2026-09-24-203 | none | 5811586904
-unknown | none | 5810730195
-RC-2026-09-23-100 | 66d32255e70b232ccf51c3628861aff96cd8f265 | 5809527250
-RC-2026-09-23-952 | 4ba96ca1 | 5807924226
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -72,5 +72,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1577 threshold=1500 rotation_due=yes watcher=active open_claims=63 prose_open=2 unfenced_prose=63 watermark=5818014948
+board_comments=1585 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=2 unfenced_prose=63 watermark=5818429015
 
