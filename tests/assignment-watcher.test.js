@@ -91,8 +91,9 @@ test("attention follows actual accountable, verifier and human decision gates wi
     evidenceVersion: receipt.evidenceVersion, summary: "Checked the exact fixture version" });
   assert.equal(notices("reviewer").size, 0);
   assert.equal(notices("owner").get("work").payload.next.action, "decide");
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "rationale-watcher", body: "Rationale: synthetic approval." });
   f.mutate("owner", T.OWNER_DECISION_RECORDED, "work", { decision: "approved", completionEventId: receipt.eventId,
-    evidenceVersion: receipt.evidenceVersion, reason: "Synthetic decision, no external action" });
+    evidenceVersion: receipt.evidenceVersion, reason: "Synthetic decision, no external action", sourceMessageId: "rationale-watcher" });
   const before = f.store.room("commons");
   for (const actor of ["agent", "reviewer", "owner"]) assert.equal(notices(actor).has("work"), false);
   assert.deepEqual(f.store.room("commons"), before);

@@ -91,7 +91,8 @@ test("local API handoff: distinct scripted clients, revision correction, restart
   assert.equal(brief.current.needsAttention.find(work => work.workItemId === "handoff").step, "decide");
   await mutate(owner, "decision", T.OWNER_DECISION_RECORDED, {
     decision: "approved", completionEventId: received.receipt.eventId, evidenceVersion: received.receipt.evidenceVersion,
-    reason: "Synthetic human-role fixture decision; no external action."
+    reason: "Synthetic human-role fixture decision; no external action.",
+    sourceMessageId: "request"
   });
   assert.equal((await item(owner)).next.action, "complete");
   assert.equal((await owner.snapshot()).state.workItems.handoff.receiptHistory.length, 1);

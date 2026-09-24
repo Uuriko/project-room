@@ -23,8 +23,13 @@ export function prepareInboxResult(f, token, binding, { sourceId = "note", ready
   };
   const review = (result = "pass") => mutate("reviewer", "verification.recorded", { result,
     completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion, summary: result === "pass" ? "Checked the exact text against shared context." : "Needs a revision." });
-  const decide = (decision = "approved") => mutate("owner", "owner.decision_recorded", { decision,
-    completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion, reason: "Reviewed for a private draft, not external sending." });
+  const decide = (decision = "approved") => {
+    const rationaleId = "rationale-" + randomUUID();
+    send("owner", "message.posted", { messageId: rationaleId, body: "Rationale: reviewed for a private draft, not external sending." });
+    return mutate("owner", "owner.decision_recorded", { decision,
+      completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion,
+      reason: "Reviewed for a private draft, not external sending.", sourceMessageId: rationaleId });
+  };
   const selected = () => f.store.inbox.results(token, sourceId, roomId, binding, workItemId).results[0];
   const adoption = (extra = {}) => ({ action: "draft.adopt", requestId: randomUUID(), sourceId, expectedRevision: f.store.inbox.read(token, sourceId, binding).draft?.revision ?? 0,
     sourceRevision: source.revision, roomId, workItemId, shareRequestId: share.receipt.requestId, resultVersion: selected().resultVersion, ...extra });

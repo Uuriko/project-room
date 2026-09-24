@@ -177,9 +177,11 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     workItemId: "legacy-approved", expectedRevision: 2, result: "pass",
     completionEventId: approvedCompletion.event.id, evidenceVersion: "v1", summary: "passed"
   });
+  run(owner, T.MESSAGE_POSTED, { messageId: "rationale-legacy-approved", body: "Rationale: legacy approval stands." });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-approved", expectedRevision: 3, decision: "approved",
-    completionEventId: approvedCompletion.event.id, evidenceVersion: "v1", reason: "accepted under v1"
+    completionEventId: approvedCompletion.event.id, evidenceVersion: "v1", reason: "accepted under v1",
+    sourceMessageId: "rationale-legacy-approved"
   });
 
   run(owner, T.WORK_PROPOSED, {
@@ -193,9 +195,11 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     evidenceUrl: "https://example.com/legacy-blocked", evidenceVersion: "v1", nextAction: "decide",
     signedEvidence: signEvidence()
   });
+  run(owner, T.MESSAGE_POSTED, { messageId: "rationale-legacy-blocked", body: "Rationale: legacy blocked approval." });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-blocked", expectedRevision: 2, decision: "approved",
-    completionEventId: blockedCompletion.event.id, evidenceVersion: "v1", reason: "accepted"
+    completionEventId: blockedCompletion.event.id, evidenceVersion: "v1", reason: "accepted",
+    sourceMessageId: "rationale-legacy-blocked"
   });
   run(human, T.WORK_BLOCKED, {
     workItemId: "legacy-blocked", expectedRevision: 3, reason: "rework", nextAction: "revise"
@@ -212,9 +216,11 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     evidenceUrl: "https://example.com/legacy-valid", evidenceVersion: "v1", nextAction: "decide",
     signedEvidence: signEvidence()
   });
+  run(owner, T.MESSAGE_POSTED, { messageId: "rationale-legacy-valid", body: "Rationale: still valid under v2." });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-valid", expectedRevision: 2, decision: "approved",
-    completionEventId: validCompletion.event.id, evidenceVersion: "v1", reason: "still valid under v2"
+    completionEventId: validCompletion.event.id, evidenceVersion: "v1", reason: "still valid under v2",
+    sourceMessageId: "rationale-legacy-valid"
   });
 
   run(owner, T.WORK_PROPOSED, {
@@ -228,9 +234,11 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     evidenceUrl: "https://example.com/legacy-forged", evidenceVersion: "v1", nextAction: "decide",
     signedEvidence: signEvidence()
   });
+  run(owner, T.MESSAGE_POSTED, { messageId: "rationale-legacy-forged", body: "Rationale: real event, forged approval test." });
   run(owner, T.OWNER_DECISION_RECORDED, {
     workItemId: "legacy-forged-approval", expectedRevision: 2, decision: "approved",
-    completionEventId: forgedCompletion.event.id, evidenceVersion: "v1", reason: "real event"
+    completionEventId: forgedCompletion.event.id, evidenceVersion: "v1", reason: "real event",
+    sourceMessageId: "rationale-legacy-forged"
   });
 
   run(owner, T.WORK_PROPOSED, {

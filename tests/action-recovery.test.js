@@ -52,7 +52,8 @@ test("work actions and help changes confirm only the exact owned operation, incl
   await send(T.WORK_COMPLETED, { summary: "Synthetic result", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", producerId: "owner", nextAction: "Review it", signedEvidence: signEvidence() });
   const evidence = { completionEventId: item().receipt.eventId, evidenceVersion: "v1" };
   await send(T.VERIFICATION_RECORDED, { ...evidence, result: "pass", summary: "Checked exact v1" }, "reviewer");
-  await send(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accept v1" });
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "rationale-recovery", body: "Rationale: accepting synthetic v1." } });
+  await send(T.OWNER_DECISION_RECORDED, { ...evidence, decision: "approved", reason: "Accept v1", sourceMessageId: "rationale-recovery" });
 });
 
 test("only exact post-ledger scope refusal pairs unlock a pending work action", () => {
