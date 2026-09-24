@@ -41,27 +41,73 @@ iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # jq is already required; unlike date -d, this works on macOS and Linux.
 iso_epoch() { jq -enr --arg value "$1" '$value | fromdateiso8601'; }
 
-clock_now() { # -> epoch seconds for lease math; warns loudly and corrects on implausible skew
+# $1 = HTTP Date header value, e.g. "Wed, 23 Sep 2026 23:49:42 GMT"
+# -> epoch seconds. Pure awk (no date -d), so it works on macOS and Linux.
+# Prints nothing and returns nonzero when the value is not a valid IMF date.
+httpdate_epoch() {
+  local iso
+  iso="$(printf '%s\n' "$1" | awk '
+    BEGIN { m["jan"]=1;m["feb"]=2;m["mar"]=3;m["apr"]=4;m["may"]=5;m["jun"]=6;
+            m["jul"]=7;m["aug"]=8;m["sep"]=9;m["oct"]=10;m["nov"]=11;m["dec"]=12 }
+    {
+      line = tolower($0)
+      if (line !~ /^[a-z]+, [0-9]+ [a-z]+ [0-9]+ [0-9]+:[0-9]+:[0-9]+ gmt$/) exit 1
+      n = split(line, p, /[ ,:]+/)
+      if (n != 8 || !(p[3] in m)) exit 1
+      printf "%04d-%02d-%02dT%02d:%02d:%02dZ", p[4], m[p[3]], p[2], p[5], p[6], p[7]
+    }')" || return 1
+  [ -n "$iso" ] || return 1
+  iso_epoch "$iso" 2>/dev/null || return 1
+}
+
+# Independent "now": the GitHub API Date response header is stamped by the
+# board server's clock, so it is a true board reading of now — unlike a
+# second read of the operator clock. Prints the epoch, or nothing when the
+# header is missing/unparseable (network or auth trouble; callers fall back
+# to the operator clock and say so).
+board_now() {
+  local hdr ref
+  hdr="$(gh api -i /rate_limit 2>/dev/null | tr -d '\r' | awk '
+    $0 == "" { exit }
+    tolower($0) ~ /^date:/ { sub(/^[^:]*:[ \t]*/, ""); print; exit }')"
+  [ -n "$hdr" ] || return 0
+  ref="$(httpdate_epoch "$hdr")" || return 0
+  # Sanity: a parsed board time before 2020-01-01 is a parse bug, not a
+  # clock reading. (GitHub's clock itself is never the problem here.)
+  [ "$ref" -gt 1577836800 ] || return 0
+  printf '%s\n' "$ref"
+}
+
+clock_now() { # [$1 = board reference epoch] -> epoch seconds for lease math
   # The board's timestamps are stamped by the GitHub server clock. If the
-  # operator clock disagrees with an independent reading of "now" by more
-  # than 5 minutes, lease math on the operator clock silently misfires
-  # (2026-09-23: a +2h operator clock posted strike-one for a claim with 1h
-  # of lease left; a -2h clock let an expired lease sit with no strike and
-  # no warning). On skew, warn loudly and use the independent reading.
-  # In production both readings come from the same system clock, so the
-  # guard is inert unless the clock actually jumps.
+  # operator clock disagrees with the independent board reading by more than
+  # 5 minutes, lease math on the operator clock misfires: a fast operator
+  # clock posts strike-one for claims whose lease is still live (2026-09-23),
+  # a slow one lets expired leases sit with no strike. On skew, warn loudly
+  # and use the board reading for lease math, in both directions.
+  # ROOM_CLOCK_OP is a test seam (scripts/room _clock); never set in production.
   local op ref skew
-  op="$(date +%s)"
-  ref="$(iso_epoch "$(iso_now)" 2>/dev/null)" || ref=""
+  op="${ROOM_CLOCK_OP:-$(date +%s)}"
+  ref="${1:-}"
   if [ -n "$ref" ]; then
     skew=$((op - ref))
     if [ "${skew#-}" -gt 300 ]; then
-      warn "clock skew: operator clock is ${skew}s from board-consistent time (|skew| > 300s); using board-consistent time for lease math"
+      if [ "$skew" -gt 0 ]; then
+        warn "clock skew: operator clock is ${skew}s ahead of board time (|skew| > 300s); using board time for lease math"
+      else
+        warn "clock skew: operator clock is ${skew#-}s behind board time (|skew| > 300s); using board time for lease math"
+      fi
       printf '%s\n' "$ref"
       return 0
     fi
   fi
   printf '%s\n' "$op"
+}
+
+lease_now() { # -> skew-corrected epoch for lease math; board Date header, else operator clock
+  # Subshell-safe (build_state runs in $(...) so it cannot export BOARD_REF).
+  # One cheap /rate_limit call; the sweep already makes heavier API calls.
+  clock_now "$(board_now)"
 }
 
 state_canon_rows() { # $1 = ROOM-STATE.md path -> canonical integrity rows, in file order
@@ -178,7 +224,8 @@ Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
             distinct_lanes, comments_per_day (machine lines).
 
 Internal (fixture/testing): _parse (comments JSON -> events JSON),
-_state (events JSON -> state JSON; --now ISO --comments N --watermark ID).
+_state (events JSON -> state JSON; --now ISO --comments N --watermark ID),
+_clock (skew logic; --op EPOCH --ref EPOCH --date "Date: ...").
 
 Exit codes: 0 ok, 2 refused-by-guard, 1 error.
 Protocol grammar: docs/ROOM-PROTOCOL.md (the normative source).
@@ -673,18 +720,32 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
 }
 
 build_state() { # -> state JSON on stdout (live board)
-  local comments now n wm newest now_op
+  local comments now n wm newest now_op ref ref_src
   comments="$(fetch_comments)"
-  now="$(clock_now)"
-  # F3 tripwire: a comment stamped later than now+5m means this machine's
-  # clock is behind the board server's clock (the detectable signal). Lease
-  # math already runs on the skew-corrected clock above; this warns loudly
-  # so the underlying clock problem gets fixed instead of silently
-  # compensated forever.
+  # Board reference clock: the GitHub API Date header is a true board-server
+  # reading of "now". Fallback: the newest board comment timestamp, which is
+  # a lower bound on board time (it can only ever reveal a behind operator
+  # clock, never an ahead one — the ahead tripwire arm below runs only on
+  # the Date-header reading).
+  ref="$(board_now)"; ref_src="date-header"
+  if [ -z "$ref" ]; then
+    newest="$(printf '%s' "$comments" | jq -r '[.[].created_at | try fromdateiso8601 catch 0] | max // 0')"
+    if [ "$newest" -gt 1577836800 ]; then ref="$newest"; ref_src="newest-comment"; fi
+  fi
+  now="$(clock_now "$ref")"
+  # F3 tripwire (bidirectional): compare the operator clock against the board
+  # reference and warn loudly so the underlying clock problem gets fixed
+  # instead of silently compensated forever. Lease math above already ran on
+  # the board reference, so a warning here never means a wrong strike.
   now_op="$(date +%s)"
-  newest="$(printf '%s' "$comments" | jq -r '[.[].created_at | try fromdateiso8601 catch 0] | max // 0')"
-  if [ "$newest" -gt "$((now_op + 300))" ]; then
-    warn "clock skew: board holds comments up to $(((newest - now_op) / 60))m in the future of this machine's clock; lease decisions use board-consistent time"
+  if [ -n "$ref" ]; then
+    if [ "$ref" -gt "$((now_op + 300))" ]; then
+      warn "clock skew: operator clock is $(((ref - now_op) / 60))m behind board time; lease math ran on board time"
+    elif [ "$ref_src" = "date-header" ] && [ "$now_op" -gt "$((ref + 300))" ]; then
+      warn "clock skew: operator clock is $(((now_op - ref) / 60))m ahead of board time; lease math ran on board time"
+    fi
+  else
+    warn "clock skew: no board time reference available; lease math ran on the unverified operator clock"
   fi
   n="$(printf '%s' "$comments" | jq 'length')"
   wm="$(printf '%s' "$comments" | jq 'map(.id) | max // 0')"
@@ -1041,7 +1102,7 @@ file_rows_json() { # $1 = ROOM-STATE.md path -> {open,expiring,lanes}
 
 live_rows_json() { # -> {open,expiring,lanes} rebuilt from the board
   local st reg now
-  st="$(build_state)"; reg="$(registry_json)"; now="$(clock_now)"
+  st="$(build_state)"; reg="$(registry_json)"; now="$(lease_now)"
   printf '%s' "$st" | jq --argjson now "$now" --argjson reg "$reg" '
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
     def epoch($s): (($s | fromdate) // 0);
@@ -1146,7 +1207,7 @@ cmd_rebuild() {
   local st reg now bytes ihash
   st="$(build_state)"
   reg="$(registry_json)"
-  now="$(clock_now)"
+  now="$(lease_now)"
   printf '%s' "$st" | render_md "$now" "$reg" "${ROOM_WATCHER_STATE:-active}" > "$out.tmp" || die "rebuild: render failed"
   # F1: stamp sha256 over the canonical rows into the banner comment, so a
   # truncated copy fails loudly in `query` instead of parsing silently.
@@ -1283,12 +1344,12 @@ cmd_sweep() {
   # overlapping sweeps can never both emit strike-one. (The duplicate used
   # to silently reset the strike-two grace clock.) Dry runs never lock.
   st="$(build_state)"
-  now="$(clock_now)"
+  now="$(lease_now)"
   if [ "$DRY_RUN" = 0 ]; then
     lock_dir="$(enforcer_lock sweep)"
     trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
     st="$(build_state)"
-    now="$(clock_now)"
+    now="$(lease_now)"
   fi
   while IFS= read -r t; do
     [ -n "$t" ] || continue
@@ -1353,14 +1414,14 @@ cmd_receipts_scan() {
     *) die "receipts-scan: unknown flag $1" ;;
   esac; done
   local st now cutoff trows prows lock_dir=""
-  st="$(build_state)"; now="$(clock_now)"; cutoff=$((now - 86400))
+  st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
   if [ "$DRY_RUN" = 0 ] && [ "$post" = 1 ]; then
     # F2: same discipline as sweep — the initial read is unlocked, then the
     # lock is taken and the board re-read before posting, so an overlapping
     # run's digest is always visible before this run posts.
     lock_dir="$(enforcer_lock receipts-scan)"
     trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
-    st="$(build_state)"; now="$(clock_now)"; cutoff=$((now - 86400))
+    st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
   fi
   trows="$(printf '%s' "$st" | jq -r --argjson cut "$cutoff" '
     [.tasks[]
@@ -1443,7 +1504,7 @@ cmd_metrics() {
       'BEGIN{d=(b-a)/86400; if (d<1) d=1; printf "%.2f", d}')"
   fi
   cpd="$(awk -v n="$n" -v d="$days" 'BEGIN{printf "%.2f", n/d}')"
-  st="$(printf '%s' "$comments" | parse_events | reduce_state "$(clock_now)" "$n" "$wm")"
+  st="$(printf '%s' "$comments" | parse_events | reduce_state "$(lease_now)" "$n" "$wm")"
   printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select((.kind == "claim" or .kind == "prose-claim") and .ok)] | length')"
   printf 'claims_completed=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed")] | length')"
   printf 'claims_expired=%s\n'   "$(printf '%s' "$st" | jq '[.tasks[] | select(.released_at != null)] | length')"
@@ -1460,6 +1521,24 @@ cmd_metrics() {
 # ---------------------------------------------------------------------------
 
 cmd__parse() { parse_events; }
+
+cmd__clock() { # testing: _clock [--op EPOCH] [--ref EPOCH] [--date "Date: ..."] -> clock_now result
+  # Exercises the skew-correction logic without network: --op simulates the
+  # operator clock via the ROOM_CLOCK_OP seam, --ref supplies the board
+  # reference directly, --date parses an HTTP Date header into the reference.
+  local op="" ref="" datehdr=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --op)   op="$2"; shift 2 ;;
+    --ref)  ref="$2"; shift 2 ;;
+    --date) datehdr="$2"; shift 2 ;;
+    *) die "_clock: unknown flag $1" ;;
+  esac; done
+  if [ -n "$datehdr" ]; then
+    datehdr="$(printf '%s\n' "$datehdr" | sed 's/^[Dd][Aa][Tt][Ee]:[ \t]*//')"
+    ref="$(httpdate_epoch "$datehdr")" || die "_clock: unparseable Date header"
+  fi
+  ROOM_CLOCK_OP="$op" clock_now "$ref"
+}
 
 cmd__state() {
   local now_iso="" n="" wm=""
@@ -1503,7 +1582,7 @@ main() {
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
       guard_enforcer_freshness "$verb"
       "cmd_${verb//-/_}" "$@" ;;
-    claim|heartbeat|release|query|handoff|receipt|_parse|_state)
+    claim|heartbeat|release|query|handoff|receipt|_parse|_state|_clock)
       # Per-verb --help must not fall through to a live run (2026-09-19:
       # `sweep --help` executed a live sweep because cmd_sweep ignores args).
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
