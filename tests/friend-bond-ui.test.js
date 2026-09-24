@@ -53,18 +53,30 @@ test("outgoing proposal is Proposed with Revoke and no Accept", () => {
   assert.equal(chrome.label, "Proposed");
   assert.deepEqual(chrome.actions.map(action => action.action), ["revoke"]);
   const unknown = friendChrome({ bond: bond(), selfIdentityId: null });
-  assert.equal(unknown.state, "outgoing");
-  assert.equal(unknown.actions.some(action => action.action === "accept"), false);
+  assert.equal(unknown.state, "pending");
+  assert.equal(unknown.label, "Proposed");
+  assert.deepEqual(unknown.actions, []);
 });
 
-test("an active bond is Friends plus peer DM and Revoke", () => {
+test("an active bond is Friends, and Message only when peer.dm was accepted", () => {
   const chrome = friendChrome({
-    bond: bond({ state: "active", acceptedAt: 20 }),
+    bond: bond({ state: "active", acceptedAt: 20, acceptedScopes: ["peer.wake", "peer.card", "peer.context", "peer.dm"] }),
     selfIdentityId: "ai_muse"
   });
   assert.equal(chrome.state, "active");
   assert.equal(chrome.label, "Friends");
   assert.deepEqual(chrome.actions.map(action => action.action), ["dm", "revoke"]);
+  const noDm = friendChrome({
+    bond: bond({ state: "active", acceptedAt: 20, acceptedScopes: ["peer.card"] }),
+    selfIdentityId: "ai_muse"
+  });
+  assert.equal(noDm.label, "Friends");
+  assert.deepEqual(noDm.actions.map(action => action.action), ["revoke"]);
+  const missing = friendChrome({
+    bond: bond({ state: "active", acceptedAt: 20 }),
+    selfIdentityId: "ai_muse"
+  });
+  assert.deepEqual(missing.actions.map(action => action.action), ["revoke"]);
 });
 
 test("the bond list wins a tie so an expired proposal is not stuck proposed", () => {
@@ -75,6 +87,28 @@ test("the bond list wins a tie so an expired proposal is not stuck proposed", ()
   assert.equal(merged[0].state, "expired");
   const peer = bondWithPeer(merged, "ai_muse", "ai_quill");
   assert.equal(friendChrome({ bond: peer, selfIdentityId: "ai_muse" }).state, "none");
+});
+
+test("an active projection beats a proposed list row that shares its stamp", () => {
+  const listed = [bond({ state: "proposed", proposedAt: 10 })];
+  const projected = {
+    "bond-1": bond({
+      state: "active", proposedAt: 10, acceptedAt: 10,
+      acceptedScopes: ["peer.dm"]
+    })
+  };
+  const merged = mergeFriendBonds(listed, projected);
+  assert.equal(merged[0].state, "active");
+  assert.equal(friendChrome({ bond: merged[0], selfIdentityId: "ai_muse" }).label, "Friends");
+  assert.equal(friendChrome({ bond: merged[0], selfIdentityId: "ai_muse" }).actions.some(action => action.action === "dm"), true);
+});
+
+test("a same-stamp re-proposal still replaces a revoked projection of another id", () => {
+  const listed = [bond({ id: "bond-2", state: "proposed", proposedAt: 12 })];
+  const projected = { "bond-1": bond({ id: "bond-1", state: "revoked", proposedAt: 10, revokedAt: 12 }) };
+  const merged = mergeFriendBonds(listed, projected);
+  assert.equal(bondWithPeer(merged, "ai_muse", "ai_quill").id, "bond-2");
+  assert.equal(bondWithPeer(merged, "ai_muse", "ai_quill").state, "proposed");
 });
 
 test("a live accept on the projection beats a stale proposed list row", () => {

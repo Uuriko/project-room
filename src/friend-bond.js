@@ -32,8 +32,32 @@ export function bondStamp(bond) {
   return times.length ? Math.max(...times) : 0;
 }
 
-// The GET /bonds list wins a timestamp tie so an expired proposal (no new
-// event) is not stuck on the older "proposed" projection.
+function bondLifecycleRank(bond) {
+  if (bond?.state === "revoked") return 4;
+  if (bond?.state === "active") return 3;
+  if (bond?.state === "expired") return 2;
+  if (bond?.state === "proposed") return 1;
+  return 0;
+}
+
+// Newer stamp wins. The list is applied second, so it still wins a tie
+// between different bond ids (an expired proposal has no newer event, and a
+// re-proposal replaces a revoked projection). The same id does not go
+// backwards: a stale "proposed" list row must not hide an active projection
+// that shares its stamp.
+function preferFriendBond(next, prev) {
+  if (!prev) return true;
+  const nextStamp = bondStamp(next);
+  const prevStamp = bondStamp(prev);
+  if (nextStamp !== prevStamp) return nextStamp > prevStamp;
+  if (next.id && next.id === prev.id) {
+    const nextRank = bondLifecycleRank(next);
+    const prevRank = bondLifecycleRank(prev);
+    if (nextRank !== prevRank) return nextRank > prevRank;
+  }
+  return true;
+}
+
 export function mergeFriendBonds(listed, projected) {
   const byPair = new Map();
   const add = bond => {
@@ -43,7 +67,7 @@ export function mergeFriendBonds(listed, projected) {
       ? `${bond.agentAId}\0${bond.agentBId}`
       : `${bond.agentBId}\0${bond.agentAId}`;
     const prev = byPair.get(key);
-    if (!prev || bondStamp(bond) >= bondStamp(prev)) byPair.set(key, bond);
+    if (preferFriendBond(bond, prev)) byPair.set(key, bond);
   };
   const projectedBonds = projected && typeof projected === "object" && !Array.isArray(projected)
     ? Object.values(projected) : Array.isArray(projected) ? projected : [];
@@ -60,8 +84,11 @@ export function bondWithPeer(bonds, selfIdentityId, peerIdentityId) {
   )) ?? null;
 }
 
-// state: none | incoming | outgoing | active
+// state: none | pending | incoming | outgoing | active
 // actions: propose | accept | decline | revoke | dm
+// pending: a proposal exists but this member's identity is not resolved yet.
+// Revoke is not offered then — treating "unknown" as outgoing put Revoke on
+// an incoming request.
 export function friendChrome({ bond, selfIdentityId } = {}) {
   const none = Object.freeze({
     state: "none", label: "Friend", bondId: null,
@@ -69,7 +96,13 @@ export function friendChrome({ bond, selfIdentityId } = {}) {
   });
   if (!bond || bond.state === "revoked" || bond.state === "expired" || bond.state === "none") return none;
   if (bond.state === "proposed") {
-    const incoming = Boolean(selfIdentityId) && bond.proposedById !== selfIdentityId;
+    if (!selfIdentityId) {
+      return Object.freeze({
+        state: "pending", label: "Proposed", bondId: bond.id ?? null,
+        actions: Object.freeze([])
+      });
+    }
+    const incoming = bond.proposedById !== selfIdentityId;
     if (incoming) {
       return Object.freeze({
         state: "incoming", label: "Proposed", bondId: bond.id ?? null,
@@ -82,9 +115,13 @@ export function friendChrome({ bond, selfIdentityId } = {}) {
     });
   }
   if (bond.state === "active") {
+    const scopes = Array.isArray(bond.acceptedScopes) ? bond.acceptedScopes : [];
+    const actions = [];
+    if (scopes.includes("peer.dm")) actions.push({ action: "dm", label: "Message" });
+    actions.push({ action: "revoke", label: "Revoke" });
     return Object.freeze({
       state: "active", label: "Friends", bondId: bond.id ?? null,
-      actions: Object.freeze([{ action: "dm", label: "Message" }, { action: "revoke", label: "Revoke" }])
+      actions: Object.freeze(actions)
     });
   }
   return none;
