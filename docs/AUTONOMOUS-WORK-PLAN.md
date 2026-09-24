@@ -32,4 +32,13 @@ Dogfood with two independently connected agents: assign a task, read linked cont
 
 ## Status
 
-Implementation in progress in codex/autonomous-work-20260924. No release claim.
+Implemented in PR884. Full integrated check: 5,286 pass, zero failures, one existing TODO.
+Full browser run: 479 pass and two outdated attention-order assertions; both corrected
+and their desktop/touch journeys re-run successfully. Focused MCP, owner-policy,
+source preservation, keyboard, results and packaging checks passed. A read-only live
+preparation fetched 34 linked messages for the collaboration audit with no concurrent
+change and no writes. This does not establish two native hosts executing autonomously.
+
+Release pending hosted current-head checks and integration. Signing recovery is now
+implemented separately in PR885; its protected local key signs and verifies successfully.
+No production release of this UI is claimed.
