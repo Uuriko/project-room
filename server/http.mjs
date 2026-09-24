@@ -640,6 +640,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    // #975: HSTS on every HTTPS response (Cloudflare path doesn't set it).
+    // NOTE: no includeSubDomains - unverified that all trydemigod.com
+    // subdomains are HTTPS-only; dropping it is the safe default.
+    res.setHeader("Strict-Transport-Security", "max-age=31536000");
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
