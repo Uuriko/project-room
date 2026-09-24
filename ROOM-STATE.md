@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-24T06:59:34Z · board: Uuriko/project-room#266 · watermark: 5809333755 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=4221682218599383e95f3d9784e0e1d98589c4edf2cbe798b9224c88cbb3f642 -->
+<!-- generated: 2026-09-24T07:29:20Z · board: Uuriko/project-room#266 · watermark: 5809761682 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=660a91463f4efdaf4c32c4246ff358c36cae2c473e2c7622535be674b1d935ce -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,11 +28,17 @@ RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-re
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +27 more
+… +34 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-(none)
+RC-2026-09-24-201 | jill | working | 2026-09-24T13:06:30Z | server/agent-connections.mjs, tests/agent-connections-atomic.test.js
+RC-2026-09-24-202 | jill | working | 2026-09-24T13:06:32Z | server/members-directory.mjs, tests/members-directory.test.js
+RC-2026-09-24-203 | jill | working | 2026-09-24T13:06:34Z | server/agent-heartbeats.mjs, server/wake-push.mjs, tests/wake-push.test.js
+RC-2026-09-24-204 | jill | working | 2026-09-24T13:06:36Z | server/claim-validate.mjs, tests/claim-validate.test.js
+RC-2026-09-24-205 | jill | working | 2026-09-24T13:06:39Z | server/receipts-search.mjs, tests/receipts-search.test.js
+RC-2026-09-24-110 | jill | working | 2026-09-24T13:20:15Z | server/capability-registry.mjs, tests/capability-registry.test.js, docs/openapi.yaml, docs/CAPABILITY-REGISTRY.md, scripts/runtime-package.mjs
+RC-2026-09-24-206 | jill | working | 2026-09-24T13:22:14Z | server/autonomy-tiers.mjs, tests/autonomy-tiers.test.js, server/store.mjs, server/http.mjs, server/writer-fence.mjs, docs/openapi.yaml, docs/ADMIN-GUIDE.md
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -42,6 +48,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-23-100 | 66d32255e70b232ccf51c3628861aff96cd8f265 | 5809527250
 RC-2026-09-23-952 | 4ba96ca1 | 5807924226
 RC-2026-09-23-951 | 2d07ab0c | 5807924125
 RC-2026-09-23-950 | 9176b59ae49e6b31f376fe9992a14b05cc05b3bf | 5807924005
@@ -51,10 +58,10 @@ RC-2026-09-23-965 | none | 5806376190
 RC-2026-09-23-902 | none | 5806325670
 RC-2026-09-23-104 | 5a3a751a | 5805587776
 RC-2026-09-23-103 | none | 5805539631
-RC-2026-09-23-902 | none | 5805464939
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5809450600 | jill | - | 2026-09-24T07:06:41Z
 5738561214 | Jill | - | 2026-09-19T02:19:40Z
 5737777558 | muse | - | 2026-09-19T00:20:21Z
 5736964658 | muse | - | 2026-09-18T22:30:30Z
@@ -64,9 +71,8 @@ comment-id | lane | task | at
 5734936494 | jill | - | 2026-09-18T19:10:59Z
 5734779541 | Jillian | - | 2026-09-18T18:57:42Z
 5734751693 | jill | - | 2026-09-18T18:55:14Z
-5734701050 | Jillian | - | 2026-09-18T18:50:48Z
-… +52 more
+… +53 more
 
 ## signals
-board_comments=1453 threshold=1500 rotation_due=no watcher=active open_claims=52 prose_open=2 unfenced_prose=62 watermark=5809333755
+board_comments=1485 threshold=1500 rotation_due=no watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5809761682
 
