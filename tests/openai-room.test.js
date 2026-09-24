@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { completeChat } from "../server/openai-complete.mjs";
 import { replyOnce, openJournal } from "../scripts/room-openai-once.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const env = { PROJECT_ROOM_OPENAI_API_KEY: "synthetic-provider-key" };
 async function fixture(t) {
@@ -19,6 +20,9 @@ async function fixture(t) {
   store.command(ownerKey, "commons", { id: "add-ai", type: "member.added", data: {
     memberId: "ai", displayName: "OpenAI test", kind: "agent", permissions: [], accountableHumanId: "owner"
   } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // OpenAI loop test exercises it as a working agent.
+  setTier(store.db, "commons", "ai", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const token = store.issueAccessKey("commons", "ai");
   // Consent-bound DMs: the owner→ai question and the ai→owner reply both
   // need approval.

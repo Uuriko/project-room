@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { needsAttention } from "../src/work-selectors.js";
 
 test("handoff receipt: recorded without closing work, halt-all gates mutations until owner clears", async t => {
@@ -18,6 +19,9 @@ test("handoff receipt: recorded without closing work, halt-all gates mutations u
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: "add-producer", type: T.MEMBER_ADDED, data: {
     memberId: "producer", displayName: "producer (scripted fixture)", kind: "agent", permissions: ["accept_work", "complete_work"], accountableHumanId: "owner" } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // handoff-receipt test exercises it as a working agent.
+  setTier(store.db, "commons", "producer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const producerKey = store.issueAccessKey("commons", "producer");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

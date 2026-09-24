@@ -14,7 +14,7 @@
 // The auxiliary table records creation provenance (who created which room)
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
@@ -57,6 +57,13 @@ const roomCreateNext = roomId => ROOM_CREATE_NEXT.map(step => ({
   ...(step.doc ? { doc: step.doc } : {}),
   description: step.description,
 }));
+function slugFromTitle(title) {
+  const suffix = randomBytes(2).toString("hex");
+  const base = String(title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "room";
+  const id = `${base}-${suffix}`.slice(0, 64);
+  return validId(id) ? id : `room-${suffix}`;
+}
+
 const control = /[\x00-\x1f\x7f]/, controlExceptBreaks = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const text = (value, max, multiline = false) =>
   typeof value === "string" && value.trim().length > 0 && value.length <= max
@@ -90,27 +97,33 @@ export class AgentRooms {
   }
 
   // Self-serve room creation. secret is the caller's pri_ identity secret
-  // (from the bearer header); request carries roomId/title/purpose/kind/
-  // displayName. The client-chosen roomId is the idempotency key: the same
-  // identity retrying with the same parameters gets duplicate: true; a
-  // different room under that id is 409 room_exists.
+  // (from the bearer header). title and purpose are required. kind defaults
+  // to personal, roomId is a slug of the title plus a short suffix, and
+  // displayName defaults to the identity's name. A client-supplied roomId
+  // stays the idempotency key.
   create(secret, request) {
-    if (!request || typeof request !== "object" || Array.isArray(request)
-      || Object.keys(request).length !== CREATE_FIELDS.length || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))) {
-      fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      fail(422, "invalid_room_request", "title is required. kind must be one of: personal, organization");
     }
-    const { roomId, kind } = request;
-    if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
-    if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
-    if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
-    if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
+    const unexpected = Object.keys(request).filter(field => !CREATE_FIELDS.includes(field));
+    if (unexpected.length) fail(422, "invalid_room_request", `Unexpected field ${unexpected[0]}. Accepted fields: ${CREATE_FIELDS.join(", ")}`);
+    if (!Object.hasOwn(request, "title")) fail(422, "invalid_room_request", "Missing title");
+    if (!text(request.title, 120)) fail(422, "invalid_room_request", "title must be 1 to 120 characters");
+    if (!Object.hasOwn(request, "purpose")) fail(422, "invalid_room_request", "Missing purpose");
+    if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "purpose must be 1 to 1000 characters");
+    const kind = Object.hasOwn(request, "kind") ? request.kind : "personal";
     // RC-2026-09-18-021: the message is derived from ROOM_KINDS so the taught
     // vocabulary can never drift from the enforced one.
-    if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `Room kind must be one of: ${ROOM_KINDS.join(", ")}`);
-    const title = request.title.trim(), purpose = request.purpose.trim(), displayName = request.displayName.trim();
+    if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
+    const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
+    if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    const title = request.title.trim(), purpose = request.purpose.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
       if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const suppliedName = Object.hasOwn(request, "displayName") ? request.displayName : identity.displayName;
+      if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");
+      const displayName = suppliedName.trim();
       const memberId = identity.identityId;
       if (this.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);

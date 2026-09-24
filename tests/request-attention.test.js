@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { currentAttention } from "../client/attention-inbox.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { requestContextNotices } from "../client/assignment-watcher.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-request-attention-")), store = new RoomStore(":memory:");
@@ -19,6 +20,9 @@ function fixture(t) {
   for (const memberId of ["agent", "other"]) {
     send("owner", "member.added", { memberId, displayName: memberId, kind: "agent", accountableHumanId: "owner", permissions: ["accept_work", "complete_work"] });
     keys[memberId] = store.issueAccessKey("commons", memberId);
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // attention tests exercise them as working agents.
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   // Consent-bound DMs: request/answer flows DM between owner, agent, other.
   for (const a of ["owner", "agent", "other"])

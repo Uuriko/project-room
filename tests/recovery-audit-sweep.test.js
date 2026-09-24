@@ -7,6 +7,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -202,6 +203,10 @@ function sweep() {
     fixture.store.identities.link(fixture.keys.owner, "commons", {
       identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
     });
+    // Graduated autonomy tiers: linked agent identities enroll at t1_readonly;
+    // promote them so the sweep exercises the bond command surface.
+    for (const identity of [left, right])
+      setTier(fixture.store.db, "commons", identity.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     const proposed = fixture.store.command(left.secret, "commons", {
       id: randomUUID(), type: "bond.propose", data: { to: right.identityId, scopes: ["peer.dm"] }
     });

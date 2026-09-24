@@ -32,6 +32,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { STREAM_INTERVAL_DEFAULT_MS } from "../server/deployment.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const ROOM = "commons";
 const MAX_AGENT_MEMBERS = 99; // 100 members per room including the owner
@@ -122,6 +123,9 @@ function openRoom({ members, prefix, workItems = false }) {
     const memberId = `${prefix}-${i}`;
     store.command(ownerKey, ROOM, { id: randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId, displayName: memberId, kind: "agent", permissions: ["accept_work", "complete_work"] } });
+    // Graduated autonomy tiers: load agents are operator-promoted so the
+    // load tests exercise them as working agents, not t1_readonly.
+    setTier(store.db, ROOM, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     if (workItems) store.command(ownerKey, ROOM, { id: randomUUID(), type: T.WORK_PROPOSED, data: {
       workItemId: `load-task-${i}`, title: `Load task ${i}`, definitionOfDone: "Claimed and completed under load",
       accountableMemberId: memberId, mode: "read" } });

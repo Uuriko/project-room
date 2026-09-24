@@ -344,7 +344,7 @@ export class WebResearch {
         source: "room",
         status: keywords.length ? "planned" : "skipped",
         reason: keywords.length
-          ? `keyword search over the room's own fetch history (${keywords.join(", ")})`
+          ? `keyword search over the room's own fetch history, scoped to this room (${keywords.join(", ")})`
           : "no usable keywords in question",
         cost: "free (room memory)",
       });
@@ -405,16 +405,20 @@ export class WebResearch {
     };
   }
 
-  // -- room leg: the room's own fetch memory.
-  searchRoomCache(req, keywords, requestId, now) {
+  // -- room leg: the room's own fetch memory, scoped by web_fetch_cache_rooms.
+  // The cache table itself is global (one row per URL), so the leg joins the
+  // per-room mapping: a room only ever sees URLs its own members fetched.
+  searchRoomCache(req, roomId, keywords, requestId, now) {
     if (!keywords.length) return [];
-    const clauses = keywords.map(() => "(url LIKE ? OR metadata_json LIKE ?)").join(" OR ");
-    const params = keywords.flatMap(kw => [`%${kw}%`, `%${kw}%`]);
+    const clauses = keywords.map(() => "(c.url LIKE ? OR c.metadata_json LIKE ?)").join(" OR ");
+    const params = [roomId, ...keywords.flatMap(kw => [`%${kw}%`, `%${kw}%`])];
     let rows = [];
     try {
       rows = this.db.prepare(
-        `SELECT key, url, final_url, markdown, metadata_json, bytes, fetched_at
-         FROM web_fetch_cache WHERE ${clauses} LIMIT ${WEB_RESEARCH_CACHE_SCAN_LIMIT}`).all(...params);
+        `SELECT c.key, c.url, c.final_url, c.markdown, c.metadata_json, c.bytes, c.fetched_at
+         FROM web_fetch_cache c
+         JOIN web_fetch_cache_rooms r ON r.cache_key = c.key AND r.room_id = ?
+         WHERE ${clauses} LIMIT ${WEB_RESEARCH_CACHE_SCAN_LIMIT}`).all(...params);
     } catch { return []; }
     const scored = [];
     for (const row of rows) {
@@ -448,6 +452,7 @@ export class WebResearch {
         }),
       };
     });
+
   }
 
   // -- docs leg: local markdown corpus (Node only).
@@ -608,7 +613,7 @@ export class WebResearch {
       if (evidence.length >= req.maxEvidence) break;
       try {
         if (leg.source === "room") {
-          for (const e of this.searchRoomCache(req, keywords, requestId, now)) {
+          for (const e of this.searchRoomCache(req, roomId, keywords, requestId, now)) {
             if (evidence.length >= req.maxEvidence) break;
             e.rank = evidence.length;
             evidence.push(e);

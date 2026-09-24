@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { needsAttention, workInvolvingMe } from "../server/return-selectors.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Return-brief wiring acceptance cases (disposition 5557850637, "next handoff" list):
 // fixed-H pagination beyond 100 events, H+1 after ack, N-versus-H boundary labeling,
@@ -22,6 +23,8 @@ function fixture(t) {
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   for (const [id, kind] of [["human", "human"], ["agent", "agent"]]) store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] }));
+  // #953: new agent members default to t1_readonly; the agent fixture needs write access
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
   const signEvidence = makeTestSigner(store);

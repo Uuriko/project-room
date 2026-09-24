@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { setTier } from '../server/autonomy-tiers.mjs';
 
 const command = (type, data) => ({ id: crypto.randomUUID(), type, data });
 function fixture(t) {
@@ -21,6 +22,9 @@ function fixture(t) {
       permissions: id === 'viewer' ? [] : ['accept_work', 'complete_work'] }));
     keys[id] = store.issueAccessKey('commons', id);
   }
+  // #953: new agent members default to t1_readonly; agent-a needs t2_standard so the decide-permission
+  // denial (not the tier denial) is what the negative tests verify
+  setTier(store.db, 'commons', 'agent-a', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   store.command(keys.owner, 'commons', command(T.MESSAGE_POSTED, { messageId: 'msg-1', body: 'We should freeze the copy on Fridays.' }));
   const decisions = () => store.eventsAfter(keys.owner, 'commons', 0).events.filter(e => e.event.type === T.DECISION_RECORDED);
   t.after(() => rmSync(directory, { recursive: true, force: true }));

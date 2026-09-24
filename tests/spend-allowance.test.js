@@ -11,6 +11,7 @@ import { EVENT_TYPES as T, replay, spendAllowance } from "../src/events.js";
 import { spendLedger, sessionRecord } from "../src/work-item-session.js";
 import { spendAllowanceReport, enforceSpendAllowance } from "../server/spend-allowance.mjs";
 import { classifyCommand } from "../server/action-classes.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Issue #6 C3: an owner-set room spend allowance. The reducer is owner-only,
 // the ledger derives from the projection, and store.command() refuses any
@@ -25,6 +26,9 @@ async function serve(t, { start = Date.parse("2026-09-14T12:00:00Z") } = {}) {
   const send = (actor, type, data, id = randomUUID()) => store.command(keys[actor], "commons", { id, type, data });
   send("owner", T.MEMBER_ADDED, { memberId: "guest", displayName: "Guest human", kind: "human", permissions: [] });
   send("owner", T.MEMBER_ADDED, { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work", "complete_work"], accountableHumanId: "owner" });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // spend-allowance tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   keys.guest = store.issueAccessKey("commons", "guest"); keys.agent = store.issueAccessKey("commons", "agent");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { agentErrorBody, validAgentNext } from "../src/agent-error.mjs";
 
 async function serve(t) {
@@ -17,6 +18,9 @@ async function serve(t) {
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: {
     memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work"] } });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // cursor tests exercise it as a posting member.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const agentKey = store.issueAccessKey("commons", "agent");
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

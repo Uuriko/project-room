@@ -206,6 +206,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // code path to them, and the module verifies its own schema on open.
   "web_fetch_cache",
   "web_fetch_log",
+  // web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310
+  // follow-up): which rooms fetched each cached URL. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to it, and the
+  // module verifies its own schema on open.
+  "web_fetch_cache_rooms",
   // web_research_log (knowledge router, RC-2026-09-24-310): per-request
   // research journal (question hash, never the question). Purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and the
@@ -228,12 +233,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // older writers have no code path to it, IPs are stored hash-only, and
   // the journal verifies its own schema on open.
   "jev_shadow_decisions",
-  // agent_operator_controls (operator prerequisites slice 1/3, PR #928):
-  // per-agent kill switch, autonomy tier, spend cap and measured spend
-  // ledger. Purely additive and intentionally NOT fenced — older writers
-  // have no code path to it, and the module verifies its own schema on
-  // open (CREATE TABLE IF NOT EXISTS, no schema bump).
-  "agent_operator_controls",
+  // agent_autonomy_tiers (graduated autonomy tiers, #928 rescope):
+  // one row per (room, member) with the operator-set tier. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // and the module verifies its own schema on open. Replaces the slice 1/3
+  // agent_operator_controls table (module removed).
+  "agent_autonomy_tiers",
   // agent_skill_cards (RC-2026-09-24-202: members-directory skill cards).
   // Purely additive and intentionally NOT fenced — older writers have no
   // code path to it, and the module verifies its own shape on write.

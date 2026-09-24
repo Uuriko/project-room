@@ -13,6 +13,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { changeDescription } from '../src/workflow.js';
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { claimWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
 
 const H = 3600 * 1000;
@@ -37,6 +38,9 @@ function fixture(t) {
   }
   const human = store.issueAccessKey('commons', 'human');
   const agent = store.issueAccessKey('commons', 'agent');
+  // #953: new agent members default to t1_readonly; agent needs t2_standard so the specific
+  // denial reasons (not the tier denial) are what the negative tests verify
+  setTier(store.db, 'commons', 'agent', 't2_standard', { updatedBy: 'owner', nowMs });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const advance = ms => { nowMs += ms; };
   return { store, owner, human, agent, advance };

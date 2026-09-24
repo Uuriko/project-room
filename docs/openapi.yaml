@@ -846,7 +846,9 @@ paths:
         returns ranked evidence, every item carrying a provenance receipt
         (source, url, final_url, retrieved_at, content_sha256, bytes, cache,
         request_id) so facts are citable. Sources: `room` (the room's own fetch
-        history — keyword search over web_fetch_cache), `docs` (local markdown
+        history — keyword search over web_fetch_cache scoped by
+        web_fetch_cache_rooms, so a room only ever sees URLs its own members
+        fetched), `docs` (local markdown
         corpus: docs/, README.md, CHANGELOG.md; Node only), `fetch` (explicit
         `urls[]` through the SSRF-hardened web-fetch service), `provider`
         (env-pluggable external knowledge, e.g. Alexandria via ALEXANDRIA_API_KEY;
@@ -7997,53 +7999,47 @@ paths:
         '403': { description: "access_denied when naming another member; owner_cannot_deactivate for the owner" }
   /api/rooms/{roomId}/operator/agents/{memberId}:
     get:
-      summary: Read one member's operator controls
+      summary: Read one member's autonomy tier
       description: >-
-        Slice 1/3 operator prerequisites. Owner only (403 owner_required for
-        anyone else). Returns the per-agent operator controls row (null when
-        the operator has never acted — the migration-safe defaults apply:
-        t2_standard tier, no spend cap, not killed), the derived status
-        (killed, autonomyTier, spendCapCents, parkedAtCap) and the measured
-        per-agent spend ledger over the control period (spent from reported
-        usageCents, reserved from live sessions' remaining declared caps,
-        held at the cap for closed attempts that never reported — measured
-        only, never estimated), plus headroomCents when a cap is set.
+        Operator attachment prerequisites: graduated autonomy tiers. Owner
+        only (403 owner_required for anyone else). Returns the per-agent
+        tier row (null when neither enrollment nor the operator has ever
+        written one — the migration-safe default applies: t2_standard) and
+        the effective autonomy tier. t1_readonly agents keep only reads,
+        heartbeats and session status/stop reports; every other write is
+        refused 403 agent_readonly. New agent members enroll at t1_readonly;
+        the owner promotes to t2_standard. Spend stays governed by the
+        room-level spend allowance; Room Trust stays the owner kill-switch.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
           in: path
           required: true
           schema: { type: string }
-          description: The member the controls apply to.
+          description: The member the tier applies to.
       responses:
-        '200': { description: "{ roomId, memberId, controls, status, ledger, headroomCents, evaluatedThrough }" }
+        '200': { description: "{ roomId, memberId, tier, status, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
     put:
-      summary: Set one member's operator controls
+      summary: Set one member's autonomy tier
       description: >-
-        Slice 1/3 operator prerequisites. Owner only (403 owner_required for
-        anyone else). Partial update — any subset of spendCapCents (positive
-        integer cents; null removes the cap), spendPeriodDays (1-365),
-        autonomyTier (t1_readonly | t2_standard), sandboxed (boolean),
-        killed (boolean) and revived (boolean). killed:true (or revived:false)
-        stops the agent's writes immediately — the kill switch is read fresh
-        on every command and always wins; killed:false (or revived:true)
-        restores them. Contradictory kill/revive is 422. t1_readonly agents
-        keep only reads, heartbeats and session status/stop reports; every
-        other write is refused 403 agent_readonly. A session start that would
-        commit the agent past its spend cap is refused 409
-        agent_spend_cap_exceeded and the refusal names measured spend vs the
-        cap ("parked at its cap"); a start under a cap with no declared
-        budget.maxSpendCents is 422 agent_spend_cap_budget_required. Stops
-        always land so actual spend is recorded.
+        Operator attachment prerequisites: graduated autonomy tiers. Owner
+        only (403 owner_required for anyone else). Body is exactly
+        { autonomyTier: t1_readonly | t2_standard }. Promotion and instant
+        demotion share this path: the tier table is read fresh on every
+        command, so a demotion to t1_readonly takes effect on the agent's
+        next write — no restart, no cache. t1_readonly agents keep only
+        reads, heartbeats and session status/stop reports; every other
+        write is refused 403 agent_readonly. Stops always land so actual
+        spend is recorded.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: memberId
           in: path
           required: true
           schema: { type: string }
-          description: The member the controls apply to.
+          description: The member the tier applies to.
       requestBody:
         required: true
         content:
@@ -8051,19 +8047,15 @@ paths:
             schema:
               type: object
               minProperties: 1
+              maxProperties: 1
               additionalProperties: false
               properties:
-                spendCapCents: { type: [integer, 'null'], minimum: 1 }
-                spendPeriodDays: { type: integer, minimum: 1, maximum: 365 }
                 autonomyTier: { type: string, enum: [t1_readonly, t2_standard] }
-                sandboxed: { type: boolean }
-                killed: { type: boolean }
-                revived: { type: boolean }
       responses:
-        '200': { description: "{ roomId, memberId, controls, status, ledger, headroomCents, evaluatedThrough }" }
+        '200': { description: "{ roomId, memberId, tier, status, evaluatedThrough }" }
         '403': { description: owner_required }
         '404': { description: member_not_found }
-        '422': { description: invalid_operator_controls }
+        '422': { description: invalid_autonomy_tier }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads

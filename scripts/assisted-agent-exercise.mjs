@@ -10,6 +10,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { issueSignedEvidence, contentHashOf } from '../server/signed-evidence.mjs';
+import { setTier } from '../server/autonomy-tiers.mjs';
 
 export async function startAssistedAgentExercise() {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-assisted-agents-'));
@@ -50,6 +51,9 @@ export async function startAssistedAgentExercise() {
     for (const participant of participants) {
       command(T.MEMBER_ADDED, { memberId: participant.memberId, displayName: participant.memberId,
         kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'complete_work', 'write_external'] });
+      // Graduated autonomy tiers: exercise agents are operator-promoted so the
+      // handoff scenario exercises them as working agents, not t1_readonly.
+      setTier(store.db, 'commons', participant.memberId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
       participant.token = store.issueAccessKey('commons', participant.memberId);
       command(T.WORK_PROPOSED, { workItemId: participant.workItemId, title: `Handoff note — ${participant.memberId}`,
         definitionOfDone: 'An original concise work-linked note, truthful scope/retry handoff, and no invented external execution or human approval.',

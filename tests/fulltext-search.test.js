@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-search-"));
@@ -85,6 +86,8 @@ test("search skips a muted author's messages for the muter only, across kind=all
     send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // #953: new agent members default to t1_readonly; producer needs write access for message.posted
+  setTier(store.db, "commons", "producer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const search = async (q, kind, actor) => {
     const res = await get(`/api/rooms/commons/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ""}`, keys[actor]);
     assert.equal(res.status, 200);
@@ -131,6 +134,8 @@ test("kind=pinned searches only pinned messages, follows unpin, and hides a mute
     send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // #953: new agent members default to t1_readonly; producer needs write access for message.posted
+  setTier(store.db, "commons", "producer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const pin = (actor, messageId, pinned) => send(actor, pinned ? T.MESSAGE_PINNED : T.MESSAGE_UNPINNED, { messageId });
   const search = async (q, kind, actor = "owner") => {
     const res = await get(`/api/rooms/commons/search?q=${encodeURIComponent(q)}&kind=${kind}`, keys[actor]);

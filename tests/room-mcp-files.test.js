@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { attachmentLimits } from "../server/attachment-schema.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { mcpAttachmentBodyBytes } from "../server/room-attachment-bytes.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -54,11 +55,12 @@ test("room file tools stay behind a live identity secret", async t => {
   const listed = await rpc(origin, "tools/list");
   assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), JOIN_TOOLS);
   const denied = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" });
-  assert.equal(denied.status, 200);
-  assert.equal(denied.body.error.code, -32602);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.error.code, -32001);
+  assert.equal(denied.body.error.data.reason, "auth_required");
   const deniedCommit = await call(origin, "room_commit_file", { roomId: created.roomId, id: "note", messageId: "msg-1" });
-  assert.equal(deniedCommit.status, 200);
-  assert.equal(deniedCommit.body.error.code, -32602);
+  assert.equal(deniedCommit.status, 401);
+  assert.equal(deniedCommit.body.error.code, -32001);
   const bad = await rpc(origin, "tools/call", {
     name: "room_commit_file", arguments: { roomId: created.roomId, id: "note", messageId: "msg-1" }
   }, "pri_" + "x".repeat(43));
@@ -167,6 +169,8 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   store.identities.link(owner.secret, created.roomId, {
     identityId: peer.identityId, displayName: "Commit peer", permissions: []
   });
+  // #953: new agent members default to t1_readonly; peer needs write access for message.posted
+  setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
   assert.equal(names.includes("room_commit_file"), true);
   const posted = await call(origin, "room_post_message", {

@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
 
 export async function createInboxCollaborationJourney({ mobile = false } = {}) {
@@ -29,6 +30,9 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
     store.agentConnections.apply(owner.token, roomId, { action: "create", requestId: randomUUID(),
       memberId: helperId, displayName: "Reply helper", access: "chat",
       keyHash: createHash("sha256").update(helperToken).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, owner.session.sessionBinding);
+    // Graduated autonomy tiers: the reply helper is operator-promoted so the
+    // browser check exercises it as a working agent, not t1_readonly.
+    setTier(store.db, roomId, helperId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     store.command(ownerKey, roomId, { id: randomUUID(), type: "member.added", data: {
       memberId: "mail-reviewer", displayName: "Simulated reviewer", kind: "human", permissions: ["verify"] } });
     const reviewerKey = store.issueAccessKey(roomId, "mail-reviewer");

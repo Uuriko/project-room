@@ -87,6 +87,7 @@ optional.push("server/web-research.mjs"); // RC-2026-09-24-310: knowledge router
 optional.push("server/claim-validate.mjs"); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
 optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
+optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
@@ -208,7 +209,7 @@ optional.push("server/notifications.mjs");
 optional.push("server/open-questions.mjs"); // F1: open-questions radar read (imported by server/http.mjs)
 optional.push("server/activity.mjs"); // Attention: activity feed, read horizons, saved messages, thread mutes (imported by server/store.mjs and server/http.mjs)
 optional.push("server/spend-allowance.mjs");
-optional.push("server/operator-controls.mjs"); // Slice 1/3: per-agent operator controls — spend caps, kill switch, autonomy tiers (imported by server/store.mjs and server/http.mjs)
+optional.push("server/autonomy-tiers.mjs"); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");

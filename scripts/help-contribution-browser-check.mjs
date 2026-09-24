@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { openMcpTestClient } from './mcp-test-client.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
+import { setTier } from '../server/autonomy-tiers.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
@@ -28,6 +29,9 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   if (multiple) {
     f.store.command(f.keys.owner, 'commons', { id: 'add-alternate', type: T.MEMBER_ADDED, data: {
       memberId: 'alternate', displayName: 'Test alternate', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'complete_work'] } });
+    // Graduated autonomy tiers: the alternate contributor is operator-promoted
+    // so the browser check exercises it as a working agent, not t1_readonly.
+    setTier(f.store.db, 'commons', 'alternate', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
     f.keys.alternate = f.store.issueAccessKey('commons', 'alternate');
     // Consent-bound DMs: the owner addresses the alternate contributor.
     f.store.dmConsents.request('commons', 'owner', 'alternate', 'browser test');

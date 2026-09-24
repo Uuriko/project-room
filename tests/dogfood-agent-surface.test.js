@@ -13,6 +13,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t) {
   const f = createAcceptanceFixture();
@@ -55,6 +56,8 @@ function linkAgent(store, ownerKey, name, memberId) {
   const linked = store.identities.link(ownerKey, "commons", {
     identityId: identity.identityId, memberId, displayName: name, permissions: ["accept_work"],
   });
+  // #953: new agent members default to t1_readonly; dogfood agents need write access
+  setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: store.now() });
   return { ...identity, memberId: linked.memberId };
 }
 

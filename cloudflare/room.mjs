@@ -1,5 +1,6 @@
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
+import { DurableObject } from 'cloudflare:workers';
 import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -31,8 +32,12 @@ function roomOrigin(env) {
 
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
-export class ProjectRoom {
+export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
+    super(ctx, env);
+    // DurableObject stores the context on this.ctx. Keep this.state and this.env
+    // as aliases so existing reads of either name stay valid.
+    this.state = ctx;
     this.env = env;
     this.requestSignals = new AsyncLocalStorage();
     const origin = roomOrigin(env);
@@ -132,9 +137,10 @@ export class ProjectRoom {
     if (this.paused) throw new Error('Room paused');
     return this.store.agentPlugin.drainWebhookDeliveries();
   }
-  // Land queue: cheap GitHub poll. No inbound GitHub webhook exists, so the
-  // cron tick is the refresh. A missing token is counted, not thrown, and
-  // the token itself is never logged.
+  // Land queue: gentle GitHub poll on the per-minute cron. Merged and closed
+  // items are skipped, unchanged items back off, and a rate-limit response
+  // waits until the reset. A missing token is counted, not thrown, and the
+  // token itself is never logged.
   async refreshLandQueue() {
     if (this.paused) return { checked: 0, updated: 0, unconfigured: 0 };
     this.store.landQueue.configure({ env: this.env });

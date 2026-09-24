@@ -7,6 +7,7 @@ import { applyEvent, replay, event } from "../src/events.js";
 import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t, extra = []) {
   const store = new RoomStore(":memory:"); t.after(() => store.close());
@@ -18,6 +19,9 @@ function fixture(t, extra = []) {
     send("owner", { id: `add-${memberId}`, type: "member.added", data: { memberId, displayName: memberId, kind, permissions } });
     keys[memberId] = store.issueAccessKey("commons", memberId);
   }
+  // #953: new agent members default to t1_readonly; these fixtures need write access
+  for (const memberId of ["agent", "reviewer"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // Consent-bound DMs: the reply-request flows DM between fixture members;
   // approve every direction up front so the tests exercise request/answer
   // logic, not the consent gate.

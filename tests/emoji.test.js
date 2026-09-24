@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { mentionHtml } from "../src/conversation.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiQuery, insertEmoji, isSingleEmoji, renderEmojiShortcodes, MAX_REACTIONS_PER_MESSAGE } from "../src/emoji.js";
 
 const HEART = "\u2764\uFE0F";
@@ -25,6 +26,9 @@ function room(t) {
   const send = (key, type, data, id = crypto.randomUUID()) => store.command(key, "commons", { id, type, data });
   send(owner, T.MEMBER_ADDED, { memberId: "human", displayName: "Maya", kind: "human", permissions: [] });
   send(owner, T.MEMBER_ADDED, { memberId: "agent", displayName: "Room agent", kind: "agent", permissions: [] });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // emoji tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });

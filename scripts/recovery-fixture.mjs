@@ -7,6 +7,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { createEmailEnvelope } from "../server/email-envelope.mjs";
 import { prepareGraphReplyDraft } from "../server/graph-reply-draft.mjs";
 import { issueSignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
@@ -37,6 +38,11 @@ export function createRecoveryFixture(filename) {
   send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "agent", displayName: "Synthetic agent", kind: "agent", permissions: [] });
   keys.oldAgent = store.issueAccessKey("commons", "agent");
   keys.agent = store.issueAccessKey("commons", "agent");
+  // Graduated autonomy tiers: new agent members enroll at t1_readonly. The
+  // fixture's agents are operator-promoted to t2_standard so the fixture
+  // exercises the full command surface.
+  for (const memberId of ["managed-agent", "agent"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: store.now() });
   const validSession = store.createSession(keys.owner), revokedSession = store.createSession(keys.owner);
   store.revoke(revokedSession.token);
   const loggedOut = store.createAccountSessionSlot(), loggedIn = store.loginAccountSession(loggedOut.token, owner.accessKey, 0);
@@ -111,6 +117,9 @@ export function createRecoveryFixture(filename) {
   inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
   // Populated send history is added after reviewed adoption below.
   send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "reply-reviewer", displayName: "Synthetic reply reviewer", kind: "agent", permissions: ["verify"] });
+  // Graduated autonomy tiers: the reply reviewer is operator-promoted so the
+  // fixture exercises verification.
+  setTier(store.db, "commons", "reply-reviewer", "t2_standard", { updatedBy: "owner", nowMs: store.now() });
   const reviewerKey = store.issueAccessKey("commons", "reply-reviewer"), workItemId = "recovery-reply";
   send("commons", keys.owner, T.WORK_PROPOSED, { workItemId, title: "Private reply", definitionOfDone: "Reply to the shared excerpt",
     sourceMessageId: inboxReceipts.at(-1).messageId, accountableMemberId: "owner", verifierMemberId: "reply-reviewer",

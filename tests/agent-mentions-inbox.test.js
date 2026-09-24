@@ -12,12 +12,15 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
 
 function enrolledAgent(t) {
   const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
   f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "mention-enroll", memberId: "mention-agent", displayName: "Scout", access: "chat",
     keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  // #953: new agents default to t1_readonly; Scout needs write access for message.posted
+  setTier(f.store.db, "commons", "mention-agent", "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
   return { f, token };
 }
 const say = (f, key, data) => f.store.command(key, "commons", { id: randomUUID(), type: "message.posted", data });

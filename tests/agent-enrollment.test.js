@@ -5,6 +5,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
   let now = Date.now();
@@ -186,6 +187,9 @@ test("connection list surfaces the agent's first action so enrollment closes the
   const before = list().find(row => row.memberId === f.request.memberId);
   assert.equal(before.status, "key_issued");
   assert.equal(before.firstActionAt, null);
+  // Graduated autonomy tiers: the enrolled agent is operator-promoted so its
+  // first action (a room message) is exercised as a working agent.
+  setTier(f.store.db, "commons", f.request.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   f.store.command(f.key.token, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "First check-in" } });
   const after = list().find(row => row.memberId === f.request.memberId);
   assert.equal(after.status, "key_issued");

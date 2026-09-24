@@ -13,7 +13,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import {
-  landTransition, tipTransition, landWakePayload, rollupChecks, normalizePull, githubAccessToken
+  landTransition, tipTransition, landWakePayload, rollupChecks, normalizePull, githubAccessToken,
+  nextPollBackoff, POLL_BACKOFF_STEPS_MS
 } from "../server/land-queue.mjs";
 import { landCardHtml, shortSha } from "../src/land-queue-board.js";
 
@@ -102,23 +103,35 @@ function linkOffline(store, ownerKey) {
 
 const observed = (checks, behind = false, mergedSha = null) => ({ checks, behind, mergedSha });
 
-test("check rollup and pull normalization", () => {
-  assert.equal(rollupChecks({ statusState: "success", checkRuns: [{ status: "completed", conclusion: "success" }] }), "green");
-  assert.equal(rollupChecks({ statusState: "pending", checkRuns: [] }), "pending");
-  assert.equal(rollupChecks({ statusState: "success", checkRuns: [{ status: "completed", conclusion: "failure" }] }), "red");
-  assert.equal(rollupChecks({ statusState: "failure", checkRuns: [] }), "red");
+test("check-run rollup ignores an empty combined status, neutral, and skipped", () => {
+  const success = { status: "completed", conclusion: "success", name: "unit" };
+  const failed = { status: "completed", conclusion: "failure", name: "unit" };
+  const neutral = { status: "completed", conclusion: "neutral", name: "Cursor Approval Agent" };
+  const skipped = { status: "completed", conclusion: "skipped", name: "optional" };
+  const emptyStatus = { state: "pending", total_count: 0, statuses: [] };
+  assert.equal(rollupChecks({ status: emptyStatus, checkRuns: [success, success, neutral] }), "green");
+  assert.equal(rollupChecks({ status: emptyStatus, checkRuns: [success, failed, neutral] }), "red");
+  assert.equal(rollupChecks({ status: emptyStatus, checkRuns: [neutral, skipped] }), "pending");
+  assert.equal(rollupChecks({ status: emptyStatus, checkRuns: [] }), "pending");
+  assert.equal(rollupChecks({ checkRuns: [{ status: "completed", conclusion: "cancelled" }] }), "red");
+  assert.equal(rollupChecks({ checkRuns: [{ status: "completed", conclusion: "timed_out" }] }), "red");
   assert.equal(rollupChecks({ checkRuns: [{ status: "in_progress", conclusion: null }] }), "pending");
-  assert.equal(rollupChecks({}), "green");
-  const green = normalizePull(snapshot().pr, { statusState: "success", checkRuns: [{ status: "completed", conclusion: "success" }] });
+  assert.equal(rollupChecks({ status: { state: "failure", total_count: 1 }, checkRuns: [success] }), "red");
+  assert.equal(rollupChecks({ status: { state: "pending", total_count: 2 }, checkRuns: [success] }), "pending");
+  assert.equal(rollupChecks({ status: { state: "success", total_count: 1 }, checkRuns: [] }), "green");
+  assert.equal(rollupChecks({}), "pending");
+  const green = normalizePull(snapshot().pr, { status: emptyStatus, checkRuns: [success] });
   assert.equal(green.checks, "green");
   assert.equal(green.mergeable, "mergeable");
   assert.equal(green.behind, false);
-  const behind = normalizePull(snapshot({ behind: true }).pr, { statusState: "success", checkRuns: [] });
+  assert.equal(green.closed, false);
+  const behind = normalizePull(snapshot({ behind: true }).pr, { status: emptyStatus, checkRuns: [] });
   assert.equal(behind.behind, true);
   assert.equal(behind.mergeable, "behind");
-  const merged = normalizePull(snapshot({ merged: true }).pr, { statusState: "success", checkRuns: [] });
+  const merged = normalizePull({ ...snapshot({ merged: true }).pr, state: "closed" }, { status: emptyStatus, checkRuns: [] });
   assert.equal(merged.mergeable, "merged");
   assert.equal(merged.mergedSha, MERGED);
+  assert.equal(merged.closed, true);
 });
 
 test("transitions wake on green, red, behind, merged, and tip, not on the first look", () => {
@@ -251,7 +264,7 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
 test("a missing token is 503 github_unconfigured and is not logged", async t => {
   const { store, clock } = fixture(t);
   const wake = spyWake(t, store);
-  const github = mockGitHub(() => ({ http: 404, message: "Not Found" }));
+  const github = mockGitHub(() => ({ http: 401, message: "Requires authentication" }));
   store.landQueue.configure({ fetchImpl: github.fetchImpl });
   await assert.rejects(
     () => store.landQueue.add("commons", "owner", { repo: "acme/private", prNumber: 3 }),
@@ -303,6 +316,178 @@ test("an unauthenticated rate limit is github_unavailable, not a silent skip", a
     error => error.status === 503 && error.code === "github_unavailable"
   );
   assert.equal(store.landQueue.list("commons", "owner").items[0].lastError, "github_unavailable");
+});
+
+test("backoff waits 1, 2, 4, then up to 10 minutes and stops on merged or closed", () => {
+  assert.deepEqual(
+    [0, 60_000, 120_000, 240_000, 480_000, 600_000].map(nextPollBackoff),
+    [60_000, 120_000, 240_000, 480_000, 600_000, 600_000]
+  );
+  assert.deepEqual(POLL_BACKOFF_STEPS_MS.at(-1), 10 * 60 * 1000);
+});
+
+function conditionalGitHub(scene) {
+  const calls = [];
+  let generation = 1;
+  const fetchImpl = async (url, init) => {
+    const key = url.includes("/check-runs") ? "checks" : url.includes("/status") ? "status" : "pr";
+    const etag = `"${key}-${generation}"`;
+    const match = init?.headers?.["If-None-Match"] ?? null;
+    calls.push({ key, match, url });
+    if (match === etag) return { status: 304, ok: false, headers: { etag } };
+    const current = scene();
+    let body = current.pr;
+    if (key === "checks") body = current.checks;
+    else if (key === "status") body = current.status;
+    return { status: 200, ok: true, headers: { etag }, json: async () => body };
+  };
+  return {
+    fetchImpl,
+    calls,
+    bump() { generation += 1; }
+  };
+}
+
+test("an unchanged poll sends If-None-Match, backs off, and skips merged and closed items", async t => {
+  const { store, clock } = fixture(t);
+  const open = {
+    pr: {
+      title: "Land the queue",
+      state: "open",
+      merged: false,
+      merge_commit_sha: null,
+      mergeable: true,
+      mergeable_state: "clean",
+      head: { sha: SHA }
+    },
+    status: { state: "pending", total_count: 0, statuses: [] },
+    checks: { total_count: 2, check_runs: [
+      { name: "unit", status: "completed", conclusion: "success" },
+      { name: "Cursor Approval Agent", status: "completed", conclusion: "neutral" }
+    ] }
+  };
+  let current = {
+    ...open,
+    checks: { total_count: 1, check_runs: [{ name: "unit", status: "in_progress", conclusion: null }] }
+  };
+  const github = conditionalGitHub(() => current);
+  store.landQueue.configure({ fetchImpl: github.fetchImpl });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 41 });
+  assert.equal(added.item.checks, "pending");
+  assert.equal(added.changed.length, 0);
+  assert.equal(landEvents(store).length, 0);
+  assert.equal(github.calls.some(call => call.url.includes("/check-runs") && call.url.includes("filter=latest")), true);
+
+  current = open;
+  github.bump();
+  clock.now += 60_000;
+  let summary = await store.landQueue.refreshDue();
+  assert.equal(summary.updated, 1);
+  assert.deepEqual(landEvents(store).at(-1).data.changed, ["green"]);
+  assert.equal(store.landQueue.list("commons", "owner").items[0].checks, "green");
+
+  const afterGreen = github.calls.length;
+  clock.now += 30_000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.checked, 0);
+  assert.equal(github.calls.length, afterGreen);
+
+  clock.now += 30_000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.checked, 1);
+  assert.equal(summary.updated, 0);
+  const conditional = github.calls.slice(afterGreen);
+  assert.equal(conditional.length, 3);
+  assert.equal(conditional.every(call => call.match === `"${call.key}-2"`), true);
+  const row = store.db.prepare("SELECT backoff_ms, next_poll_at, checks_state FROM land_queue WHERE item_id=?").get(added.item.itemId);
+  assert.equal(row.backoff_ms, 120_000);
+  assert.equal(row.checks_state, "green");
+  assert.equal(row.next_poll_at, clock.now + 120_000);
+  assert.equal(landEvents(store).length, 1);
+
+  clock.now += 60_000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.checked, 0);
+
+  current = {
+    ...open,
+    pr: { ...open.pr, state: "closed", merged: true, merge_commit_sha: MERGED, mergeable: false, mergeable_state: "unknown" }
+  };
+  github.bump();
+  clock.now += 60_000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.updated, 1);
+  assert.deepEqual(landEvents(store).at(-1).data.changed, ["merged"]);
+  const mergedCalls = github.calls.length;
+  clock.now += 30 * 60 * 1000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.checked, 0);
+  assert.equal(github.calls.length, mergedCalls);
+
+  const closed = {
+    pr: { ...open.pr, state: "closed", merged: false, mergeable: false, mergeable_state: "unknown" },
+    status: open.status,
+    checks: open.checks
+  };
+  current = closed;
+  github.bump();
+  const second = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 42 });
+  assert.equal(second.item.checks, "green");
+  const closedCalls = github.calls.length;
+  clock.now += 30 * 60 * 1000;
+  summary = await store.landQueue.refreshDue();
+  assert.equal(summary.checked, 0);
+  assert.equal(github.calls.length, closedCalls);
+  assert.equal(store.db.prepare("SELECT closed FROM land_queue WHERE item_id=?").get(second.item.itemId).closed, 1);
+});
+
+test("a cron rate limit records the reset and skips until then without an error", async t => {
+  const { store, clock } = fixture(t);
+  const wake = spyWake(t, store);
+  const resetSeconds = Math.floor((clock.now + 30 * 60 * 1000) / 1000);
+  let limited = false;
+  let hits = 0;
+  store.landQueue.configure({
+    fetchImpl: async (url) => {
+      hits += 1;
+      if (limited) {
+        return {
+          status: 429,
+          ok: false,
+          headers: { "x-ratelimit-reset": String(resetSeconds), "x-ratelimit-remaining": "0" },
+          json: async () => ({ message: "API rate limit exceeded" })
+        };
+      }
+      const scene = snapshot({ checks: "pending" });
+      let body = scene.pr;
+      if (String(url).includes("/check-runs")) body = scene.checks;
+      else if (String(url).includes("/status")) body = scene.status;
+      return { status: 200, ok: true, json: async () => body };
+    }
+  });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 8 });
+  assert.equal(added.item.lastError, null);
+  limited = true;
+  const afterAdd = hits;
+  clock.now += 60_000;
+  const blocked = await store.landQueue.refreshDue();
+  assert.equal(blocked.checked, 1);
+  assert.equal(blocked.rateLimited, 1);
+  assert.equal(blocked.updated, 0);
+  assert.equal(hits, afterAdd + 1);
+  assert.equal(wake.warnings.length, 0);
+  assert.equal(store.landQueue.list("commons", "owner").items[0].lastError, null);
+  assert.equal(store.db.prepare("SELECT rate_limited_until AS until FROM land_queue").get().until, resetSeconds * 1000);
+  const paused = await store.landQueue.refreshDue({ now: clock.now + 10 * 60 * 1000 });
+  assert.equal(paused.checked, 0);
+  assert.equal(paused.rateLimited, 1);
+  assert.equal(hits, afterAdd + 1);
+  clock.now = resetSeconds * 1000 + 1000;
+  const again = await store.landQueue.refreshDue();
+  assert.equal(again.checked, 1);
+  assert.equal(again.rateLimited, 1);
+  assert.equal(wake.warnings.length, 0);
+  assert.equal(store.landQueue.list("commons", "owner").items[0].lastError, null);
 });
 
 test("members can remove an item and the queue caps at 50", async t => {
@@ -386,6 +571,18 @@ test("REST add, list, tip, and remove match the tool names", async t => {
 
   f.store.landQueue.configure({
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => ({ message: "Not Found" }) })
+  });
+  const missing = await fetch(`${origin}/api/rooms/commons/add_land_item`, {
+    method: "POST", headers, body: JSON.stringify({ repo: "acme/demo", prNumber: 99999 })
+  });
+  assert.equal(missing.status, 404);
+  const missingBody = await missing.json();
+  assert.equal(missingBody.error.code, "pr_not_found");
+  assert.equal(missingBody.item, undefined);
+  assert.equal(f.store.landQueue.list("commons", "owner").items.some(item => item.prNumber === 99999), false);
+
+  f.store.landQueue.configure({
+    fetchImpl: async () => ({ status: 401, ok: false, json: async () => ({ message: "Requires authentication" }) })
   });
   const hidden = await fetch(`${origin}/api/rooms/commons/add_land_item`, {
     method: "POST", headers, body: JSON.stringify({ repo: "acme/private", prNumber: 3 })

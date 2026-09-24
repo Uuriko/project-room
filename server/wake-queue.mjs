@@ -231,8 +231,12 @@ export class WakeQueue {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
       const subject = this.subject(auth, roomId, memberId, { change: true });
-      const fields = ["requestId"];
-      if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !validId(request.requestId)) fail(422, "invalid_wake_resume", "Supply a request ID.");
+      const keys = request && !Array.isArray(request) ? Object.keys(request) : null;
+      const reasonOk = !keys?.includes("reason") || request.reason === null || typeof request.reason === "string" && request.reason.length <= 200;
+      if (!keys || !keys.includes("requestId") || keys.some(key => key !== "requestId" && key !== "reason") || !validId(request.requestId) || !reasonOk) {
+        fail(422, "invalid_wake_resume", "Supply a request ID. reason is optional.");
+      }
+      const fields = keys.includes("reason") ? ["requestId", "reason"] : ["requestId"];
       const fingerprint = this.receipt(request.requestId, fields, request);
       const prior = this.priorReceipt(roomId, subject, request, fingerprint);
       if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });

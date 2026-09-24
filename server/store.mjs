@@ -18,7 +18,7 @@ import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
-import { ensureOperatorControlsSchema, enforceOperatorControls } from "./operator-controls.mjs";
+import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -66,7 +66,7 @@ import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensur
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
-import { LandQueue, landQueueSchema } from "./land-queue.mjs";
+import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
@@ -856,9 +856,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // EXISTS is idempotent, no schema version bump, intentionally
       // outside the writer fence (see unfencedAdditiveTables).
       ensureIdentityLinkCodeSchema(this.db);
-      // Slice 1/3 operator prerequisites: per-agent controls table is purely
-      // additive — IF NOT EXISTS is idempotent, no schema version bump.
-      ensureOperatorControlsSchema(this.db);
+      // Graduated autonomy tiers (#928 rescope): purely additive table —
+      // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
+      // slice 1/3 agent_operator_controls table (module removed).
+      ensureAutonomyTiersSchema(this.db);
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
@@ -915,6 +916,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // writer fence. The table is the source of truth; land.updated events
       // are thin wake receipts and do not copy the row into the projection.
       this.db.exec(landQueueSchema);
+      migrateLandQueueColumns(this.db);
       // Identity-scoped inbox attachment bytes: purely additive, no schema
       // version bump, outside the writer fence. Account-session descriptor
       // routes are unchanged and still do not retain provider bytes.
@@ -2355,7 +2357,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         expiresAt: null, csrf: null, sessionBinding: null
       };
     }
-    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
+    if (typeof token !== "string" || !isRoomAccessToken(token)) {
+      fail(401, "unauthenticated", token == null || token === ""
+        ? "No credential. Agents can self-mint an identity at POST /api/agent-identities."
+        : "Sign in with an active room key or agent identity secret");
+    }
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash
@@ -3343,10 +3349,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
-      // Slice 1/3 operator prerequisites: per-agent kill switch, autonomy
-      // tier and spend cap. Read fresh from the table on every command, so a
-      // kill in the table always wins and propagates immediately.
-      enforceOperatorControls({ db: this.db, roomId, state: room.state, command, actorId: auth.member.id, nowMs: this.now(), fail });
+      // Graduated autonomy tiers: read fresh from the table on every command,
+      // so a demotion to t1_readonly wins on the agent's next write. New
+      // agent members are enrolled at t1_readonly (see autonomy-tiers.mjs).
+      enforceAutonomyTiers({ db: this.db, roomId, state: room.state, command, actor: auth.member, nowMs: this.now(), fail });
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.
       // Peer DMs are a separate command, gated by an active bond with peer.dm.
@@ -3377,6 +3383,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       catch (error) {
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
+        if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
+          fail(422, "invalid_arguments", error.message);
+        }
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
       // Integration map slice 5: the external path is only as strong as

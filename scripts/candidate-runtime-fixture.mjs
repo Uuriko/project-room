@@ -42,6 +42,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/share-invite-code.js');
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
+  paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
@@ -80,7 +81,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
-  paths.add('server/operator-controls.mjs'); // Slice 1/3: per-agent operator controls (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)

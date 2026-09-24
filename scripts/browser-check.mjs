@@ -11,6 +11,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -21,6 +22,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
     send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
     send(owner, T.MEMBER_ADDED, { memberId: "room-agent", displayName: "Room agent", kind: "agent", permissions: [] });
+    // Graduated autonomy tiers: new agents enroll at t1_readonly; promote the
+    // fixture agent so the check exercises it as a working agent.
+    setTier(store.db, "commons", "room-agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
     // Consent-bound DMs: the owner addresses both members in this flow.
     for (const target of ["maya", "room-agent"]) {
       store.dmConsents.request("commons", "owner", target, "browser test");

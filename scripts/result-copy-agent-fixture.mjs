@@ -5,11 +5,15 @@ import { createHash } from "node:crypto";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const f = createAcceptanceFixture();
 const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
 send("owner", T.MEMBER_ADDED, { memberId: "copy-editor", displayName: "Synthetic summary editor", kind: "agent", accountableHumanId: "owner", permissions: [] });
 f.keys.editor = f.store.issueAccessKey("commons", "copy-editor");
+// Graduated autonomy tiers: the fixture agent is operator-promoted so the
+// browser check exercises it as a working agent.
+setTier(f.store.db, "commons", "copy-editor", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 send("producer", T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: 0 });
 send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: 1,
   summary: "Draft agenda: review the launch checklist, assign an owner to open questions, and choose the next test. Dates remain unconfirmed. Internal-only synthetic detail: ORCHID-PRIVATE; contact owner@example.invalid before external sharing.",
