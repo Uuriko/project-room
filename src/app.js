@@ -28,6 +28,7 @@ import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanel
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { installReferralBoard } from "./referral-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
+import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 
 const $ = selector => document.querySelector(selector);
@@ -855,6 +856,23 @@ function syncSessionMenu() {
   const clearBtn = $("#clear-session-menu");
   if (clearBtn) clearBtn.hidden = signedIn || !leftovers;
   menu?.classList.toggle("empty", !signedIn && !leftovers);
+  // Genuine session-expiration display: the server stamps every browser
+  // session's real expiry (sessionView.expiresAt / accountView.expiresAt).
+  // The room session gates the current view, so it wins; the account session
+  // shows only when the account workspace is open with no room.
+  const expiryEl = $("#session-expiry");
+  if (expiryEl) {
+    const roomExpiry = client.session?.expiresAt ?? null;
+    const accountExpiry = !state && accountClient.session?.authenticated ? accountClient.session.expiresAt : null;
+    const formatted = signedIn ? formatSessionExpiry(roomExpiry ?? accountExpiry) : null;
+    if (formatted) {
+      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted}`;
+      expiryEl.hidden = false;
+    } else {
+      expiryEl.textContent = "";
+      expiryEl.hidden = true;
+    }
+  }
 }
 async function reopenRememberedRoom() {
   const lastRoom = readLastRoom();

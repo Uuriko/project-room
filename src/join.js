@@ -9,6 +9,8 @@
 // Pure helpers are exported for unit tests; the DOM boot below runs only
 // in a browser.
 
+import { formatSessionExpiry } from "./session-expiry.js";
+
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
 // "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the code, else null.
@@ -198,7 +200,7 @@ async function boot() {
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
-    const { identitySecret, roomId, displayName } = joined.body ?? {};
+    const { identitySecret, roomId, displayName, sessionExpiresAt } = joined.body ?? {};
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {
       if (button) button.disabled = false;
       if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";
@@ -208,6 +210,14 @@ async function boot() {
     const nameEl = $("join-success-name"), roomEl = $("join-success-room");
     if (nameEl) nameEl.textContent = displayName || name;
     if (roomEl) roomEl.textContent = preview.body.roomTitle || roomId;
+    // The session cookie the response set expires at the server's genuine
+    // session expiry — show the real date/time, never a guess.
+    const expiryEl = $("join-session-expiry");
+    const expiryText = formatSessionExpiry(sessionExpiresAt);
+    if (expiryEl) {
+      if (expiryText) { expiryEl.textContent = `This browser's session expires ${expiryText}.`; expiryEl.hidden = false; }
+      else expiryEl.hidden = true;
+    }
     const secretEl = $("join-secret");
     if (secretEl) secretEl.value = identitySecret;
     const openEl = $("join-open-room");
