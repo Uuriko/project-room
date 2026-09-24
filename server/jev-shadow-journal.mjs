@@ -11,7 +11,7 @@
 // table. All writes go through the store transaction. Rows are append-only:
 // shadow decisions are measurements, never mutated after the fact.
 
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
