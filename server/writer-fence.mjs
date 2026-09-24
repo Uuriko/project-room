@@ -218,7 +218,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // would-be decision). Purely additive and intentionally NOT fenced —
   // older writers have no code path to it, IPs are stored hash-only, and
   // the journal verifies its own schema on open.
-  "jev_shadow_decisions"
+  "jev_shadow_decisions",
+  // agent_operator_controls (operator prerequisites slice 1/3, PR #928):
+  // per-agent kill switch, autonomy tier, spend cap and measured spend
+  // ledger. Purely additive and intentionally NOT fenced — older writers
+  // have no code path to it, and the module verifies its own schema on
+  // open (CREATE TABLE IF NOT EXISTS, no schema bump).
+  "agent_operator_controls"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
