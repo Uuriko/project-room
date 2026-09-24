@@ -883,6 +883,7 @@ cmd_claim() {
     --reason)  reason="$2"; shift 2 ;;
     --state)   state="$2"; shift 2 ;;
     --title)   title="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "claim: unknown flag $1" ;;
   esac; done
   [ -n "$task" ]   || die "claim: --task-id required"
@@ -1337,6 +1338,12 @@ $(suffix_line "$task_id" "${by:-(unknown)}")"
 }
 
 cmd_sweep() {
+  # Flags after the verb were ignored, so `sweep --dry-run` posted live
+  # strikes. Unknown flags die before any board read.
+  while [ $# -gt 0 ]; do case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "sweep: unknown flag $1" ;;
+  esac; done
   local st now actions=0 lock_dir=""
   # F2: the initial read is unlocked (concurrent runs may read together);
   # the enforcer lock is then taken and the board re-read, so the deciding
