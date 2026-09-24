@@ -2370,6 +2370,51 @@ paths:
                   sweptAt: { type: string, format: date-time }
         '401': { description: unauthenticated }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/duplicates:
+    get:
+      summary: Find possible duplicate work claims
+      description: |
+        Fuzzy similarity search over the room's work-claim registry
+        (Linear-style "similar issues"). Tokenizes the `q` text and ranks
+        claims by weighted Jaccard overlap (title x0.6, note x0.4); returns up
+        to `limit` candidates with scores in [0,1], best first. Read-only:
+        it suggests candidates, never merges or closes — the caller decides
+        whether anything is truly a duplicate. Any room member may read; API
+        keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 512 }
+          description: Free text to match against claim titles and notes
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+          description: Maximum candidates to return
+      responses:
+        '200':
+          description: Ranked duplicate candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  query: { type: string }
+                  duplicates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        state: { type: string }
+                        owner: { type: string, nullable: true }
+                        score: { type: number, minimum: 0, maximum: 1 }
+        '401': { description: unauthenticated }
+        '422': { description: 'invalid_claim_input (bad q/limit) or invalid_duplicate_input' }
   /api/rooms/{roomId}/work-claims/{claimId}:
     get:
       summary: Read one work claim
