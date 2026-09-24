@@ -67,6 +67,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-lifecycle.mjs');
   paths.add('server/attachment-schema.mjs');
   paths.add('server/room-attachment-bytes.mjs'); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/inbox-attachment-bytes.mjs'); // identity inbox attachment bytes (imported by server/store.mjs)
   paths.add('server/attachments.mjs'); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
   paths.add('server/moderation.mjs');
   paths.add('scripts/release-evidence.mjs');

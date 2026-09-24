@@ -4,9 +4,9 @@
 // committed / discarded / expired / deleted states. This module is the store
 // API those rows were missing: stage, list, download, discard, and commit.
 // Commit sets message_id and state committed on a staged row. It does not
-// add a second blob store and it does not post a chat message. Inbox
-// attachment descriptors stay on the account-session inbox routes; those
-// routes do not retain bytes.
+// add a second blob store and it does not post a chat message. Provider
+// inbox descriptors stay on the account-session routes and do not retain
+// bytes. Identity-staged inbox bytes live in inbox_attachment_bytes.
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";

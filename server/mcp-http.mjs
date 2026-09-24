@@ -68,7 +68,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
-        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the enrolled room profile: post, board, mentions, work, replies, bond.propose, bond.accept, bond.decline, bond.revoke, bond.list, dm.posted, room_list_peer_dms, wake.register, heartbeat.set, wake.pause, wake.resume, and webhook.subscribe. Each room tool takes roomId. Wake registration, heartbeats, and webhook subscription are identity-scoped. wake.pause and wake.resume take roomId. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the enrolled room profile: post, board, mentions, work, replies, bond.propose, bond.accept, bond.decline, bond.revoke, bond.list, dm.posted, room_list_peer_dms, inbox_put_attachment, wake.register, heartbeat.set, wake.pause, wake.resume, and webhook.subscribe. Each room tool takes roomId. Inbox attachment bytes, wake registration, heartbeats, and webhook subscription are identity-scoped. wake.pause and wake.resume take roomId. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
