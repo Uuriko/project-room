@@ -16,7 +16,7 @@ test("server.json has the registry-required fields", () => {
     /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/,
     "name must be reverse-DNS with exactly one slash"
   );
-  assert.equal(manifest.name, "io.github.uuriko/project-room");
+  assert.equal(manifest.name, "io.github.Uuriko/project-room");
   assert.ok(
     typeof manifest.description === "string" &&
       manifest.description.length >= 1 &&
