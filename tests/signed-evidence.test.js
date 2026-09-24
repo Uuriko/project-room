@@ -260,7 +260,11 @@ test("an unsigned external completion is rejected", t => {
   issueTestIdentity(store);
   proposeWork(store, key, "w2");
   assert.throws(() => complete(store, key, "w2", { evidenceUrl: "https://example.com", evidenceVersion: "v1" }),
-    error => error.status === 422 && error.code === "missing_signed_evidence");
+    error => error.status === 422 && error.code === "missing_signed_evidence"
+      && /unsigned external evidence is rejected/.test(error.message)
+      && /evidenceKind room_text/.test(error.message)
+      && /evidenceMessageId/.test(error.message)
+      && /evidenceVersion/.test(error.message));
   assert.equal(store.room("commons").state.workItems.w2.state, "working");
 });
 
