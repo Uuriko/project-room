@@ -201,6 +201,16 @@ export function sessionWorker(item, nowMs = Date.now()) {
   return session.worker_member_id;
 }
 
+// Live exclusive claim. Null when the caller already holds it, the session
+// is not running, or the heartbeat is stale (the existing 10-minute lease —
+// the item is takeable). The sentence is the 409 session_claimed message;
+// the hint parser reads the holder id from it. No second lock token.
+export function sessionClaimConflict(item, actorId, nowMs = Date.now()) {
+  const holder = sessionWorker(item, nowMs);
+  if (!holder || holder === actorId) return null;
+  return `Claim held by ${holder}`;
+}
+
 // Presentation only: completed work must not keep a never-started session
 // card on queued, or Done chips look stuck. The ledger status stays queued
 // on sessionRecord — this does not rewrite history.
@@ -370,6 +380,21 @@ export function applySessionFields(item, incoming) {
   const session = sessionRecord(item);
   const at = incoming.at;
   if (incoming.type === SESSION_EVENT_TYPES.STARTED) {
+    // A running claim is exclusive. The holder re-claims by refreshing the
+    // heartbeat (same attempt). A stale heartbeat is takeable by the same
+    // command. A fresh holder who is someone else is a conflict. A missing
+    // actor stays the old invalid-transition refusal so replay of incomplete
+    // fixtures does not grow a new sentence.
+    if (RUNNING.has(session.status)) {
+      const holder = sessionWorker(item, Date.parse(at));
+      if (holder && holder !== incoming.actorId) {
+        if (typeof incoming.actorId === "string" && incoming.actorId.length > 0) throw new Error(`Claim held by ${holder}`);
+        throw new Error(`Invalid session transition from ${session.status}`);
+      }
+      item.heartbeat_at = at;
+      if (!holder) item.worker_member_id = incoming.actorId;
+      return;
+    }
     // A first start needs a queued session with no stop pending. A session that
     // already finished (done/failed) may start again as a retry: attempt_count
     // grows, heartbeat/stop/worker fields reset, and a declared maxAttempts is
@@ -406,6 +431,23 @@ export function applySessionFields(item, incoming) {
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
     const next = incoming.data.status;
+    // Same status from the holder is a heartbeat renew, not a new transition.
+    // Same status after a stale heartbeat takes the claim. Same status while
+    // someone else still holds a fresh claim conflicts. A different status
+    // stays the existing transition (claim managers still drive it live).
+    if (next === session.status && RUNNING.has(session.status)) {
+      const holder = sessionWorker(item, Date.parse(at));
+      if (holder && holder !== incoming.actorId) {
+        if (typeof incoming.actorId === "string" && incoming.actorId.length > 0) throw new Error(`Claim held by ${holder}`);
+        throw new Error(`Invalid session transition from ${session.status}`);
+      }
+      item.heartbeat_at = at;
+      if (!holder) item.worker_member_id = incoming.actorId;
+      reportSpend(item, incoming);
+      reportRounds(item, incoming);
+      reportToolCalls(item, incoming);
+      return;
+    }
     if (!CHANGES[session.status]?.includes(next)) throw new Error(`Invalid session transition from ${session.status}`);
     // RC-2026-09-19-063: a round-limit pause is recorded, and only an
     // owner-approved resume clears it (with a fresh round count). A worker

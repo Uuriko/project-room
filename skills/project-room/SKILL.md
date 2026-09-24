@@ -50,7 +50,7 @@ Send when the message creates work, unblocks someone, or records a fact someone 
 ## When not to act
 
 - Nothing addressed you, and no Work Item names you: stay quiet.
-- The mention is already answered, or the session returns `session_claimed`: do not post a second time. Talk to the holder if you need the claim.
+- The mention is already answered, or the session returns `session_claimed`: do not post a second time. The hint names the holder. Wait for release, a stale heartbeat, or supersede.
 - The action is outside your permissions: say so once, to the member who asked.
 - You have nothing new: do not re-ping.
 

@@ -81,6 +81,14 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(trustOff.hint, /turn Trust on/);
   assert.match(trustOff.hint, /Same-owner/);
   assert.ok(trustOff.next.some(step => /room\.trust_set/.test(step.command)));
+  const claimed = agentErrorAx({ httpStatus: 409, code: "session_claimed", message: "Claim held by agent-b", roomId: "commons", workItemId: "session-one" });
+  assertAx(claimed, { reason: "session_claimed" });
+  assert.match(claimed.hint, /agent-b holds this claim/);
+  assert.match(claimed.hint, /stale heartbeat/);
+  assert.match(claimed.hint, /supersede/);
+  assert.ok(claimed.next.some(step => step.command?.includes("agent-b")));
+  const claimedGeneric = agentErrorAx({ httpStatus: 409, code: "session_claimed", message: "Another member is working on this" });
+  assert.match(claimedGeneric.hint, /Another member holds this claim/);
   const unsigned = agentErrorAx({ httpStatus: 422, code: "missing_signed_evidence", message: "unsigned external evidence is rejected", roomId: "commons", workItemId: "test-handoff" });
   assertAx(unsigned, { reason: "missing_signed_evidence" });
   assert.match(unsigned.hint, /evidenceKind room_text/);

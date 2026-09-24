@@ -1926,7 +1926,10 @@ paths:
         needs expectedRevision; stale revisions get 409. The atomic claim is
         set_status -> processing on a queued card. Claims go stale after
         10 min without a heartbeat; a second live claim gets 409
-        session_claimed.
+        session_claimed. The error message is `Claim held by <memberId>`
+        and the hint names that holder, the 10-minute heartbeat, and
+        supersede. The holder may send the same claim again to renew.
+        Release is set_status done or failed.
         Budgets (RC-2026-09-19-063): a start may declare maxRounds and
         maxToolCalls alongside the existing bounds. Status changes may report
         cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding

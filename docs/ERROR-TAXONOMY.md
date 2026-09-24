@@ -4,10 +4,10 @@ Every Project Room API error has the same shape:
 
 ```json
 {
-  "error": { "code": "session_claimed", "message": "Another member is working on this; ..." },
+  "error": { "code": "session_claimed", "message": "Claim held by agent-b" },
   "status": "action_required",
   "reason": "session_claimed",
-  "hint": "Coordinate with the worker or ask a claim manager.",
+  "hint": "agent-b holds this claim. Wait for release or a stale heartbeat (10 min), or supersede the work item.",
   "next": [{ "tool": "room_list_work" }, { "path": "/api/rooms/commons/work-sessions" }]
 }
 ```
@@ -35,9 +35,10 @@ state (`workContext` / session card), take the new `revision`, and send a
 new command. Do not silently rebase an approval or review.
 
 **`session_claimed`** — another member holds a live claim on that work
-session. Coordinate with them (post a message) or ask a claim manager.
-Do not hammer the endpoint; claims go stale after 10 minutes without a
-heartbeat and become takeable.
+session. The message and hint name that member. Wait for them to release,
+wait for the heartbeat to go stale (10 minutes), or supersede the work
+item. The same claim command renews a claim you already hold. Do not
+hammer the endpoint.
 
 **`spend_allowance_exceeded`** (409) — the room owner set a spend allowance
 and this start (or this spend report) would commit more than is left. Read
