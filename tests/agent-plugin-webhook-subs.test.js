@@ -2,18 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAgentWebhookSubscriptions, signPayload, verifySignature, WebhookSubscriptionError,
+  EVENT_CATALOG, assertKnownEvents,
 } from "../server/agent-webhook-subscriptions.mjs";
 
 const fresh = () => createAgentWebhookSubscriptions({ clock: () => 1_700_000_000_000 });
 const SECRET = "signing-secret-0123456789";
-const SUB = { subscriptionId: "sub_one", agentId: "ai_agent1", url: "https://agents.example/hook", events: ["thread.created", "mention.added"], secret: SECRET };
+const SUB = { subscriptionId: "sub_one", agentId: "ai_agent1", url: "https://agents.example/hook", events: ["message.posted", "member.added"], secret: SECRET };
 
 test("subscribe validates, stores no secret on the view, and dedups events", t => {
   const subs = fresh();
   const view = subs.subscribe(SUB);
   assert.equal(view.subscriptionId, "sub_one");
   assert.equal(view.agentId, "ai_agent1");
-  assert.deepEqual([...view.events], ["thread.created", "mention.added"]);
+  assert.deepEqual([...view.events], ["message.posted", "member.added"]);
   assert.equal(view.enabled, true);
   assert.equal(view.createdAt, 1_700_000_000_000);
   assert.ok(!("secret" in view));
@@ -32,19 +33,34 @@ test("subscribe validates, stores no secret on the view, and dedups events", t =
   assert.throws(() => subs.subscribe({ ...SUB, subscriptionId: "s2", agentId: "BAD ID" }), WebhookSubscriptionError);
 });
 
+test("subscribe rejects unknown events with the known catalog", t => {
+  const subs = fresh();
+  // The catalog is the room's actual event vocabulary plus agent.wake.
+  assert.ok(EVENT_CATALOG.includes("message.posted"));
+  assert.ok(EVENT_CATALOG.includes("agent.wake"));
+  assertKnownEvents(["message.posted", "*"]); // no throw; "*" subscribes to all
+  assert.throws(
+    () => subs.subscribe({ ...SUB, subscriptionId: "s_nope", events: ["thread.created"] }),
+    err => err instanceof WebhookSubscriptionError &&
+      err.code === "invalid_subscription" &&
+      /unknown event\(s\): "thread\.created"/.test(err.message) &&
+      err.message.includes("message.posted"),
+    "unknown event names name the offender and list known events");
+});
+
 test("match supports wildcard and honors enabled flag", t => {
   const subs = fresh();
   subs.subscribe({ ...SUB });
   subs.subscribe({ subscriptionId: "sub_all", agentId: "ai_agent1", url: "https://agents.example/all",
     events: ["*"], secret: SECRET });
   subs.subscribe({ subscriptionId: "sub_off", agentId: "ai_agent1", url: "https://agents.example/off",
-    events: ["thread.created"], secret: SECRET });
+    events: ["message.posted"], secret: SECRET });
   subs.setEnabled("sub_off", { agentId: "ai_agent1", enabled: false });
-  const matched = subs.match("ai_agent1", "thread.created").map(s => s.subscriptionId).sort();
+  const matched = subs.match("ai_agent1", "message.posted").map(s => s.subscriptionId).sort();
   assert.deepEqual(matched, ["sub_all", "sub_one"]);
   const none = subs.match("ai_agent1", "work.completed");
   assert.deepEqual(none.map(s => s.subscriptionId), ["sub_all"]);
-  assert.throws(() => subs.match("", "thread.created"), WebhookSubscriptionError);
+  assert.throws(() => subs.match("", "message.posted"), WebhookSubscriptionError);
 });
 
 test("ownership: agents cannot touch other agents' subscriptions", t => {
@@ -62,7 +78,7 @@ test("ownership: agents cannot touch other agents' subscriptions", t => {
 test("buildDelivery signs payloads; journal records attempts", t => {
   const subs = fresh();
   subs.subscribe({ ...SUB });
-  const delivery = subs.buildDelivery("sub_one", { eventType: "thread.created", data: { threadId: "t1" } });
+  const delivery = subs.buildDelivery("sub_one", { eventType: "message.posted", data: { threadId: "t1" } });
   assert.equal(delivery.state, "pending");
   assert.equal(delivery.attempts, 0);
   assert.equal(delivery.agentId, "ai_agent1");
@@ -70,15 +86,15 @@ test("buildDelivery signs payloads; journal records attempts", t => {
   assert.ok(delivery.signature && delivery.signature.length === 64);
 
   // the agent verifies the delivery with its own secret
-  assert.ok(verifySignature(SECRET, delivery.signature, { eventType: "thread.created", data: { threadId: "t1" } }));
-  assert.ok(!verifySignature(SECRET, delivery.signature, { eventType: "thread.created", data: { threadId: "t2" } }));
-  assert.ok(!verifySignature("wrong-secret-0123456789", delivery.signature, { eventType: "thread.created", data: { threadId: "t1" } }));
+  assert.ok(verifySignature(SECRET, delivery.signature, { eventType: "message.posted", data: { threadId: "t1" } }));
+  assert.ok(!verifySignature(SECRET, delivery.signature, { eventType: "message.posted", data: { threadId: "t2" } }));
+  assert.ok(!verifySignature("wrong-secret-0123456789", delivery.signature, { eventType: "message.posted", data: { threadId: "t1" } }));
 
   const r1 = subs.recordAttempt(delivery.deliveryId, { ok: true });
   assert.equal(r1.state, "delivered");
   assert.equal(r1.attempts, 1);
 
-  const d2 = subs.buildDelivery("sub_one", { eventType: "mention.added", data: {} });
+  const d2 = subs.buildDelivery("sub_one", { eventType: "member.added", data: {} });
   subs.recordAttempt(d2.deliveryId, { ok: false, error: "connection refused" });
   const journal = subs.journal("sub_one");
   assert.equal(journal.length, 2);
