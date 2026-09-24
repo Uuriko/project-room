@@ -1,0 +1,21 @@
+name: retarget-958-head
+on:
+  workflow_dispatch:
+  push:
+    branches: [jill/hosted-mcp-file-bytes-on-957]
+    paths: ['agent-scratch/958/RETARGET']
+permissions:
+  contents: write
+jobs:
+  retarget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jill/hosted-mcp-file-bytes-on-957
+          fetch-depth: 0
+      - name: Point old #958 head at jill tip
+        run: |
+          set -euo pipefail
+          git push --force origin HEAD:cursor/hosted-mcp-file-bytes-df03
+          echo done
