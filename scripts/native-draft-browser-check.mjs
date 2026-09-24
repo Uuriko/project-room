@@ -90,7 +90,7 @@ for (const touch of [false, true]) test("selected helper to reviewed native resu
   assert.equal(reviewed.isError, undefined, JSON.stringify(reviewed)); assert.equal(f.item().verification.independenceConfirmed, true); assert.equal(f.item().decision, null);
   await owner.card.locator('[data-action="decide"]').click();
   await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, body);
-  send("owner", "message.posted", { messageId: "rationale-native", body: "Rationale: this is ready to use." });
+  f.send("owner", "message.posted", { messageId: "rationale-native", body: "Rationale: this is ready to use." });
   await owner.page.locator('[name="decision"]').selectOption("approved"); await owner.page.locator('#action-fields [name="reason"]').fill("This is ready to use");
   await owner.page.locator('#action-fields [name="sourceMessageId"]').fill("rationale-native");
   await owner.page.screenshot({ path: prefix + "-decision.png" });
@@ -167,7 +167,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   };
   const decide = async (decision, reason) => {
     const rationaleId = `rationale-${crypto.randomUUID()}`;
-    send("owner", "message.posted", { messageId: rationaleId, body: `Rationale: ${reason}` });
+    f.send("owner", "message.posted", { messageId: rationaleId, body: `Rationale: ${reason}` });
     await owner.card.locator('[data-action="decide"]').click();
     await owner.page.waitForFunction(() => !document.querySelector("#action-form button[type=submit]").disabled);
     await owner.page.locator('[name="decision"]').selectOption(decision); await owner.page.locator('#action-fields [name="reason"]').fill(reason);
