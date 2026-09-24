@@ -53,6 +53,11 @@ export const API_KEY_SCOPES = Object.freeze([
     description: "Read this identity's host presence status and pending wake signals.",
     routes: ["GET /api/agent-heartbeats"],
   }),
+  Object.freeze({
+    scope: "skills:publish",
+    description: "Publish this identity's skill set (A2A skill shape + receipt-hash evidence) for member discovery.",
+    routes: ["POST /api/agent-skills"],
+  }),
 ]);
 // A scope ending in ":*" (e.g. "agent:*") grants every scope sharing its
 // prefix, including scopes added in the future.

@@ -119,6 +119,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // agent identity, and AgentHeartbeats.verifySchema() is read-only-safe.
   "agent_hosts",
   "agent_wake_signals",
+  // Push wake path (RC-2026-09-24-203): agent_push_configs. Same rationale
+  // as agent_hosts — purely additive, per-identity rows, self-verified
+  // schema on open; rows never drive bans, slashes, or balances.
+  "agent_push_configs",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
@@ -224,7 +228,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // ledger. Purely additive and intentionally NOT fenced — older writers
   // have no code path to it, and the module verifies its own schema on
   // open (CREATE TABLE IF NOT EXISTS, no schema bump).
-  "agent_operator_controls"
+  "agent_operator_controls",
+  // agent_skill_cards (RC-2026-09-24-202: members-directory skill cards).
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to it, and the module verifies its own shape on write.
+  "agent_skill_cards"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

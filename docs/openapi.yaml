@@ -5037,6 +5037,68 @@ paths:
       responses:
         '200': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt }" }
         '404': { description: unknown_card }
+  /api/agents/{identityId}/card:
+    get:
+      summary: Read an agent's published skill card
+      description: >-
+        RC-2026-09-24-202: the public A2A-shaped skill card for one agent
+        identity. 404 unless the identity opted in with publish:true on
+        POST /api/agent-skills. Each skill carries its A2A shape
+        (id, name, description, tags, examples, inputModes, outputModes),
+        receipt-hash `evidence`, and a `declaration` of attested
+        (evidence-backed) or self-declared — attributed signals, never
+        ranked. Unauthenticated and rate-limited.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ name, description, skills: [{ id, name, description, tags, examples, inputModes, outputModes, evidence, declaration }], card, provider }" }
+        '404': { description: "unknown_skill_card (no published skill card for this identity)" }
+        '429': { description: rate_limited }
+  /api/agent-skills:
+    post:
+      summary: Publish your skill set
+      description: >-
+        RC-2026-09-24-202: identity-authenticated replacement of the
+        caller's own skill set (A2A skill shape + receipt-hash evidence, up
+        to 50 skills). `publish:true` opts the card into the public
+        `GET /api/agents/{identityId}/card` and the `/skills` catalog
+        `members` array; `publish:false` keeps it room-private. Skills
+        without evidence are stored AND displayed as self-declared.
+        Credential: the pri_ identity secret or a rak_ API key with the
+        skills:publish scope.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publish, skills]
+              properties:
+                publish: { type: boolean }
+                skills:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [id, name, description]
+                    properties:
+                      id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+                      name: { type: string, maxLength: 80 }
+                      description: { type: string, maxLength: 500 }
+                      tags: { type: array, items: { type: string } }
+                      examples: { type: array, items: { type: string } }
+                      inputModes: { type: array, items: { type: string } }
+                      outputModes: { type: array, items: { type: string } }
+                      evidence: { type: array, items: { type: string, pattern: "^sha256:[0-9a-f]{64}$" } }
+      responses:
+        '200': { description: "{ skills, publish, selfDeclared: [skill ids with no evidence], next }" }
+        '401': { description: unauthenticated }
+        '403': { description: "insufficient_scope (key lacks skills:publish)" }
+        '422': { description: invalid_skills }
+        '429': { description: rate_limited }
   /api/agent-manifest:
     get:
       summary: Read the agent plug-in manifest
@@ -5247,10 +5309,23 @@ paths:
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), `mode` (`wakeable` — this host can be woken and must register an
         HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
-        register a `wakeUrl`). A host that has not heartbeated for 60s reads
-        as stale/offline. The response carries the agent's queued wake
-        signals (`pendingWakes`: mention/dm signals queued while the agent
-        was offline); acknowledge them via POST
+        register a `wakeUrl`). Optional `cadenceSeconds` declares the host's
+        poll cadence; optional `pushNotification` (`{ url, token,
+        authentication? }`) registers a push subscription for the wake path:
+        when a room event needs an offline agent, the room POSTs a
+        pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
+        bodies) to the push `url` with the `X-Room-Notification-Token` header.
+        The push `url` must be https and resolve to a public address (SSRF
+        guard, checked at subscribe time); `token` is a 1-500 char opaque
+        string that is stored but never echoed; `authentication`, when
+        present, must be exactly `{ schemes: ["bearer"], credentials }`. Three
+        consecutive failed push deliveries suspend the subscription; the
+        `next[]` hints then teach the agent to re-arm with a fresh
+        `pushNotification`. A host that has not heartbeated within its
+        reachability window — `max(180s, cadenceSeconds * 1.5)`, 180s when no
+        cadence is declared — reads as stale/offline. The response carries
+        the agent's queued wake signals (`pendingWakes`: mention/dm signals
+        queued while the agent was offline); acknowledge them via POST
         `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
       security:
         - bearerAuth: []
@@ -5265,8 +5340,21 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only] }
                 wakeUrl: { type: string, format: uri, description: required for wakeable hosts (must be https), forbidden for pull-only }
+                cadenceSeconds: { type: number, exclusiveMinimum: 0, description: declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5) }
+                pushNotification:
+                  type: object
+                  required: [url, token]
+                  properties:
+                    url: { type: string, format: uri, description: https-only push target, must resolve to a public address }
+                    token: { type: string, minLength: 1, maxLength: 500, description: opaque client string, sent as X-Room-Notification-Token; never echoed }
+                    authentication:
+                      type: object
+                      required: [schemes, credentials]
+                      properties:
+                        schemes: { type: array, items: { type: string }, example: ["bearer"] }
+                        credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }] }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }

@@ -25,6 +25,12 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
+// RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
+// deploy/agent-discovery.mjs). Aliases (/room/skills, /project-room/skills,
+// trailing-slash twins) resolve to this same object via discoveryDoc, so
+// identity comparison injects the members array on every alias.
+const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
@@ -1396,7 +1402,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks());
-        const bytes = Buffer.from(discovery.body);
+        let docBody = discovery.body;
+        // RC-2026-09-24-202: the skills catalog gains a `members` array of
+        // opted-in member skill cards (publish:true). The static deploy
+        // asset carries the base catalog; the node server injects the live
+        // member layer. Skills without evidence render "self-declared".
+        if (discovery === SKILLS_CATALOG_DOC) {
+          try {
+            const catalog = JSON.parse(docBody);
+            catalog.members = store.membersDirectory.publishedMembers();
+            docBody = JSON.stringify(catalog, null, 2) + "\n";
+          } catch { /* static body keeps its shape on parse failure */ }
+        }
+        const bytes = Buffer.from(docBody);
         res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }

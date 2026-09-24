@@ -351,7 +351,11 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
-    capabilities: Object.freeze({ streaming: false, pushNotifications: false, ...CAPABILITIES, stale: deployed.stale })
+    // RC-2026-09-24-203: the room speaks the A2A push-notification pattern —
+    // offline agents with a push subscription get a pointer-only doorbell
+    // POST when room events need them. CAPABILITIES carries no
+    // pushNotifications key, so the spread below cannot override this.
+    capabilities: Object.freeze({ streaming: false, pushNotifications: true, ...CAPABILITIES, stale: deployed.stale })
   };
   // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
   // attached only when the signature covers exactly this build's card bytes;
