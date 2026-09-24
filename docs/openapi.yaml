@@ -7145,6 +7145,23 @@ paths:
       responses:
         '200': { description: "{ roomId, memberId, mentions: [{ messageEventId, memberId, state, displayName, createdAt, timeoutAt, decidedAt }] }" }
         '403': { description: mention_forbidden }
+  /api/rooms/{roomId}/open-questions:
+    get:
+      summary: List unanswered questions in the room (F1)
+      description: >-
+        Member-readable open-questions radar: non-deleted messages whose body
+        contains "?" with no reply from a different author — neither a direct
+        reply nor a later message in the same thread by someone else. The
+        asker's own follow-ups never close a question. DMs are scoped to the
+        caller's parties (other members' DMs are invisible). Newest first,
+        optional limit (1..100, default 50).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { description: "{ roomId, viewerId, evaluatedAt, openQuestions: [{ messageId, authorId, excerpt, askedAt, threadRootId }] }" }
   /api/rooms/{roomId}/mentions/{messageEventId}/ack:
     post:
       summary: Acknowledge a mention (#658)
