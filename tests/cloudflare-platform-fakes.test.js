@@ -107,11 +107,17 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   const original = console.warn;
   console.warn = (...args) => { warnings.push(args.join(" ")); };
   try {
-    await worker.scheduled({ cron: "* * * * *" }, {
-      ROOM_MAINTENANCE: "0",
-      ROOM_ORIGIN: "https://room.example.test",
-      ROOM: namespace
-    }, { waitUntil(promise) { pending.push(promise); } });
+    // #992: scheduled() throws when any cron job fails, so Cron Events and
+    // tail show an exception instead of a green "ok" over swallowed warnings.
+    // The paused room makes channel-drain and webhook-dispatch fail here.
+    await assert.rejects(
+      worker.scheduled({ cron: "* * * * *" }, {
+        ROOM_MAINTENANCE: "0",
+        ROOM_ORIGIN: "https://room.example.test",
+        ROOM: namespace
+      }, { waitUntil(promise) { pending.push(promise); } }),
+      /cron jobs failed: channel-drain, webhook-dispatch/
+    );
     await Promise.all(pending);
   } finally {
     console.warn = original;
@@ -122,7 +128,8 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "refreshLandQueue",
-    "planRetention"
+    "planRetention",
+    "recordCronTick"
   ]);
   assert.deepEqual(warnings.map(line => line.slice(0, line.indexOf("]"))), [
     "[channel-drain",
