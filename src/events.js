@@ -1,4 +1,4 @@
-import { REACTIONS } from "./conversation.js";
+import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
@@ -1006,12 +1006,20 @@ function setMessageReaction(state, incoming) {
   const { messageId, reaction, active } = incoming.data;
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Reaction must reference a message in this Room");
-  if (!Object.hasOwn(REACTIONS, reaction) || typeof active !== "boolean") throw new Error("Invalid reaction choice");
-  const members = new Set(message.reactions?.[reaction] || []);
-  if (active) members.add(actor.id); else members.delete(actor.id);
-  message.reactions ||= {};
-  if (members.size) message.reactions[reaction] = [...members].sort();
-  else delete message.reactions[reaction];
+  const key = canonicalReaction(reaction);
+  if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
+  // Replay and checkpoints may still carry like/heart/celebrate/thinking.
+  // Fold those into the Unicode key before applying this choice.
+  message.reactions = foldedReactionMap(message.reactions);
+  const members = new Set(message.reactions[key] || []);
+  if (active) {
+    if (!message.reactions[key] && Object.keys(message.reactions).length >= MAX_REACTIONS_PER_MESSAGE) {
+      throw new Error("Too many reactions on this message");
+    }
+    members.add(actor.id);
+  } else members.delete(actor.id);
+  if (members.size) message.reactions[key] = [...members].sort();
+  else delete message.reactions[key];
 }
 
 function proposeWork(state, incoming) {

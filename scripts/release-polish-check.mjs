@@ -43,15 +43,16 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/redesign-${touch ? 'touch' : 'desktop'}-conversation.png` });
   const message = page.locator('[data-message-record-id="test-welcome"]');
-  assert.equal(await message.locator('[data-reaction="heart"]').count(), 0, 'unused reactions stay out of sight until added');
+  const HEART = "\u2764\uFE0F";
+  assert.equal(await message.locator(`[data-reaction="${HEART}"]`).count(), 0, 'unused reactions stay out of sight until added');
   await message.locator('summary[aria-label="More actions for this message"]').click();
   await message.locator('button[data-message-action="add-reaction"]').click();
-  await page.locator('#reaction-sheet [data-reaction="heart"]').click();
+  await page.locator(`#reaction-sheet [data-reaction="${HEART}"]`).first().click();
   await page.locator('#reaction-sheet').waitFor({ state: "hidden" });
-  await page.waitForFunction(() => document.querySelector('[data-message-record-id="test-welcome"] [data-reaction="heart"]').getAttribute('aria-pressed') === 'true');
+  await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="test-welcome"] [data-reaction="${glyph}"]`).getAttribute('aria-pressed') === 'true', HEART);
   assert.equal(await page.locator('#thread-bar').isVisible(), false, 'reacting does not switch the conversation');
-  assert.match(await message.locator('[data-reaction="heart"]').getAttribute('aria-label'), /, 1$/);
-  assert.equal(await message.locator('[data-reaction="heart"].used').count(), 1, 'a used reaction stays visibly marked');
+  assert.match(await message.locator(`[data-reaction="${HEART}"]`).getAttribute('aria-label'), /, 1$/);
+  assert.equal(await message.locator(`[data-reaction="${HEART}"].used`).count(), 1, 'a used reaction stays visibly marked');
 
   await openSearch(page);
   await page.locator('#message-search').fill('agenda');

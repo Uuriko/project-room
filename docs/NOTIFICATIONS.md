@@ -92,7 +92,8 @@ message counts as a response.** Every `mention` item carries:
     different thread does not count.
   - `"pending"` otherwise.
 - `suggestedAck`: the reaction key the client offers as the one-tap
-  acknowledgment (`"like"` = 👍).
+  acknowledgment (`"like"`, which resolves to 👍). The client sends the
+  Unicode glyph through `message.reaction_set`.
 
 The browser renders pending mention items with a one-tap 👍 button that
 sends `message.reaction_set` through the normal reaction path; it never

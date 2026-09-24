@@ -1,12 +1,13 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
+import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
+// Legacy names remain the input aliases. Pills render the Unicode key.
+export const REACTIONS = LEGACY_REACTIONS;
 
 export function reactionPills(reactions = {}) {
-  return Object.entries(REACTIONS).map(([key, symbol]) => {
-    const memberIds = [...(reactions?.[key] || [])];
-    return { key, symbol, memberIds, count: memberIds.length, used: memberIds.length > 0 };
-  });
+  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
+    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
+  ));
 }
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -16,8 +17,9 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
-export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, emojiOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
+  if (emojiOpen) return "hide-emoji";
   if (mentionOpen) return "hide-mentions";
   if (replyOpen) return "clear-reply";
   if (inThread) return "leave-thread";
@@ -197,7 +199,7 @@ const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
 const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpecial.has(ch) ? `\\${ch}` : ch).join("");
 
 export function mentionHtml(body, members, esc) {
-  const text = String(body ?? "");
+  const text = renderEmojiShortcodes(body);
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return esc(text);
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");

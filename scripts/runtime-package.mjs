@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -33,6 +33,7 @@ optional.push("server/room-directory.mjs"); // #605 opt-in public room directory
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/room-layout.js");
 optional.push("src/needs-attention.js"); // #662: owner "needs your attention" card (imported by src/app.js)
+optional.push("src/emoji.js", "src/emoji-catalog.js"); // Unicode emoji catalog + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
 optional.push("scripts/agent-doctor.mjs");

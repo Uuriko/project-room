@@ -349,7 +349,7 @@
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <div id="room-guide" class="room-guide" hidden>
-            <p>Type <kbd>@</kbd> to mention someone.<span id="room-guide-inbox"> Your private messages are in <strong>Inbox</strong>.</span></p>
+            <p>Type <kbd>@</kbd> to mention someone. Type <kbd>:</kbd> and a short name for emoji.<span id="room-guide-inbox"> Your private messages are in <strong>Inbox</strong>.</span></p>
             <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
           </div>
           <details id="pinned-panel" class="pinned-panel" hidden>
@@ -360,7 +360,8 @@
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
           <dialog id="reaction-sheet" aria-labelledby="reaction-sheet-label">
             <p id="reaction-sheet-label" class="reaction-sheet-label"></p>
-            <div id="reaction-sheet-options" class="reaction-sheet-options" role="group" aria-label="Choose a reaction"></div>
+            <input id="reaction-search" class="reaction-search" type="search" placeholder="Search emoji" aria-label="Search emoji" autocomplete="off" spellcheck="false">
+            <div id="reaction-sheet-options" class="reaction-sheet-options"></div>
             <button id="reaction-sheet-close" class="button ghost" type="button">Close</button>
           </dialog>
           <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
@@ -385,6 +386,7 @@
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
+            <ul id="emoji-list" class="mention-list emoji-list" role="listbox" aria-label="Emoji" hidden></ul>
             <p id="composer-status" class="status form-status" role="status"></p>
           </form>
           <span id="cursor-label" class="sr-only"></span>

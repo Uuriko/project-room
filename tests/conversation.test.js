@@ -50,13 +50,13 @@ test("reaction choices belong to their actors and old retries never reverse a la
   const first = f.send(f.human, T.MESSAGE_REACTION_SET, choice, "like-once");
   f.send(f.agent, T.MESSAGE_REACTION_SET, choice);
   f.send(f.human, T.MESSAGE_REACTION_SET, choice);
-  assert.deepEqual(f.store.snapshot(f.owner, "commons").state.messages[0].reactions.heart, ["agent", "human"]);
+  assert.deepEqual(f.store.snapshot(f.owner, "commons").state.messages[0].reactions["❤️"], ["agent", "human"]);
   f.send(f.human, T.MESSAGE_REACTION_SET, { ...choice, active: false });
   f.restart();
   const retry = f.send(f.human, T.MESSAGE_REACTION_SET, choice, "like-once");
   assert.equal(retry.duplicate, true); assert.equal(retry.sequence, first.sequence);
   const after = f.store.snapshot(f.owner, "commons").state;
-  assert.deepEqual(after.messages[0].reactions.heart, ["agent"]);
+  assert.deepEqual(after.messages[0].reactions["❤️"], ["agent"]);
   assert.deepEqual(after.members, before.members); assert.deepEqual(after.workItems, before.workItems);
   assert.deepEqual(replay(after.eventLog).messages, after.messages);
 });
@@ -270,15 +270,16 @@ test("removeMention strips one @Name token without eating longer names", () => {
   assert.equal(removeMention("Ask @Maya tomorrow", {}), "Ask @Maya tomorrow");
 });
 
-test("reaction pills always list the four types and mark used ones", () => {
-  const empty = reactionPills();
-  assert.deepEqual(empty.map(p => p.key), Object.keys(REACTIONS));
-  assert.equal(empty.every(p => !p.used && p.count === 0), true);
-  const used = reactionPills({ like: ["maya"], heart: ["maya", "instinct"] });
-  assert.equal(used.find(p => p.key === "like").used, true);
-  assert.equal(used.find(p => p.key === "heart").count, 2);
-  assert.equal(used.find(p => p.key === "thinking").used, false);
-  assert.equal(used.find(p => p.key === "celebrate").symbol, "🎉");
+test("reaction pills list used emoji and fold legacy aliases into the same glyph", () => {
+  assert.deepEqual(reactionPills(), []);
+  assert.deepEqual(Object.keys(REACTIONS), ["like", "heart", "celebrate", "thinking"]);
+  const used = reactionPills({ like: ["maya"], heart: ["maya", "instinct"], "🔥": ["ada"] });
+  assert.equal(used.find(p => p.key === "👍").count, 1);
+  assert.equal(used.find(p => p.key === "👍").symbol, "👍");
+  assert.deepEqual(used.find(p => p.key === "❤️").memberIds, ["instinct", "maya"]);
+  assert.equal(used.find(p => p.key === "🔥").count, 1);
+  assert.equal(used.some(p => p.key === "🤔"), false);
+  assert.equal(reactionPills({ like: ["maya"], "👍": ["maya"] }).find(p => p.key === "👍").count, 1);
 });
 
 test("Escape peels mention picker, then reply quote, then thread, and never implies clearing a draft", () => {
