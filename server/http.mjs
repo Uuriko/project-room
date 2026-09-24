@@ -2656,8 +2656,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/review$/.exec(url.pathname);
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
+      const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch;
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimItemMatch
+        ?? workClaimReceiptsMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file. The
@@ -2820,6 +2822,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const workClaimRoute = workClaimsSweepMatch ? "sweep"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
+          : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"
           : workClaimClaimMatch ? "claim"
           : workClaimUpdateMatch ? "update"
