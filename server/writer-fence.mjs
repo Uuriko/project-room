@@ -232,7 +232,14 @@ export const unfencedAdditiveTables = Object.freeze([
   // agent_skill_cards (RC-2026-09-24-202: members-directory skill cards).
   // Purely additive and intentionally NOT fenced — older writers have no
   // code path to it, and the module verifies its own shape on write.
-  "agent_skill_cards"
+  "agent_skill_cards",
+  // identity_link_codes (RC-2026-09-24-210: identity-holder
+  // proof-of-possession for identityId enrollment). Single-use codes are
+  // hash-only rows with a 10-minute TTL, minted by the identity holder and
+  // consumed atomically on enrollment. Purely additive and intentionally
+  // NOT fenced — older writers have no code path to it, and the
+  // mint/consume module verifies its own schema on open.
+  "identity_link_codes"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
