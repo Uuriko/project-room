@@ -138,7 +138,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
               // #953: new members default to t1_readonly; the producer needs
               // write access for work.accepted below. Direct SQL upsert
               // (avoids importing server modules into the check bundle).
-              if (memberId === 'producer') store.db.prepare('INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by) VALUES(\'commons\',?,\'t2_standard\',?,\'owner\') ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier=\'t2_standard\',updated_at=excluded.updated_at,updated_by=\'owner\'').run(memberId, store.now());
+              if (memberId === 'producer') store.db.prepare("INSERT INTO agent_autonomy_tiers(room_id,member_id,autonomy_tier,updated_at,updated_by) VALUES('commons',?,'t2_standard',?,'owner') ON CONFLICT(room_id,member_id) DO UPDATE SET autonomy_tier='t2_standard',updated_at=excluded.updated_at,updated_by='owner'").run(memberId, store.now());
               replyKeys[memberId]=store.issueAccessKey('commons',memberId);
             }
             const reply=prepareInboxResult({store,keys:replyKeys},f.token,f.session.sessionBinding,{sourceId:'private-source'});
