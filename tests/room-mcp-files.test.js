@@ -11,7 +11,7 @@ import { attachmentLimits } from "../server/attachment-schema.mjs";
 import { mcpAttachmentBodyBytes } from "../server/room-attachment-bytes.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
-const FILE_TOOLS = ["room_put_file", "room_list_files", "room_get_file", "room_discard_file"];
+const FILE_TOOLS = ["room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file"];
 
 function serve(t, { now = () => Date.now() } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-files-"));
@@ -56,7 +56,12 @@ test("room file tools stay behind a live identity secret", async t => {
   const denied = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" });
   assert.equal(denied.status, 200);
   assert.equal(denied.body.error.code, -32602);
-  const bad = await rpc(origin, "tools/list", undefined, "pri_" + "x".repeat(43));
+  const deniedCommit = await call(origin, "room_commit_file", { roomId: created.roomId, id: "note", messageId: "msg-1" });
+  assert.equal(deniedCommit.status, 200);
+  assert.equal(deniedCommit.body.error.code, -32602);
+  const bad = await rpc(origin, "tools/call", {
+    name: "room_commit_file", arguments: { roomId: created.roomId, id: "note", messageId: "msg-1" }
+  }, "pri_" + "x".repeat(43));
   assert.equal(bad.status, 401);
   const roomKey = store.issueAccessKey(created.roomId, created.ownerMemberId);
   const keyCall = await call(origin, "room_put_file", {
@@ -64,6 +69,9 @@ test("room file tools stay behind a live identity secret", async t => {
   }, roomKey);
   assert.equal(keyCall.status, 401);
   assert.equal(keyCall.body.result, undefined);
+  const keyCommit = await call(origin, "room_commit_file", { roomId: created.roomId, id: "note", messageId: "msg-1" }, roomKey);
+  assert.equal(keyCommit.status, 401);
+  assert.equal(keyCommit.body.result, undefined);
 });
 
 test("enrolled members upload and download room_attachments through hosted MCP", async t => {
@@ -145,6 +153,171 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   const stored = store.db.prepare("SELECT state, bytes FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "note");
   assert.equal(stored.state, "discarded");
   assert.equal(stored.bytes, null);
+});
+
+test("an enrolled uploader commits a staged file onto a message they posted", async t => {
+  let now = 1_700_000_000_000;
+  const { origin, store, rooms } = await serve(t, { now: () => now });
+  const owner = store.identities.create("Commit owner");
+  const peer = store.identities.create("Commit peer");
+  const outsider = store.identities.create("Commit outsider");
+  const created = rooms.create(owner.secret, {
+    roomId: "commit-den", title: "Commit den", purpose: "Commit a staged file", kind: "personal", displayName: "Commit owner"
+  });
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: peer.identityId, displayName: "Commit peer", permissions: []
+  });
+  const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
+  assert.equal(names.includes("room_commit_file"), true);
+  const posted = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-1", messageId: "msg-1", body: "file lands here"
+  }, owner.secret);
+  assert.equal(posted.value.status, "posted");
+  const peerPosted = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-peer", messageId: "msg-peer", body: "peer chat"
+  }, peer.secret);
+  assert.equal(peerPosted.value.status, "posted");
+  const bytes = Buffer.from("committed room file");
+  const data = bytes.toString("base64");
+  const staged = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "note", filename: "note.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(staged.value.status, "staged");
+  assert.equal(staged.value.attachment.messageId, null);
+  const before = store.room(created.roomId).state.messages.length;
+
+  const shaped = await call(origin, "room_commit_file", { roomId: created.roomId, id: "note" }, owner.secret);
+  assert.equal(shaped.body.error.code, -32602);
+  const missingFile = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "missing", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(missingFile.value.status, 404);
+  assert.equal(missingFile.value.code, "attachment_not_found");
+  const missingMessage = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "missing-msg"
+  }, owner.secret);
+  assert.equal(missingMessage.value.status, 404);
+  assert.equal(missingMessage.value.code, "message_not_found");
+  const peerCommit = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-peer"
+  }, peer.secret);
+  assert.equal(peerCommit.value.status, 403);
+  assert.equal(peerCommit.value.code, "attachment_forbidden");
+  const peerStaged = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "peer-note", filename: "peer.txt", mediaType: "text/plain", data
+  }, peer.secret);
+  assert.equal(peerStaged.value.status, "staged");
+  const ownerTakes = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "peer-note", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(ownerTakes.value.status, 403);
+  assert.equal(ownerTakes.value.code, "attachment_forbidden");
+  assert.equal(store.db.prepare("SELECT state, message_id FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "peer-note").state, "staged");
+  const ontoPeer = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-peer"
+  }, owner.secret);
+  assert.equal(ontoPeer.value.status, 403);
+  assert.equal(ontoPeer.value.code, "attachment_forbidden");
+  const hidden = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-1"
+  }, outsider.secret);
+  assert.equal(hidden.value.status, 401);
+  assert.equal(JSON.stringify(hidden.body).includes(owner.secret), false);
+
+  const committed = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(committed.status, 200);
+  assert.equal(committed.body.error, undefined);
+  assert.equal(committed.value.status, "committed");
+  assert.equal(committed.value.duplicate, false);
+  assert.equal(committed.value.attachment.state, "committed");
+  assert.equal(committed.value.attachment.messageId, "msg-1");
+  assert.equal(committed.value.attachment.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.equal(JSON.stringify(committed.body).includes(owner.secret), false);
+  assert.equal(store.room(created.roomId).state.messages.length, before);
+  const row = store.db.prepare("SELECT state, message_id, length(bytes) AS n FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "note");
+  assert.equal(row.state, "committed");
+  assert.equal(row.message_id, "msg-1");
+  assert.equal(row.n, bytes.length);
+
+  const again = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(again.value.duplicate, true);
+  assert.equal(again.value.attachment.state, "committed");
+  const other = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-2", messageId: "msg-2", body: "second post"
+  }, owner.secret);
+  assert.equal(other.value.status, "posted");
+  const moved = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "note", messageId: "msg-2"
+  }, owner.secret);
+  assert.equal(moved.value.code, "attachment_conflict");
+  assert.equal(store.db.prepare("SELECT message_id FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "note").message_id, "msg-1");
+
+  const listed = await call(origin, "room_list_files", { roomId: created.roomId }, peer.secret);
+  const listedNote = listed.value.files.find(file => file.id === "note");
+  assert.equal(listedNote.state, "committed");
+  assert.equal(listedNote.messageId, "msg-1");
+  assert.equal("data" in listedNote, false);
+  const downloaded = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, peer.secret);
+  assert.equal(downloaded.value.attachment.data, data);
+  const discarded = await call(origin, "room_discard_file", { roomId: created.roomId, id: "note" }, owner.secret);
+  assert.equal(discarded.value.code, "attachment_unavailable");
+
+  now += attachmentLimits.lifetimeMs + 1;
+  const still = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, owner.secret);
+  assert.equal(still.value.attachment.state, "committed");
+  assert.equal(still.value.attachment.data, data);
+
+  const second = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "drop", filename: "drop.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(second.value.status, "staged");
+  const dropped = await call(origin, "room_discard_file", { roomId: created.roomId, id: "drop" }, owner.secret);
+  assert.equal(dropped.value.status, "discarded");
+  const afterDrop = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "drop", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(afterDrop.value.status, 410);
+  assert.equal(afterDrop.value.code, "attachment_unavailable");
+
+  const aging = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "aging", filename: "aging.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(aging.value.status, "staged");
+  now += attachmentLimits.lifetimeMs + 1;
+  const expired = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "aging", messageId: "msg-1"
+  }, owner.secret);
+  assert.equal(expired.value.status, 410);
+  assert.equal(expired.value.code, "attachment_unavailable");
+  const listedExpired = await call(origin, "room_list_files", { roomId: created.roomId }, owner.secret);
+  assert.equal(listedExpired.value.files.some(file => file.id === "aging"), false);
+  const expiredRow = store.db.prepare("SELECT state, message_id, bytes FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "aging");
+  assert.equal(expiredRow.state, "expired");
+  assert.equal(expiredRow.message_id, null);
+  assert.equal(expiredRow.bytes, null);
+
+  const removed = await call(origin, "room_post_message", {
+    roomId: created.roomId, id: "chat-gone", messageId: "msg-gone", body: "will delete"
+  }, owner.secret);
+  assert.equal(removed.value.status, "posted");
+  store.command(owner.secret, created.roomId, {
+    id: "del-gone", type: "message.deleted",
+    data: { messageId: "msg-gone", expectedMessageRevision: 0, reason: "removed" }
+  });
+  const late = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "late", filename: "late.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(late.value.status, "staged");
+  const ontoDeleted = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "late", messageId: "msg-gone"
+  }, owner.secret);
+  assert.equal(ontoDeleted.value.status, 404);
+  assert.equal(ontoDeleted.value.code, "message_not_found");
+  assert.equal(store.db.prepare("SELECT state, message_id FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "late").state, "staged");
 });
 
 test("a pri_ bearer can stage a file larger than the join body cap", async t => {

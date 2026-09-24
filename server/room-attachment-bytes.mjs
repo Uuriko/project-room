@@ -2,10 +2,11 @@
 //
 // attachment-schema.mjs owns the table, the byte caps, and the staged /
 // committed / discarded / expired / deleted states. This module is the store
-// API those rows were missing: stage, list, download, and discard. It does
-// not add a second blob store, and it does not commit a file onto a chat
-// message. Inbox attachment descriptors stay on the account-session inbox
-// routes; those routes do not retain bytes.
+// API those rows were missing: stage, list, download, discard, and commit.
+// Commit sets message_id and state committed on a staged row. It does not
+// add a second blob store and it does not post a chat message. Inbox
+// attachment descriptors stay on the account-session inbox routes; those
+// routes do not retain bytes.
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
@@ -179,6 +180,45 @@ export class RoomAttachmentBytes {
         WHERE room_id=? AND id=? AND state='staged'`).run(roomId, id).changes;
       if (changed !== 1) fail(409, "attachment_conflict", "That attachment changed before it could be discarded");
       return { status: "discarded", roomId, id };
+    });
+  }
+
+  // Bind a staged file to a chat message the caller already posted.
+  // Same id + messageId is a duplicate. A different message does not move it.
+  commit(token, roomId, { id, messageId } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId);
+      if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
+      if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
+      this.expire(roomId, this.store.now());
+      const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+      if (!row) fail(404, "attachment_not_found", "Attachment not found");
+      if (row.uploader_id !== auth.member.id) {
+        fail(403, "attachment_forbidden", "Only the uploader can commit this file onto a message");
+      }
+      if (row.state === "committed" && row.message_id === messageId) {
+        return { status: "committed", duplicate: true, roomId, attachment: view(row) };
+      }
+      if (row.state === "committed") fail(409, "attachment_conflict", "That file is already committed to a message");
+      if (row.state !== "staged") fail(410, "attachment_unavailable", "Only a staged room file can be committed");
+      const message = this.store.room(roomId).state.messages.find(entry => entry.id === messageId);
+      if (!message || message.deletedAt) fail(404, "message_not_found", "Message not found");
+      if (message.authorId !== auth.member.id) {
+        fail(403, "attachment_forbidden", "Commit a file only onto a message you posted");
+      }
+      const changed = this.db.prepare(`UPDATE room_attachments SET state='committed', message_id=?
+        WHERE room_id=? AND id=? AND state='staged' AND uploader_id=? AND message_id IS NULL`).run(
+        messageId, roomId, id, auth.member.id
+      ).changes;
+      if (changed !== 1) {
+        const current = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+        if (current?.state === "committed" && current.message_id === messageId && current.uploader_id === auth.member.id) {
+          return { status: "committed", duplicate: true, roomId, attachment: view(current) };
+        }
+        fail(409, "attachment_conflict", "That attachment changed before it could be committed");
+      }
+      const committed = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+      return { status: "committed", duplicate: false, roomId, attachment: view(committed) };
     });
   }
 }
