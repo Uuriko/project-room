@@ -763,7 +763,9 @@ paths:
         returns ranked evidence, every item carrying a provenance receipt
         (source, url, final_url, retrieved_at, content_sha256, bytes, cache,
         request_id) so facts are citable. Sources: `room` (the room's own fetch
-        history — keyword search over web_fetch_cache), `docs` (local markdown
+        history — keyword search over web_fetch_cache scoped by
+        web_fetch_cache_rooms, so a room only ever sees URLs its own members
+        fetched), `docs` (local markdown
         corpus: docs/, README.md, CHANGELOG.md; Node only), `fetch` (explicit
         `urls[]` through the SSRF-hardened web-fetch service), `provider`
         (env-pluggable external knowledge, e.g. Alexandria via ALEXANDRIA_API_KEY;

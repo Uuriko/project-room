@@ -206,6 +206,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // code path to them, and the module verifies its own schema on open.
   "web_fetch_cache",
   "web_fetch_log",
+  // web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310
+  // follow-up): which rooms fetched each cached URL. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to it, and the
+  // module verifies its own schema on open.
+  "web_fetch_cache_rooms",
   // web_research_log (knowledge router, RC-2026-09-24-310): per-request
   // research journal (question hash, never the question). Purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and the
