@@ -2,7 +2,7 @@
 // burst }) returns an object with tryTake(key, { now }) that refills each
 // key's bucket at `rate` tokens per second up to `burst`, consumes one token
 // per call, and refuses with a Retry-After hint when the bucket is empty.
-// Bucket state lives in a caller-owned Map (pass your own to share across
+// peek(key, { now }) snapshots a bucket without consuming. Bucket state lives in a caller-owned Map (pass your own to share across
 // limiter instances); the limiter itself holds no shared state, so it is
 // safe to construct per request. Time is injectable via { now } for tests.
 // Pure, dependency-free, deterministic; frozen results. HTTP middleware
@@ -36,10 +36,25 @@ export function createLimiter({ rate, burst, store } = {}) {
     const retryAfterMs = Math.ceil(((1 - bucket.tokens) / rate) * 1000);
     return Object.freeze({ allowed: false, remaining: 0, retryAfterMs });
   };
+  // Non-consuming snapshot for diagnostics: { remaining, retryAfterMs,
+  // fullAtMs }. fullAtMs is null when the bucket is already full, otherwise the
+  // instant it returns to full at the current refill rate.
+  const peek = (key, { now } = {}) => {
+    check(typeof key === "string" && key.length > 0 && key.length <= 256, "key must be a non-empty string up to 256 chars");
+    const at = now ?? Date.now();
+    check(typeof at === "number" && Number.isFinite(at), "now must be a finite number");
+    if (!buckets.has(key)) return Object.freeze({ remaining: burst, retryAfterMs: 0, fullAtMs: null });
+    const bucket = buckets.get(key);
+    refill(bucket, at);
+    const remaining = Math.floor(bucket.tokens);
+    const retryAfterMs = bucket.tokens >= 1 ? 0 : Math.ceil(((1 - bucket.tokens) / rate) * 1000);
+    const fullAtMs = bucket.tokens >= burst ? null : Math.ceil(at + ((burst - bucket.tokens) / rate) * 1000);
+    return Object.freeze({ remaining, retryAfterMs, fullAtMs });
+  };
   const reset = key => {
     check(typeof key === "string" && key.length > 0, "key must be a non-empty string");
     buckets.delete(key);
   };
-  return Object.freeze({ tryTake, reset, rate, burst });
+  return Object.freeze({ tryTake, peek, reset, rate, burst });
 }
 export { RateLimitError };

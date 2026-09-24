@@ -64,13 +64,19 @@ export class TelegramLiveStatus {
 }
 const iso = ms => Number.isSafeInteger(ms) ? new Date(ms).toISOString() : null;
 // What the connection card shows. Binding names and states only; never values or hashes.
-export function telegramLiveView({ config, connection, record, status = null, importAvailable = false, now = Date.now() }) {
+// sendBudget is an optional diagnostics attachment from the send-budget
+// registry (task #41): { remaining, resetsAtMs }. It is included only when
+// provided, so callers without budgets see the previous shape unchanged.
+export function telegramLiveView({ config, connection, record, status = null, importAvailable = false, sendBudget = null, now = Date.now() }) {
   if (record.channel !== "telegram") return null;
   const live = status ? status.snapshot(record.accountId, record.id) : { lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null };
   const storedHash = connection?.webhook?.secretHash ?? null;
   const webhook = !storedHash ? "unset" : !config.configured ? "set" : storedHash === config.webhookSecretHash() ? "matches" : "differs";
-  return { contractVersion: 1, channel: "telegram", state: config.state, bindings: config.bindings, missing: config.missing, invalid: config.invalid,
+  const view = { contractVersion: 1, channel: "telegram", state: config.state, bindings: config.bindings, missing: config.missing, invalid: config.invalid,
     webhook, webhookSetAt: iso(connection?.webhook?.updatedAt), lastUpdateReceivedAt: iso(live.lastUpdateReceivedAt), receivedUpdates: live.receivedUpdates,
     lastSendResult: live.lastSendResult ? { at: iso(live.lastSendResult.at), outcome: live.lastSendResult.outcome, code: live.lastSendResult.code } : null,
     importAvailable, rotation: webhookRotationView(connection?.webhook, now) };
+  if (sendBudget !== null && typeof sendBudget === "object")
+    view.sendBudget = { remaining: sendBudget.remaining ?? null, resetsAt: iso(sendBudget.resetsAtMs ?? null) };
+  return view;
 }
