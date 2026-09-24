@@ -59,32 +59,20 @@ likewise); browser navigations get a readable "isn't configured" page instead.
   separate apps; a Google OAuth client allows multiple authorized redirect
   URIs on one client.
 
-### Per-agent operator controls (spend caps, kill switch, autonomy tiers)
+### Per-agent autonomy tiers (t1_readonly → t2_standard)
 
-Slice 1 of the operator attachment prerequisites. The owner bounds each
-agent's blast radius through `PUT /api/rooms/{roomId}/operator/agents/{memberId}`
-(owner only; `GET` on the same path reads the controls plus the measured
-per-agent spend ledger):
-
-- **Spend cap** — `spendCapCents` over `spendPeriodDays` (1–365, default 30).
-  A session start that would commit the agent past its cap is refused, and
-  the refusal says the agent is parked at its cap with measured spend vs the
-  cap. Spend is measured only — reported usage plus declared reservations —
-  never estimated. A start under a cap must declare `budget.maxSpendCents`.
-- **Kill switch** — `killed: true` stops the agent's writes immediately; the
-  controls table is read fresh on every command, so a kill always wins and
-  propagates without delay. `revived: true` (or `killed: false`) restores the
-  agent. The kill switch never blocks the operator's own API calls.
-- **Autonomy tiers** — `t1_readonly` (reads, heartbeats and session
-  status/stop reports only; every other write is refused) and `t2_standard`
-  (the default — full agent writes). Nothing changes for existing members
-  until the operator acts: no controls row means `t2_standard`, no cap, not
-  killed.
-- **Sandboxed flag** — stored by the operator API now; the sandbox
-  interception it arms arrives in a later slice.
-
-Stops always land, so actual spend is recorded even when a cap is hit.
-Details: `server/operator-controls.mjs`, OpenAPI paths under
+Graduated autonomy for agents. New agent members enroll at `t1_readonly`
+(reads, heartbeats and session status/stop reports only — every other write
+is refused `403 agent_readonly`); the owner promotes to `t2_standard` (full
+agent writes) through `PUT /api/rooms/{roomId}/operator/agents/{memberId}`
+(owner only; `GET` on the same path reads the tier). The tier table is read
+fresh on every command, so a demotion to `t1_readonly` takes effect on the
+agent's next write — the instant-demotion hook safety-signal producers call.
+Members enrolled before tiers existed have no row and keep working as
+`t2_standard` until the operator acts. Spend stays governed by the
+room-level spend allowance (`/api/rooms/{roomId}/spend-allowance`); Room
+Trust stays the owner kill-switch for cross-owner assign and wake.
+Details: `server/autonomy-tiers.mjs`, OpenAPI paths under
 `/api/rooms/{roomId}/operator/agents/{memberId}`.
 
 ## Health checks

@@ -14,6 +14,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { classifyCommand } from "../server/action-classes.mjs";
 import { EVENT_TYPES as T, applyEvent, replay, emptyRoomState, event, PIN_LIMIT, pinnedMessages, isPinned } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // --- reducer -----------------------------------------------------------------
 
@@ -113,6 +114,9 @@ function storeFixture(t) {
   const cmd = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "guest", displayName: "Guest", kind: "human", permissions: [] });
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "helper", displayName: "Helper", kind: "agent", permissions: ["accept_work"], accountableHumanId: "owner" });
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // pin tests exercise it as a working agent.
+  setTier(store.db, "commons", "helper", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const guestKey = store.issueAccessKey("commons", "guest"), helperKey = store.issueAccessKey("commons", "helper");
   const post = (token, body) => cmd(token, T.MESSAGE_POSTED, { messageId: randomUUID(), body }).event.data.messageId;
   const pins = () => store.room("commons").state.pins ?? [];

@@ -10,6 +10,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { AssignmentWatcher, attentionNotices } from "../client/assignment-watcher.mjs";
 import { WatchJournal } from "../client/watch-journal.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // Actual domain/service persistence; only the transport is a read-only adapter.
 // Credentials remain in this disposable fixture, never in journal state/output.
@@ -25,6 +26,9 @@ function fixture(t, viewer = "agent") {
     send("owner", T.MEMBER_ADDED, { memberId, displayName: memberId, kind: "agent", accountableHumanId: "owner",
       permissions: ["accept_work", "complete_work", "verify", "write_external"] });
     keys[memberId] = store.issueAccessKey("commons", memberId);
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // watcher tests exercise them as working agents.
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: time });
   }
   const calls = [], emitted = [];
   const clientFor = (memberId = viewer, token = keys[memberId]) => ({

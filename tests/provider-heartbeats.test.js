@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-heartbeats-"));
@@ -29,6 +30,10 @@ test("provider heartbeat dashboard (round-2 #118)", async t => {
   // Two agent providers; one idle, one with a live session heartbeat.
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "gpu-a", displayName: "GPU A", kind: "agent", permissions: ["accept_work"] });
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "gpu-b", displayName: "GPU B", kind: "agent", permissions: ["accept_work"] });
+  // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+  // heartbeat test exercises them as working agents.
+  for (const memberId of ["gpu-a", "gpu-b"])
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const gpuA = store.issueAccessKey("commons", "gpu-a");
   const workItemId = randomUUID();
   cmd(ownerKey, T.WORK_PROPOSED, { workItemId, title: "Render frames", definitionOfDone: "Frames posted.", accountableMemberId: "gpu-a", mode: "read" });

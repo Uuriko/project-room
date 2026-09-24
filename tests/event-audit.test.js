@@ -8,14 +8,20 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-audit-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const add = (memberId, displayName) => store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
-    data: { memberId, displayName, kind: "agent", permissions: ["accept_work", "complete_work"] } });
+  const add = (memberId, displayName) => {
+    store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId, displayName, kind: "agent", permissions: ["accept_work", "complete_work"] } });
+    // Graduated autonomy tiers: the fixture agents are operator-promoted so the
+    // audit tests exercise them as working agents.
+    setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  };
   add("agent", "Test agent");
   add("agent2", "Second agent");
   const agentKey = store.issueAccessKey("commons", "agent");

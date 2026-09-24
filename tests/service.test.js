@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 function fixture(t) {
@@ -20,6 +21,9 @@ function fixture(t) {
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   for (const [id, kind] of [["human", "human"], ["agent", "agent"]]) store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: id, displayName: id, kind, permissions: ["accept_work", "complete_work", "verify"] }));
+  // Graduated autonomy tiers: the fixture agent is operator-promoted so the
+  // service tests exercise it as a working agent.
+  setTier(store.db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const human = store.issueAccessKey("commons", "human");
   const agent = store.issueAccessKey("commons", "agent");
   // Consent-bound DMs: the human→agent test DM needs the agent's approval.
