@@ -269,7 +269,12 @@ test("HTTP endpoints deny anonymous and oversized commands and expose only expli
   assert.equal(readyHead.status, 200);
   assert.equal(await readyHead.text(), "");
   assert.equal((await request("/api/rooms/commons", { token: null })).status, 401);
-  assert.equal((await request("/api/rooms/commons/commands", { method: "POST", data: command(T.MESSAGE_POSTED, { body: "x".repeat(17000) }) })).status, 413);
+  const longMessage = await request("/api/rooms/commons/commands", { method: "POST", data: command(T.MESSAGE_POSTED, { body: "x".repeat(17000) }) });
+  assert.equal(longMessage.status, 201, JSON.stringify(await longMessage.clone().json().catch(() => null)));
+  const overChars = await request("/api/rooms/commons/commands", { method: "POST", data: command(T.MESSAGE_POSTED, { body: "x".repeat(65537) }) });
+  assert.equal(overChars.status, 422);
+  assert.match((await overChars.json()).error.message, /65536/);
+  assert.equal((await request("/api/rooms/commons/commands", { method: "POST", data: command(T.MESSAGE_POSTED, { body: "x".repeat(600000) }) })).status, 413);
   for (const path of ["/server.mjs", "/server/store.mjs", "/.data/room.sqlite", "/src/seed.js", "/src/storage.js", "/package.json"]) assert.equal((await request(path, { token: null })).status, 404);
   const page = await request("/", { token: null });
   assert.equal(page.status, 200); assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);

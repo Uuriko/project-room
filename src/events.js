@@ -6,6 +6,13 @@ import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields, ensureWorkControlDefaults } from "./work-item-session.js";
 
+// message.posted and message.edited bodies. Other event strings stay at 4,096.
+// 65,536 characters is far under the 4 MiB room projection and Durable Object
+// SQLite row limits. Worst-case JSON escaping is 6 bytes per character
+// (\uXXXX), about 384 KiB, which fits the 512 KiB message command ceiling.
+export const MAX_MESSAGE_BODY_CHARS = 65536;
+export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
+
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
@@ -455,7 +462,14 @@ function validateEnvelope(incoming) {
   for (const [key, value] of Object.entries(incoming.data)) {
     if (value === null) continue;
     if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
-    if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
+    if (typeof value === "string") {
+      const messageBody = key === "body" && (incoming.type === EVENT_TYPES.MESSAGE_POSTED || incoming.type === EVENT_TYPES.MESSAGE_EDITED);
+      const limit = messageBody ? MAX_MESSAGE_BODY_CHARS : 4096;
+      if (!value.trim() || value.length > limit) {
+        if (messageBody && value.trim()) throw new Error(`body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
+        throw new Error(`Invalid ${key}`);
+      }
+    }
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities", "scopes", "acceptedScopes"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);

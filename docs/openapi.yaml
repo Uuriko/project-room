@@ -264,8 +264,10 @@ paths:
           Owner-only. `general` cannot be archived. Archived channels reject
           new messages (409 channel_archived).
         Messages carry `channelId`; omitted defaults to `general`. `message.posted`
-        data.body is 1 to 4096 characters (the client `say()` refuses longer;
-        the whole command envelope is capped at 16 KiB, 413 `too_large`).
+        and `message.edited` data.body is 1 to 65536 characters. A longer body
+        is refused with that limit named (`body must be at most 65536 characters`).
+        The client `say()` uses the same ceiling. Those two commands may be up
+        to 512 KiB (413 `too_large`); every other command stays at 16 KiB.
         Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EVENT_TYPES, WORK_STATES, applyEvent, event, replay } from "../src/events.js";
+import { EVENT_TYPES, WORK_STATES, applyEvent, event, replay, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 
 const ROOM_ID = "room-project-room-v0";
@@ -25,6 +25,18 @@ test("an exact duplicate event is idempotent", () => {
   const twice = applyEvent(once, posted);
   assert.equal(once.messages.length, state.messages.length + 1);
   assert.equal(twice.messages.length, once.messages.length);
+});
+
+test("message bodies may be 65536 characters and name the limit when longer", () => {
+  const state = baseState();
+  const accepted = applyEvent(state, fixedEvent("long-body", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "x".repeat(MAX_MESSAGE_BODY_CHARS) }));
+  assert.equal(accepted.messages.at(-1).body.length, MAX_MESSAGE_BODY_CHARS);
+  assert.throws(() => applyEvent(state, fixedEvent("too-long-body", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "x".repeat(MAX_MESSAGE_BODY_CHARS + 1) })),
+    new RegExp(`body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`));
+  assert.throws(() => applyEvent(state, fixedEvent("blank-body", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "   " })), /Invalid body/);
+  assert.throws(() => applyEvent(state, fixedEvent("long-title", EVENT_TYPES.WORK_PROPOSED, "potter", {
+    workItemId: "work-long-title", title: "t".repeat(4097), definitionOfDone: "done", accountableMemberId: "codex", mode: "read"
+  })), /Invalid title/);
 });
 
 test("room conversation can address a human or agent without creating work", () => {

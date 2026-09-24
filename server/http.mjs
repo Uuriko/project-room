@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
-import { validId, memberCan } from "../src/events.js";
+import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
@@ -3794,7 +3794,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
           rate(`guest-post:${rateHash(selected.token)}`, 120);
         }
-        const result = store.command(selected.token, roomId, await body(req), fence);
+        const result = store.command(selected.token, roomId, await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES }), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "return-brief" && req.method === "GET") {

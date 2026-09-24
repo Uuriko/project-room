@@ -119,9 +119,11 @@ test("agent client: say posts room messages and targeted DMs", async t => {
   assert.ok(JSON.stringify(peerThread).includes("Psst, agent-two"));
 
   // Local validation refuses bad bodies without a network call.
-  assert.throws(() => me.say(""), /1 to 4096/);
-  assert.throws(() => me.say("   "), /1 to 4096/);
-  assert.throws(() => me.say("x".repeat(4097)), /1 to 4096/);
+  const longer = await me.say("x".repeat(4097));
+  assert.equal(longer.event.data.body.length, 4097);
+  assert.throws(() => me.say(""), /1 to 65536/);
+  assert.throws(() => me.say("   "), /1 to 65536/);
+  assert.throws(() => me.say("x".repeat(65537)), /1 to 65536/);
   assert.throws(() => me.say("hi", { toMemberId: "not an id!" }), /member id/);
 });
 

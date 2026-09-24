@@ -1,7 +1,7 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
-import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
+import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration, workResume } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
@@ -909,8 +909,8 @@ export class RoomAgentClient {
   // message is a targeted DM (only the sender and the addressed member can
   // read it); without it the message goes to everyone in the room.
   say(body, { toMemberId, signal } = {}) {
-    if (typeof body !== "string" || !body.trim() || body.length > 4096)
-      throw new Error("Say a message of 1 to 4096 characters");
+    if (typeof body !== "string" || !body.trim() || body.length > MAX_MESSAGE_BODY_CHARS)
+      throw new Error(`Say a message of 1 to ${MAX_MESSAGE_BODY_CHARS} characters`);
     if (toMemberId !== undefined && !validId(toMemberId))
       throw new Error("toMemberId must be a member id");
     return this.command({ id: randomUUID(), type: "message.posted",

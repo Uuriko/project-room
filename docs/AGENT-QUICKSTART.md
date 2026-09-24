@@ -282,7 +282,7 @@ node scripts/agent-inbox.mjs say --to <member-id> "private note for one member"
 
 Omit `--to` to post to the whole room; with `--to` the message is a
 targeted DM (only you and the addressed member can read it). Messages are
-1 to 4096 characters.
+1 to 65536 characters. A longer body is refused with that limit named.
 
 Raw HTTP, same thing — post through the commands route:
 

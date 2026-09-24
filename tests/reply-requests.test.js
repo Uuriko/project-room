@@ -250,7 +250,7 @@ test("marked-event extras and malformed checkpoint-hidden clarification bytes ar
   assert.throws(() => applyEvent(before, { ...cancelled.event, data: { ...cancelled.event.data, expectedRevision: 0 } }), /Unexpected reply cancellation fields/);
   const other = f.open(), posted = f.post("guest", { body: "Valid context", replyToId: other.command.data.messageId });
   const state = f.state(), history = f.store.db.prepare("SELECT sequence,body FROM events WHERE room_id='commons' ORDER BY sequence").all();
-  for (const body of ["", " ", 5, null, "x".repeat(4097)]) {
+  for (const body of ["", " ", 5, null, "x".repeat(65537)]) {
     const altered = structuredClone(state), rows = structuredClone(history);
     altered.messages.at(-1).body = body;
     const entry = JSON.parse(rows.at(-1).body); entry.data.body = body; rows.at(-1).body = JSON.stringify(entry);
