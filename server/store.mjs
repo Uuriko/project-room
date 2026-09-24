@@ -2530,16 +2530,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // report cumulative spend, rounds, and tool calls. Both are optional;
     // nothing else is accepted. suspendReason/resumeApproved are system-set —
     // a caller that smuggles them in is rejected, not silently honoured.
-    const required = ["requestId", "workItemId", "expectedRevision", "action",
+    const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "outputs"] : [];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "outputs"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
-      fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
+      fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
     if (!validId(request.requestId) || !validId(request.workItemId)
-      || !Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0
+      || (request.expectedRevision !== undefined && (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0))
       || !["set_status", "request_stop"].includes(request.action)) {
-      fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
+      fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
     if (request.action === "set_status" && !isSessionStatus(request.status)) fail(422, "invalid_session_status", "Choose a session status");
     if (request.spendCents !== undefined && (!Number.isSafeInteger(request.spendCents) || request.spendCents < 0))
@@ -2604,7 +2604,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       return null;
     });
-    if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded; report status and ask the room owner or a claim manager to resume");
+    if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
     if (tripped?.kind === "budget") fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -2628,7 +2628,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (sess.status === "suspended" && sess.suspended_by === "round_limit") {
           const isOwner = roomState.room.ownerId === auth.member.id;
           if (!isOwner && !memberCan(roomState, auth.member.id, "manage_claims"))
-            fail(409, "round_limit_exceeded", "Session is paused by its round limit; report status and ask the room owner or a claim manager to resume");
+            fail(409, "round_limit_exceeded", "Session is paused by its round limit. The next mention or post resumes it");
           resumeApproved = true;
         }
       }
@@ -2676,7 +2676,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       catch (error) { fail(422, "invalid_session_environment", error.message); }
       try { outputs = validateAttemptOutputs(request.outputs); }
       catch (error) { fail(422, "invalid_session_outputs", error.message); }
-      const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
+      const data = { workItemId: request.workItemId };
+      if (request.expectedRevision !== undefined) data.expectedRevision = request.expectedRevision;
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
@@ -3301,13 +3302,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // refused DM never persists and never wakes its target.
         this.dmConsents.requireDmAllowed(roomId, auth.member.id, command.data.toMemberId);
       }
-      // Room Trust off: a post that would wake a cross-owner agent is refused
-      // before it is stored, so the sender gets a clear error and nothing wakes.
-      // Ordinary room chat that does not address a cross-owner agent still posts.
-      if (command.type === T.MESSAGE_POSTED) {
-        const blocked = firstBlockedWakeTarget(room.state, auth.member.id, agentWakeTargetIds(room.state, auth.member.id, command.data));
-        if (blocked) fail(403, TRUST_OFF_CODE, trustOffMessage(blocked));
-      }
+      // Room Trust off: a post that would wake a cross-owner agent still
+      // lands. The wake is skipped and the result carries a note. Assign
+      // stays blocked in the reducer.
+      const skippedWakes = command.type === T.MESSAGE_POSTED
+        ? agentWakeTargetIds(room.state, auth.member.id, command.data)
+          .filter(id => firstBlockedWakeTarget(room.state, auth.member.id, [id]))
+        : [];
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
@@ -3427,7 +3428,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // for any subscription the agent registered. Runs in the same
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
-      if (command.type === T.MESSAGE_POSTED) this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+      if (command.type === T.MESSAGE_POSTED) {
+        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+        state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
+      }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
@@ -3486,7 +3490,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       } catch (error) {
         console.error("webhook fan-out failed:", error?.message ?? error);
       }
-      return { sequence, event: incoming, duplicate: false };
+      const note = skippedWakes.length
+        ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
+        : null;
+      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}) };
     });
   }
 
@@ -3522,6 +3529,49 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       escalate: decision.escalate, signals: decision.signals, at: this.now() });
   }
 
+  // A round-limit pause clears when the paused worker is mentioned, DM'd,
+  // or posts. The resume is a normal session.status_changed with
+  // resumeApproved, so replay still refuses a status change that lacks it.
+  // Runs inside the message transaction. A resume that cannot apply is
+  // skipped; the post still stands. The room event cap is unchanged.
+  resumeRoundLimitPauses(roomId, state, senderMemberId, messageEvent, sequence) {
+    const body = typeof messageEvent?.data?.body === "string" ? messageEvent.data.body : "";
+    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, {}, body, senderMemberId));
+    const dmId = typeof messageEvent?.data?.toMemberId === "string" ? messageEvent.data.toMemberId : "";
+    let next = state;
+    let seq = sequence;
+    for (const item of Object.values(state.workItems ?? {})) {
+      if (seq >= PILOT_LIMITS.eventsPerRoom) break;
+      const session = sessionRecord(item);
+      if (session.status !== "suspended" || session.suspended_by !== "round_limit") continue;
+      const worker = session.worker_member_id;
+      if (!worker) continue;
+      if (senderMemberId !== worker && !mentioned.has(worker) && dmId !== worker) continue;
+      const actor = state.members?.[worker];
+      const can = actor && actor.active !== false && (
+        (worker === item.accountableMemberId && memberCan(state, worker, "accept_work"))
+        || memberCan(state, worker, "steer"));
+      if (!can) continue;
+      const incoming = event({
+        type: T.SESSION_STATUS_CHANGED, roomId, actorId: worker, at: messageEvent.at,
+        idempotencyKey: hash(`${messageEvent.id}:resume:${item.id}`), causationId: messageEvent.id,
+        data: { workItemId: item.id, status: "active", resumeApproved: true }
+      });
+      let resumed;
+      try { resumed = compact(applyEvent(next, incoming)); }
+      catch { continue; }
+      const projection = JSON.stringify(resumed);
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
+      seq += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
+      next = resumed;
+    }
+    if (seq !== sequence) {
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(seq, JSON.stringify(next), roomId);
+    }
+    return next;
+  }
+
   // Wake-on-mention for message.posted: resolve @mentions and the DM target
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
@@ -3531,8 +3581,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
-      // Defense in depth: Trust off never enqueues a cross-owner wake, even
-      // if a message reached this point. The command path refuses that post first.
+      // Trust off skips the wake. The post already landed; the command result
+      // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
       const link = linkOf.get(roomId, memberId);
       if (!link) continue;

@@ -55,12 +55,13 @@ Unknown keys and empty budgets are rejected.
   `session.status_changed` to `suspended` with `suspendReason:
   "round_limit"` in its own committing transaction and rejects the
   caller's mutation with `409 round_limit_exceeded`. The worker keeps its
-  claim through the pause but cannot self-resume — any resume by the
-  worker is rejected with the same code. Only the room owner (or a member
-  with `manage_claims`) can resume; the approved resume is recorded with
-  `resumeApproved: true`, restarts the round count at 0, and hands the
-  session back to the paused worker. The applier re-checks
-  `resumeApproved`, so a tampered log entry cannot smuggle a resume past.
+  claim through the pause. `set_status` from the worker does not clear it.
+  The next mention of that worker, a direct message to them, or their next
+  post does: the room records `session.status_changed` with
+  `resumeApproved: true`, restarts the round count at 0, and keeps the
+  worker. The room owner (or a member with `manage_claims`) can still
+  resume with `set_status`. The applier re-checks `resumeApproved`, so a
+  status change without that flag cannot smuggle a resume past.
   The room owner is notified of every pause and every enforcement stop,
   even when they are not the accountable member on the card.
 - **Attempts.** A start that would exceed `maxAttempts` is rejected with

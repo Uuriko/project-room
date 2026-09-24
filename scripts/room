@@ -334,6 +334,25 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
     def prose_reason:
       gsub("[ \\t][ \\t]+"; " ") | gsub("\\n"; " ")
       | .[0:280] | gsub("^[ \\t]+|[ \\t]+$"; "");
+    # Spacing and order: "[ claim ][ quill ]", "[claim][quill]", and
+    # "[quill] [ claim ]" all become the glued "[quill][claim]" form.
+    # Unknown bracket pairs are left alone. Fenced blocks still win.
+    def header_kind($t):
+      (["claim", "receipt", "done"] | index($t | ascii_downcase));
+    def header_lane($t):
+      ($t | test("^[A-Za-z0-9_-]+$"));
+    def normalize_header:
+      if test("^[ \\t]*\\[[^\\]\\r\\n]+\\][ \\t]*\\[[^\\]\\r\\n]+\\]") then
+        capture("^(?<lead>[ \\t]*)\\[(?<a>[^\\]\\r\\n]+)\\][ \\t]*\\[(?<b>[^\\]\\r\\n]+)\\](?<tail>[\\s\\S]*)$") as $m
+        | ($m.a | gsub("^[ \\t]+|[ \\t]+$"; "")) as $a
+        | ($m.b | gsub("^[ \\t]+|[ \\t]+$"; "")) as $b
+        | if (header_kind($a) != null) and header_lane($b) and (header_kind($b) == null) then
+            "[" + $b + "][" + ($a | ascii_downcase) + "]" + $m.tail
+          elif (header_kind($b) != null) and header_lane($a) and (header_kind($a) == null) then
+            "[" + $a + "][" + ($b | ascii_downcase) + "]" + $m.tail
+          else . end
+      else . end;
+
     def prose_claim($lane):
       . as $b
       | ($b | prose_files) as $files
@@ -348,7 +367,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at
-      | ($body | split("\n")[0]) as $first
+      | ($body | split("\n")[0] | normalize_header) as $first
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
