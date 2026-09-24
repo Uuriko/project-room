@@ -8,7 +8,6 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
@@ -26,8 +25,6 @@ import {
   WEB_RESEARCH_RATE_PER_MEMBER_PER_DAY,
 } from "../server/web-research.mjs";
 import { WebFetchError } from "../server/web-fetch.mjs";
-
-const sha256 = text => createHash("sha256").update(String(text), "utf8").digest("hex");
 
 // Minimal fake store: real SQLite DB + injectable webFetch + controllable clock.
 function makeService(opts = {}, seed) {

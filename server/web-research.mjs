@@ -336,7 +336,6 @@ export class WebResearch {
 
   // -- Planner: deterministic, no model. Returns [{ source, status, reason, cost }].
   plan(req) {
-    const keywords = researchKeywords(req.question);
     const prov = req.sources.includes("provider") ? providerStatus(true) : null;
     const plan = [];
     if (req.sources.includes("room")) {
@@ -409,52 +408,12 @@ export class WebResearch {
   }
 
   // -- room leg: the room's own fetch memory.
-  searchRoomCache(req, keywords, requestId, now) {
-    // INTERIM DISABLE (2026-09-24): cross-room disclosure — web_fetch_cache
-    // is global with no room scope. Defense in depth: the planner already
-    // marks this leg "disabled", but never return rows from here regardless.
+  // INTERIM DISABLE (2026-09-24): cross-room disclosure — web_fetch_cache
+  // is global with no room scope. The planner marks this leg "disabled" and
+  // this method returns nothing until the room-scoped web_fetch_cache_rooms
+  // fix lands. (Full query body preserved in git history.)
+  searchRoomCache(_req, _keywords, _requestId, _now) {
     return [];
-    if (!keywords.length) return [];
-    const clauses = keywords.map(() => "(url LIKE ? OR metadata_json LIKE ?)").join(" OR ");
-    const params = keywords.flatMap(kw => [`%${kw}%`, `%${kw}%`]);
-    let rows = [];
-    try {
-      rows = this.db.prepare(
-        `SELECT key, url, final_url, markdown, metadata_json, bytes, fetched_at
-         FROM web_fetch_cache WHERE ${clauses} LIMIT ${WEB_RESEARCH_CACHE_SCAN_LIMIT}`).all(...params);
-    } catch { return []; }
-    const scored = [];
-    for (const row of rows) {
-      let title = "";
-      try { title = JSON.parse(row.metadata_json)?.title ?? ""; } catch { /* ignore */ }
-      const haystack = `${row.url} ${row.final_url} ${title}`.toLowerCase();
-      let score = 0;
-      for (const kw of keywords) if (haystack.includes(kw)) score++;
-      if (score > 0) scored.push({ row, title, score });
-    }
-    scored.sort((a, b) => b.score - a.score || b.row.fetched_at - a.row.fetched_at);
-    return scored.slice(0, req.maxEvidence).map(({ row, title }, i) => {
-      const passages = extractHighlights(row.markdown, req.question, 2, title);
-      const excerpt = passages.join("\n\n");
-      return {
-        rank: i,
-        source: "room",
-        id: `room:${row.key.slice(0, 8)}`,
-        url: row.final_url,
-        title: title || row.final_url,
-        excerpt,
-        provenance: this.provenance({
-          source: "room",
-          url: row.url,
-          finalUrl: row.final_url,
-          retrievedAt: row.fetched_at,
-          content: excerpt || row.markdown.slice(0, 4000),
-          bytes: row.bytes,
-          cache: { status: "hit", age_ms: Math.max(0, now - row.fetched_at) },
-          requestId,
-        }),
-      };
-    });
   }
 
   // -- docs leg: local markdown corpus (Node only).
