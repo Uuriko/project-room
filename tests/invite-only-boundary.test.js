@@ -38,6 +38,11 @@ const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /api/auth/gmail/callback": [undefined, 200],
   "GET /api/health": [undefined, 200],
+  // Hosted MCP is outside the /api template scan. Unauthenticated GET/POST
+  // stay the public join surface (200). The bearer profile is covered by
+  // tests/room-mcp-auth.test.js.
+  "GET /mcp": [undefined, 200],
+  "POST /mcp": [{}, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],
   // Agent directory reads: public documents without a credential; an
@@ -158,7 +163,7 @@ test("unauthenticated endpoint inventory equals the openapi security: [] set", a
   }
   assert.deepEqual([...served.keys()].filter(key => !declared.has(key)).map(key => served.get(key)), [],
     "served without a credential but not declared security: [] in docs/openapi.yaml; declare it there and in docs/ROUTE-AUTH-TABLE.md + docs/INVITE-ONLY-CHECKLIST.md section 1, or guard it");
-  assert.deepEqual([...declared.keys()].filter(key => !served.has(key)), [],
+  assert.deepEqual([...declared.keys()].filter(key => / \/api\//.test(key) && !served.has(key)), [],
     "declared security: [] in docs/openapi.yaml but refused or not served anonymously");
   // Every declared route states what an anonymous caller gets; no stale probes.
   assert.deepEqual(Object.keys(PROBES).filter(key => !declared.has(key)), [], "probe for a route that is not open in docs/openapi.yaml");

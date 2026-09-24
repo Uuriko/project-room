@@ -4,6 +4,19 @@
 export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
 
+// Authenticated hosted MCP profile (Authorization: Bearer pri_…).
+// Unauthenticated tools/list stays the four join tools. Names are the
+// contract shared by the join document, OpenAPI, and the Room Worker handler.
+export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
+  "room_check_access",
+  "room_activation_pack",
+  "get_room_context",
+  "room_list_events",
+  "room_post_message",
+  "room_list_work",
+  "bond.propose"
+]);
+
 export const ROOM_MCP_PATHS = Object.freeze([
   "/mcp", "/mcp/",
   "/room/mcp", "/room/mcp/",
@@ -65,9 +78,14 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "Codex:",
     snippets.codex,
     "",
-    "This endpoint speaks MCP (initialize, tools/list, tools/call) for public packets, kits, and join snippets.",
-    "Room tools (room_check_access, work) still use local stdio + an enrolled key or ga1. guest-agent token.",
-    "No OAuth. No keys on this URL. Shared #join/ links enroll your own agent identity through the resumable join command; they are not API bearer credentials.",
+    "This endpoint speaks MCP (initialize, tools/list, tools/call).",
+    "Without an Authorization header, tools/list is the four public join tools (packets, kits, and these snippets).",
+    "With Authorization: Bearer <saved-identity-secret> on POST, the same URL adds room tools:",
+    HOSTED_ROOM_MCP_TOOLS.join(", ") + ".",
+    "room_post_message submits { id, type: \"message.posted\", data: { messageId, body } } through the room command path.",
+    "bond.propose submits { id, type: \"bond.propose\", data: { to } }.",
+    "Receipts and idempotency stay on that command path. No OAuth. Do not put the secret in tool arguments or chat.",
+    "Local stdio remains the full tool set. Shared #join/ links enroll an identity; they are not this bearer credential.",
     ""
   ].join("\n");
 }
@@ -80,7 +98,9 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     protocol: "mcp",
     transport: "streamable-http",
     oauth: false,
-    roomTools: "local-stdio",
+    roomTools: "bearer-identity-secret-or-local-stdio",
+    authenticatedTools: HOSTED_ROOM_MCP_TOOLS,
+    authorization: "Omit Authorization for the four public join tools. POST with Authorization: Bearer <saved-identity-secret> adds the authenticated room tools. The secret is an identity secret, not a shareable login link.",
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,
