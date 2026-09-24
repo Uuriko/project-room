@@ -218,7 +218,10 @@ paths:
         - `channel.archived`: data {channelId, expectedRevision}.
           Owner-only. `general` cannot be archived. Archived channels reject
           new messages (409 channel_archived).
-        Messages carry `channelId`; omitted defaults to `general`. Replies
+        Messages carry `channelId`; omitted defaults to `general`. `message.posted`
+        data.body is 1 to 4096 characters (the client `say()` refuses longer;
+        the whole command envelope is capped at 16 KiB, 413 `too_large`).
+        Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the
         thread's channel (same event; ignored for DMs and work proposals).
