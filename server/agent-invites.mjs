@@ -18,6 +18,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
+import { assignEnrollmentTier } from "./autonomy-tiers.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -278,6 +279,9 @@ export class AgentInvites {
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      // #987 F1: invite-redeem bypasses store.command(), so the enrollment
+      // tier hook never fires. Assign t1_readonly here for the new agent.
+      assignEnrollmentTier(this.db, row.room_id, memberId, now);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.

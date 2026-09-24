@@ -133,7 +133,7 @@ export function demoteToReadonly(db, roomId, memberId, opts = {}) {
 // existing tier — a demoted agent cannot wash its tier by leaving and
 // rejoining. Guest agents bypass store.command() (their short-lived pass
 // governs them), so this only touches full agent members.
-function assignEnrollmentTier(db, roomId, memberId, nowMs) {
+export function assignEnrollmentTier(db, roomId, memberId, nowMs) {
   db.prepare(`INSERT INTO agent_autonomy_tiers (room_id, member_id, autonomy_tier, updated_at, updated_by)
       VALUES (?, ?, ?, ?, NULL) ON CONFLICT(room_id, member_id) DO NOTHING`)
     .run(roomId, memberId, ENROLLMENT_TIER, nowMs);
@@ -174,7 +174,7 @@ export function autonomyTierReport(db, roomId, state, memberId, nowMs = Date.now
 }
 
 function requireOwner(auth, room) {
-  if (auth.member.kind !== "human" || auth.member.id !== room.state.room.ownerId)
+  if (auth.member.id !== room.state.room.ownerId)
     refuse(403, "owner_required", "Only the room owner can manage autonomy tiers");
 }
 
