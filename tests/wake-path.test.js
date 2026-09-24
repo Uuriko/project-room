@@ -486,7 +486,7 @@ test("trigger: bond proposal POSTs bond.proposed to the offline party", async t 
 });
 
 test("trigger: collab assignment to an offline agent POSTs assignment.created", async t => {
-  const { f, origin, identity, transport } = await triggerFixture(t, "taskagent");
+  const { f, origin, transport } = await triggerFixture(t, "taskagent");
   const threadId = randomUUID(); // assignThread journals by thread id; no thread row needed
   const assignRes = await post(origin, "/api/rooms/commons/collab/assignments", {
     threadId, assignee: { kind: "agent", id: "taskagent" },
