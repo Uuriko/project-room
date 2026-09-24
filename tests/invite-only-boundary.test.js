@@ -69,6 +69,9 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public run-receipts aggregate: measured work from the receipt board,
+  // public by design; answers 200 with the checked-in snapshot.
+  "GET /api/public/receipts": [undefined, 200],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   // "read" is not a room permission and never was; a later vocabulary check
   // started refusing it with 422, so this probe stopped reaching the thing it
