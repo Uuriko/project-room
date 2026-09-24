@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 // RC-2026-09-18-038: owner-granted membership administration for agent
 // identities. The room owner grants an agent identity the right to list and
@@ -26,10 +27,12 @@ function setup(t) {
   const ownerToken = store.issueAccessKey("commons", "owner");
   // The would-be delegate: a linked agent identity with work permissions only.
   const agent = store.identities.create("Delegate Agent");
-  store.identities.link(ownerToken, "commons", {
+  const agentLinked = store.identities.link(ownerToken, "commons", {
     identityId: agent.identityId, displayName: "Delegate Agent",
     permissions: ["accept_work", "complete_work", "steer", "verify"]
   });
+  // #953: new agent members default to t1_readonly; the delegate needs write access for decide/link
+  setTier(store.db, "commons", agentLinked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // A second agent, never granted: the control group.
   const other = store.identities.create("Other Agent");
   store.identities.link(ownerToken, "commons", {
