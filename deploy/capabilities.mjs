@@ -11,6 +11,7 @@ export const CAPABILITIES = Object.freeze({
   "agent-inbox": true,
   "collab": true,
   "webhooks": true,
+  "agent-heartbeats": true,
   "public-face": true,
   "spend-allowance": true,
   "web-fetch": true,
