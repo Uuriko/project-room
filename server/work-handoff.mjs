@@ -394,6 +394,12 @@ export class HandoffEnvelopeJournal {
         if (status === "escalated" && actor !== envelope.to && actor !== envelope.from)
           envelopeFail(403, "envelope_party_only", "Only the sender or recipient can escalate this envelope.");
       }
+      const now = this.store.now();
+      // A delayed recipient must not revive a delegation after either of its
+      // configured deadlines. Cleanup remains available until the explicit sweep.
+      if ((status === "accepted" || status === "completed")
+        && (now >= Date.parse(envelope.authority.expiresAt) || now >= Date.parse(envelope.termination.expiresAt)))
+        envelopeFail(409, "envelope_expired", "This handoff has expired. Ask the sender for a new handoff.");
       let passed = null;
       if (status === "completed") {
         envelopeCheck(Array.isArray(checksPassed) && checksPassed.length >= 1, "envelope_checks_required",
@@ -406,7 +412,6 @@ export class HandoffEnvelopeJournal {
         }))]);
         envelopeCheck(passed.length >= 1, "envelope_checks_required", "At least one declared acceptance check must pass.");
       }
-      const now = this.store.now();
       const entry = { status, at: new Date(now).toISOString(), ...(actor ? { by: actor } : {}),
         ...(trimmed ? { note: trimmed } : {}), ...(passed ? { checksPassed: [...passed] } : {}) };
       const history = [...JSON.parse(row.history), entry];
