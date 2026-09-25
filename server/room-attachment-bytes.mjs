@@ -135,26 +135,52 @@ export class RoomAttachmentBytes {
     });
   }
 
+  // Visibility rule (2026-09-24, #983): a staged file is visible only to
+  // its uploader; a file committed onto a DM (toMemberId) is visible only
+  // to the message author and recipient. Everything else stays room-wide.
+  visibleTo(row, messages, memberId) {
+    if (row.state === "staged") return row.uploader_id === memberId;
+    if (row.message_id) {
+      const message = messages.get(row.message_id);
+      if (message?.toMemberId) {
+        return message.authorId === memberId || message.toMemberId === memberId;
+      }
+    }
+    return true;
+  }
+
+  messageIndex(roomId) {
+    return new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+  }
+
   list(token, roomId) {
     return this.store.transaction(() => {
-      this.store.authenticate(token, roomId);
+      const auth = this.store.authenticate(token, roomId);
       this.expire(roomId, this.store.now());
+      const messages = this.messageIndex(roomId);
+      const memberId = auth.member.id;
       const files = this.db.prepare(`SELECT * FROM room_attachments
         WHERE room_id=? AND state IN ('staged','committed')
-        ORDER BY created_at DESC, id`).all(roomId).map(view);
+        ORDER BY created_at DESC, id`).all(roomId)
+        .filter(row => this.visibleTo(row, messages, memberId))
+        .map(view);
       return { roomId, files };
     });
   }
 
   get(token, roomId, id) {
     return this.store.transaction(() => {
-      this.store.authenticate(token, roomId);
+      const auth = this.store.authenticate(token, roomId);
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       this.expire(roomId, this.store.now());
       const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
       if (!row) fail(404, "attachment_not_found", "Attachment not found");
       if ((row.state !== "staged" && row.state !== "committed") || row.bytes == null) {
         fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
+      }
+      // Invisible files 404 (not 403) so the id does not leak existence.
+      if (!this.visibleTo(row, this.messageIndex(roomId), auth.member.id)) {
+        fail(404, "attachment_not_found", "Attachment not found");
       }
       return {
         roomId,
