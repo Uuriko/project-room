@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T01:01:06Z · board: Uuriko/project-room#266 · watermark: 5824763690 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ca31e05f8ace0d8264e832b1ec4837c0d9afb58778ffa69937d8702ba01bb64d -->
+<!-- generated: 2026-09-25T01:42:19Z · board: Uuriko/project-room#266 · watermark: 5825288432 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d99018a555d30f1eb74d8908a0f7686a340db445199be6308a28c791e997e37 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,7 @@ RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-24-927 | instinct-comms | working | 2026-09-25T01:23:32Z | server/bonds.mjs, tests/bonds.test.js
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -68,5 +68,5 @@ comment-id | lane | task | at
 … +53 more
 
 ## signals
-board_comments=1688 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5824763690
+board_comments=1696 threshold=1500 rotation_due=yes watcher=active open_claims=59 prose_open=2 unfenced_prose=63 watermark=5825288432
 
