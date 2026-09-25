@@ -573,21 +573,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
-  // Bounded request reader shared by the JSON and NDJSON routes: an oversized
-  // Content-Length is refused before any byte is read, buffering stops once the
-  // streamed bytes pass the limit, and a client that stops sending fails the
-  // request at once instead of holding it until the server request timeout.
+  // Bounded request reader shared by JSON and NDJSON routes. An oversized
+  // Content-Length never enters the buffer; a stream that passes the limit
+  // discards the buffered chunks. Drain before sending 413 so a client still
+  // uploading can read the error instead of seeing a connection reset.
+  // Aborted streams fail immediately rather than waiting for an end event.
   function readText(req, limit, tooLarge) {
-    if (Number(req.headers["content-length"]) > limit) { req.resume(); throw tooLarge(); }
     return new Promise((resolve, rejectPromise) => {
-      let bytes = 0; const chunks = [];
+      let bytes = 0;
+      let oversize = Number(req.headers["content-length"]) > limit;
+      const chunks = [];
       req.on("data", chunk => {
-        if (bytes > limit) return;
+        if (oversize) return;
         bytes += chunk.length;
-        if (bytes > limit) { chunks.length = 0; rejectPromise(tooLarge()); }
+        if (bytes > limit) { oversize = true; chunks.length = 0; }
         else chunks.push(chunk);
       });
-      req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      req.on("end", () => oversize ? rejectPromise(tooLarge()) : resolve(Buffer.concat(chunks).toString("utf8")));
       req.on("error", rejectPromise);
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
