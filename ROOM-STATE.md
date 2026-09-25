@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T19:59:21Z · board: Uuriko/project-room#266 · watermark: 5838713968 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
+<!-- generated: 2026-09-25T20:29:11Z · board: Uuriko/project-room#266 · watermark: 5839089852 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=92530faccabfb1426bd17e6976d025570f99c7aab969b9cee9e0050adc711516 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,7 @@ RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-(none)
+RC-2026-09-25-7401 | instinct-comms | working | 2026-09-26T02:16:55Z | NONE
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -42,6 +42,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-25-500 | none | 5839059620
 RC-2026-09-25-7410 | none | 5829131014
 RC-2026-09-25-7410 | 4d53686a2b1a4b0c9b0a3b0e0f0a0b0c0d0e0f0a | 5829127600
 RC-2026-09-25-7402 | none | 5828696203
@@ -51,7 +52,6 @@ RC-2026-09-24-311 | cba36d624871edf5e249737f8b8ab51b52e4247a | 5823197947
 RC-2026-09-24-212 | f235f7d769f23f3356c11e59a40c62eb63436327 | 5822924613
 RC-2026-09-24-214 | f235f7d769f23f3356c11e59a40c62eb63436327 | 5822921979
 unknown | none | 5822861425
-RC-2026-09-24-310 | b3082b77a1a9fd76c22552a82fa170cf49987bf8 | 5821928289
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -68,5 +68,5 @@ comment-id | lane | task | at
 … +63 more
 
 ## signals
-board_comments=1798 threshold=1500 rotation_due=yes watcher=active open_claims=62 prose_open=3 unfenced_prose=73 watermark=5838713968
+board_comments=1806 threshold=1500 rotation_due=yes watcher=active open_claims=62 prose_open=3 unfenced_prose=73 watermark=5839089852
 
