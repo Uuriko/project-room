@@ -114,6 +114,9 @@ export const mentionStateSchema = `
 // (member id, then display name, then identity name). Skips the sender and
 // inactive members, never invents a recipient, and returns ids in first
 // appearance order without duplicates.
+//
+// `@_Name` is a silent mention (Zulip). Skip it here so wake, push, and
+// mention rows never see it. The text is left unchanged for the renderer.
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
   if (typeof text !== "string" || text.length === 0 || text.length > 20000) return [];
   const candidates = [];
@@ -128,10 +131,12 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
   const lowerText = text.toLowerCase(), found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
+    if (text[at + 1] === "_") continue;
+    const nameAt = at + 1;
     let best = null;
     for (const candidate of candidates) {
-      const end = at + 1 + candidate.lower.length;
-      if (lowerText.slice(at + 1, end) !== candidate.lower) continue;
+      const end = nameAt + candidate.lower.length;
+      if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
       if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
       if (!best || candidate.lower.length > best.lower.length
         || (candidate.lower.length === best.lower.length && candidate.rank < best.rank)) best = candidate;
