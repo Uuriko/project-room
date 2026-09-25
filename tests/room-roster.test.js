@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   ROOM_ROSTER, rosterById, rosterSelection, rosterNameTaken,
-  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
+  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary, connectionStanding,
   setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
   claudeMcpAddCommand, reconnectCopy
 } from "../src/room-roster.js";
@@ -56,6 +56,12 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.match(capabilitySummary("chat")[1], /does not start a model/);
   assert.equal(capabilitySummary("contribute").some(line => /work drafts/.test(line)), true);
   assert.equal(capabilitySummary("review").some(line => /Review work/.test(line)), true);
+  const joined = connectionStanding({ permissions: [] });
+  assert.match(joined.summary, /cannot act yet/);
+  assert.match(joined.summary, /Missing work capabilities: accept_work, complete_work, verify, write_external/);
+  assert.match(joined.summary, /room owner can grant/);
+  assert.equal(connectionStanding({ permissions: ["accept_work", "complete_work", "verify", "write_external"], hostTools: ["room_read_messages"] }).work, "Can accept, complete, verify, and write work");
+  assert.match(connectionStanding({ permissions: ["accept_work"], hostTools: [] }).summary, /Host tools are missing/);
   assert.match(setupChecklist({ route: "mcp" }).join("\n"), /room_check_access/);
   assert.match(setupChecklist({ route: "packet" }).join("\n"), /Use my AI/);
   assert.match(setupChecklist({ route: "direct" }).join("\n"), /On that computer/);

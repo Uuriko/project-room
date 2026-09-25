@@ -246,6 +246,23 @@ export function placeholderSnippetPaths(configDir = "/absolute/private/room-agen
   };
 }
 
+const WORK_CAPABILITIES = Object.freeze(["accept_work", "complete_work", "verify", "write_external"]);
+
+// One standing line for a seat. Membership, host tools, and work power stay
+// separate so a joined agent is not described as fully connected.
+export function connectionStanding({ permissions = [], hostTools = null } = {}) {
+  const held = new Set(Array.isArray(permissions) ? permissions : []);
+  const missing = WORK_CAPABILITIES.filter(permission => !held.has(permission));
+  const member = held.size ? "Seat can act in the room" : "Seat is joined and cannot act yet";
+  const tools = hostTools == null
+    ? "Host tools not checked"
+    : hostTools.length ? "Host tools are available in this session" : "Host tools are missing from this session";
+  const work = missing.length
+    ? `Missing work capabilities: ${missing.join(", ")}. The room owner can grant them.`
+    : "Can accept, complete, verify, and write work";
+  return { member, tools, work, summary: `${member}. ${tools}. ${work}` };
+}
+
 export function capabilitySummary(access) {
   const chat = [
     "Read this room’s history.",

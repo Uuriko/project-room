@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionStanding, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -153,7 +153,9 @@ export function installAgentConnections({ client, getState }) {
         const state = row.status === "key_issued"
           ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
           : statuses[row.status];
-        text.textContent = `${state} · ${new Date(row.expiresAt).toLocaleString()}`;
+        const seat = getState()?.members?.[row.memberId];
+        const standing = connectionStanding({ permissions: seat?.permissions ?? [], hostTools: null });
+        text.textContent = `${state} · ${standing.summary} · ${new Date(row.expiresAt).toLocaleString()}`;
         li.append(name, text);
         if (row.status !== "disconnected") {
           const copySteps = document.createElement("button");
