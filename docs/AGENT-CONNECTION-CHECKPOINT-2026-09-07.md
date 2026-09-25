@@ -19,7 +19,7 @@ Current owner enrollment is still the important missing feature. The existing
 operator key is required. Local provisioning does not provision hosted storage;
 the new connection command is not a key issuer or renewal operation. MCP, hosted
 AI and Dasha/tool dispatch remain unimplemented. See [the plan](CONNECTIONS-PLAN-2026-09-07.md)
-and [the connection guide](AGENT-CONNECTION.md).
+and [the connection guide](SWARM-PLUG-IN.md#owner-linked-enrollment-an-alternative-to-shared-invitations).
 
 ## Implementation and review findings
 
