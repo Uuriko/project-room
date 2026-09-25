@@ -573,15 +573,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
-  // Bounded request reader shared by JSON and NDJSON routes. An oversized
-  // Content-Length never enters the buffer; a stream that passes the limit
-  // discards the buffered chunks. Drain before sending 413 so a client still
-  // uploading can read the error instead of seeing a connection reset.
+  // Bounded request reader shared by JSON and NDJSON routes. A modestly
+  // oversized upload is drained before 413 so clients finish sending and can
+  // read the error. For a declared body over 1 MiB, refuse immediately while
+  // draining in the background: a client that never sends bytes must not hold
+  // the request open. In either case, chunks over the limit are not buffered.
   // Aborted streams fail immediately rather than waiting for an end event.
   function readText(req, limit, tooLarge) {
+    const declaredBytes = Number(req.headers["content-length"]);
+    if (declaredBytes > limit && declaredBytes > 1024 * 1024) { req.resume(); throw tooLarge(); }
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0;
-      let oversize = Number(req.headers["content-length"]) > limit;
+      let oversize = declaredBytes > limit;
       const chunks = [];
       req.on("data", chunk => {
         if (oversize) return;
