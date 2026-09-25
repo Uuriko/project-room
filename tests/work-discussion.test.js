@@ -69,11 +69,16 @@ test("focused discussion selects exact anchors and descendants without importing
 });
 
 test("frozen sequence pages survive sparse activity, reactions, new replies, read-marker changes and restart", async t => {
-  const f = await fixture(t), fixedTime = Date.now(); f.store.now = () => fixedTime;
+  const f = await fixture(t);
+  let at = Date.now();
+  f.store.now = () => at;
   for (let n = 0; n < 115; n++) {
+    at += 2000;
     f.post("reply-" + n, { replyToId: "test-request" });
-    if (n % 10 === 0) f.post("noise-" + n);
+    if (n % 10 === 0) { at += 2000; f.post("noise-" + n); }
   }
+  const fixedTime = at;
+  f.store.now = () => fixedTime;
   const initial = f.view("test-handoff", { limit: 17 }), frozen = initial.discussion.horizon, firstItems = structuredClone(initial.discussion.items);
   f.post("arrived-later", { replyToId: "reply-114" });
   f.send("owner", T.MESSAGE_REACTION_SET, { messageId: "test-request", reaction: "like", active: true });
