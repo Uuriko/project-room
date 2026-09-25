@@ -24,6 +24,6 @@
     "routes": [{ "pattern": "room.trydemigod.com", "custom_domain": true }],
     "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
     "triggers": { "crons": ["* * * * *"] },
-    "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "1", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-production" }
+    "vars": { "ROOM_ORIGIN": "https://room.trydemigod.com", "ROOM_DEPLOYMENT": "production", "ROOM_GMAIL_ENABLED": "0", "ROOM_GMAIL_PILOT_ONLY": "1", "ROOM_SERVICE_MODE": "cloudflare-production" }
   } }
 }

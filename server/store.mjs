@@ -916,6 +916,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // and holds no credential data (tokens are bearer strings, never
       // stored).
       this.db.exec(referralInviteSchema);
+      // Backfill the cap for members admitted before this field existed. An
+      // unmatched row stays NULL and the mint path refuses it fail-closed.
+      const chainColumns = new Set(this.db.prepare("PRAGMA table_info(referral_chain_members)").all().map(c => c.name));
+      if (!chainColumns.has("max_depth")) this.db.exec("ALTER TABLE referral_chain_members ADD COLUMN max_depth INTEGER");
+      this.db.exec(`UPDATE referral_chain_members SET max_depth = (
+        SELECT ri.max_depth FROM referral_invites ri
+        WHERE ri.room_id = referral_chain_members.room_id
+          AND ri.redeemed_member_id = referral_chain_members.member_id
+          AND ri.status = 'redeemed' LIMIT 1
+      ) WHERE max_depth IS NULL`);
       // Referral attribution (invite/access-request joins): purely additive —
       // no migration, no fence impact; referrals are only written by the join
       // paths, and the table holds no credential data.

@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS referral_chain_members (
   member_id TEXT NOT NULL,
   chain_id TEXT NOT NULL,
   depth INTEGER NOT NULL,
+  max_depth INTEGER,
   PRIMARY KEY (room_id, member_id)
 );`;
 
@@ -219,18 +220,16 @@ export class ReferralInvites {
     return { jti, chainId, roomId, depth, maxDepth, issuedAt, expiresAt };
   }
 
-  chainDepth(roomId, memberId) {
-    const row = this.store.db.prepare(
-      "SELECT depth FROM referral_chain_members WHERE room_id = ? AND member_id = ?"
-    ).get(roomId, memberId);
-    return row ? row.depth : -1;
+  // Old rows are backfilled from their redeemed invite at store initialization.
+  // An orphan old row is fail-closed: it can no longer mint until reconciled.
+  chainPolicy(roomId, memberId) {
+    return this.store.db.prepare(
+      "SELECT chain_id, depth, max_depth FROM referral_chain_members WHERE room_id = ? AND member_id = ?"
+    ).get(roomId, memberId) ?? null;
   }
 
   // --- mint --------------------------------------------------------------
-  mint(token, roomId, { maxDepth = DEFAULT_MAX_DEPTH } = {}) {
-    if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > MAX_MAX_DEPTH) {
-      fail(422, "invalid_max_depth", `maxDepth must be an integer 1..${MAX_MAX_DEPTH}`);
-    }
+  mint(token, roomId, { maxDepth: requestedMaxDepth } = {}) {
     const auth = this.store.authenticate(token, roomId);
     if (!auth.member || auth.member.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
     if (typeof auth.member.id !== "string" || !MEMBER_ID_PATTERN.test(auth.member.id)) fail(403, "access_denied", "Join the room before sending referral invites");
@@ -243,7 +242,18 @@ export class ReferralInvites {
     // The depth-cap refusal is journaled in its own committed transaction
     // before failing: a throw inside the mint transaction below would roll
     // the journal entry back.
-    const minterDepth = this.chainDepth(roomId, auth.member.id);
+    const chain = this.chainPolicy(roomId, auth.member.id);
+    const minterDepth = chain?.depth ?? -1;
+    if (chain && (!Number.isInteger(chain.max_depth) || chain.max_depth < 1)) {
+      fail(409, "referral_depth_exceeded", "This chain cap cannot be verified");
+    }
+    const maxDepth = requestedMaxDepth ?? chain?.max_depth ?? DEFAULT_MAX_DEPTH;
+    if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > MAX_MAX_DEPTH) {
+      fail(422, "invalid_max_depth", `maxDepth must be an integer 1..${MAX_MAX_DEPTH}`);
+    }
+    if (chain && maxDepth > chain.max_depth) {
+      fail(409, "referral_depth_exceeded", "A descendant cannot raise the chain depth cap");
+    }
     if (minterDepth >= maxDepth) {
       const jti = randomUUID();
       const now = this.now();
@@ -251,13 +261,13 @@ export class ReferralInvites {
         this.store.db.prepare(
           `INSERT INTO referral_invites (jti, room_id, chain_id, inviter_member_id, depth, max_depth, created_at, expires_at, status, rejected_at, reject_reason)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'rejected', ?, 'depth_exceeded')`
-        ).run(jti, roomId, this.chainIdFor(roomId, auth.member.id) ?? randomUUID(), auth.member.id, minterDepth + 1, maxDepth, now, now, now);
+        ).run(jti, roomId, chain?.chain_id ?? randomUUID(), auth.member.id, minterDepth + 1, maxDepth, now, now, now);
       });
       fail(409, "referral_depth_exceeded", `This chain is at maxDepth ${maxDepth}; no further invites can be minted from it`);
     }
 
     return this.store.transaction(() => {
-      const chainId = this.chainIdFor(roomId, auth.member.id) ?? randomUUID();
+      const chainId = chain?.chain_id ?? randomUUID();
       const depth = minterDepth + 1;
       const jti = randomUUID();
       const issuedAt = this.now();
@@ -305,6 +315,14 @@ export class ReferralInvites {
     let room;
     try { room = this.store.room(payload.roomId); }
     catch { fail(404, "invite_unavailable", "That invite is not available"); }
+    const ledger = this.store.db.prepare(
+      "SELECT status, inviter_member_id, chain_id, depth, max_depth FROM referral_invites WHERE jti = ? AND room_id = ?"
+    ).get(payload.jti, payload.roomId);
+    if (!ledger || ledger.status !== "minted" || ledger.chain_id !== payload.chainId
+        || ledger.depth !== payload.depth || ledger.max_depth !== payload.maxDepth
+        || room.state.members[ledger.inviter_member_id]?.active !== true) {
+      fail(404, "invite_unavailable", "That invite is not available");
+    }
     return {
       roomId: payload.roomId,
       roomTitle: room.state.room.title,
@@ -327,11 +345,14 @@ export class ReferralInvites {
     // must be journaled (committed) even though the redeem itself fails, and
     // a throw inside store.transaction would roll the journal entry back.
     const ledger = this.store.db.prepare(
-      "SELECT status, inviter_member_id FROM referral_invites WHERE jti = ?"
-    ).get(jti);
+      "SELECT status, inviter_member_id, chain_id, depth, max_depth FROM referral_invites WHERE jti = ? AND room_id = ?"
+    ).get(jti, roomId);
     // A signed token with no ledger row is forged against a rotated key or
     // minted before this feature existed: not available, no row to update.
-    if (!ledger || ledger.status !== "minted") fail(404, "invite_unavailable", "That invite is not available");
+    if (!ledger || ledger.status !== "minted" || ledger.chain_id !== chainId
+        || ledger.depth !== depth || ledger.max_depth !== maxDepth) {
+      fail(404, "invite_unavailable", "That invite is not available");
+    }
     const rejectAndFail = (status, code, message, reason) => {
       this.store.transaction(() => {
         this.store.db.prepare(
@@ -405,8 +426,8 @@ export class ReferralInvites {
       ).run(now, memberId, identityId, jti);
       if (claimed.changes !== 1) fail(404, "invite_unavailable", "That invite is not available");
       this.store.db.prepare(
-        "INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth) VALUES (?, ?, ?, ?)"
-      ).run(roomId, memberId, chainId, depth);
+        "INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth, max_depth) VALUES (?, ?, ?, ?, ?)"
+      ).run(roomId, memberId, chainId, depth, maxDepth);
 
       return {
         identityId,

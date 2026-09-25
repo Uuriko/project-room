@@ -173,14 +173,57 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
   assert.ok(reasons.length >= 2, "mint-cap and redeem-cap rejections are both journaled");
 });
 
+test("descendants cannot raise an inherited chain cap", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const inviter = await enrollInviter(store, origin, ownerKey);
+  const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, inviter.secret);
+  const zero = await post(origin, "/api/referral-invites/redeem", { token: first.json.token });
+  const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, zero.json.secret);
+  assert.equal(second.status, 201);
+  assert.equal(second.json.maxDepth, 1, "unspecified descendant cap inherits the original");
+  const one = await post(origin, "/api/referral-invites/redeem", { token: second.json.token });
+  const raised = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 12 }, one.json.secret);
+  assert.equal(raised.status, 409);
+  assert.equal(raised.json.error.code, "referral_depth_exceeded");
+  const defaultAtCap = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, one.json.secret);
+  assert.equal(defaultAtCap.status, 409);
+  const rows = store.db.prepare("SELECT max_depth FROM referral_chain_members WHERE room_id = ? ORDER BY depth").all("commons");
+  assert.deepEqual(rows.map(r => r.max_depth), [1, 1]);
+});
+
+test("preview refuses a consumed token and a removed inviter", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const inviter = await enrollInviter(store, origin, ownerKey);
+  const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  assert.equal((await post(origin, "/api/referral-invites/preview", { token: first.json.token })).status, 200);
+  assert.equal((await post(origin, "/api/referral-invites/redeem", { token: first.json.token })).status, 201);
+  const consumed = await post(origin, "/api/referral-invites/preview", { token: first.json.token });
+  assert.equal(consumed.status, 404);
+  const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  store.db.prepare("UPDATE rooms SET projection = ?, sequence = sequence + 1 WHERE id = 'commons'").run(
+    JSON.stringify({ ...store.room("commons").state,
+      members: { ...store.room("commons").state.members,
+        [inviter.identityId]: { ...store.room("commons").state.members[inviter.identityId], active: false } } }));
+  const removed = await post(origin, "/api/referral-invites/preview", { token: second.json.token });
+  assert.equal(removed.status, 404);
+});
+
 test("tampered and forged tokens are indistinguishable from unknown ones", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
   const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
   const [prefix, body, sig] = minted.json.token.split(".");
 
-  const tamperedBody = `${prefix}.${body.slice(0, -2)}AA.${sig}`;
-  const tamperedSig = `${prefix}.${body}.${sig.slice(0, -2)}AA`;
+  // Flip a character to a guaranteed-different one. For the body the signature
+  // covers the raw string, so flipping the last char is enough; for the
+  // signature the last char's low bits are unused by base64url decoding
+  // (64-byte Ed25519 sig = 86 chars), so flip the FIRST char instead —
+  // flipping unused bits decodes to the identical signature and the
+  // "tampered" token stays valid (flaky 200).
+  const flipLast = s => s.slice(0, -1) + (s.endsWith("A") ? "B" : "A");
+  const flipFirst = s => (s.startsWith("A") ? "B" : "A") + s.slice(1);
+  const tamperedBody = `${prefix}.${flipLast(body)}.${sig}`;
+  const tamperedSig = `${prefix}.${body}.${flipFirst(sig)}`;
   for (const bad of [tamperedBody, tamperedSig, "bogus.token.here", "ref1.onlyonepart", minted.json.token.slice(0, 20)]) {
     const previewed = await post(origin, "/api/referral-invites/preview", { token: bad });
     assert.equal(previewed.status, 404, `preview of ${bad.slice(0, 12)}...`);
