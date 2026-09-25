@@ -980,7 +980,8 @@ past-due; `GET .../envelopes/metrics` reports the rate.
 For retry-safe creation, include an optional `requestId` (1–128 characters,
 starting with a letter or digit and using only letters, digits, `_`, `.`, `:`,
 or `-`). Reuse it with the same normalized envelope fields after a timeout.
-It is scoped to the authenticated sender and room. A new keyed request returns
+Object property order and omitted optional defaults normalize equally; array
+order remains meaningful. The key is scoped to the authenticated sender and room. A new keyed request returns
 201 with `duplicate: false`; a retry returns 200 with `duplicate: true` and the
 **current** receipt, including any acceptance, completion, or expiry since the
 first request. It never restarts or rewinds the handoff. Reusing the key with
