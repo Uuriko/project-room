@@ -297,7 +297,7 @@ function makeEscrow({ signed } = {}, db = new DatabaseSync(":memory:")) {
     catch (error) { db.exec("ROLLBACK TO escrow_test"); db.exec("RELEASE escrow_test"); throw error; }
   };
   const store = { db, transaction, readTransaction: transaction };
-  const opts = { now: () => nowMs };
+  const opts = { now: () => nowMs, allowLegacyStringLanes: true };
   if (signed) opts.receipts = createReceiptSigner({ seedHex: TEST_SEED, ref: "test-operator" });
   const escrow = new BountyEscrow(store, opts);
   escrow.ensureGenesis(ROOM);
