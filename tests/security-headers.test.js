@@ -22,9 +22,11 @@ test("security headers: HSTS is sent on every response (#975)", async t => {
   const res = await fetch(`${origin}/api/health`);
   assert.equal(res.status, 200);
   // Node lowercases header names.
+  // Pre-merge safety: includeSubDomains was dropped — unverified that all
+  // trydemigod.com subdomains are HTTPS-only. HSTS still applies per-host.
   assert.equal(
     res.headers.get("strict-transport-security"),
-    "max-age=31536000; includeSubDomains",
+    "max-age=31536000",
     "HSTS header missing or wrong value on /api/health"
   );
 });
