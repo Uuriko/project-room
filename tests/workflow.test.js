@@ -144,6 +144,7 @@ test("selected work shows one primary next action and keeps the others behind Mo
   assert.doesNotMatch(html.slice(0, moreAt), /Report blocker|Post evidence/);
   assert.equal(html.match(/<button type="button"/g).length, 3);
   assert.match(html, /data-focus-key="work-more:work"/);
+  assert.match(html, /Does not invoke Begin or start a host/);
   const write = { ...accepted, mode: "write" };
   const claim = presentedWorkActions(write, member, now);
   assert.equal(claim.primary.action, "claim");

@@ -112,6 +112,7 @@ export async function callHostedStdioTool(store, secret, name, args) {
     const value = await beginSelectedWork({
       connected: true,
       scope: { workItemId: rest.workItemId, repository: rest.repository, ref: rest.ref, paths: rest.paths, expiresAt: rest.expiresAt },
+      invocation: rest.invocationRequestId ? { requestId: rest.invocationRequestId } : null,
       read: () => store.workContext(secret, roomId, rest.workItemId, {}),
       execute: async stage => {
         try {

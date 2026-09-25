@@ -89,6 +89,10 @@ test("room_begin_work is a hosted tool and rejects a guessed extra field", async
   const tool = roomTools.find(entry => entry.name === "room_begin_work");
   assert.equal(tool.annotations.destructiveHint, true);
   assert.equal(tool.annotations.readOnlyHint, false);
+  assert.doesNotMatch(tool.description, /Checks this host/);
+  assert.match(tool.description, /Room work state/);
+  assert.match(tool.description, /does not invoke Begin/);
+  assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", invocationRequestId: "begin-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), true);
   assert.equal(HOSTED_ROOM_MCP_TOOLS.includes("room_begin_work"), true);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925" }), true);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", repository: "Uuriko/project-room" }), true);

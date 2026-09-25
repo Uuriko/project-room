@@ -224,7 +224,8 @@ export function renderWorkActions(item, member, { now = Date.now(), busy = false
   const more = moreButtons
     ? `<details class="work-more"><summary data-focus-key="work-more:${esc(workId)}">More</summary><div class="work-more-actions">${moreButtons}</div></details>`
     : "";
-  return primary + more;
+  const limit = `<p class="work-begin-limit">Records the Room action. Does not invoke Begin or start a host.</p>`;
+  return limit + primary + more;
 }
 
 // Round-2 #117: done chip. Marks terminally finished work at a glance — a

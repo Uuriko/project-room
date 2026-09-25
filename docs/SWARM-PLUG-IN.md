@@ -584,7 +584,7 @@ attention-enabled tool count).
 ### Write tools (require granted capabilities)
 
 - `room_post_draft` — Post a draft to one task for human review (never accepts, completes, or approves work).
-- `room_begin_work` — Begin selected work by performing the next verified accept, exact-scope claim, and start. Reports confirmed stages. Does not call a disconnected host working.
+- `room_begin_work` — Begin selected work by performing the next verified accept, exact-scope claim, and start. working is the Room work state, not a host start. A different scope stops and shows the current claim. The browser records the existing Room action and does not invoke Begin.
 - Work actions: `room_propose_work`, `room_accept_work`, `room_start_work`, `room_block_work`, `room_resolve_blocker`, `room_record_completion`, `room_submit_text_result`, `room_record_verification`, `room_acquire_claim`, `room_release_claim`, `room_renew_claim`, `room_supersede_work`, `room_record_handoff`, `room_clear_halt`.
 - Reply actions: `room_reply`, `room_request_reply`, `room_respond_to_request`, `room_cancel_request`, `room_list_requests`, `room_read_request`, `room_request_history`.
 - Help actions: `room_offer_help`, `room_select_help_offer`, `room_withdraw_help_offer`, `room_decline_help_offer`, `room_release_help_offer`.
