@@ -4,6 +4,8 @@
 
 export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
+// initialize serverInfo.version. The server card copies this string.
+export const ROOM_MCP_SERVER_VERSION = "0.1.0";
 
 // Authenticated hosted MCP profile (Authorization: Bearer pri_…).
 // Unauthenticated tools/list stays the four join tools. Names are the

@@ -191,7 +191,7 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   assert.equal(cardEntry.url, "https://room.trydemigod.com/.well-known/agent-card.json");
   const mcpEntry = catalog.entries.find(e => e.type === "application/mcp-server-card+json");
   assert.ok(mcpEntry, "MCP entry present");
-  assert.equal(mcpEntry.url, "https://www.getdasha.com/room/mcp");
+  assert.equal(mcpEntry.url, "https://www.getdasha.com/room/mcp/server-card");
   assert.deepEqual(catalog, JSON.parse(aiCatalog()), "served bytes match aiCatalog()");
   const doc = discoveryDoc("/.well-known/ard.json");
   assert.equal(doc.body, aiCatalog(), "discoveryDoc body matches aiCatalog()");

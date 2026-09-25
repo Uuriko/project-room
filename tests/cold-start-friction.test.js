@@ -201,11 +201,14 @@ test("llms.txt leads with the five-call path and /.well-known/mcp points at host
   assert.match(text, /tools\/list/);
   assert.match(text, /room_post_message/);
   const doc = discoveryDoc("/.well-known/mcp");
-  assert.equal(doc.type, "application/json; charset=utf-8");
+  assert.equal(doc.type, "application/mcp-server-card+json; charset=utf-8");
   assert.equal(doc.body, wellKnownMcpJson());
   const card = JSON.parse(doc.body);
   assert.equal(card.url, "https://www.getdasha.com/room/mcp");
   assert.equal(card.auth.mint, "https://room.trydemigod.com/api/agent-identities");
   assert.equal(discoveryDoc("/.well-known/mcp.json").body, doc.body);
   assert.equal(discoveryDoc("/room/.well-known/mcp").body, doc.body);
+  assert.equal(discoveryDoc("/mcp/server-card").body, doc.body);
+  assert.equal(discoveryDoc("/room/mcp/server-card").body, doc.body);
+  assert.equal(discoveryDoc("/.well-known/mcp.json"), discoveryDoc("/mcp/server-card"));
 });
