@@ -1,9 +1,12 @@
 // Appendix A discoverability surface (Burs-IA steal A1): one canonical route
 // inventory for the in-scope machine surfaces. GET /openapi.json is GENERATED
-// from this table (buildOpenApiJson) — never hand-maintained — so the served
-// spec cannot drift from the live routes. The same table drives the HTTP
-// error-guidance overrides (discoverabilityErrorOverride) so every 4xx/429
-// on a listed route carries the canonical envelope with a non-empty next[].
+// from this table (buildOpenApiJson) — never hand-edited — but the table
+// itself is hand-maintained: keep it in sync with server/http.mjs and
+// server/mcp-http.mjs. tests/discoverability.test.js pins the served methods
+// for the inventoried routes, so method drift fails loudly instead of
+// silently omitting operations from the generated spec. The same table drives
+// the HTTP error-guidance overrides (discoverabilityErrorOverride) so every
+// 4xx/429 on a listed route carries the canonical envelope with a non-empty next[].
 //
 // Route entries: { path, methods, auth, summary, operationId }.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
@@ -32,15 +35,15 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
-  route("/api/agent-rooms", ["POST"], "identity-secret", "Create a room owned by the calling identity.", "createAgentRoom"),
+  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom"),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
   // Hosted MCP (JSON-RPC over POST).
-  route("/mcp", ["POST"], "mcp", "Hosted MCP endpoint: tools/list + tools/call.", "postMcp"),
-  route("/room/mcp", ["POST"], "mcp", "Hosted MCP endpoint on the www door: tools/list + tools/call.", "postRoomMcp"),
+  route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp"),
+  route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp"),
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks"),
   route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById"),
@@ -126,7 +129,9 @@ export function buildOpenApiJson({ origin }) {
       version: "1",
       description:
         "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. " +
-        "This document is generated from the server route table; it cannot drift from the live routes. " +
+        "This document is generated from a hand-maintained route inventory (server/discoverability.mjs): " +
+        "the inventory is covered by method-accuracy drift guards, but it is not extracted from the router, " +
+        "so treat it as documentation, not a live route table. " +
         "Every 4xx/429 on a listed route returns the canonical error envelope (see components.schemas.ErrorEnvelope).",
     },
     servers: [{ url: origin }],
