@@ -265,7 +265,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // is the PROVIDER side: external clients redirect users here to obtain
   // scoped tokens for the Project Room API. One instance per server (one per
   // Durable Object in production); client registry comes from config.
-  const oauthProvider = createOAuthProvider({ clock: () => store.now() });
+  const oauthProvider = createOAuthProvider({
+    clock: () => store.now(),
+    // F-01 reuse signal: refresh-token reuse (possible theft) revokes the
+    // whole token family inside the provider; log it as a structured
+    // security line so operators see it, and the token endpoint already
+    // answers the reuse attempt with a distinct invalid_grant.
+    onSecurityEvent: event => {
+      console.warn(`oauth security event: ${JSON.stringify(event)}`);
+    },
+  });
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
   }
