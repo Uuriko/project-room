@@ -186,6 +186,11 @@ export function acceptanceTransitionLegal(from, to) {
   return ACCEPTANCE_TRACK.get(from)?.has(to) ?? false;
 }
 
+// Scoped-idempotency index (bounty_idempotency_scope below): one replay
+// record per (room, caller, route, bounty, key). Plain rather than unique
+// because legacy rows all carry scope_key NULL and SQLite counts NULLs as
+// distinct in unique indexes; the version=2 filter is what actually bounds
+// the lookup.
 export const bountyEscrowSchema = `
   CREATE TABLE IF NOT EXISTS bounty_journal (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,8 +270,12 @@ export const bountyEscrowSchema = `
     status INTEGER NOT NULL,
     response TEXT NOT NULL CHECK(json_valid(response)),
     created_at TEXT NOT NULL,
-    PRIMARY KEY(room_id, idem_key)
+    scope_key TEXT,
+    caller_lane TEXT,
+    version INTEGER,
+    PRIMARY KEY(room_id, scope_key)
   );
+  CREATE INDEX IF NOT EXISTS bounty_idempotency_scope ON bounty_idempotency(room_id, scope_key) WHERE version = 2;
   CREATE TABLE IF NOT EXISTS bounty_watchers (
     room_id TEXT NOT NULL,
     bounty_id TEXT NOT NULL,
@@ -416,7 +425,7 @@ export function convergeBountyDeployedSchema(db) {
   // 2. Rebuild tables whose stored DDL drifted (row-preserving), then
   // recreate that table's indexes (ALTER TABLE ... RENAME drops them — the
   // slice-1-era rebuild lost them).
-  for (const table of ["bounty_journal", "bounty_records", "bounty_events"]) {
+  for (const table of ["bounty_journal", "bounty_records", "bounty_events", "bounty_idempotency"]) {
     const actual = tableExists(table)?.sql;
     if (!actual) continue; // Fresh database: created above.
     if (normalize(actual) === expectedTables.get(table).norm) continue; // Already converged.
@@ -939,6 +948,14 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
     addCol("bounty_records", "submission_hash TEXT");
+    // Idempotency scope columns (scope_key / caller_lane / version) live in
+    // the CREATE TABLE and are converged by convergeBountyDeployedSchema's
+    // DDL-drift rebuild, NOT added here: ALTER TABLE cannot rewrite the
+    // stored DDL text, so an ALTER-only path would leave a deployed table
+    // that verifySchema rejects. Legacy rows keep version NULL, so the
+    // scoped lookup (version=2) ignores them — a pre-fix key is never
+    // replayed under the scoped regime, which is the safe direction: a
+    // re-execution is recoverable, replaying a stranger's receipt is not.
     // Reuse the exact schema-text chunks: the strict DDL-text verifySchema
     // compares stored DDL verbatim, so a reformatted copy would fail it.
     // A name may own several chunks (table + its indexes), so collect all.
@@ -948,6 +965,11 @@ export class BountyEscrow {
     for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
       "bounty_reputation_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
+    // Idempotent additive convergence for the scoped-idempotency index on
+    // databases whose bounty_idempotency table already matched the expected
+    // DDL (so the rebuild above skipped it) but whose index predates it.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='bounty_idempotency_scope'").get())
+      this.db.exec("CREATE INDEX IF NOT EXISTS bounty_idempotency_scope ON bounty_idempotency(room_id, scope_key) WHERE version = 2");
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
     if (!hadRubricCols) _backfillRubricPins(this.db);
@@ -2896,17 +2918,30 @@ export class BountyEscrow {
 
   // --- idempotency ----------------------------------------------------------------------
   // All mutating routes are idempotent on a client-supplied key: a replayed
-  // key returns the original status + body without re-executing.
-  idemExecute(roomId, key, route, status, thunk) {
+  // key returns the original status + body without re-executing. The replay
+  // scope is (caller, route, bounty, key), not (room, key) — see below.
+  idemExecute(roomId, key, route, status, thunk, scope = {}) {
     if (key === null || key === undefined) return { replayed: false, status, body: thunk() };
     check(typeof key === "string" && key.length >= 1 && key.length <= 128, "invalid_input", "idempotency key must be 1..128 characters");
+    // Scope the replay to (caller, route, bounty, key). The original
+    // (room, key) key let any member replay another member's response: an
+    // agent that builds keys predictably (claim-<bountyId>) could be
+    // squatted by a second member reusing the same key on a different
+    // bounty, getting a 200 whose body was the first member's receipt. That
+    // is a correctness bug (their work never ran) and a cross-member leak.
+    const callerLane = scope.callerLane ?? null;
+    const bountyId = scope.bountyId ?? null;
+    const scopeKey = "v2:" + sha256([callerLane ?? "", route ?? "", bountyId ?? "", key].join("\u0000"));
     return this.store.transaction(() => {
       this._ensure();
-      const existing = this.db.prepare("SELECT status, response FROM bounty_idempotency WHERE room_id=? AND idem_key=?").get(roomId, key);
+      // version=2 excludes legacy (room, key) rows, which predate the scope
+      // and whose key cannot be trusted to name one member's operation.
+      const existing = this.db.prepare(
+        "SELECT status, response FROM bounty_idempotency WHERE room_id=? AND scope_key=? AND version=2").get(roomId, scopeKey);
       if (existing) return { replayed: true, status: existing.status, body: JSON.parse(existing.response) };
       const body = thunk();
-      this.db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at) VALUES (?,?,?,?,?,?)")
-        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs()));
+      this.db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at, scope_key, caller_lane, version) VALUES (?,?,?,?,?,?,?,?,2)")
+        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs()), scopeKey, callerLane);
       return { replayed: false, status, body };
     });
   }
