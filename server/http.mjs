@@ -2109,7 +2109,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // account instead of the sign-in find-or-provision order.
       const requireAccountSession = () => {
         const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage your account");
         let session;
         try {
           session = store.authenticateAccountSession(slotToken);
@@ -2117,7 +2117,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (error.status !== 401) throw error;
           reject(401, "invalid_session", "That session is no longer valid; sign in again");
         }
-        if (!session.account) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!session.account) reject(401, "account_session_required", "Sign in to manage your account");
         return { ...session, slotToken };
       };
       const providerConfigured = probe => {
@@ -2407,6 +2407,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ],
           nextActions: nextActionsForInviteRedeem(result.roomId),
         });
+      }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/share-links/join-agent" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
@@ -2826,6 +2831,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             decisionWindowDays: REQUEST_TTL_MS / 86400000,
           }),
         });
+      }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity
       // creates a room and becomes its owner. The pri_ secret travels in
