@@ -35,6 +35,7 @@ import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle,
 import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
+import { installHumanPush } from "./human-push.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -5141,6 +5142,7 @@ function loadReturnBrief() { return briefView.refresh(); }
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
 // evaluated through, so items arriving later stay unread.
 let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
+let humanPushUi = null;
 // Saved-but-not-refreshed, shown in the feed's own status line. Kept apart from
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
@@ -5169,6 +5171,7 @@ function resetNotifications() {
   $("#notification-panel").hidden = true; $("#notification-list").replaceChildren(); delete $("#notification-list")._content;
   $("#notification-status").textContent = ""; $("#notification-status").classList.remove("visible");
   $("#notification-read-button").hidden = true; $("#notification-read-button").disabled = true; $("#notification-read-button").textContent = "Mark read";
+  humanPushUi?.reset();
 }
 function renderNotifications() {
   const owned = Boolean(state) && ownsNotifications(notificationOwner);
@@ -5208,7 +5211,14 @@ function renderNotifications() {
       : "";
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a>${ack}</li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
+  humanPushUi?.refresh();
 }
+humanPushUi = installHumanPush({
+  client,
+  button: $("#human-push-button"),
+  note: $("#human-push-note"),
+  eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
+});
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
 // suggested 👍 react through the normal reaction path. Idempotent — when the
 // member already reacted (stale feed), the button does nothing rather than

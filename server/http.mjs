@@ -2,6 +2,7 @@ import { GmailSync } from './gmail-sync.mjs';
 import { GmailActions } from './gmail-actions.mjs';
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
+import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -161,7 +162,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   magicLinkMailer = null,
   githubAuth = null,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
+  // Human browser push stays off until VAPID keys are present. Node reads
+  // process.env; the Worker passes its bindings as `push` so a secret never
+  // has to live in the source tree.
+  if (store?.humanPush) store.humanPush.configure({
+    vapid: push === undefined ? vapidFromEnv(globalThis.process?.env ?? {}) : push
+  });
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
@@ -2819,7 +2826,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3578,6 +3585,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
+      }
+      // Human browser push. One fixed default (mentions and DMs). GET returns
+      // the VAPID public key when delivery is configured. POST stores the
+      // browser subscription. There is no preference body.
+      if (route === "human-push" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
+        return json(res, 200, store.humanPush.status(selected.token, roomId, fence));
+      }
+      if (route === "human-push" && req.method === "POST") {
+        return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
+      }
+      if (route === "human-push" && req.method === "DELETE") {
+        return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named

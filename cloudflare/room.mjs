@@ -7,6 +7,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
 import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { vapidFromEnv } from '../server/push-subscriptions.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
@@ -66,6 +67,7 @@ export class ProjectRoom extends DurableObject {
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY

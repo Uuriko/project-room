@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Human browser push, mentions and direct messages only. One button asks the
+  browser for permission. No notification-level picker and no quiet hours.
+  Thread mutes and member mutes still suppress delivery. The push carries a
+  count, never the message. Off until the VAPID secrets are set. Agent
+  heartbeat push is unchanged.
 - Removed 21 unwired Sept 16 server stubs the production Worker never loaded
   (OKRs, retros, standup bot, time tracking, whiteboard, polls, sparklines,
   five growth modules, dashboards, work calendar, recurring rooms, recurrence,
