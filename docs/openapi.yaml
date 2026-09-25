@@ -8088,6 +8088,43 @@ paths:
         '403': { description: owner_required }
         '404': { description: member_not_found }
         '422': { description: invalid_autonomy_tier }
+  /api/rooms/{roomId}/human-push:
+    get:
+      summary: Human browser push status
+      description: >-
+        Whether browser push is configured for this server, and the VAPID
+        public key when it is. The default is fixed: mentions and direct
+        messages. The response has no preference levels and no quiet hours.
+        Human members only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, configured, default: mentions_and_dms, publicKey? } plus the viewer ownership envelope" }
+        '403': { description: human_push_humans_only }
+    post:
+      summary: Store this browser's push subscription
+      description: >-
+        Body is the browser PushSubscription: endpoint, keys { p256dh, auth },
+        and optional expirationTime. Unknown fields, including a notification
+        level or quiet hours, are refused. The private VAPID key is never
+        returned. 404 push_not_configured when the server has no VAPID keys.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, saved: true } plus the viewer ownership envelope" }
+        '403': { description: human_push_humans_only }
+        '404': { description: push_not_configured }
+        '409': { description: human_push_device_limit }
+        '422': { description: invalid_human_push }
+    delete:
+      summary: Remove this browser's push subscription
+      description: Body is `{ endpoint }`. Idempotent when the endpoint is already gone.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, removed } plus the viewer ownership envelope" }
+        '403': { description: human_push_humans_only }
+        '422': { description: invalid_human_push }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads

@@ -1,7 +1,7 @@
 // B4: per-member notification feed, derived at read time from the event tail
 // after the member's own room cursor. Read model only: it writes nothing,
-// enqueues no wake, and delivers nothing (push is a follow-up needing VAPID
-// keys; see docs/NOTIFICATIONS.md). Every read re-authenticates, so a member
+// enqueues no wake. Human browser push is a separate path
+// (server/human-push.mjs) and does not read this feed. Every read re-authenticates, so a member
 // whose access ended gets 401/403 and never a stale list.
 import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
