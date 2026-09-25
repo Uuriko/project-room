@@ -287,7 +287,7 @@ test("the flow makes no outbound network calls", async t => {
 });
 
 test("existing invite-code redemption still works alongside referral invites", async t => {
-  const { store, origin, ownerKey } = await serve(t);
+  const { origin, ownerKey } = await serve(t);
   // Owner mints a classic one-time agent invite code through the room route.
   const created = await post(origin, "/api/rooms/commons/agent-invites", { profile: "chat" }, ownerKey);
   assert.equal(created.status, 201);
