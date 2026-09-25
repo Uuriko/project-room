@@ -1,1 +1,1 @@
-file:///tmp/calm-fixed.mjs
+PLACEHOLDER_REPLACE_WITH_LOADER
