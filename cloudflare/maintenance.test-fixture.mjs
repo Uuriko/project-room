@@ -1,12 +1,15 @@
 // Local test entrypoint only. The hostile storage accessor must never be read.
 import assert from 'node:assert/strict';
 import worker, { ProjectRoom } from './room.mjs';
+import { strictBinding, TestDurableObjectBase } from './platform-fakes.mjs';
 
 // ProjectRoom extends DurableObject, whose workerd constructor only accepts a
 // real DurableObjectState. These checks build the object directly with a
 // hostile stand-in, so point super() at a plain base that stores ctx and env
 // the same way. Test entrypoint only; production gets the real base.
-Object.setPrototypeOf(ProjectRoom, class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } });
+// The base invents no RPC methods. strictBinding throws if fetch touches any
+// namespace method other than the getByName this pause test plants.
+Object.setPrototypeOf(ProjectRoom, TestDurableObjectBase);
 
 export default { async fetch(request, env) {
   const direct = new URL(request.url).pathname === '/direct';
@@ -23,7 +26,9 @@ export default { async fetch(request, env) {
     return object.fetch(new Request(env.ROOM_ORIGIN + '/api/rooms/commons'));
   }
   let called = false;
-  const result = await worker.fetch(request, { ...env, ROOM: { getByName() { called = true; throw new Error('Maintenance must precede binding access'); } } });
+  const result = await worker.fetch(request, { ...env, ROOM: strictBinding({
+    getByName() { called = true; throw new Error('Maintenance must precede binding access'); }
+  }, 'DurableObjectNamespace') });
   assert.equal(called, false);
   return result;
 } };

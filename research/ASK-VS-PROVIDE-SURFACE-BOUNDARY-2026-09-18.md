@@ -51,7 +51,6 @@ them.
 Paths this fold owns:
 
 - `research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md` (this file)
-- `tests/ask-provide-surface-boundary-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md`
 
 No `client/` · `cloudflare/` · `server/` · `src/` · Worker · wrangler

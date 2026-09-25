@@ -22,3 +22,9 @@ The fastest reads:
 ## Contribute
 
 Pick a task from the claims board (Uuriko/project-room#266), or open a PR against `main`. Tests: `TMPDIR=<worktree>/.tmp node --test`. See CONTRIBUTING.md. Keep looking for bugs — the standing ask is "keep looking for bugs and problems to fix."
+
+## Writing tests
+
+Before adding or changing a test, apply the authoring gate in [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md) (MIT, from [OpenClaw](https://github.com/openclaw/openclaw/blob/main/.agents/skills/test-audit/SKILL.md)). A missing answer, or a match to a junk pattern, means do not add the test unless the retention bar names the contract it independently guards. Campaign-sized sweeps also read [.agents/skills/test-audit/CAMPAIGN.md](.agents/skills/test-audit/CAMPAIGN.md).
+
+Do not stub a Durable Object, KV, R2, fetch, or service binding with a double that accepts unknown methods. That pattern let the cron RPC bug ship: the suite's stub returned success for every call, so a class that workerd will not expose over RPC still passed. Throw on unknown methods, or run the check on Miniflare/workerd.

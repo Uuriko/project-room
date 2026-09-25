@@ -85,7 +85,6 @@ stays empty. No ⌘K in the same lobby PR.
 Paths this fold owns:
 
 - `research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md` (this file)
-- `tests/ask-artifacts-lite-implement-gate-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` (next to
   the existing Artifacts-lite rows, not the T074/T075 ladder rows)
 

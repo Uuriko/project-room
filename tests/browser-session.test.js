@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY, SESSION_HINT_COPY,
-  rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints
+  LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, LAST_ROOM_BY_MEMBER_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY, SESSION_HINT_COPY,
+  rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints,
+  rememberMemberRoom, readMemberRoom, signInRoomTarget, clearStoredPasswords
 } from "../src/browser-session.js";
 
 function memoryStore(start = {}) {
@@ -58,6 +59,41 @@ test("clearBrowserSessionHints removes last-room, account hint, auth-kind, and g
   assert.equal(local.getItem(HAD_ACCOUNT_KEY), null);
   assert.equal(session.getItem(AUTH_KIND_KEY), null);
   assert.equal(session.getItem(GUIDE_DISMISSED_KEY), null);
+});
+
+function listStore(start = {}) {
+  const data = { ...start };
+  return {
+    get length() { return Object.keys(data).length; },
+    key(index) { return Object.keys(data)[index] ?? null; },
+    getItem(key) { return Object.hasOwn(data, key) ? data[key] : null; },
+    setItem(key, value) { data[key] = String(value); },
+    removeItem(key) { delete data[key]; }
+  };
+}
+
+test("per-user last room survives sign-out and sign-in prefers next, then a deep link, then that room", () => {
+  const local = memoryStore();
+  assert.equal(rememberMemberRoom("email:abc", "commons", local, "Commons"), true);
+  assert.deepEqual(readMemberRoom("email:abc", local), { roomId: "commons", title: "Commons" });
+  assert.equal(rememberMemberRoom("bad id", "commons", local), false);
+  clearBrowserSessionHints({ localStorage: local, sessionStorage: memoryStore() });
+  assert.equal(local.getItem(LAST_ROOM_BY_MEMBER_KEY) !== null, true);
+  assert.equal(readMemberRoom("email:abc", local).roomId, "commons");
+  assert.deepEqual(signInRoomTarget({ nextRoom: "next", deepLinkRoom: "deep", rememberedRoom: "commons" }), { roomId: "next", explicit: true, source: "next" });
+  assert.deepEqual(signInRoomTarget({ deepLinkRoom: "deep", rememberedRoom: "commons" }), { roomId: "deep", explicit: true, source: "deep-link" });
+  assert.deepEqual(signInRoomTarget({ rememberedRoom: "commons" }), { roomId: "commons", explicit: false, source: "last" });
+  assert.deepEqual(signInRoomTarget({}), { roomId: null, explicit: false, source: "inbox" });
+  for (let index = 0; index < 21; index += 1) rememberMemberRoom(`member${index}`, "commons", local);
+  assert.equal(readMemberRoom("member0", local), null);
+  assert.equal(readMemberRoom("member20", local).roomId, "commons");
+});
+
+test("clearStoredPasswords drops sessionStorage keys that name a password", () => {
+  const session = listStore({ "pr-password": "secret", other: "1" });
+  assert.deepEqual(clearStoredPasswords(session), ["pr-password"]);
+  assert.equal(session.getItem("pr-password"), null);
+  assert.equal(session.getItem("other"), "1");
 });
 
 test("session hint copy never names a secret and explains cookie vs localStorage", () => {

@@ -78,7 +78,7 @@ test("an enrolled identity puts, lists, downloads, and discards its own inbox at
   const { origin, store } = await serve(t);
   const owner = store.identities.create("Inbox owner");
   const other = store.identities.create("Inbox other");
-  const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
+  const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   for (const name of INBOX_TOOLS) assert.equal(names.includes(name), true);
   assert.equal(names.includes("room_join_packet"), true);
   const bytes = Buffer.from("inbox attachment bytes");

@@ -36,7 +36,7 @@ function makeEscrow(db = new DatabaseSync(":memory:")) {
     catch (error) { db.exec("ROLLBACK TO escrow_test"); db.exec("RELEASE escrow_test"); throw error; }
   };
   const store = { db, transaction, readTransaction: transaction };
-  const escrow = new BountyEscrow(store, { now: () => nowMs });
+  const escrow = new BountyEscrow(store, { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
   return { escrow, db };
 }
