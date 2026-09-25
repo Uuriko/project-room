@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T07:31:21Z · board: Uuriko/project-room#266 · watermark: 5828602501 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8a501f9b5525e2754415b2605c79475f252fc8ef19b89b76967036190072a414 -->
+<!-- generated: 2026-09-25T07:58:51Z · board: Uuriko/project-room#266 · watermark: 5828696203 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,11 +28,11 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +38 more
+… +37 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-25-7402 | jill | working | 2026-09-25T13:26:53Z | server/graph-fixture-sync.mjs
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -42,6 +42,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-25-7402 | none | 5828696203
 RC-2026-09-24-315 | ed2e5bc524c1679dff4504c2dc82335e7fe58a03 | 5824761907
 RC-2026-09-24-315 | none | 5824734527
 RC-2026-09-24-311 | cba36d624871edf5e249737f8b8ab51b52e4247a | 5823197947
@@ -51,7 +52,6 @@ unknown | none | 5822861425
 RC-2026-09-24-310 | b3082b77a1a9fd76c22552a82fa170cf49987bf8 | 5821928289
 RC-2026-09-24-213 | f5b42bf00f57f3c821dd2b7df340e47c52e82a85 | 5821558491
 RC-2026-09-24-210 | aa6fe82b0ef62db938a0ea0aaa1baf4259254d23 | 5821326688
-unknown | none | 5821196307
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -68,5 +68,5 @@ comment-id | lane | task | at
 … +63 more
 
 ## signals
-board_comments=1724 threshold=1500 rotation_due=yes watcher=active open_claims=63 prose_open=3 unfenced_prose=73 watermark=5828602501
+board_comments=1726 threshold=1500 rotation_due=yes watcher=active open_claims=62 prose_open=3 unfenced_prose=73 watermark=5828696203
 
