@@ -15,4 +15,4 @@ runlogs-tmp/
 .tmp/
 
 # Expanded at import time by scripts/acceptance-fixture.mjs
-scripts/.acceptance-fixture.generated.mjs
+scripts/.acceptance-fixture.*.generated.mjs
