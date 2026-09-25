@@ -168,6 +168,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .claim summary { cursor: pointer; color: var(--violet); }
 .claim p { margin: .35rem 0 0; overflow-wrap: anywhere; }
 .work-actions { display: flex; flex-wrap: wrap; gap: .45rem; min-height: 2.6rem; align-items: center; margin-top: .9rem; }
+.work-more > summary { cursor: pointer; color: var(--muted); font-size: .78rem; font-weight: 600; }
+.work-more-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .45rem; }
 
 .event-list { margin: 0; padding: .8rem 1rem 0; list-style: none; }
 .event-list li { display: grid; gap: .25rem; padding: .8rem 0; overflow-wrap: anywhere; }

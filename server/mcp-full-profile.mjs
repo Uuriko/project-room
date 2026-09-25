@@ -7,6 +7,7 @@
 // Local attention tools stay off this URL: they read an operator directory.
 
 import { prepareWork } from "../client/work-preparation.mjs";
+import { beginSelectedWork } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
@@ -106,6 +107,24 @@ export async function callHostedStdioTool(store, secret, name, args) {
     if (replyRoute(name)) return { value: replyRead(store, secret, roomId, name, rest), isError: false };
     const command = buildReplyCommand(identity, name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedReplyAction(name, rest, command, receipt));
+  }
+  if (name === "room_begin_work") {
+    const value = await beginSelectedWork({
+      connected: true,
+      scope: { workItemId: rest.workItemId, repository: rest.repository, ref: rest.ref, paths: rest.paths, expiresAt: rest.expiresAt },
+      read: () => store.workContext(secret, roomId, rest.workItemId, {}),
+      execute: async stage => {
+        try {
+          const command = buildWorkCommand(stage.action, stage.args);
+          const outcome = await recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(stage.action, command, receipt));
+          return outcome.value;
+        } catch (error) {
+          if ([409, 422].includes(error?.status)) return { status: "refused", code: error.code };
+          return { status: "unconfirmed", requestId: stage.requestId };
+        }
+      }
+    });
+    return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
   }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);

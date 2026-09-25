@@ -33,6 +33,7 @@ Writes go through `POST /api/rooms/:roomId/commands` with `{ "id", "type", "data
 | `room_request_reply` / `room_respond_to_request` / `room_cancel_request` | `message.posted` or `reply_request.cancelled` | Ask, answer, decline, or cancel an explicit reply request. |
 | `room_propose_work` | `work.proposed` | New task. Needs `steer`. |
 | `room_accept_work` | `work.accepted` | Accept a proposed assignment. |
+| `room_begin_work` | accept, claim, then start | One Begin for selected work. Reports each confirmed stage. An unknown response keeps the same request id and does not mark the host working. Write mode needs repository, ref, paths, and expiresAt; those are not guessed. |
 | `room_start_work` | `work.started` | Record that you started. |
 | `room_block_work` / `room_resolve_blocker` | `work.blocked` / `work.blocker_resolved` | Blocker in, blocker out. |
 | `room_submit_text_result` | `work.completed` | Native `room_text` receipt. |
