@@ -25,6 +25,7 @@ export function routeSources(root) {
   return {
     http: read("server/http.mjs"),
     pluginRoutes: read("server/agent-plugin-routes.mjs"),
+    nextActionsRoutes: read("server/next-actions-routes.mjs"),
     openapi: read("docs/openapi.yaml"),
   };
 }
@@ -45,7 +46,29 @@ export function pluginRouteTemplates(source) {
   return [...routes].sort();
 }
 
-export function routeDocsDrift({ http, pluginRoutes, openapi }) {
+// Next-actions routes live in server/next-actions-routes.mjs as one anchored
+// regex whose tail is an alternation group
+// (/^\/api\/rooms\/([^/]{1,384})\/(next-actions|…)$/). The alternation expands
+// to one template per route; every other group becomes {id}, like the
+// plug-in extractor above.
+export function nextActionsRouteTemplates(source) {
+  const routes = new Set();
+  for (const match of source.matchAll(/\/\^((?:\\\/|[^$/])+)\$\//g)) {
+    const template = match[1].replaceAll("\\/", "/");
+    const alternation = /\(([^()]*\|[^()]*)\)/.exec(template);
+    const variants = alternation
+      ? alternation[1].split("|").map(part => template.replace(alternation[0], part))
+      : [template];
+    for (const variant of variants) {
+      const expanded = variant.replace(/\([^()]*\)/g, "{id}");
+      if (/[\\^$]/.test(expanded)) throw new Error(`next-actions route regex not expanded: ${expanded}`);
+      routes.add(expanded);
+    }
+  }
+  return [...routes].sort();
+}
+
+export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, openapi }) {
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
@@ -57,6 +80,14 @@ export function routeDocsDrift({ http, pluginRoutes, openapi }) {
   if (typeof pluginRoutes !== "string") throw new Error("routeDocsDrift needs server/agent-plugin-routes.mjs; routes are served from two files");
   {
     for (const template of pluginRouteTemplates(pluginRoutes)) {
+      const key = templateKey(template);
+      if (!served.has(key)) served.set(key, template);
+    }
+  }
+  // RC-2026-09-25-911: the next-actions surface is a third route source.
+  if (typeof nextActionsRoutes !== "string") throw new Error("routeDocsDrift needs server/next-actions-routes.mjs; routes are served from three files");
+  {
+    for (const template of nextActionsRouteTemplates(nextActionsRoutes)) {
       const key = templateKey(template);
       if (!served.has(key)) served.set(key, template);
     }

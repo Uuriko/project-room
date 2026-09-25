@@ -30,7 +30,11 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
   await page.goto(origin); await fillAccessKey(page, f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
-  t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(writes, []); });
+  t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []);
+    // The attention lane syncs the read horizon (a write) on room entry by
+    // design; it is not "creating anything" in the room-actions sense, so it is
+    // excluded while every other non-GET room request still fails the check.
+    assert.deepEqual(writes.filter(path => !path.endsWith("/read-horizon")), []); });
   const open = async () => { await clickChrome(page, "#room-actions-open"); await page.locator("#room-actions-query").waitFor(); };
   const action = id => page.locator(`[data-room-action="${id}"]`);
   const capture = async name => {
