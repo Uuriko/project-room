@@ -133,8 +133,8 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
      rejected_at, reject_reason, redeemed_at, redeemed_member_id, redeemed_identity_id)
     VALUES('recovery-referral-jti','commons','recovery-chain','owner',0,6,?,?, 'redeemed',NULL,NULL,?, 'referred-agent-recovery', ?)`)
     .run(f.now(), f.now() + 7 * 86400000, f.now(), identityId);
-  f.store.db.prepare(`INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth)
-    VALUES('commons','referred-agent-recovery','recovery-chain',0)`).run();
+  f.store.db.prepare(`INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth, max_depth)
+    VALUES('commons','referred-agent-recovery','recovery-chain',0,6)`).run();
   // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
   // agent_directory_cards and agent_webhook_subs.
   f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
