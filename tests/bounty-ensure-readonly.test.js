@@ -64,7 +64,7 @@ test("cold-isolate read performs zero writes and returns balances", () => {
     store.db.exec(bountyEscrowSchema);
   });
   reset();
-  const escrow = new BountyEscrow(store); // cold isolate: _ready === false
+  const escrow = new BountyEscrow(store, { allowLegacyStringLanes: true }); // cold isolate: _ready === false
   const before = counts();
   const result = escrow.balances("room1", "alice");
   assert.equal(counts(), before, "a read-only path must not issue any write");
@@ -79,7 +79,7 @@ test("cold-isolate read still heals via a later write, then reads succeed", () =
     convergeBountyDeployedSchema(store.db);
     store.db.exec(bountyEscrowSchema);
   });
-  const escrow = new BountyEscrow(store);
+  const escrow = new BountyEscrow(store, { allowLegacyStringLanes: true });
   escrow.balances("room1", "alice"); // cold read, must not throw
   const posted = escrow.postBounty("room1", {
     poster: "alice", title: "Fix the leak", criteria: "No more drips.",
@@ -104,7 +104,7 @@ test("write path still migrates a legacy (pre-track) database", () => {
   });
   const colsBefore = new Set(store.db.prepare("PRAGMA table_info(bounty_records)").all().map(r => r.name));
   assert.ok(!colsBefore.has("state_changed_ms"));
-  const escrow = new BountyEscrow(store);
+  const escrow = new BountyEscrow(store, { allowLegacyStringLanes: true });
   escrow.postBounty("room1", {
     poster: "alice", title: "Fix the leak", criteria: "No more drips.",
     amount: 10, deadline: new Date(Date.now() + 86400000).toISOString(),

@@ -12,7 +12,7 @@ import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
-import { HOSTED_ROOM_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
 import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../deploy/agent-discovery.mjs";
 import { EVENT_TYPES as T, ROOM_KINDS } from "../src/events.js";
@@ -62,8 +62,12 @@ test("authenticated MCP reports field reasons and serves room_react plus replyTo
   const call = (name, args) => mcp(rpc("tools/call", { name, arguments: args }), { authorization: `Bearer ${identity.secret}` });
 
   const listed = await mcp(rpc("tools/list"), { authorization: `Bearer ${identity.secret}` });
-  assert.equal(listed.result.tools.length, 74);
-  assert.equal(HOSTED_ROOM_MCP_TOOLS.length + 4, 74);
+  assert.equal(listed.result.profile, "core");
+  assert.equal(listed.result.tools.length, CORE_MCP_TOOLS.length + 4);
+  assert.ok(listed.result.tools.every(tool => MCP_TOOL_NAME_RE.test(tool.name)));
+  const full = await mcp(rpc("tools/list", { profile: "full" }), { authorization: `Bearer ${identity.secret}` });
+  assert.equal(full.result.tools.some(tool => tool.name === "room_read_board"), true);
+  assert.equal(full.result.tools.some(tool => tool.name === "bond.list"), false);
 
   const longBody = await call("room_post_message", { roomId: created.roomId, body: "x".repeat(4097) });
   assert.equal(longBody.error.message, "invalid_arguments");

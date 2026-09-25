@@ -116,3 +116,30 @@ test("[lane][receipt] with an RC-style task-id keeps the full id (no truncation)
   assert.equal(byId[202].kind, "receipt");
   assert.equal(byId[202].task, "A012-2");
 });
+
+test("[lane][done] without a fenced room-done block parses as done, not a crash", () => {
+  // Regression 2026-09-24: parse_events died with
+  // "jq: error: split input and separator must be strings" on any
+  // [lane][done] comment lacking a ```room-done fence (comment
+  // 5822637457), which failed the whole room-watch tick closed.
+  // The parser must degrade to the prose task-id instead of crashing.
+  const fixture = JSON.stringify([
+    {
+      id: 301, created_at: "2026-09-24T21:36:07Z",
+      body: "[jill][done] RC-2026-09-24-310 containment: PR #980 merged as 144f7dff, all hosted CI green, deployed to production."
+    },
+    {
+      id: 302, created_at: "2026-09-24T21:36:26Z",
+      body: "[jill][done] RC-2026-09-24-310-contain\n\n```room-done\ntask-id: RC-2026-09-24-310-contain\npr: 980\nsha: 144f7dffc737d0865041c2db8c7310e9329bb9d6\nreceipt: deployed\n```"
+    }
+  ]);
+  const events = run(["_parse"], fixture);
+  const byId = Object.fromEntries(events.map(e => [e.id, e]));
+  assert.equal(byId[301].kind, "done");
+  assert.equal(byId[301].lane, "jill");
+  assert.equal(byId[301].ref, "RC-2026-09-24-310");
+  assert.equal(byId[302].kind, "done");
+  assert.equal(byId[302].receipt["task-id"], "RC-2026-09-24-310-contain");
+  assert.equal(byId[302].receipt.pr, "980");
+  assert.equal(byId[302].receipt.merged, "144f7dffc737d0865041c2db8c7310e9329bb9d6");
+});

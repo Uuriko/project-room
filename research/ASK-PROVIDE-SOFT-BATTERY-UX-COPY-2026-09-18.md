@@ -80,7 +80,6 @@ the **paused** whisper and the Ask stay-open rule.
 Paths this fold owns:
 
 - `research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md` (this file)
-- `tests/provide-soft-battery-ux-copy-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` **next to
   the T068 / T069 battery rows** (not the T082 keyboard rows, not
   the T081 Artifacts-lite rows)

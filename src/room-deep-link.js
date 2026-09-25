@@ -23,6 +23,23 @@ export function selectedRoomFromLocation({ search = "", hash = "" } = {}) {
   return values.length === 1 && ROOM_ID_PATTERN.test(values[0]) ? values[0] : null;
 }
 
+// ?next= is an explicit post-login destination. A bare room id, or a path
+// or URL that already carries ?room= / #room/, wins over the remembered room.
+export function roomIdFromNext(value) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 2048) return null;
+  if (ROOM_ID_PATTERN.test(raw)) return raw;
+  try {
+    const url = new URL(raw, "https://room.invalid");
+    return selectedRoomFromLocation({ search: url.search, hash: url.hash });
+  } catch {
+    return null;
+  }
+}
+
+export const ROOM_ACCESS_NOTICE = "You're not in that room yet. Ask a member for an invite, or request to join";
+
 // Door Open/People must survive hash-dropping in-app browsers: keep ?room= and #room/.
 export function roomOpenHandoffHref(href, hash, base) {
   const roomId = roomIdFromHash(hash);

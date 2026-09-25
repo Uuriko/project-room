@@ -86,7 +86,6 @@ keydown tree later — not three products.
 Paths this fold owns:
 
 - `research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md` (this file)
-- `tests/ask-keyboard-shortcuts-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` **next to
   the T042 / T043 / quiet-shell rows** (not the Artifacts-lite /
   T081 rows)

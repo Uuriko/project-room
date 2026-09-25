@@ -118,6 +118,11 @@ export const agentPluginSchema = `
   );
 `;
 
+// How long a skipped (disabled subscription / unlinked identity) delivery
+// waits before the drain looks at it again. Keeps it pending without letting
+// it block the head of the due queue.
+export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
+
 export class AgentPluginError extends Error {
   constructor(status, code, message) {
     super(message);
@@ -941,7 +946,18 @@ export class AgentPluginStore {
       this.mutate(() => this.markDeadLetter(row.delivery_id, "subscription removed", now));
       return "deadLettered";
     }
-    if (!sub.enabled) return "skipped";
+    // A skipped delivery stays pending but moves its next_attempt_at forward.
+    // The drain reads the oldest due rows first (LIMIT 25), so skipped rows
+    // that kept their old next_attempt_at would fill every batch forever and
+    // starve all newer deliveries: live 2026-09-24 every cron tick reported
+    // processed 25 / skipped 25 and nothing was ever delivered or retried.
+    const skip = () => {
+      this.mutate(() => this.db.prepare(
+        "UPDATE agent_webhook_deliveries SET next_attempt_at=? WHERE delivery_id=?")
+        .run(now + SKIPPED_RECHECK_MS, row.delivery_id));
+      return "skipped";
+    };
+    if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
     // identity lost its room link between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
@@ -949,7 +965,7 @@ export class AgentPluginStore {
     const link = this.db.prepare(
       "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
       .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return "skipped";
+    if (!link && row.room_id) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     const signature = signDelivery(sub.secret,
@@ -1009,11 +1025,21 @@ export class AgentPluginStore {
   // real resolver and every target is re-validated before its POST
   // (dispatch-time SSRF guard, QA-Sec 2026-09-19).
   async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+    // Only rows that can actually be attempted fill the batch. Deliveries of a
+    // disabled subscription or of an identity no longer linked to the event's
+    // room stay pending but are left out here; otherwise a large skipped
+    // backlog occupies every LIMIT-sized batch and live deliveries wait behind
+    // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
+    // subscription was removed (s is NULL) are still selected so they
+    // dead-letter as before.
     const due = this.db.prepare(
-      `SELECT * FROM agent_webhook_deliveries
-       WHERE state IN ('pending','failed') AND next_attempt_at <= ?
-       ${agentId ? "AND agent_id = ?" : ""}
-       ORDER BY next_attempt_at ASC LIMIT ?`)
+      `SELECT d.* FROM agent_webhook_deliveries d
+       LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
+       WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
+       ${agentId ? "AND d.agent_id = ?" : ""}
+       AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+       ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {

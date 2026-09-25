@@ -101,7 +101,6 @@ once the user confirms. T082 still owns the **keys**.
 Paths this fold owns:
 
 - `research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md` (this file)
-- `tests/ask-new-chat-clear-thread-docs.test.js`
 - index rows on `research/README.md` and `docs/README.md` **next to
   the T082 / quiet-shell / `#clear-chat` rows** (not the T083
   battery rows, not the T081 Artifacts-lite rows)
