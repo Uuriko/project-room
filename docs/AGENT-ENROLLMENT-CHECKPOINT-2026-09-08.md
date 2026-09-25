@@ -125,7 +125,7 @@ and explicit live-release approval remain required. Node is not DO storage failo
 
 ## Next work
 
-[Host routes](AGENT-HOSTS.md) separates researched configuration recipes from
+[Host routes](SWARM-PLUG-IN.md#host-routes-connect-the-ai-you-already-use) separates researched configuration recipes from
 tested contracts. Native Claude/Codex/Cursor/Gemini/Grok-host acceptance is pending.
 No native Instinct/iMessage API contract was established; reviewed manual handoff
 is the usable fallback, without inspecting an existing personal inbox. No universal
