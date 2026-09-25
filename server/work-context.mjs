@@ -18,6 +18,11 @@ export function currentWorkRecord(item) {
   work.status = session.status;
   work.stop_requested_at = session.stop_requested_at;
   work.heartbeat_at = session.heartbeat_at;
+  // Keep the inputs to the shared resume projection explicit so SDKs can
+  // verify worker continuity without receiving the attempt ledger.
+  work.started_at = session.started_at;
+  work.attempt_count = session.attempt_count;
+  work.suspended_by = session.suspended_by;
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
   work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion signedEvidence checksClaimed nextAction eventId nativeText");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
