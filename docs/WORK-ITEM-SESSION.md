@@ -52,8 +52,10 @@ allowed at pilot capacity so a session can be ended.
 | `GET` | `/api/rooms/:room/work-sessions` | Cards: title, status, Stop timestamp, heartbeat. Optional `?status=` |
 | `POST` | `/api/rooms/:room/work-sessions` | `set_status` or `request_stop` → the matching Event |
 
-POST body (exact known fields): `requestId`, `workItemId`, `expectedRevision`,
-`action` (`set_status` \| `request_stop`), and `status` when setting status.
+POST body: `requestId`, `workItemId`, `action` (`set_status` \| `request_stop`),
+and `status` when setting status. `expectedRevision` is optional. When it is
+sent and does not match the card, the write is rejected. When it is omitted,
+the write is last-writer-wins.
 
 `set_status` maps to `session.started` (queued→processing), `session.stopped`
 (→done/failed), or `session.status_changed`. `request_stop` writes

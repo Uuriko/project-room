@@ -560,7 +560,7 @@ test("a round-limit pause records its reason; resume without approval is refused
   assert.equal(sessionRecord(item).suspended_by, "round_limit");
   // The worker's own resume is refused even if the event log were tampered with.
   assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent",
-    at: "2026-09-10T21:01:00.000Z", data: { status: "active" } }), /owner approval/);
+    at: "2026-09-10T21:01:00.000Z", data: { status: "active" } }), /resumeApproved/);
   // An approved resume clears the pause with a fresh round count and keeps the worker.
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "owner",
     at: "2026-09-10T21:02:00.000Z", data: { status: "active", resumeApproved: true, rounds: 7 } });

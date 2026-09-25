@@ -2209,8 +2209,9 @@ paths:
     post:
       summary: Drive a work session
       description: |
-        Actions: set_status (needs `status`), request_stop. Every mutation
-        needs expectedRevision; stale revisions get 409. The atomic claim is
+        Actions: set_status (needs `status`), request_stop. expectedRevision
+        is optional. When it is sent and stale, the write is 409. When it
+        is omitted, the write is last-writer-wins. The atomic claim is
         set_status -> processing on a queued card. Claims go stale after
         10 min without a heartbeat; a second live claim gets 409
         session_claimed. The error message is `Claim held by <memberId>`
@@ -2220,9 +2221,10 @@ paths:
         Budgets (RC-2026-09-19-063): a start may declare maxRounds and
         maxToolCalls alongside the existing bounds. Status changes may report
         cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding
-        maxRounds auto-suspends the session (409 round_limit_exceeded) and the
-        pause resumes only with room-owner (or manage_claims) approval;
-        exceeding maxToolCalls force-stops the session (409 budget_exceeded).
+        maxRounds auto-suspends the session (409 round_limit_exceeded). The
+        next mention or post resumes that run; the owner can still resume
+        with set_status. A worker set_status does not clear the pause.
+        Exceeding maxToolCalls force-stops the session (409 budget_exceeded).
         The owner is notified of every enforcement pause and stop.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -2232,11 +2234,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [requestId, workItemId, expectedRevision, action]
+              required: [requestId, workItemId, action]
               properties:
                 requestId: { type: string, description: Idempotency key }
                 workItemId: { type: string }
-                expectedRevision: { type: integer }
+                expectedRevision: { type: integer, description: Optional compare-and-swap. Omit for last-writer-wins. A stale value is 409. }
                 action: { type: string, enum: [set_status, request_stop] }
                 status:
                   type: string
@@ -2250,7 +2252,7 @@ paths:
       responses:
         '201': { description: Committed }
         '409':
-          description: Stale revision, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; owner resume required)
+          description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; the next mention or post resumes it)
           content:
             application/json:
               schema:

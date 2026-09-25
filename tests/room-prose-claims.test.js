@@ -24,6 +24,23 @@ function stateOf(comments, now) {
 
 const C = (id, at, body) => ({ id, created_at: at, body });
 
+test("spaced and reordered [lane][claim] headers are parsed", () => {
+  const comments = [
+    C(1, "2026-09-17T00:50:00Z",
+      "[ claim ][ quill-s2 ] B099-2 build the thing. Exact files: `src/foo.mjs`"),
+    C(2, "2026-09-17T00:51:00Z",
+      "[quill-s2] [claim] B101-2 spaced pair. Exact files: `src/bar.mjs`"),
+  ];
+  const events = parse(comments);
+  assert.equal(events[0].kind, "prose-claim");
+  assert.equal(events[0].lane, "quill-s2");
+  assert.equal(events[0].prefix, "[claim]");
+  assert.equal(events[0].task_id, "B099-2");
+  assert.equal(events[1].kind, "prose-claim");
+  assert.equal(events[1].lane, "quill-s2");
+  assert.equal(events[1].task_id, "B101-2");
+});
+
 test("prose claim with backtick files becomes a lease-bearing event", () => {
   const comments = [
     C(1, "2026-09-17T00:50:00Z",

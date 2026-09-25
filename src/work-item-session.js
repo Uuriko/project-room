@@ -316,7 +316,7 @@ export function workContinuity(item, nowMs = Date.now()) {
   if (flags.stopRequested) return { ...common, state: "stopping", label: "Stop requested", needsAttention: true,
     next: "Confirm the worker stopped before starting another run." };
   if (session.status === "suspended") return { ...common, state: "paused", label: "Run paused", needsAttention: true,
-    next: session.suspended_by === "round_limit" ? "The owner can resume this run after reviewing its round limit." : "Read saved progress to continue or hand off." };
+    next: session.suspended_by === "round_limit" ? "The next mention or post resumes this run." : "Read saved progress to continue or hand off." };
   if (flags.unresponsive || !session.heartbeat_at) return { ...common, state: "unknown", label: "Waiting for a worker update", needsAttention: true,
     next: "Process state is unknown. Check the worker and saved progress before resuming." };
   return { ...common, state: "running", label: "Worker checked in", needsAttention: false };
@@ -449,16 +449,15 @@ export function applySessionFields(item, incoming) {
       return;
     }
     if (!CHANGES[session.status]?.includes(next)) throw new Error(`Invalid session transition from ${session.status}`);
-    // RC-2026-09-19-063: a round-limit pause is recorded, and only an
-    // owner-approved resume clears it (with a fresh round count). A worker
-    // cannot dodge the limit by suspending and resuming on its own: the
-    // resume gate lives in the store, and the applier re-checks it so a
-    // tampered log entry cannot smuggle a resume past.
+    // A round-limit pause is recorded. set_status cannot clear it unless
+    // resumeApproved is set. The server sets that flag when the next mention
+    // or post resumes the run. A log entry without the flag cannot smuggle
+    // a resume past this check.
     if (next === SESSION_STATUSES.SUSPENDED && incoming.data?.suspendReason !== undefined
       && incoming.data.suspendReason !== "round_limit") throw new Error("suspendReason is round_limit or omitted");
     if (session.status === SESSION_STATUSES.SUSPENDED && session.suspended_by === "round_limit") {
       if (next !== SESSION_STATUSES.SUSPENDED && incoming.data?.resumeApproved !== true)
-        throw new Error("A round-limit pause resumes only with owner approval");
+        throw new Error("A round-limit pause resumes only when resumeApproved is set");
     } else if (next === SESSION_STATUSES.SUSPENDED) {
       item.suspended_by = incoming.data?.suspendReason === "round_limit" ? "round_limit" : null;
     } else {

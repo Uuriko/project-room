@@ -95,8 +95,15 @@ test("round limit: the worker cannot self-resume; the owner resumes and the roun
   assert.equal(resumed.suspendedBy, null);
   assert.equal(resumed.rounds, 0, "resume restarts the round count");
   assert.equal(resumed.worker_member_id, "agent", "the paused worker keeps the session");
-  // The worker can report again after the approved resume.
-  assert.equal((await mutate(workItemId, resumed.revision, { status: "processing", rounds: 1 })).status, 201);
+  // expectedRevision is optional. A stale one still conflicts.
+  const omitted = await request("/api/rooms/commons/work-sessions", {
+    method: "POST", token: agentKey, data: { requestId: randomUUID(), workItemId, action: "set_status", status: "active", rounds: 1 }
+  });
+  assert.equal(omitted.status, 201, JSON.stringify(omitted.json));
+  const current = await card(workItemId);
+  const stale = await mutate(workItemId, current.revision - 1, { status: "processing" });
+  assert.equal(stale.status, 409);
+  assert.match(stale.json?.error?.message ?? "", /Stale Work Item revision/);
   // The pause and the owner resume are in the event log.
   const events = await request("/api/rooms/commons/events", { token: agentKey });
   const rows = (events.json?.events ?? []).map(e => e.event ?? e).filter(e => e.data?.workItemId === workItemId);
@@ -104,6 +111,33 @@ test("round limit: the worker cannot self-resume; the owner resumes and the roun
   assert.ok(pause && pause.data.suspendReason === "round_limit");
   const approved = rows.find(e => e.type === "session.status_changed" && e.data.status === "active" && e.data.resumeApproved === true);
   assert.ok(approved, "the owner-approved resume is recorded as such");
+});
+
+test("round limit: the next mention or the worker's post resumes the run", async t => {
+  const { propose, claim, mutate, card, send, request, ownerKey, agentKey } = await serve(t);
+  const workItemId = propose("mentioned run");
+  assert.equal((await claim(workItemId, { budget: { maxRounds: 1 } })).status, 201);
+  let session = await card(workItemId);
+  assert.equal((await mutate(workItemId, session.revision, { status: "active", rounds: 4 })).status, 409);
+  session = await card(workItemId);
+  assert.equal(session.status, "suspended");
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "nudge", body: "@agent continue" });
+  session = await card(workItemId);
+  assert.equal(session.status, "active", "a mention of the paused worker resumes the run");
+  assert.equal(session.rounds, 0);
+  assert.equal(session.worker_member_id, "agent");
+  assert.equal((await mutate(workItemId, session.revision, { status: "active", rounds: 4 })).status, 409);
+  session = await card(workItemId);
+  assert.equal(session.status, "suspended");
+  send(agentKey, T.MESSAGE_POSTED, { messageId: "back", body: "picking this up" });
+  session = await card(workItemId);
+  assert.equal(session.status, "active", "the worker's next post resumes the run");
+  assert.equal(session.rounds, 0);
+  const events = await request("/api/rooms/commons/events", { token: agentKey });
+  const resumes = (events.json?.events ?? []).map(e => e.event ?? e)
+    .filter(e => e.data?.workItemId === workItemId && e.data?.resumeApproved === true);
+  assert.equal(resumes.length, 2);
+  assert.ok(resumes.every(e => e.type === "session.status_changed" && e.data.status === "active"));
 });
 
 test("round-limit pause and budget stop notify the room owner", async t => {
