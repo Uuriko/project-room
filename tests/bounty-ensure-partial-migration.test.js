@@ -65,7 +65,7 @@ test("partially-migrated shard: first write converges tables AND columns, propos
   assert.ok(!tablesOf(db).has("bounty_rubric_versions"), "precondition: new table missing");
   assert.ok(!colsOf(db, "bounty_records").has("rubric_json"), "precondition: rubric column missing");
 
-  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs });
+  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs, allowLegacyStringLanes: true });
   // Pre-fix this threw "table bounty_records has no column named rubric_json".
   const { bounty } = escrow.postBounty(ROOM,
     { poster: LANE, title: "T", criteria: "C", amount: 10, deadline });
@@ -96,7 +96,7 @@ test("partially-migrated shard: first write converges tables AND columns, propos
 
 test("partially-migrated shard: repeated writes stay converged (no double migration)", () => {
   const db = makePartialShard();
-  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs });
+  const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs, allowLegacyStringLanes: true });
   const first = escrow.postBounty(ROOM, { poster: LANE, title: "A", criteria: "C", amount: 10, deadline }).bounty;
   const second = escrow.postBounty(ROOM, { poster: LANE, title: "B", criteria: "C", amount: 10, deadline }).bounty;
   assert.notEqual(first.bountyId, second.bountyId);

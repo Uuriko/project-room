@@ -113,13 +113,21 @@ export function signalsForEvent(event) {
 
 // Fold every bounty event for the room into per-agent reputation.
 // Deterministic: same events, same nowMs -> same scores, always.
+//
+// Membership gate: reputation accrues only to CURRENT active room members.
+// Stale labels (members who left) and phantom labels (never members) project
+// to nothing — a forged or leftover lane in an old event can never build
+// standing. Without a membership source (legacy string-only test mode) the
+// projector keeps the historical unfiltered behavior.
 export function projectBountyReputation(escrow, roomId, { nowMs } = {}) {
   const now = nowMs === undefined ? escrow.nowMs() : nowMs;
   const rep = createReputation();
   const applied = [];
+  const memberIds = typeof escrow.memberLaneIds === "function" ? escrow.memberLaneIds(roomId) : null;
   for (const event of escrow.listEvents(roomId)) {
     const at = Number.isInteger(Date.parse(event.at)) ? Date.parse(event.at) : now;
     for (const s of signalsForEvent(event)) {
+      if (memberIds !== null && !memberIds.has(s.agent)) continue;
       rep.signalTyped(s.agent, s.type, { at });
       applied.push(Object.freeze({ seq: event.seq, at, agent: s.agent, type: s.type }));
     }

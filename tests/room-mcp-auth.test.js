@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
-import { HOSTED_ROOM_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { HOSTED_ROOM_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -105,13 +105,23 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
 
   const listed = await rpc(origin, "tools/list", undefined, owner.secret);
   assert.equal(listed.status, 200);
-  const names = (await listed.json()).result.tools.map(tool => tool.name);
-  assert.equal(names.length, 74);
+  const coreBody = await listed.json();
+  const names = coreBody.result.tools.map(tool => tool.name);
+  assert.equal(coreBody.result.profile, "core");
+  assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
+  assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
+  assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
   assert.equal(names.includes("room_react"), true);
-  assert.deepEqual(names.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
-  assert.deepEqual(names.slice(HOSTED_ROOM_MCP_TOOLS.length), JOIN_TOOLS);
+  assert.equal(names.includes("bond.list"), false);
+  for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
+  const full = await rpc(origin, "tools/list", { profile: "full" }, owner.secret);
+  const fullNames = (await full.json()).result.tools.map(tool => tool.name);
+  assert.equal(fullNames.includes("room_react"), true);
+  assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
+  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), JOIN_TOOLS);
+  for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
-    assert.equal(names.includes(name), true, name);
+    assert.equal(fullNames.includes(name), true, name);
   }
 
   const access = await call(origin, "room_check_access", { roomId: created.roomId }, owner.secret);
@@ -268,7 +278,8 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(missingRoom.body.error.code, -32602);
 });
 
-const BOND_DM_TOOLS = ["bond.accept", "bond.decline", "bond.revoke", "bond.list", "dm.posted", "room_list_peer_dms"];
+const BOND_DM_TOOLS = ["bond_accept", "bond_decline", "bond_revoke", "bond_list", "dm_posted", "room_list_peer_dms"];
+const BOND_DM_ALIASES = ["bond.accept", "bond.decline", "bond.revoke", "bond.list", "dm.posted"];
 
 test("bond accept decline revoke and peer DM require the identity bearer and call through", async t => {
   const { origin, store, rooms } = await serve(t);
@@ -292,8 +303,8 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   const openNames = (await openList.json()).result.tools.map(tool => tool.name);
   for (const name of BOND_DM_TOOLS) assert.equal(openNames.includes(name), false, name);
 
-  for (const name of BOND_DM_TOOLS) {
-    assert.equal(HOSTED_ROOM_MCP_TOOLS.includes(name), true, name);
+  for (const name of [...BOND_DM_TOOLS, ...BOND_DM_ALIASES]) {
+    if (!name.includes(".")) assert.equal(HOSTED_ROOM_MCP_TOOLS.includes(name), true, name);
     const open = await call(origin, name, { roomId: created.roomId, id: "nope", bondId: "bond-x", to: peer.identityId, body: "no", messageId: "m" });
     assert.equal(open.status, 401, name);
     assert.equal(open.body.error.code, -32001, name);
@@ -418,8 +429,9 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.equal(JSON.stringify(still.body).includes("too late"), false);
 
   const page = await (await fetch(`${origin}/room/mcp`)).text();
-  assert.match(page, /bond\.accept submits/);
-  assert.match(page, /dm\.posted submits/);
+  assert.match(page, /bond_accept submits/);
+  assert.match(page, /dm_posted submits/);
+  assert.match(page, /type: "bond\.accept"/);
   assert.match(page, /room_list_peer_dms lists/);
   assert.match(page, /room_put_file, room_list_files, room_get_file, and room_discard_file/);
   assert.match(page, /room_commit_file commits/);
@@ -428,8 +440,8 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment/);
   assert.match(page, /inbox attachment bytes/);
   assert.doesNotMatch(page, /account-session descriptors only; bytes are not retained/);
-  assert.match(page, /wake\.register reports/);
-  assert.match(page, /webhook\.subscribe, webhook\.list, and webhook\.unsubscribe/);
+  assert.match(page, /wake_register reports/);
+  assert.match(page, /webhook_subscribe, webhook_list, and webhook_unsubscribe/);
   assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
 });

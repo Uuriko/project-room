@@ -160,7 +160,10 @@ test("room import rejects duplicate event ids cleanly", async t => {
 
 test("room import round-trips a large (1500-event) export", async t => {
   const { request, importNdjson, ownerKey, store } = await serve(t);
+  let at = Date.now();
+  store.now = () => at;
   for (let i = 0; i < 1500; i++) {
+    at += 2000;
     store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
       data: { messageId: `bulk-${i}`, body: `bulk message ${i}` } });
   }

@@ -88,7 +88,9 @@ test("historical charter reads remain bounded beyond the recent event tail and l
   const f = await setup(t), initial = f.store.room("commons");
   f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", initial.sequence, JSON.stringify(initial.state));
   f.send(data()); f.send(data(1, "Current"));
-  for (let n = 0; n < 105; n++) f.store.command(f.keys.owner, "commons", { id: `background-${n}`, type: "message.posted", data: { body: "Background discussion" } });
+  let at = Date.now();
+  f.store.now = () => at;
+  for (let n = 0; n < 105; n++) { at += 2000; f.store.command(f.keys.owner, "commons", { id: `background-${n}`, type: "message.posted", data: { body: "Background discussion" } }); }
   const before = auditRecovery(f.store).dataSha256, original = f.store.db.prepare.bind(f.store.db), historyQueries = [];
   f.store.db.prepare = sql => { if (sql.includes("FROM events")) historyQueries.push(sql); return original(sql); };
   try { assert.equal((await f.client.charter({ revision: 1 })).charter.purpose, data().purpose); }

@@ -207,7 +207,7 @@ for (const row of rows) {
     // 1) Request-path INSERT must not 500. This is the exact throw the
     //    incident produced ("table bounty_records has no column named
     //    rubric_json") — the pre-#793 _ensure() never added the columns.
-    const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs });
+    const escrow = new BountyEscrow(makeStore(db), { now: () => nowMs, allowLegacyStringLanes: true });
     let bounty;
     try {
       ({ bounty } = escrow.postBounty(ROOM, {

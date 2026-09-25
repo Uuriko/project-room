@@ -46,7 +46,7 @@ const propose = (escrow, roomId, title = "t") =>
 test("colliding slugs: both rooms propose successfully on a shared counter", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(bountyEscrowSchema);
-  const escrow = new BountyEscrow(makeStore(db));
+  const escrow = new BountyEscrow(makeStore(db), { allowLegacyStringLanes: true });
   const a = propose(escrow, ROOM_A);
   assert.equal(a.bounty.bountyId, "JILLBP179016-1");
   // Pre-repair this threw UNIQUE constraint failed: bounty_records.bounty_id.
@@ -69,7 +69,7 @@ test("migration heals a pre-repair database through the _ensure() fallback path"
      deadline_ms, created_at, updated_at)
     VALUES ('JILLBP179016-1', ?, 't', 'criteria', 5000, ?, 'proposed', ?, ?, datetime('now'), datetime('now'))`)
     .run(ROOM_A, LANE, nowMs, nowMs + 3_600_000);
-  const escrow = new BountyEscrow(makeStore(db)); // direct construction: no RoomStore boot convergence
+  const escrow = new BountyEscrow(makeStore(db), { allowLegacyStringLanes: true }); // direct construction: no RoomStore boot convergence
   const b = propose(escrow, ROOM_B); // must not 500
   assert.equal(b.bounty.bountyId, "JILLBP179016-2");
   // Sequence table is now slug-keyed with the merged counter.
@@ -107,7 +107,7 @@ test("migration never rewinds below a minted row without a sequence row", () => 
      deadline_ms, created_at, updated_at)
     VALUES ('JILLBP179016-7', ?, 't', 'criteria', 5000, ?, 'proposed', ?, ?, datetime('now'), datetime('now'))`)
     .run(ROOM_A, LANE, nowMs, nowMs + 3_600_000);
-  const escrow = new BountyEscrow(makeStore(db));
+  const escrow = new BountyEscrow(makeStore(db), { allowLegacyStringLanes: true });
   const b = propose(escrow, ROOM_B);
   assert.equal(b.bounty.bountyId, "JILLBP179016-8");
 });

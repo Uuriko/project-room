@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,10 +14,10 @@ import {
   AUTONOMY_TIERS, DEFAULT_AUTONOMY_TIER, ENROLLMENT_TIER,
 } from "../server/autonomy-tiers.mjs";
 
-// Graduated autonomy tiers: new agent members start t1_readonly, the owner
-// promotes to t2_standard, and demotion to t1 is instant (the table is read
-// fresh on every command). No tier row = t2_standard: migration-safe, no
-// behavior change for existing members until the operator acts.
+// Graduated autonomy tiers: new agent members start t2_standard (full member
+// access). The owner can demote one agent to t1_readonly, and that demotion
+// is instant (the table is read fresh on every command). No tier row =
+// t2_standard: invite redeem, share links, and members from before tiers.
 
 async function serve(t, { start = Date.parse("2026-09-14T12:00:00Z") } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-autonomy-tiers-"));
@@ -45,39 +45,41 @@ async function serve(t, { start = Date.parse("2026-09-14T12:00:00Z") } = {}) {
   const propose = (title, accountableMemberId = "agent") => { const workItemId = `w-${randomUUID()}`; send("owner", T.WORK_PROPOSED, { workItemId, title, definitionOfDone: "done", accountableMemberId, mode: "read" }); return workItemId; };
   const startSession = (actor, workItemId, budget) => send(actor, T.SESSION_STARTED,
     { workItemId, expectedRevision: state().workItems[workItemId].revision, ...(budget ? { budget } : {}) });
-  // New agent members enroll at t1_readonly; promote them for tests that
-  // need a working agent.
+  // Enrollment is already t2_standard. promote() is the explicit working
+  // tier; demote() is the owner's per-agent stop.
   const promote = memberId => setTier(db(), "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: clock.now });
-  return { store, keys, clock, send, request, state, db, propose, startSession, promote };
+  const demote = memberId => demoteToReadonly(db(), "commons", memberId, { updatedBy: "owner", nowMs: clock.now });
+  return { store, keys, clock, send, request, state, db, propose, startSession, promote, demote };
 }
 
 // assert.throws returns undefined on this Node; capture the error instead.
 const capture = fn => { try { fn(); } catch (error) { return error; } throw new Error("expected the function to throw"); };
 
-test("constants: two tiers, t2 legacy default, t1 enrollment default", async t => {
+test("constants: two tiers, t2 legacy default, t2 enrollment default", async t => {
   const f = await serve(t);
   assert.deepEqual(AUTONOMY_TIERS, ["t1_readonly", "t2_standard"]);
   assert.equal(DEFAULT_AUTONOMY_TIER, "t2_standard");
-  assert.equal(ENROLLMENT_TIER, "t1_readonly");
+  assert.equal(ENROLLMENT_TIER, "t2_standard");
   assert.ok(f);
 });
 
-test("enrollment default: new agent members start t1_readonly; humans get no row", async t => {
+test("enrollment default: new agent members start t2_standard; humans get no row", async t => {
   const f = await serve(t);
   const db = f.db();
-  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t1_readonly", "agent enrolled at t1");
-  assert.equal(getTier(db, "commons", "agent2").autonomyTier, "t1_readonly");
+  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t2_standard", "agent enrolled at t2");
+  assert.equal(getTier(db, "commons", "agent2").autonomyTier, "t2_standard");
   assert.equal(getTier(db, "commons", "guest"), null, "human members get no tier row");
   assert.equal(getTier(db, "commons", "owner"), null);
+  f.send("agent", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "full member access" });
   // A re-enrollment attempt for an existing tier keeps the current tier:
   // the hook is ON CONFLICT DO NOTHING, so a demoted agent cannot wash its
   // tier by leaving and rejoining. Exercise the hook directly (a real
   // re-add would fail at apply time, after the hook runs).
-  setTier(db, "commons", "agent", "t2_standard", { updatedBy: "owner", nowMs: f.clock.now });
+  demoteToReadonly(db, "commons", "agent", { updatedBy: "owner", nowMs: f.clock.now });
   enforceAutonomyTiers({ db, roomId: "commons", state: f.state(),
     command: { type: T.MEMBER_ADDED, data: { kind: "agent", memberId: "agent" } },
     actor: { id: "owner", kind: "human" }, nowMs: f.clock.now, fail: () => { throw new Error("must not fail"); } });
-  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t2_standard", "existing tier survives re-enrollment");
+  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t1_readonly", "a demotion survives re-enrollment");
 });
 
 test("validation: bad tiers and shapes are 422 invalid_autonomy_tier", async t => {
@@ -86,7 +88,7 @@ test("validation: bad tiers and shapes are 422 invalid_autonomy_tier", async t =
   assert.throws(() => setTier(db, "commons", "agent", "t3_admin"), { code: "invalid_autonomy_tier" });
   assert.throws(() => setTier(db, "commons", "agent", null), { code: "invalid_autonomy_tier" });
   assert.throws(() => setTier(db, "commons", "not a member!!", "t1_readonly"), { code: "invalid_autonomy_tier" });
-  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t1_readonly", "rejected writes leave the enrollment row alone");
+  assert.equal(getTier(db, "commons", "agent").autonomyTier, "t2_standard", "rejected writes leave the enrollment row alone");
 });
 
 test("setTier / demoteToReadonly: upsert, frozen rows, instant effect", async t => {
@@ -106,7 +108,8 @@ test("setTier / demoteToReadonly: upsert, frozen rows, instant effect", async t 
 
 test("enforcement: t1_readonly refuses writes but heartbeats, spend reports and stops land", async t => {
   const f = await serve(t);
-  // "agent" enrolled at t1_readonly by the hook.
+  // Enrollment is full access. The owner's demotion is what restricts this agent.
+  f.demote("agent");
   const refused = capture(() => f.send("agent", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "chat" }));
   assert.equal(refused.status, 403);
   assert.equal(refused.code, "agent_readonly");
@@ -158,7 +161,8 @@ test("enforceAutonomyTiers is a no-op for t2 agents and ignores malformed input"
     command: { type: T.MESSAGE_POSTED, data: {} }, actor: { id: "agent2", kind: "agent" }, nowMs: f.clock.now,
     fail: () => { throw new Error("must not fail"); } });
   assert.doesNotThrow(t2noop, "t2 agent: no behavior change");
-  // t1 agents are refused through fail().
+  // A demoted agent is refused through fail().
+  f.demote("agent");
   const refused = capture(() => enforceAutonomyTiers({ db: f.db(), roomId: "commons", state: f.state(),
     command: { type: T.MESSAGE_POSTED, data: {} }, actor: { id: "agent", kind: "agent" }, nowMs: f.clock.now,
     fail: (status, code) => { throw Object.assign(new Error(code), { status, code }); } }));
@@ -191,11 +195,11 @@ test("API: owner can set and read; non-owner gets 403; shape is complete", async
   const nullBody = await f.request(path, { method: "PUT", token: f.keys.owner, data: null });
   assert.equal(nullBody.status, 400);
   assert.equal(nullBody.json.error.code, "invalid_json");
-  // Enrollment row reads back before the operator ever acts.
+  // Enrollment row reads back as full member access before the operator restricts anyone.
   const fresh = await f.request(path, { method: "GET", token: f.keys.owner });
   assert.equal(fresh.status, 200);
-  assert.equal(fresh.json.tier.autonomyTier, "t1_readonly");
-  assert.deepEqual(fresh.json.status, { autonomyTier: "t1_readonly" });
+  assert.equal(fresh.json.tier.autonomyTier, "t2_standard");
+  assert.deepEqual(fresh.json.status, { autonomyTier: "t2_standard" });
   assert.equal(typeof fresh.json.evaluatedThrough, "number");
   // Promote then demote through the API; each takes effect immediately.
   const promoted = await f.request(path, { method: "PUT", token: f.keys.owner, data: { autonomyTier: "t2_standard" } });
@@ -206,6 +210,51 @@ test("API: owner can set and read; non-owner gets 403; shape is complete", async
   assert.equal(demoted.status, 200);
   assert.equal(demoted.json.status.autonomyTier, "t1_readonly");
   assert.throws(() => f.send("agent", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "x" }), { status: 403, code: "agent_readonly" });
+});
+
+test("API: an agent room owner can restrict another agent", async t => {
+  const f = await serve(t);
+  const row = f.db().prepare("SELECT projection FROM rooms WHERE id=?").get("commons");
+  const projection = JSON.parse(row.projection);
+  projection.room.ownerId = "agent";
+  f.db().prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), "commons");
+  const path = "/api/rooms/commons/operator/agents/agent2";
+  const put = await f.request(path, { method: "PUT", token: f.keys.agent, data: { autonomyTier: "t1_readonly" } });
+  assert.equal(put.status, 200, JSON.stringify(put.json));
+  assert.equal(put.json.status.autonomyTier, "t1_readonly");
+  assert.equal(put.json.tier.updatedBy, "agent");
+  const guest = await f.request(path, { method: "PUT", token: f.keys.guest, data: { autonomyTier: "t2_standard" } });
+  assert.equal(guest.status, 403);
+  assert.equal(guest.json.error.code, "owner_required");
+});
+
+test("join paths: invite redeem, share link, and access-request approve can post", async t => {
+  const f = await serve(t);
+  const post = (token, text) => f.store.command(token, "commons", {
+    id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: text },
+  });
+
+  const linkedIdentity = f.store.identities.create("Linked agent");
+  const linked = f.store.identities.link(f.keys.owner, "commons", {
+    identityId: linkedIdentity.identityId, permissions: [],
+  });
+  assert.equal(getTier(f.db(), "commons", linked.memberId).autonomyTier, "t2_standard", "access-request approve enrolls t2");
+  post(linkedIdentity.secret, "approved agent posts");
+
+  const minted = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Invited" });
+  const redeemed = f.store.invites.redeem(minted.code, { displayName: "Invited Bot" });
+  assert.equal(getTier(f.db(), "commons", redeemed.memberId), null, "invite redeem leaves no tier row");
+  post(redeemed.secret, "redeemed agent posts");
+
+  const linkToken = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(f.keys.owner, "commons", {
+    requestId: randomUUID(), linkToken, expiresAt: f.clock.now + 3600000, maxJoins: 2,
+    expectedMemberRevision: f.state().members.owner.revision,
+  }, null);
+  const shareIdentity = f.store.identities.create("Share agent");
+  const joined = f.store.shareLinks.joinAgent(shareIdentity.secret, linkToken, "Share agent");
+  assert.equal(getTier(f.db(), "commons", joined.memberId), null, "share-link join leaves no tier row");
+  post(shareIdentity.secret, "share-link agent posts");
 });
 
 test("autonomyTierReport: effective tier falls back to t2_standard without a row", async t => {

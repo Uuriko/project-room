@@ -36,6 +36,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/agent-first-run.js'); // Agent first-run orientation card (imported by src/agent-signin-ui.js, RC-2026-09-24-213)
   paths.add('src/room-deep-link.js');
   paths.add('src/browser-session.js');
+  paths.add('src/composer-files.js'); // Composer file chips (imported by src/app.js)
   paths.add('src/session-expiry.js'); // Session-expiry locale rendering (imported by src/app.js + src/join.js)
   paths.add('src/agent-invite-ui.js');
   paths.add('src/share-invite-code.js');
@@ -43,6 +44,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/mcp-http.mjs');
   paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
+  paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
@@ -117,6 +119,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
+  paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
   paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)

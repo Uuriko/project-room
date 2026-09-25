@@ -157,8 +157,11 @@ test("store: pin commands are classified, field-checked, idempotent by command i
   assert.throws(() => f.cmd(f.helperKey, T.MESSAGE_UNPINNED, { messageId: m1 }), error => [401, 403].includes(error.status));
 
   // Capacity: PIN_LIMIT pins per room, refused as 409 without changing anything.
-  for (let i = f.pins().length; i < PIN_LIMIT; i += 1) f.cmd(f.ownerKey, T.MESSAGE_PINNED, { messageId: f.post(f.ownerKey, `bulk ${i}`) });
+  let at = Date.now();
+  f.store.now = () => at;
+  for (let i = f.pins().length; i < PIN_LIMIT; i += 1) { at += 2000; f.cmd(f.ownerKey, T.MESSAGE_PINNED, { messageId: f.post(f.ownerKey, `bulk ${i}`) }); }
   assert.equal(f.pins().length, PIN_LIMIT);
+  at += 2000;
   const extra = f.post(f.ownerKey, "one too many");
   assert.throws(() => f.cmd(f.ownerKey, T.MESSAGE_PINNED, { messageId: extra }), { status: 409, code: "command_rejected", message: /Pin capacity reached/ });
   assert.equal(f.pins().length, PIN_LIMIT);

@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // `import { ServiceError } from "./store.mjs"` resolves to the exact same
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
+import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
@@ -681,6 +682,7 @@ export class RoomStore {
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
     this.now = now;
+    this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
@@ -3287,6 +3289,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
+      // Live chat posts and replies only. The replay above, importEvents,
+      // initialize, and projection replay do not reach this line.
+      this.roomFlood.consume(roomId, auth.member.id, command.type);
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
@@ -3352,7 +3357,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       // Graduated autonomy tiers: read fresh from the table on every command,
       // so a demotion to t1_readonly wins on the agent's next write. New
-      // agent members are enrolled at t1_readonly (see autonomy-tiers.mjs).
+      // agent members enroll at t2_standard (see autonomy-tiers.mjs).
       enforceAutonomyTiers({ db: this.db, roomId, state: room.state, command, actor: auth.member, nowMs: this.now(), fail });
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.

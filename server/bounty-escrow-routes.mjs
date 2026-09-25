@@ -8,8 +8,9 @@
 //
 // Identity: the caller is the authenticated room member, mapped to a ledger
 // lane account via canonicalLane() in server/bounty-escrow.mjs. The actor
-// recorded on every transition is {kind, id}: agent lanes are `id:agent/...`,
-// anything else is human; mechanical keeper transitions use the rule actor.
+// recorded on every transition is {kind, id} with kind derived from the
+// room's live membership record (agent/human) — never from the shape of the
+// lane string; mechanical keeper transitions use the rule actor.
 // Credits are valueless ledger units: no cash-out, no on-chain touch, no
 // real money.
 //

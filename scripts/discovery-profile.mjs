@@ -45,12 +45,17 @@ export async function profileDiscovery({ workCount, messageCount, samples = 3, m
   if (typeof managedProducer !== 'boolean') throw new Error('Choose a boolean managed-producer fixture mode');
   const f = createAcceptanceFixture({ managedProducer }); let server;
   try {
+    let at = Date.now();
+    f.store.now = () => at;
     const send = (type, data) => f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type, data });
     for (let i = 1; i < workCount; i++) send('work.proposed', { workItemId: `profile-work-${i}`,
       title: `Observation preparation ${i}`, definitionOfDone: 'Synthetic task criteria. '.repeat(20),
       accountableMemberId: 'owner', independentVerificationRequired: false, ownerDecisionRequired: false });
-    for (let i = 2; i < messageCount; i++) send('message.posted', { messageId: `profile-message-${i}`,
-      body: `Synthetic unrelated discussion ${i}: ` + 'Observation notes for the local fixture. '.repeat(12) });
+    for (let i = 2; i < messageCount; i++) {
+      at += 2000;
+      send('message.posted', { messageId: `profile-message-${i}`,
+        body: `Synthetic unrelated discussion ${i}: ` + 'Observation notes for the local fixture. '.repeat(12) });
+    }
     const { state, sequence } = f.store.room('commons');
     assert.equal(Object.keys(state.workItems).length, workCount); assert.equal(state.messages.length, messageCount);
     const projectionJsonBytes = Buffer.byteLength(f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection);

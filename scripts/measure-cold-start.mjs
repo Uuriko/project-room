@@ -141,9 +141,12 @@ if (subcommand === "constructor") {
         scope: "Synthetic help invitation for measurement only", expiresAt: new Date(Date.now() + 3600000).toISOString() } });
     }
     let sequence = store.room("commons").sequence;
+    let at = Date.now();
+    store.now = () => at;
     // One transaction for the whole fill: this measures startup, not insert speed.
     store.transaction(() => {
       for (; sequence < TARGET; sequence++) {
+        at += 2000;
         store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
           data: { messageId: randomUUID(), body: `Synthetic audit event ${sequence + 1} for the cold-start measurement` } });
       }

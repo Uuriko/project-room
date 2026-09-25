@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
-  publicJoinInviteHref, humanJoinShareBase, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
+  publicJoinInviteHref, humanJoinShareBase, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT,
+  roomIdFromNext, ROOM_ACCESS_NOTICE
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -14,6 +15,18 @@ test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
   assert.equal(roomIdFromHash("#room/"), null);
   assert.equal(roomIdFromHash("#room/../x"), null);
   assert.equal(roomIdFromHash(""), null);
+});
+
+test("roomIdFromNext accepts a room id or a link that already names one", () => {
+  assert.equal(roomIdFromNext("commons"), "commons");
+  assert.equal(roomIdFromNext("  commons  "), "commons");
+  assert.equal(roomIdFromNext("/?room=lobby"), "lobby");
+  assert.equal(roomIdFromNext("https://room.example/?room=lobby#room/commons"), "commons");
+  assert.equal(roomIdFromNext("https://room.example/#room/commons"), "commons");
+  assert.equal(roomIdFromNext("not a room"), null);
+  assert.equal(roomIdFromNext(""), null);
+  assert.equal(roomIdFromNext("x".repeat(2049)), null);
+  assert.equal(ROOM_ACCESS_NOTICE, "You're not in that room yet. Ask a member for an invite, or request to join");
 });
 
 test("selectedRoomFromLocation prefers #room/{id} over ?room=", () => {

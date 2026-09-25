@@ -5,8 +5,8 @@
 //
 //   t1_readonly — reads, heartbeats and session status/stop reports only;
 //                 every other write is refused with 403 agent_readonly.
-//                 New agent members start here; the operator promotes.
-//   t2_standard — full agent writes (the legacy behavior).
+//                 The owner's per-agent stop. Not the enrollment default.
+//   t2_standard — full member access. Every new agent starts here.
 //
 // Tiers are keyed by (room_id, member_id) — room-local, matching room
 // sovereignty — and live in a side table read FRESH on every command, so a
@@ -19,10 +19,11 @@
 //   (server/spend-allowance.mjs, GET/POST /api/rooms/{roomId}/spend-allowance)
 //   remains the single spend control. Tiers bound actions, not money — a
 //   t1_readonly agent cannot start sessions, so it cannot commit spend.
-// - No per-agent kill switch: Room Trust (PR #903) remains the owner
-//   kill-switch for cross-owner assign and wake. Demoting an agent to
+// - No per-agent kill switch on join: Room Trust remains the owner
+//   kill-switch for cross-owner assign and wake. Demoting one agent to
 //   t1_readonly is the finer-grained per-agent stop: writes are refused
-//   while reads, heartbeats and session stops keep landing.
+//   while reads, heartbeats and session stops keep landing. Owners restrict
+//   a specific agent; they do not approve every new one.
 // - No sandbox enforcement: server/agent-sandbox.mjs is a dry-run manager
 //   whose write-interception wiring is a later slice; tiers do not pretend
 //   to arm it.
@@ -42,7 +43,12 @@ export const AUTONOMY_TIERS = Object.freeze(["t1_readonly", "t2_standard"]);
 // until the operator acts.
 export const DEFAULT_AUTONOMY_TIER = "t2_standard";
 // Tier written for a newly enrolled agent member (see enforceAutonomyTiers).
-export const ENROLLMENT_TIER = "t1_readonly";
+// Full member access. Owner add, access-request approve, and any other
+// member.added that runs through store.command() record this row. Invite
+// redeem and share-link joins skip that hook and leave no row, which is the
+// same full access (DEFAULT_AUTONOMY_TIER). A later demotion stays put:
+// assignEnrollmentTier is ON CONFLICT DO NOTHING.
+export const ENROLLMENT_TIER = "t2_standard";
 
 // t1_readonly agents may not change room state at all, except the session
 // report/stop family: heartbeats and spend reports keep landing (a readonly
@@ -128,11 +134,13 @@ export function demoteToReadonly(db, roomId, memberId, opts = {}) {
   return setTier(db, roomId, memberId, "t1_readonly", opts);
 }
 
-// The enrollment default: a newly added agent member starts at t1_readonly.
-// Idempotent (ON CONFLICT DO NOTHING) so a rejoin keeps the member's
-// existing tier — a demoted agent cannot wash its tier by leaving and
-// rejoining. Guest agents bypass store.command() (their short-lived pass
-// governs them), so this only touches full agent members.
+// The enrollment default: a newly added agent member starts at t2_standard
+// (full member access). Idempotent (ON CONFLICT DO NOTHING) so a rejoin
+// keeps the member's existing tier — a demoted agent cannot wash a
+// restriction by leaving and rejoining. Guest agents bypass
+// store.command() (their short-lived pass governs them), so this only
+// touches full agent members. Invite redeem and share-link joins also
+// bypass this hook; no row still means t2_standard.
 function assignEnrollmentTier(db, roomId, memberId, nowMs) {
   db.prepare(`INSERT INTO agent_autonomy_tiers (room_id, member_id, autonomy_tier, updated_at, updated_by)
       VALUES (?, ?, ?, ?, NULL) ON CONFLICT(room_id, member_id) DO NOTHING`)
@@ -148,8 +156,8 @@ const memberName = (state, memberId) => state?.members?.[memberId]?.displayName 
 export function enforceAutonomyTiers({ db, roomId, state, command, actor, nowMs = Date.now(), fail = refuse }) {
   if (!db || typeof roomId !== "string" || !command || typeof command.type !== "string") return;
   // The enrollment default runs for every writer, not just agents: new
-  // agent members start read-only; the operator promotes. Runs inside the
-  // write transaction, so a rejected member.added leaves no tier row.
+  // agent members start with full member access. Runs inside the write
+  // transaction, so a rejected member.added leaves no tier row.
   if (command.type === T.MEMBER_ADDED && command.data?.kind === "agent" && validMemberId(command.data.memberId))
     assignEnrollmentTier(db, roomId, command.data.memberId, nowMs);
   if (!actor || typeof actor.id !== "string" || actor.kind !== "agent") return; // humans are never tier-restricted
@@ -174,7 +182,9 @@ export function autonomyTierReport(db, roomId, state, memberId, nowMs = Date.now
 }
 
 function requireOwner(auth, room) {
-  if (auth.member.kind !== "human" || auth.member.id !== room.state.room.ownerId)
+  // Ownership is full authority regardless of kind. An agent that owns the
+  // room manages tiers the same way a human owner does.
+  if (auth.member.id !== room.state.room.ownerId)
     refuse(403, "owner_required", "Only the room owner can manage autonomy tiers");
 }
 
