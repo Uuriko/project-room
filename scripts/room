@@ -1555,8 +1555,8 @@ cmd_receipts_scan() {
     digest="[room-watch] missing receipts (24h SLO)
 
 The following completed tasks / merged PRs have no room-receipt block on the board:
-$([ -n "$trows" ] && printf '%s\n' "$trows" | awk -F'\t' '{print "- " $1 " " $2 " (" $3 ", " $4 ")"}')
-$([ -n "$prows" ] && printf '%s\n' "$prows" | awk -F'\t' '{print "- " $1 " " $2 " (" $3 ", " $4 ")"}')
+$(if [ -n "$trows" ]; then printf '%s\n' "$trows" | awk -F'\t' '{print "- " $1 " " $2 " (" $3 ", " $4 ")"}'; fi)
+$(if [ -n "$prows" ]; then printf '%s\n' "$prows" | awk -F'\t' '{print "- " $1 " " $2 " (" $3 ", " $4 ")"}'; fi)
 
 Receipts close the loop (protocol §6): post DONE: + a room-receipt block with the merge SHA within 24h of the merge."
     if [ "$DRY_RUN" = 1 ]; then
