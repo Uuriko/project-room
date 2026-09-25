@@ -21,7 +21,7 @@ import {
 } from "../server/receipt-standard.mjs";
 import { canonicalJson, signBytes } from "../server/bounty-receipts.mjs";
 
-const NOW = Date.parse("2026-09-25T18:00:00.000Z");
+const FIXED_NOW = Date.parse("2026-09-25T18:00:00.000Z");
 const iso = ms => new Date(ms).toISOString();
 
 const keypair = () => {
@@ -32,7 +32,8 @@ const keypair = () => {
 const baseInput = (keys, overrides = {}) => ({
   issuer: { pubkeyHex: keys.pubkeyHex, agentId: "ai_test123", roomId: "commons" },
   seedHex: keys.seedHex,
-  issuedAt: iso(NOW - 60_000),
+  issuedAt: iso(FIXED_NOW - 60_000),
+  now: FIXED_NOW,
   surface: {
     roomId: "commons",
     workItemId: "RC-2026-09-25-101",
@@ -48,7 +49,7 @@ const baseInput = (keys, overrides = {}) => ({
 
 const verifyOpts = (keys, overrides = {}) => ({
   expectedPubkey: keys.pubkeyHex,
-  now: NOW,
+  now: FIXED_NOW,
   ...overrides,
 });
 
@@ -117,10 +118,10 @@ test("wrong key fails (unexpected_signer) — attacker's valid signature rejecte
 test("no expectedPubkey fails closed (untrusted_issuer) unless explicitly allowed", () => {
   const keys = keypair();
   const receipt = emitReceipt(baseInput(keys));
-  const closed = verifyReceipt(receipt, { now: NOW });
+  const closed = verifyReceipt(receipt, { now: FIXED_NOW });
   assert.equal(closed.ok, false);
   assert.match(closed.reason, /^untrusted_issuer/);
-  const open = verifyReceipt(receipt, { now: NOW, allowUnboundIssuer: true });
+  const open = verifyReceipt(receipt, { now: FIXED_NOW, allowUnboundIssuer: true });
   assert.equal(open.ok, true, JSON.stringify(open));
 });
 
@@ -129,7 +130,7 @@ test("replay outside the freshness window fails (stale_receipt)", () => {
   const fresh = emitReceipt(baseInput(keys));
   // A validly-signed receipt whose issuedAt has aged out: re-sign the body
   // with a stale timestamp (the replay attack this MUST blocks).
-  const staleBody = tamper(fresh, r => { r.issuedAt = iso(NOW - DEFAULT_MAX_AGE_MS - 1000); });
+  const staleBody = tamper(fresh, r => { r.issuedAt = iso(FIXED_NOW - DEFAULT_MAX_AGE_MS - 1000); });
   const { signature: _dropped, ...unsigned } = staleBody;
   const stale = { ...unsigned, signature: signBytes(canonicalJson(unsigned), keys.seedHex) };
   const res = verifyReceipt(stale, verifyOpts(keys));
@@ -139,7 +140,10 @@ test("replay outside the freshness window fails (stale_receipt)", () => {
 
 test("receipt from the future fails (future_receipt)", () => {
   const keys = keypair();
-  const receipt = emitReceipt(baseInput(keys, { issuedAt: iso(NOW + 10 * 60_000) }));
+  // The emit-time sanity check runs against the pinned clock: give it a `now`
+  // inside the skew window of the future issuedAt so emit succeeds and the
+  // failure is deferred to verification, which is what this test guards.
+  const receipt = emitReceipt(baseInput(keys, { issuedAt: iso(FIXED_NOW + 10 * 60_000), now: FIXED_NOW + 15 * 60_000 }));
   const res = verifyReceipt(receipt, verifyOpts(keys));
   assert.equal(res.ok, false);
   assert.match(res.reason, /^future_receipt/);
@@ -160,7 +164,7 @@ test("v0 and unknown versions are rejected (unknown_version)", () => {
   const receipt = emitReceipt(baseInput(keys));
   for (const version of ["project-room-receipt/0", "project-room-receipt/2", "room-bounty-receipt/1"]) {
     const bad = tamper(receipt, r => { r.schemaVersion = version; });
-    const res = verifyReceipt(bad, { now: NOW, allowUnboundIssuer: true });
+    const res = verifyReceipt(bad, { now: FIXED_NOW, allowUnboundIssuer: true });
     assert.equal(res.ok, false, version);
     assert.match(res.reason, /^unknown_version/, version);
   }
@@ -170,7 +174,7 @@ test("unknown fields are rejected (invalid_receipt) — no smuggling past verifi
   const keys = keypair();
   const receipt = emitReceipt(baseInput(keys));
   const bad = tamper(receipt, r => { r.extra = "smuggled"; });
-  const res = verifyReceipt(bad, { now: NOW, allowUnboundIssuer: true });
+  const res = verifyReceipt(bad, { now: FIXED_NOW, allowUnboundIssuer: true });
   assert.equal(res.ok, false);
   assert.match(res.reason, /^invalid_receipt/);
 });
@@ -179,7 +183,7 @@ test("JSON numbers in the signed body are rejected before signature checking", (
   const keys = keypair();
   const receipt = emitReceipt(baseInput(keys));
   const bad = tamper(receipt, r => { r.deliverables[0].bytes = 5; });
-  const res = verifyReceipt(bad, { now: NOW, allowUnboundIssuer: true });
+  const res = verifyReceipt(bad, { now: FIXED_NOW, allowUnboundIssuer: true });
   assert.equal(res.ok, false);
   assert.match(res.reason, /^number_ban/);
 });
@@ -188,7 +192,7 @@ test("duplicate-key JSON text is rejected at parse time", () => {
   const keys = keypair();
   const receipt = emitReceipt(baseInput(keys));
   const text = JSON.stringify(receipt).replace('"status":"done"', '"status":"done","status":"blocked"');
-  const res = verifyReceipt(text, { now: NOW, allowUnboundIssuer: true });
+  const res = verifyReceipt(text, { now: FIXED_NOW, allowUnboundIssuer: true });
   assert.equal(res.ok, false);
   assert.match(res.reason, /invalid_json/);
 });
@@ -236,13 +240,14 @@ test("adapter: room work receipt (rc_*) maps onto the standard and verifies", ()
     tags: Object.freeze(["ui"]),
     summary: "Fixed the needs-attention card overflow on narrow viewports",
     createdBy: "ai_test123",
-    createdAt: NOW - 3600_000,
+    createdAt: FIXED_NOW - 3600_000,
     blobs: Object.freeze(["blob:deadbeef"]),
   });
   const receipt = roomWorkReceiptToStandard(roomReceipt, {
     issuer: { pubkeyHex: keys.pubkeyHex, agentId: "ai_test123", roomId: "commons" },
     seedHex: keys.seedHex,
-    issuedAt: iso(NOW - 60_000),
+    issuedAt: iso(FIXED_NOW - 60_000),
+    now: FIXED_NOW,
   });
   assert.equal(receipt.status, "done");
   assert.equal(receipt.surface.workItemId, "abc123");

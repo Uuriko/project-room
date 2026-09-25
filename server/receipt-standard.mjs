@@ -144,8 +144,12 @@ const checkSeedHex = seedHex => {
 // issuer: { pubkeyHex, agentId, roomId }; the seedHex signs; pubkeyHex must be
 // the seed's public key (checked at emit so a mismatched pair fails here,
 // not at some later verifier).
+// now: reference time (ms) for the emit-time sanity verification. Defaults to
+// the wall clock; pass an explicit value for deterministic emits (tests,
+// backfills) so the sanity check does not depend on when the code runs.
 export function emitReceipt({ issuer, surface, status, deliverables = [], declaration,
-  observations = [], limitations, seedHex, issuedAt = null, nonce = null, receiptId = null }) {
+  observations = [], limitations, seedHex, issuedAt = null, nonce = null, receiptId = null,
+  now = null }) {
   checkSeedHex(seedHex);
   if (!isPlainObject(issuer)) fail("invalid_input", "issuer must be an object");
   const body = {
@@ -172,8 +176,9 @@ export function emitReceipt({ issuer, surface, status, deliverables = [], declar
   validateBodyShape({ ...body, signature: "0".repeat(128) });
   const signature = signBytes(canonicalJson(body), seedHex);
   const receipt = Object.freeze({ ...body, signature });
-  // Sanity: the emitted receipt verifies against its own issuer key.
-  const check = verifyReceipt(receipt, { expectedPubkey: body.issuer.pubkey, allowUnboundIssuer: false });
+  // Sanity: the emitted receipt verifies against its own issuer key, using the
+  // caller's reference time when provided (null falls back to the wall clock).
+  const check = verifyReceipt(receipt, { expectedPubkey: body.issuer.pubkey, allowUnboundIssuer: false, now });
   if (!check.ok) fail("emit_failed", `emitted receipt does not verify: ${check.reason}`);
   return receipt;
 }
@@ -259,7 +264,7 @@ export function verifyReceipt(receipt, { expectedPubkey = null, expectedRoomId =
 // receipt WITHOUT rewriting room flows: the projection's limits are declared
 // in limitations, and the original rc_ id is preserved as a surface resource.
 export function roomWorkReceiptToStandard(roomReceipt, { issuer, seedHex, roomId = null,
-  extraLimitations = [], issuedAt = null } = {}) {
+  extraLimitations = [], issuedAt = null, now = null } = {}) {
   if (!isPlainObject(roomReceipt)) fail("invalid_input", "roomReceipt must be an object");
   for (const k of ["receiptId", "workItemId", "summary", "createdBy", "createdAt"])
     if (roomReceipt[k] === undefined) fail("invalid_input", `roomReceipt.${k} is required`);
@@ -268,6 +273,7 @@ export function roomWorkReceiptToStandard(roomReceipt, { issuer, seedHex, roomId
     issuer,
     seedHex,
     issuedAt,
+    now,
     surface: {
       roomId: roomId ?? issuer.roomId,
       workItemId: String(roomReceipt.workItemId),
