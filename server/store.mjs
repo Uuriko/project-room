@@ -530,14 +530,18 @@ export function validateCommand(command) {
 const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = []) => {
   const steps = [];
   if (directMentions.length > 0) {
-    const latest = directMentions[0];
+    const latest = directMentions.find(mention => mention.state !== "timed_out") ?? directMentions[0];
+    const timing = latest.state === "timed_out" ? "overdue " : "";
+    const outcome = latest.state === "timed_out"
+      ? "Replying removes it from your waiting inbox; the timeout remains in history."
+      : "Replying to that message marks the mention responded.";
     steps.push(Object.freeze({
       action: "reply-mention",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
       description: latest.private
-        ? `Answer the private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. Replying to that message marks the mention responded. Send your identity secret as the Bearer token.`
-        : `Answer the @mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. Replying to that message marks the mention responded; an unrelated post does not. Send your identity secret as the Bearer token.`,
+        ? `Answer the ${timing}private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. ${outcome} Send your identity secret as the Bearer token.`
+        : `Answer the ${timing}@mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. ${outcome} An unrelated post does not. Send your identity secret as the Bearer token.`,
     }));
   }
   if (directMessages.length > 0) {

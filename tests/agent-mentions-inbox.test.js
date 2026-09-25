@@ -62,6 +62,26 @@ test("an overdue mention reads as timed_out without a write inside the read", t 
   assert.equal(mention.state, "timed_out");
 });
 
+test("inbox prioritizes current mentions and labels overdue replies without hiding them", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const now = f.store.now();
+  say(f, f.keys.owner, { messageId: "current-ask", body: "@Scout current question" });
+  say(f, f.keys.owner, { messageId: "overdue-ask", body: "@Scout older obligation" });
+  // Different owner-selected deadlines: the newest message has already expired.
+  f.store.db.prepare("UPDATE mention_states SET timeout_at=? WHERE message_event_id=(SELECT id FROM events WHERE body LIKE ?)")
+    .run(now - 1, '%"messageId":"overdue-ask"%');
+  const inbox = f.store.agentInbox(token, "commons");
+  assert.equal(inbox.directMentions.length, 2);
+  assert.equal(inbox.directMentions[0].state, "timed_out");
+  assert.match(inbox.next.find(step => step.action === "reply-mention").description, /replyToId: "current-ask"/);
+  say(f, token, { messageId: "current-answer", body: "Done", replyToId: "current-ask" });
+  const overdue = f.store.agentInbox(token, "commons");
+  assert.equal(overdue.directMentions[0].messageId, "overdue-ask");
+  assert.match(overdue.next.find(step => step.action === "reply-mention").description, /overdue/i);
+  assert.match(overdue.next.find(step => step.action === "reply-mention").description, /timeout remains in history/);
+});
+
 test("MCP host reads the inbox and room messages through real stdio against a real server", { timeout: 20000 }, async t => {
   const { f, token } = enrolledAgent(t);
   const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
