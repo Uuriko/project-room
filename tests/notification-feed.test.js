@@ -242,7 +242,9 @@ test("older mentions remain reachable after 600 unrelated events, with read and 
   const { store, send, feed, ownerKey, agentKey } = await serve(t);
   store.markCaughtUp(agentKey, "commons", store.room("commons").sequence);
   const mention = send(ownerKey, T.MESSAGE_POSTED, { messageId: "buried", body: "@Test agent please check" });
-  for (let i = 0; i < 600; i++) send(ownerKey, T.MESSAGE_POSTED, { messageId: `noise-${i}`, body: "Routine progress" });
+  let at = Date.now();
+  store.now = () => at;
+  for (let i = 0; i < 600; i++) { at += 2000; send(ownerKey, T.MESSAGE_POSTED, { messageId: `noise-${i}`, body: "Routine progress" }); }
   const newest = (await feed(agentKey)).body;
   assert.equal(newest.notifications.length, 0);
   assert.ok(newest.nextBefore);

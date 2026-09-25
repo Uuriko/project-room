@@ -104,32 +104,36 @@ test("Trust off blocks cross-owner assign and leaves same-owner assign open", t 
   assert.equal(f.state().workItems["cross-open"].accountableMemberId, "foreign");
 });
 
-test("Trust off blocks cross-owner wake and still posts ordinary chat", t => {
+test("Trust off posts a cross-owner wake and skips the wake", t => {
   const f = fixture(t);
   f.setTrust(false);
   const hello = f.post("owner", "hello room, no address");
   assert.equal(hello.event.type, T.MESSAGE_POSTED);
+  assert.equal(hello.note, undefined);
   f.post("owner", "same owner @producer please look");
   f.post("guest", "@foreign this is your sponsor");
   const before = f.store.room("commons").sequence;
-  assertTrustOff(() => f.post("owner", "cross @foreign please look", { messageId: "blocked-mention" }));
-  assertTrustOff(() => f.post("producer", "@foreign and @producer together", { messageId: "blocked-mixed" }));
-  assert.equal(f.store.room("commons").sequence, before);
-  assert.equal(f.state().messages.some(message => message.id === "blocked-mention"), false);
-  assert.equal(f.state().messages.some(message => message.id === "blocked-mixed"), false);
-  // DMs are open by default: consent no longer gates this DM; the trust-off
-  // cross-owner policy blocks it instead.
-  assertTrustOff(() => f.post("producer", "cross owner dm", { messageId: "needs-consent", toMemberId: "foreign" }));
-  f.store.dmConsents.request("commons", "producer", "foreign", "acceptance");
-  f.store.dmConsents.decide("commons", "foreign", "producer", "approve");
-  assertTrustOff(() => f.post("producer", "cross owner dm", { messageId: "blocked-dm", toMemberId: "foreign" }));
+  const mention = f.post("owner", "cross @foreign please look", { messageId: "skipped-mention" });
+  const mixed = f.post("producer", "@foreign and @producer together", { messageId: "skipped-mixed" });
+  assert.ok(f.store.room("commons").sequence > before);
+  assert.equal(f.state().messages.some(message => message.id === "skipped-mention"), true);
+  assert.equal(f.state().messages.some(message => message.id === "skipped-mixed"), true);
+  assert.match(mention.note, /Wake skipped for Foreign agent/);
+  assert.match(mention.note, /Room Trust is off/);
+  assert.match(mixed.note, /Wake skipped for Foreign agent/);
+  // DMs are open by default. Trust off still delivers the DM and skips the wake.
+  const dm = f.post("producer", "cross owner dm", { messageId: "skipped-dm", toMemberId: "foreign" });
+  assert.equal(f.state().messages.some(message => message.id === "skipped-dm"), true);
+  assert.match(dm.note, /Wake skipped for Foreign agent/);
   f.store.dmConsents.request("commons", "owner", "producer", "acceptance");
   f.store.dmConsents.decide("commons", "producer", "owner", "approve");
-  f.post("owner", "same owner dm", { messageId: "same-dm", toMemberId: "producer" });
+  const same = f.post("owner", "same owner dm", { messageId: "same-dm", toMemberId: "producer" });
   assert.equal(f.state().messages.some(message => message.id === "same-dm"), true);
+  assert.equal(same.note, undefined);
   f.setTrust(true);
-  f.post("owner", "cross @foreign now allowed", { messageId: "open-mention" });
+  const open = f.post("owner", "cross @foreign now allowed", { messageId: "open-mention" });
   assert.equal(f.state().messages.some(message => message.id === "open-mention"), true);
+  assert.equal(open.note, undefined);
   f.post("producer", "cross owner dm open", { messageId: "open-dm", toMemberId: "foreign" });
   assert.equal(f.state().messages.some(message => message.id === "open-dm"), true);
 });
@@ -150,7 +154,9 @@ test("Trust off does not enqueue a cross-owner wake; Trust on does", t => {
   beat(home.identityId);
   at += HEARTBEAT_STALE_AFTER_MS + 1000;
   f.setTrust(false);
-  assertTrustOff(() => f.post("owner", "@foreign wake", { messageId: "no-wake" }));
+  const skipped = f.post("owner", "@foreign wake", { messageId: "no-wake" });
+  assert.match(skipped.note, /Wake skipped/);
+  assert.equal(f.state().messages.some(message => message.id === "no-wake"), true);
   assert.equal(f.store.agentHeartbeats.pendingWakes(identity.identityId).length, 0);
   f.post("owner", "@producer wake", { messageId: "home-wake" });
   assert.equal(f.store.agentHeartbeats.pendingWakes(home.identityId).length, 1);

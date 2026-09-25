@@ -1657,10 +1657,13 @@ function recordOwnerDecision(state, incoming) {
 
 function mutableWorkItem(state, incoming, allowedStates) {
   requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["workItemId", "expectedRevision"]);
+  requireFields(incoming.data, ["workItemId"]);
   const item = requireWorkItem(state, incoming.data.workItemId);
   if (!allowedStates.includes(item.state)) throw new Error(`Invalid transition from ${item.state}`);
-  if (incoming.data.expectedRevision !== item.revision) throw new Error(`Stale Work Item revision: expected ${item.revision}`);
+  // Optional compare-and-swap. Absent means last-writer-wins. Present and
+  // stale is still a conflict.
+  if (incoming.data.expectedRevision != null && incoming.data.expectedRevision !== item.revision)
+    throw new Error(`Stale Work Item revision: expected ${item.revision}`);
   return item;
 }
 

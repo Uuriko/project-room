@@ -27,7 +27,7 @@ function makeEscrow(db = new DatabaseSync(":memory:")) {
     catch (error) { db.exec("ROLLBACK TO escrow_test"); db.exec("RELEASE escrow_test"); throw error; }
   };
   const store = { db, transaction, readTransaction: transaction };
-  const escrow = new BountyEscrow(store, { now: () => nowMs });
+  const escrow = new BountyEscrow(store, { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
   return { escrow, db };
 }
@@ -259,7 +259,7 @@ import { createRoomServer } from "../server/http.mjs";
 const HROOM = "commons";
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
-  const escrow = new BountyEscrow(fixture.store);
+  const escrow = new BountyEscrow(fixture.store, { allowLegacyStringLanes: true });
   fixture.store.transaction(() => {
     escrow._ensure();
     const at = new Date().toISOString();

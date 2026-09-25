@@ -47,13 +47,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let container = null;
   let activeMethod = null;
   let passwordMode = "signup"; // or "login"
-  let passwordFields = { email: "", password: "" };
+  // Email may be kept across the create/sign-in toggle. The password is never
+  // stored and never written back into the input, so only the browser's
+  // password manager can offer a value.
+  let passwordFields = { email: "" };
+  let emailPanel = null;
+  let passwordHost = "chooser";
   let magicPhase = "request"; // or "code"
   let magicEmail = "";
   let magicManualCode = false; // link-first: code entry is an opt-in fallback
   let busy = false;
 
-  const statusNode = () => container?.querySelector("[data-signin-status]") ?? null;
+  const statusNode = () => (passwordHost === "email" ? emailPanel?.querySelector?.("[data-signin-status]") : null)
+    ?? container?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
     const node = statusNode();
     if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
@@ -92,7 +98,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         <button type="button" class="button ghost" data-password-mode="login" aria-pressed="${!signup}">Sign in</button>
       </div>
       <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(passwordFields.email)}"></label>
-      <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}" minlength="12" maxlength="256" value="${escapeHtml(passwordFields.password)}"></label>
+      <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}" minlength="12" maxlength="256"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
     </form>`;
   }
@@ -134,6 +140,24 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (panel) panel.innerHTML = panelHtml();
     else render();
   }
+  function paintPassword() {
+    if (passwordHost === "email" && emailPanel) {
+      emailPanel.hidden = false;
+      let formHost = emailPanel.querySelector?.("[data-email-form]");
+      if (!formHost) {
+        emailPanel.innerHTML = `<div data-email-form></div><p class="status form-status" role="alert" data-signin-status></p>`;
+        formHost = emailPanel.querySelector?.("[data-email-form]");
+      }
+      if (formHost) formHost.innerHTML = passwordHtml();
+      else emailPanel.innerHTML = passwordHtml();
+      return;
+    }
+    renderPanel();
+  }
+  function paintBusySurface() {
+    if (activeMethod === "password" && passwordHost === "email") paintPassword();
+    else renderPanel();
+  }
 
   function readForm(form) {
     const values = {};
@@ -150,10 +174,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
 
   async function withBusy(fn) {
     if (busy) return;
-    busy = true; renderPanel(); setStatus("");
+    busy = true; paintBusySurface(); setStatus("");
     try { await fn(); }
     catch (error) { setStatus(failureText(error), true); }
-    finally { busy = false; renderPanel(); }
+    finally { busy = false; paintBusySurface(); }
   }
 
   const onClick = async event => {
@@ -165,10 +189,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     const modeButton = event.target?.closest?.("[data-password-mode]");
     if (modeButton) {
-      const form = container?.querySelector('[data-signin-form="password"]');
-      if (form) passwordFields = { email: form.querySelector('[name="email"]')?.value ?? "", password: form.querySelector('[name="password"]')?.value ?? "" };
+      const form = modeButton.closest?.("form") ?? container?.querySelector('[data-signin-form="password"]');
+      if (form) passwordFields = { email: form.querySelector('[name="email"]')?.value ?? "" };
       passwordMode = modeButton.dataset.passwordMode;
-      renderPanel();
+      if (emailPanel?.contains?.(modeButton)) passwordHost = "email";
+      paintPassword();
       return;
     }
     if (event.target?.closest?.("[data-magic-restart]")) {
@@ -196,12 +221,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
 
   const onSubmit = async event => {
     const form = event.target?.closest?.("[data-signin-form]");
-    if (!form || !container?.contains(form)) return;
+    if (!form || !(container?.contains?.(form) || emailPanel?.contains?.(form))) return;
     event.preventDefault();
     const kind = form.dataset.signinForm;
     if (kind === "password") {
       const { email, password } = readForm(form);
-      passwordFields = { email, password };
+      passwordFields = { email };
       await withBusy(async () => {
         const session = await authedSession();
         const view = await api(session, `/api/auth/password/${passwordMode}`,
@@ -300,10 +325,43 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (linkFailure && !accountClient.session?.authenticated) onMagicLinkFailure?.(linkFailure);
   }
 
+  function bind(node) {
+    node.addEventListener("click", onClick);
+    node.addEventListener("submit", onSubmit);
+  }
+
   return {
     showPassword(mode) {
       if (busy) return;
+      passwordHost = "chooser";
       activeMethod = "password"; passwordMode = mode === "login" ? "login" : "signup";
+      render();
+    },
+    // Welcome-page pair. The form sits outside More options.
+    openEmail(mode, panel) {
+      if (busy) return;
+      if (panel) emailPanel = panel;
+      passwordHost = "email";
+      activeMethod = "password";
+      passwordMode = mode === "login" ? "login" : "signup";
+      if (emailPanel && !emailPanel.dataset.bound) {
+        bind(emailPanel);
+        emailPanel.dataset.bound = "1";
+      }
+      paintPassword();
+    },
+    // Sign-out. Drops every in-memory auth field, including any password that
+    // was only held for the request that just finished.
+    clear() {
+      passwordFields = { email: "" };
+      passwordMode = "signup";
+      passwordHost = "chooser";
+      activeMethod = null;
+      magicPhase = "request";
+      magicEmail = "";
+      magicManualCode = false;
+      busy = false;
+      if (emailPanel) { emailPanel.hidden = true; emailPanel.innerHTML = ""; }
       render();
     },
     mount(target) {

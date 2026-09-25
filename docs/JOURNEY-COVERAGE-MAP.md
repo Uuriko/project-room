@@ -356,7 +356,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "room-trust",
-      "claim": "Room Trust starts on. The room owner flips it off from the header when the room has more than one member-owner; off blocks cross-owner assign and wake (trust_off) and leaves same-owner work and ordinary chat open. A member does not see the toggle.",
+      "claim": "Room Trust starts on. The room owner flips it off from the header when the room has more than one member-owner; off blocks cross-owner assign (trust_off). A post that would wake another owner's agent still lands, the wake is skipped, and the response note says so. Same-owner work and ordinary chat stay open. A member does not see the toggle.",
       "evidence": {
         "unit": [
           "tests/room-trust.test.js",

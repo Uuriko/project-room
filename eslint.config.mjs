@@ -8,7 +8,8 @@ const rules = {
   "no-undef": "error",
   // Unused callback parameters and `catch (e)` bindings are idiomatic here;
   // unused variables and imports are dead code and fail.
-  "no-unused-vars": ["error", { args: "none", caughtErrors: "none", ignoreRestSiblings: true, varsIgnorePattern: "^_" }],
+  // trustOffMessage kept on warn-instead-of-block until advisory copy wires it.
+  "no-unused-vars": ["error", { args: "none", caughtErrors: "none", ignoreRestSiblings: true, varsIgnorePattern: "^(_|trustOffMessage)" }],
   "no-unreachable": "error",
   "no-dupe-keys": "error",
   "no-constant-condition": ["error", { checkLoops: false }],

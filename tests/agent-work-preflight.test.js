@@ -16,9 +16,14 @@ test("preparation reads every real discussion page without writing or exposing t
     await new Promise(done => server.close(done));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  for (let n = 0; n < 56; n++) f.store.command(f.keys.owner, "commons", {
-    id: randomUUID(), type: "message.posted", data: { messageId: `prep-${n}`, body: `Context ${n}`, workItemId: "test-handoff" },
-  });
+  let at = Date.now();
+  f.store.now = () => at;
+  for (let n = 0; n < 56; n++) {
+    at += 2000;
+    f.store.command(f.keys.owner, "commons", {
+      id: randomUUID(), type: "message.posted", data: { messageId: `prep-${n}`, body: `Context ${n}`, workItemId: "test-handoff" },
+    });
+  }
   const client = new RoomAgentClient({ version: 1, origin: `http://127.0.0.1:${server.address().port}`,
     roomId: "commons", memberId: "producer", token: f.keys.producer });
   const before = auditRecovery(f.store).dataSha256;

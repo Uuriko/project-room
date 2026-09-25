@@ -91,7 +91,9 @@ test("search finds older replies outside the audit tail, is literal, bounded, an
   const f = room(t);
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "topic", body: "Book club" });
   f.send(f.agent, T.MESSAGE_POSTED, { messageId: "target", body: "Dune [edition] <paperback>", replyToId: "topic" });
-  for (let i = 0; i < 110; i++) f.send(f.human, T.MESSAGE_POSTED, { body: `Update ${i}` });
+  let at = Date.now();
+  f.store.now = () => at;
+  for (let i = 0; i < 110; i++) { at += 2000; f.send(f.human, T.MESSAGE_POSTED, { body: `Update ${i}` }); }
   const snapshot = f.store.snapshot(f.human, "commons"), before = JSON.stringify(snapshot);
   assert.equal(snapshot.state.eventLog.length, 100);
   assert.equal(searchMessages(snapshot.state, "DUNE [edition]").messages[0].id, "target");

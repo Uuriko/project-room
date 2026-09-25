@@ -7,7 +7,7 @@ import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
-  HOSTED_ROOM_MCP_TOOLS
+  HOSTED_ROOM_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 
@@ -70,7 +70,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
-        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the enrolled room profile: post, board, mentions, work, replies, bond.propose, bond.accept, bond.decline, bond.revoke, bond.list, dm.posted, room_list_peer_dms, inbox_put_attachment, wake.register, heartbeat.set, wake.pause, wake.resume, and webhook.subscribe. Each room tool takes roomId. Inbox attachment bytes, wake registration, heartbeats, and webhook subscription are identity-scoped. wake.pause and wake.resume take roomId. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
@@ -84,7 +84,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const name = message.params?.name;
     const args = message.params?.arguments ?? {};
     const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...HOSTED_ROOM_MCP_TOOLS];
-    if (HOSTED_ROOM_MCP_TOOLS.includes(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
+    if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
     if (!selected) return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: closestToolName(name, known) });
     const problems = diagnoseArguments(selected.inputSchema, args);
@@ -101,7 +101,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   return { jsonrpc: "2.0", id: requestId, error: { code: -32601, message: "Method not found" } };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams } = {}) {
   const presented = typeof authorization === "string" && authorization.trim() !== "";
   if (!presented) return handleMcpJoinRpc(message, { mcpUrl });
   if (typeof roomMcp !== "function") {
@@ -111,7 +111,7 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp 
       ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service" } };
   }
-  return roomMcp(message, { authorization, mcpUrl });
+  return roomMcp(message, { authorization, mcpUrl, searchParams });
 }
 
 export function mcpRpcStatus(reply) {
@@ -186,7 +186,8 @@ export async function roomMcpFetchPost(request, options = {}) {
     reply = await dispatchRoomMcp(message, {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
-      roomMcp: options.roomMcp
+      roomMcp: options.roomMcp,
+      searchParams: url.searchParams
     });
   } catch {
     reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };
@@ -229,7 +230,8 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     reply = await dispatchRoomMcp(message, {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
-      roomMcp
+      roomMcp,
+      searchParams: url.searchParams
     });
   } catch {
     reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };

@@ -113,6 +113,18 @@ test("bare `lease: 6h` is unregistered with the exact enforcer error", () => {
   assert.ok(!idx.claims.some((x) => x.task_id === "RC-2026-09-23-102"));
 });
 
+test("spaced and swapped [lane][claim] headers are recognized", () => {
+  const spaced = C(2001, "2026-09-23T18:00:00Z",
+    "[ claim ][ jill ] spaced\n\n```room-claim\ntask-id: RC-2026-09-23-110\nlane: jill\nfiles: scripts/e.mjs\nlease: lease=6h\nstate: working\nreason: spaced\n```");
+  const swapped = C(2002, "2026-09-23T18:01:00Z", "[claim][jill] swapped RC-2026-09-23-111");
+  const idx = run([spaced, swapped]);
+  const claim = idx.claims.find(x => x.task_id === "RC-2026-09-23-110");
+  assert.ok(claim, "spaced header with a fence registers");
+  assert.equal(claim.lane, "jill");
+  const unfenced = idx.unregistered.find(x => x.comment_id === 2002);
+  assert.ok(unfenced && /without a fenced room-claim/.test(unfenced.reason));
+});
+
 test("prose CLAIM: and unfenced [claim] are unregistered, never crash", () => {
   const idx = run(fixture);
   const u4 = idx.unregistered.find((x) => x.comment_id === 1004);

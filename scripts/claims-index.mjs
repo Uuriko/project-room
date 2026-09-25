@@ -105,6 +105,21 @@ function fieldsOf(fenced) {
   return out;
 }
 
+const HEADER_KINDS = new Set(["claim", "receipt", "done"]);
+// Same spacing and order tolerance as scripts/room: "[ claim ][jill]" and
+// "[claim][jill]" both become "[jill][claim]" before classification.
+function normalizeClaimHeader(line) {
+  const match = line.match(/^([ \t]*)\[([^\]\r\n]+)\][ \t]*\[([^\]\r\n]+)\]([\s\S]*)$/);
+  if (!match) return line;
+  const a = match[2].trim();
+  const b = match[3].trim();
+  const kind = value => (HEADER_KINDS.has(value.toLowerCase()) ? value.toLowerCase() : null);
+  const lane = value => /^[A-Za-z0-9_-]+$/.test(value);
+  if (kind(a) && lane(b) && !kind(b)) return `[${b}][${kind(a)}]${match[4]}`;
+  if (kind(b) && lane(a) && !kind(a)) return `[${a}][${kind(b)}]${match[4]}`;
+  return line;
+}
+
 const firstRc = (s) => (s.match(/RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+/) || [])[0] || null;
 const firstTask = (s) => (s.match(/[A-Z]+[0-9]*-[0-9]+/) || [])[0] || null;
 const firstPr = (s) => {
@@ -131,7 +146,7 @@ function parseComment(c) {
              reason: "comment body missing or not a string — not registered" };
   }
   const body = rawBody.replace(/\r/g, "");
-  const first = body.split("\n")[0];
+  const first = normalizeClaimHeader(body.split("\n")[0]);
   const lp = first.match(/^\[([A-Za-z0-9_-]+)\]([\s\S]*)$/);
   const lane = lp ? lp[1] : null;
   const rest = lp ? trim(lp[2]) : first;

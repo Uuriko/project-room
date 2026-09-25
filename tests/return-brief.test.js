@@ -31,7 +31,13 @@ function fixture(t) {
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, owner, human, agent, signEvidence };
 }
-const postMessages = (store, token, n, prefix = "m") => { for (let i = 1; i <= n; i++) store.command(token, "commons", command(T.MESSAGE_POSTED, { body: `${prefix}${i}` })); };
+const chatAt = new WeakMap();
+const postMessages = (store, token, n, prefix = "m") => {
+  let at = chatAt.get(store) ?? Date.now();
+  store.now = () => at;
+  for (let i = 1; i <= n; i++) { at += 2000; store.command(token, "commons", command(T.MESSAGE_POSTED, { body: `${prefix}${i}` })); }
+  chatAt.set(store, at);
+};
 // Full lifecycle: owner proposes (independent verification + owner decision), human accepts,
 // starts, completes; agent verifies pass; owner approves. Returns the completion event id.
 function completeLifecycle(store, owner, human, agent, workItemId, signEvidence) {

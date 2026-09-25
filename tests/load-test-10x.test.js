@@ -325,8 +325,8 @@ test("graceful degradation: rate-limited writer degrades, other traffic isolated
         outcomes.push("ok");
       } catch (e) { outcomes.push(`${e.status}:${e.code}`); }
     }
-    assert.equal(outcomes.filter(o => o === "ok").length, 60, "per-credential write budget is 60/min");
-    assert.equal(outcomes.filter(o => o === "429:rate_limited").length, 15, "overflow is a clean 429, never a 5xx");
+    assert.equal(outcomes.filter(o => o === "ok").length, 30, "room chat burst is 30 posts per member");
+    assert.equal(outcomes.filter(o => o === "429:rate_limited").length, 45, "overflow is a clean 429, never a 5xx");
     // isolation: a different credential still writes fine
     const other = clientFor({ origin, memberId: room.agents[1].memberId, key: room.agents[1].key });
     await other.command({ id: randomUUID(), type: T.MESSAGE_POSTED,

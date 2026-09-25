@@ -104,17 +104,25 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
   }, "DurableObjectNamespace");
   const pending = [];
   const warnings = [];
+  const errors = [];
   const original = console.warn;
+  const originalError = console.error;
   console.warn = (...args) => { warnings.push(args.join(" ")); };
+  console.error = (...args) => { errors.push(args.join(" ")); };
+  // #992: the room instance is paused, so the two drain jobs throw.
+  // runCronJobs warns and continues; scheduled() records the tick (that
+  // write fails because paused startup must not open storage), then
+  // rejects so Cron Events show channel-drain and webhook-dispatch.
   try {
-    await worker.scheduled({ cron: "* * * * *" }, {
+    await assert.rejects(worker.scheduled({ cron: "* * * * *" }, {
       ROOM_MAINTENANCE: "0",
       ROOM_ORIGIN: "https://room.example.test",
       ROOM: namespace
-    }, { waitUntil(promise) { pending.push(promise); } });
+    }, { waitUntil(promise) { pending.push(promise); } }), /cron jobs failed: channel-drain, webhook-dispatch/);
     await Promise.all(pending);
   } finally {
     console.warn = original;
+    console.error = originalError;
   }
   assert.deepEqual(names, ["invite-only-pilot"]);
   assert.deepEqual(invoked, [
@@ -122,13 +130,15 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     "drainChannelBacklog",
     "drainWebhookDeliveries",
     "refreshLandQueue",
-    "planRetention"
+    "planRetention",
+    "recordCronTick"
   ]);
   assert.deepEqual(warnings.map(line => line.slice(0, line.indexOf("]"))), [
     "[channel-drain",
     "[webhook-dispatch"
   ]);
   assert.ok(warnings.every(line => /Room paused/.test(line)), warnings.join("\n"));
+  assert.deepEqual(errors, ["[job-heartbeat] record failed: paused startup must not open storage"]);
   assert.throws(() => stub.notARealCronMethod(), /does not implement the method "notARealCronMethod"/);
   assert.equal((await stub.syncGmailMailboxes()).completed, 0);
 });

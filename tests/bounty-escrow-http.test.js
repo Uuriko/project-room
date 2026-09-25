@@ -14,7 +14,7 @@ async function startServer(t) {
   const fixture = createAcceptanceFixture();
   // Test-only ledger seeding: grant the fixture members payable credits so
   // fund/claim/dispute can lock real (valueless) balances over HTTP.
-  const escrow = new BountyEscrow(fixture.store);
+  const escrow = new BountyEscrow(fixture.store, { allowLegacyStringLanes: true });
   fixture.store.transaction(() => {
     escrow._ensure();
     const at = new Date().toISOString();

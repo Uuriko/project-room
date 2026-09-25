@@ -33,7 +33,9 @@ test("native text preserves exact stored UTF-8 and old post/proposal provenance 
   const f = await setup(t), body = "\uFEFF  Café e\u0301 🪷\r\n\tsecond line  \n";
   const posted = f.post(body, { packetId: "original-packet", basisRevision: 1 }, "guest");
   f.mutate(T.WORK_STARTED);
-  for (let i = 0; i < 105; i++) f.send(T.MESSAGE_POSTED, { body: "Unrelated activity" }, "owner");
+  let at = Date.now();
+  f.store.now = () => at;
+  for (let i = 0; i < 105; i++) { at += 2000; f.send(T.MESSAGE_POSTED, { body: "Unrelated activity" }, "owner"); }
   assert.equal(f.store.snapshot(f.keys.owner, "commons").state.eventLog.some(event => event.id === posted.event.id), false);
   f.send(T.MEMBER_ACCESS_CHANGED, { memberId: "guest", permissions: [], expectedMemberRevision: 0, active: false }, "owner");
   const before = auditRecovery(f.store).dataSha256;

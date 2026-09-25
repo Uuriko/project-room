@@ -610,7 +610,7 @@ test("hosted MCP lists and calls the land queue tools", async t => {
     headers: { "content-type": "application/json", authorization: `Bearer ${owner.secret}` },
     body: JSON.stringify({ jsonrpc: "2.0", id: "t", method, ...(params === undefined ? {} : { params }) })
   });
-  const names = (await (await rpc("tools/list")).json()).result.tools.map(tool => tool.name);
+  const names = (await (await rpc("tools/list", { profile: "full" })).json()).result.tools.map(tool => tool.name);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
     assert.equal(names.includes(name), true, name);
   }
