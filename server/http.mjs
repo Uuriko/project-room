@@ -54,6 +54,7 @@ import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
+import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listPins, setPin } from "./pins.mjs";
@@ -405,6 +406,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
   // so every RoomStore carries it; http.mjs only owns the service instance.
   const agentPlugin = createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin });
+  // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
+  // open path (server/store.mjs), so every RoomStore carries it; http.mjs
+  // only owns the service instance.
+  const nextActionsRoutes = createNextActionsRoutes({ store, json, reject, body, rate, roomCredentials, expectedBinding, accountBinding });
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
@@ -2566,6 +2571,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
+      if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
       // Public agent-invite join page: GET /join and GET /join/:code
       // (plus the /room/join twins on the www door). Unauthenticated and
       // stateless by design, like POST /join: the page previews the invite

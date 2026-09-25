@@ -221,6 +221,7 @@ optional.push("server/open-questions.mjs"); // F1: open-questions radar read (im
 optional.push("server/activity.mjs"); // Attention: activity feed, read horizons, saved messages, thread mutes (imported by server/store.mjs and server/http.mjs)
 optional.push("server/spend-allowance.mjs");
 optional.push("server/autonomy-tiers.mjs"); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
+optional.push("server/next-actions.mjs", "server/next-actions-routes.mjs"); // RC-2026-09-25-911: ranked per-agent next actions (pure builder + HTTP routes; imported by server/store.mjs and server/http.mjs)
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
