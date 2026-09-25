@@ -338,3 +338,77 @@ test("other 403s on send still end access", async () => {
   await assert.rejects(client.send({ id: "x", type: "message.posted", data: {} }), /no/);
   assert.equal(ended.length, 1, "a real access failure still ends the session");
 });
+
+// Request-count regressions guard the transport boundary: one snapshot should
+// satisfy both a command receipt and its stream notification. Existing refresh
+// tests cover unsequenced callers but cannot detect duplicate network traffic.
+function liveRefreshFixture(t, snapshotRead = async sequence => response(snapshot(sequence))) {
+  let stream, reads = 0, current = 9;
+  class Events extends EventTarget {
+    constructor() { super(); stream = this; }
+    close() {}
+  }
+  const event = sequence => ({ sequence, event: { id: `event-${sequence}`, roomId: 'commons', type: 'message.posted' } });
+  const seen = [];
+  const client = new RoomClient({ events: Events, onSnapshot: value => seen.push(value.sequence), fetcher: async (url, options) => {
+    if (url === '/api/rooms/commons/commands' && options.method === 'POST') return response(event(current));
+    assert.equal(url, '/api/rooms/commons', 'unexpected transport request');
+    assert.equal(options.method, 'GET');
+    reads++;
+    return snapshotRead(current, reads);
+  } });
+  client.session = identity(); client.connect();
+  t.after(() => client.disconnect());
+  return { client, seen, reads: () => reads, setSequence: value => { current = value; }, event,
+    notify: (value = event(current)) => stream.dispatchEvent(new MessageEvent('room-event', { data: JSON.stringify(value) })),
+    emit: type => stream.dispatchEvent(new Event(type)) };
+}
+
+test('a command and its stream notifications need only one snapshot in either arrival order', async t => {
+  for (const order of ['stream-first', 'command-first', 'overlapping']) await t.test(order, async t => {
+    const pending = deferred();
+    const f = liveRefreshFixture(t, async sequence => { if (order === 'overlapping') await pending.promise; return response(snapshot(sequence)); });
+    if (order !== 'command-first') f.notify();
+    if (order === 'stream-first') await f.client.flight.promise;
+    const sent = f.client.send({ id: order, type: 'message.posted', data: { body: 'hello' } });
+    if (order === 'overlapping') {
+      // Let the committed command join the pending stream read.
+      await new Promise(resolve => setImmediate(resolve));
+      pending.resolve();
+    }
+    await sent;
+    f.notify(); await f.client.flight?.promise;
+    assert.equal(f.reads(), 1, order);
+    assert.deepEqual(f.seen, [9], order);
+  });
+});
+
+test('a newer notification during a stale snapshot still triggers a follow-up read', async t => {
+  const pending = deferred();
+  const f = liveRefreshFixture(t, async (sequence, read) => read === 1 ? pending.promise : response(snapshot(sequence)));
+  f.setSequence(8); f.notify();
+  f.setSequence(9); f.notify();
+  pending.resolve(response(snapshot(8)));
+  await f.client.flight.promise;
+  assert.equal(f.reads(), 2);
+  assert.deepEqual(f.seen, [8, 9]);
+});
+
+test('unknown event hints and reconnects still fetch snapshots even when room sequence is unchanged', async t => {
+  const f = liveRefreshFixture(t);
+  f.notify(); await f.client.flight.promise;
+  const unknown = [null, {}, { sequence: 9, event: null }, f.event('9'), f.event(-1), f.event(0), f.event(1.5), f.event(Number.MAX_SAFE_INTEGER + 1),
+    { sequence: 9, event: { roomId: 'other-room' } }];
+  for (const value of unknown) {
+    const before = f.reads();
+    f.notify(value); await f.client.flight.promise;
+    assert.equal(f.reads(), before + 1);
+  }
+  for (const type of ['open', 'error']) {
+    const before = f.reads(); f.emit(type); await f.client.flight.promise;
+    assert.equal(f.reads(), before + 1, type);
+  }
+  const before = f.reads();
+  await f.client.refresh();
+  assert.equal(f.reads(), before + 1, 'manual refresh');
+});
