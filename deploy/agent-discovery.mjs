@@ -4,6 +4,7 @@ import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY } from "./agent-card-key.mjs";
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-signed.mjs";
+import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -182,7 +183,10 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: JOIN_PROMPT_PATH, auth: false, first: "pasteable join prompt" }),
   Object.freeze({ path: "/mcp", auth: false, first: "hosted MCP join (packets/kits)" }),
+  Object.freeze({ path: MCP_SERVER_CARD_PATH, auth: false, first: "hosted MCP server card (live tool registry)" }),
+  Object.freeze({ path: "/.well-known/mcp.json", auth: false, first: "same MCP server card bytes" }),
   Object.freeze({ path: "/room/mcp", auth: false, first: "hosted MCP join; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/mcp/server-card", auth: false, first: "MCP server card; prefix-preserving edge" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
@@ -397,7 +401,8 @@ Default tools/list is the core profile (about 16 tools): room_needs_me, room_rea
 
 What needs you, across every room: \`room_needs_me\` (or \`GET ${ROOM_ORIGIN}/api/needs-me\`). Each item has roomId, seq, and a suggested next tool. Pass since from the previous cursor.
 
-Hosted MCP discovery: ${ROOM_ORIGIN}/.well-known/mcp
+Hosted MCP server card: ${ROOM_PUBLIC_WWW}/mcp/server-card
+Hosted MCP discovery: ${ROOM_ORIGIN}/.well-known/mcp.json
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
 Not a run factory. Compute stays separate.
@@ -513,6 +518,8 @@ www ${ROOM_PUBLIC_WWW}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+mcp-card ${ROOM_PUBLIC_WWW}/mcp/server-card
+mcp-discovery ${ROOM_ORIGIN}/.well-known/mcp.json
 kits ${ROOM_ORIGIN}/kits.txt
 skills ${ROOM_ORIGIN}/skills
 source ${ROOM_SOURCE}
@@ -697,7 +704,7 @@ export function aiCatalog() {
       identifier: "urn:air:getdasha.com:mcp:room",
       displayName: "Uuriko Project Room MCP server",
       type: "application/mcp-server-card+json",
-      url: "https://www.getdasha.com/room/mcp",
+      url: `${ROOM_PUBLIC_WWW}/mcp/server-card`,
       description: "Hosted MCP for Uuriko Project Room. Public join tools, or room tools with Authorization: Bearer <saved-identity-secret>. No OAuth.",
       tags: ["mcp", "collaboration", "agent-room"],
       capabilities: ["room_check_access", "room_list_work"],
@@ -945,20 +952,27 @@ export function agentsJson() {
   }, null, 2) + "\n";
 }
 
-export function wellKnownMcpJson() {
-  return JSON.stringify({
-    protocol: "mcp",
-    transport: "streamable-http",
-    url: `${ROOM_PUBLIC_WWW}/mcp`,
-    oauth: false,
-    auth: {
-      type: "bearer",
-      header: "Authorization",
-      scheme: "Bearer",
-      mint: `${ROOM_ORIGIN}/api/agent-identities`
-    }
-  }, null, 2) + "\n";
+// The card body is the live tool registry. server/mcp-discovery.mjs binds
+// the reader once that registry has finished loading. Callers read .body
+// after startup; this module does not import the registry (that import
+// cycle would initialize the card before the tools exist).
+let readMcpServerCard = null;
+export function bindLiveMcpServerCard(read) {
+  if (typeof read !== "function") throw new TypeError("MCP server card reader must be a function");
+  readMcpServerCard = read;
 }
+
+export function wellKnownMcpJson() {
+  if (typeof readMcpServerCard !== "function") {
+    throw new Error("MCP server card is not bound to the live tool registry");
+  }
+  return readMcpServerCard();
+}
+
+const MCP_SERVER_CARD_DOC = Object.freeze({
+  type: MCP_SERVER_CARD_MEDIA_TYPE,
+  get body() { return wellKnownMcpJson(); }
+});
 
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
@@ -969,8 +983,7 @@ const CANONICAL = Object.freeze({
   // agents.json: the agent-world equivalent of llms.txt (Wildcard/Steinberger draft).
   [AGENTS_JSON_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
-  "/.well-known/mcp": Object.freeze({ type: "application/json; charset=utf-8", body: wellKnownMcpJson() }),
-  "/.well-known/mcp.json": Object.freeze({ type: "application/json; charset=utf-8", body: wellKnownMcpJson() }),
+  [MCP_SERVER_CARD_PATH]: MCP_SERVER_CARD_DOC,
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
   // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
   "/.well-known/ard.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
@@ -995,10 +1008,19 @@ const ALIASES = Object.freeze({
     ["/room/skills", "/project-room/skills"].flatMap(path =>
       withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
-  "/room/.well-known/mcp": "/.well-known/mcp",
-  "/room/.well-known/mcp.json": "/.well-known/mcp.json",
-  "/project-room/.well-known/mcp": "/.well-known/mcp",
-  "/project-room/.well-known/mcp.json": "/.well-known/mcp.json",
+  ...Object.fromEntries(
+    [
+      "/.well-known/mcp",
+      "/.well-known/mcp.json",
+      "/room/.well-known/mcp",
+      "/room/.well-known/mcp.json",
+      "/project-room/.well-known/mcp",
+      "/project-room/.well-known/mcp.json",
+      "/mcp/server-card",
+      "/room/mcp/server-card",
+      "/project-room/mcp/server-card"
+    ].flatMap(path => withSlash(path).filter(alias => alias !== MCP_SERVER_CARD_PATH).map(alias => [alias, MCP_SERVER_CARD_PATH]))
+  ),
   "/project-room/llms.txt": "/llms.txt",
   "/project-room/join.txt": JOIN_PROMPT_PATH,
   "/project-room/llms-full.txt": "/llms-full.txt",

@@ -7,9 +7,10 @@ import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
-  HOSTED_ROOM_MCP_TOOLS, isHostedMcpToolName
+  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
+import { livePublicMcpTools } from "./mcp-discovery.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -69,7 +70,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
       result: {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
-        serverInfo: { name: ROOM_MCP_SERVER_NAME, version: "0.1.0" },
+        serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
         instructions: "Public join MCP when no Authorization header is sent. Read packets and kits here. Send Authorization: Bearer with your saved identity secret on this same URL for the core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
@@ -78,7 +79,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     if (message.params?.cursor !== undefined) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }
-    return { jsonrpc: "2.0", id: requestId, result: { tools: MCP_JOIN_TOOLS } };
+    return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools() } };
   }
   if (message.method === "tools/call") {
     const name = message.params?.name;

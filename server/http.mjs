@@ -26,12 +26,14 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
 // deploy/agent-discovery.mjs). Aliases (/room/skills, /project-room/skills,
 // trailing-slash twins) resolve to this same object via discoveryDoc, so
 // identity comparison injects the members array on every alias.
 const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
+const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
@@ -1423,9 +1425,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
       const discovery = discoveryDoc(url.pathname);
+      if (discovery === MCP_SERVER_CARD_DOC && req.method === "OPTIONS") {
+        res.setHeader("X-Robots-Tag", "all");
+        res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
+        for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
+        res.writeHead(204, { Allow: "GET, HEAD, OPTIONS" });
+        return res.end();
+      }
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks());
+        if (discovery === MCP_SERVER_CARD_DOC) {
+          res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
+          for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
+        }
         let docBody = discovery.body;
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy

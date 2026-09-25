@@ -42,6 +42,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/share-invite-code.js');
   paths.add('src/room-mcp-join.js');
   paths.add('server/mcp-http.mjs');
+  paths.add('src/mcp-server-card.mjs');
+  paths.add('server/mcp-hosted-tools.mjs');
+  paths.add('server/mcp-discovery.mjs');
   paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)

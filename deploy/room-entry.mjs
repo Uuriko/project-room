@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
+import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
+import "../server/mcp-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
 import { isRoomMcpPath, roomMcpFetchResponse } from "../server/mcp-http.mjs";
 import { catalogDoorHtml } from "../src/room-roster.js";
@@ -127,9 +129,12 @@ export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
 const SCRIPT_HASH = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
 export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 
-function discoveryHeaders(type) {
+function discoveryHeaders(type, pathname) {
+  const card = pathname && discoveryDoc(pathname) === discoveryDoc(MCP_SERVER_CARD_PATH);
   return {
-    "Content-Type": type, "Cache-Control": "no-store",
+    "Content-Type": type,
+    "Cache-Control": card ? MCP_DISCOVERY_CACHE_CONTROL : "no-store",
+    ...(card ? MCP_SERVER_CARD_CORS : {}),
     "X-Robots-Tag": "all", "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
   };
@@ -226,8 +231,12 @@ export function roomEntry(request) {
   }
   const doc = discoveryDoc(url.pathname);
   if (doc) {
-    const headers = discoveryHeaders(doc.type);
-    if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
+    const headers = discoveryHeaders(doc.type, url.pathname);
+    const card = doc === discoveryDoc(MCP_SERVER_CARD_PATH);
+    if (card && request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: { ...headers, Allow: "GET, HEAD, OPTIONS" } });
+    }
+    if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: card ? "GET, HEAD, OPTIONS" : "GET, HEAD" } });
     return new Response(request.method === "HEAD" ? null : doc.body, { headers });
   }
   return null;
