@@ -153,10 +153,23 @@ export function installAgentConnections({ client, getState }) {
         const state = row.status === "key_issued"
           ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
           : statuses[row.status];
-        const seat = getState()?.members?.[row.memberId];
-        const standing = connectionStanding({ permissions: seat?.permissions ?? [], hostTools: null });
-        text.textContent = `${state} · ${standing.summary} · ${new Date(row.expiresAt).toLocaleString()}`;
-        li.append(name, text);
+        const members = getState()?.members;
+        const seat = members ? members[row.memberId] : undefined;
+        const standing = connectionStanding({
+          connectionStatus: row.status,
+          memberFound: members ? seat != null : null,
+          permissions: seat ? seat.permissions ?? [] : null,
+          hostTools: null,
+          pending: row.status === "key_issued" && !row.firstActionAt,
+        });
+        text.textContent = `${standing.compact} · ${new Date(row.expiresAt).toLocaleString()}`;
+        const detail = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = "Permission detail";
+        const detailText = document.createElement("p");
+        detailText.textContent = standing.detail;
+        detail.append(summary, detailText);
+        li.append(name, text, detail);
         if (row.status !== "disconnected") {
           const copySteps = document.createElement("button");
           copySteps.type = "button"; copySteps.className = "button ghost"; copySteps.textContent = "Copy plug-in steps";

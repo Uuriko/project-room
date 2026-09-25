@@ -246,21 +246,57 @@ export function placeholderSnippetPaths(configDir = "/absolute/private/room-agen
   };
 }
 
-const WORK_CAPABILITIES = Object.freeze(["accept_work", "complete_work", "verify", "write_external"]);
+const OPTIONAL_WORK = Object.freeze(["accept_work", "complete_work", "verify", "write_external"]);
+const UNAVAILABLE = Object.freeze({
+  revoked: "Key revoked",
+  expired: "Expired",
+  disconnected: "Disconnected",
+});
 
-// One standing line for a seat. Membership, host tools, and work power stay
-// separate so a joined agent is not described as fully connected.
-export function connectionStanding({ permissions = [], hostTools = null } = {}) {
-  const held = new Set(Array.isArray(permissions) ? permissions : []);
-  const missing = WORK_CAPABILITIES.filter(permission => !held.has(permission));
-  const member = held.size ? "Seat can act in the room" : "Seat is joined and cannot act yet";
+// Credential availability stays separate from optional work grants. A chat
+// seat can read and post without verify or write_external. Those grants are
+// owner-selected limits, not a requirement that every agent receive them.
+export function connectionStanding({
+  connectionStatus = null,
+  memberFound = null,
+  permissions = null,
+  hostTools = null,
+  pending = false,
+} = {}) {
+  if (UNAVAILABLE[connectionStatus]) {
+    const compact = UNAVAILABLE[connectionStatus];
+    const detail = "Credential is not available. Work grants are not shown.";
+    return { compact, detail, summary: `${compact}. ${detail}` };
+  }
+  if (memberFound === false) {
+    const compact = "Member record missing";
+    const detail = "No member record for this connection. Work grants are not shown.";
+    return { compact, detail, summary: `${compact}. ${detail}` };
+  }
+  const credential = pending
+    ? "Access ready, waiting for first action"
+    : connectionStatus === "access_changed"
+      ? "Access changed"
+      : connectionStatus === "key_issued"
+        ? "Access ready"
+        : "Credential status not checked";
   const tools = hostTools == null
     ? "Host tools not checked"
-    : hostTools.length ? "Host tools are available in this session" : "Host tools are missing from this session";
-  const work = missing.length
-    ? `Missing work capabilities: ${missing.join(", ")}. The room owner can grant them.`
-    : "Can accept, complete, verify, and write work";
-  return { member, tools, work, summary: `${member}. ${tools}. ${work}` };
+    : hostTools.length ? "Host tools available" : "Host tools missing";
+  const compact = `${credential}. Can read and post when addressed.`;
+  if (permissions == null) {
+    const detail = `${tools}. Work grants not checked.`;
+    return { compact, detail, summary: `${compact} ${detail}` };
+  }
+  const held = new Set(permissions);
+  const unselected = OPTIONAL_WORK.filter(permission => !held.has(permission));
+  const work = unselected.length === 0
+    ? "Work grants include accept, complete, verify, and write."
+    : unselected.length === OPTIONAL_WORK.length
+      ? "Work grants not selected. Chat remains available."
+      : `Owner-selected limit: ${unselected.join(", ")} not granted. Chat remains available.`;
+  const detail = `${tools}. ${work}`;
+  return { compact, detail, summary: `${compact} ${detail}` };
 }
 
 export function capabilitySummary(access) {
