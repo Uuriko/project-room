@@ -59,7 +59,7 @@ export const nextActionsSchema = `
   );
 `;
 
-const DISMISS_DEFAULT_MS = 14 * 24 * 3600 * 1000;
+const DISMISS_DEFAULT_DAYS = 14;
 const NEWCOMER_MS = 7 * 24 * 3600 * 1000;
 const isoOf = value => {
   if (typeof value === "number") {
@@ -367,7 +367,7 @@ export class NextActions {
       if (existing) {
         // Idempotent re-dismiss: refresh the window on the live row.
         const nowMs = this._nowMs();
-        const expiresAt = forever ? null : nowMs + Math.round((expiresInDays ?? 14) * 24 * 3600 * 1000);
+        const expiresAt = forever ? null : nowMs + Math.round((expiresInDays ?? DISMISS_DEFAULT_DAYS) * 24 * 3600 * 1000);
         this.db.prepare(`UPDATE private_next_action_dismissals SET dismissed_at=?,expires_at=?,reason=?
           WHERE room_id=? AND member_id=? AND action_id=?`)
           .run(nowMs, expiresAt, reason, roomId, auth.member.id, actionId);
@@ -380,7 +380,7 @@ export class NextActions {
         throw new ServiceError(404, "unknown_action", "That action is not in your current list");
       }
       const nowMs = this._nowMs();
-      const expiresAt = forever ? null : nowMs + Math.round((expiresInDays ?? 14) * 24 * 3600 * 1000);
+      const expiresAt = forever ? null : nowMs + Math.round((expiresInDays ?? DISMISS_DEFAULT_DAYS) * 24 * 3600 * 1000);
       this.db.prepare(`INSERT INTO private_next_action_dismissals (room_id,member_id,action_id,dismissed_at,expires_at,reason)
         VALUES(?,?,?,?,?,?)`)
         .run(roomId, auth.member.id, actionId, nowMs, expiresAt, reason);

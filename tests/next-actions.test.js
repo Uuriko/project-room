@@ -179,7 +179,7 @@ function storeFixture(t, actor = "owner") {
 // re-dismiss is idempotent. (2) Regression: dismiss writes the wrong member's
 // row, or re-dismiss 500s. (3) New surface.
 test("dismiss hides the item for the caller and is idempotent on retry", t => {
-  const { f, token, na } = storeFixture(t);
+  const { token, na } = storeFixture(t);
   const first = na.list(token, "commons", { limit: 50 });
   const target = first.items.find(i => i.kind === "profile-gap" || i.kind === "bounty-match");
   assert.ok(target, "fixture yields a live dismissable item");
