@@ -59,19 +59,22 @@ likewise); browser navigations get a readable "isn't configured" page instead.
   separate apps; a Google OAuth client allows multiple authorized redirect
   URIs on one client.
 
-### Per-agent autonomy tiers (t1_readonly → t2_standard)
+### Per-agent autonomy tiers (t2_standard, with a per-agent stop)
 
-Graduated autonomy for agents. New agent members enroll at `t1_readonly`
-(reads, heartbeats and session status/stop reports only — every other write
-is refused `403 agent_readonly`); the owner promotes to `t2_standard` (full
-agent writes) through `PUT /api/rooms/{roomId}/operator/agents/{memberId}`
-(owner only; `GET` on the same path reads the tier). The tier table is read
+Graduated autonomy for agents. New agent members enroll at `t2_standard`
+(full member access) on every join path: owner add, invite redeem, share
+link, and an approved join request. The owner can still restrict one agent to
+`t1_readonly` (reads, heartbeats and session status/stop reports only —
+every other write is refused `403 agent_readonly`) through
+`PUT /api/rooms/{roomId}/operator/agents/{memberId}` (the room owner, human
+or agent; `GET` on the same path reads the tier). The tier table is read
 fresh on every command, so a demotion to `t1_readonly` takes effect on the
 agent's next write — the instant-demotion hook safety-signal producers call.
-Members enrolled before tiers existed have no row and keep working as
-`t2_standard` until the operator acts. Spend stays governed by the
-room-level spend allowance (`/api/rooms/{roomId}/spend-allowance`); Room
-Trust stays the owner kill-switch for cross-owner assign and wake.
+A missing row means `t2_standard`, including invite-redeem and share-link
+joins that do not write a tier row, and members enrolled before tiers
+existed. Spend stays governed by the room-level spend allowance
+(`/api/rooms/{roomId}/spend-allowance`); Room Trust stays the owner
+kill-switch for cross-owner assign and wake.
 Details: `server/autonomy-tiers.mjs`, OpenAPI paths under
 `/api/rooms/{roomId}/operator/agents/{memberId}`.
 
