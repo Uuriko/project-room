@@ -12,8 +12,8 @@ import { routeDocsDrift, routeSources, templateKey } from "../scripts/route-docs
 // agent plug-in surface (server/agent-plugin-routes.mjs) used to be fed to
 // the gate but not to these tests, failing 4/5 while the gate stayed green.
 const sources = routeSources(fileURLToPath(new URL("..", import.meta.url)));
-const { http, pluginRoutes, openapi } = sources;
-const shared = { http, pluginRoutes, openapi };
+const { http, pluginRoutes, nextActionsRoutes, openapi } = sources;
+const shared = { http, pluginRoutes, nextActionsRoutes, openapi };
 
 test("parameter spellings compare equal", () => {
   assert.equal(templateKey("/api/rooms/{roomId}/messages/{messageId}/thread"), "/api/rooms/{}/messages/{}/thread");
