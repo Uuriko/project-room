@@ -15,6 +15,12 @@ wrangler deploy --env production --keep-vars
 wrangler deploy --keep-vars
 ```
 
+Gmail and unified messaging remain shelved. Production defaults to
+`ROOM_GMAIL_ENABLED=0`; retain `ROOM_GMAIL_PILOT_ONLY=1` for any later pilot.
+Normal Room releases must keep Gmail disabled. Re-enablement is a separate,
+explicit release decision after the [Gmail setup requirements](GMAIL-SETUP.md)
+are satisfied; existing Google sign-in remains available.
+
 Deploy the canonical service first, then the entry Worker. Preserve existing
 secrets. Only the canonical Worker has scheduled jobs; the entry must not run
 another cron against the shared store. Both configurations disable workers.dev
