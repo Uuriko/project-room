@@ -116,7 +116,11 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   };
   const idem = (payload, route, status, thunk) =>
     runPure(reject, () => {
-      const result = escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk));
+      // Scope the replay to (caller, route, bounty, key): reusing one
+      // member's key on another member's bounty must execute, not replay the
+      // first member's receipt back at the second.
+      const result = escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk),
+        { callerLane: caller, bountyId: bountyId ?? null });
       if (!result.replayed) publishEvent(result.body?.receipt?.event);
       return json(res, result.status, result.body);
     });
