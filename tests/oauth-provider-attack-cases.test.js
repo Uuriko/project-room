@@ -2,9 +2,11 @@
 //
 // Threat-model review 2026-09-24 (200-list #95). Each test pins a security
 // invariant at the module boundary — the owner of the token/code lifecycle.
-// Two tests are DOCUMENTED GAPs: they assert the CURRENT (weaker) behavior on
-// purpose so CI stays green while the finding is open. Each is tagged with its
-// REVIEW.md finding id; when the fix lands, invert the assertion.
+// One test is a DOCUMENTED GAP (F-02): it asserts the CURRENT (weaker)
+// behavior on purpose so CI stays green while the finding is open; it is
+// tagged with its REVIEW.md finding id. F-01 (refresh-token reuse theft
+// detection) was FIXED 2026-09-25: the reuse test now asserts the new
+// behavior — whole-family revocation plus a reuse-detected signal.
 //
 // Authoring-gate notes (repo .agents/skills/test-audit/SKILL.md):
 //  1. Every test guards an observable security invariant of the OAuth2 flow.
@@ -16,8 +18,9 @@
 //     revocation. These attack cases cover what it does not: replay AFTER
 //     downstream refresh, failed-guess code survival, downgrade-shaped
 //     verifiers, refresh-chain scope pinning, redirect-URI lookalikes,
-//     cross-client binding, consent->grant binding, and the two documented
-//     gaps (no theft-triggered family revocation; no revoke cascade).
+//     cross-client binding, consent->grant binding, refresh-token reuse
+//     theft response (F-01 fixed), and the one remaining documented gap
+//     (F-02: no revoke cascade).
 //  4. No production seams: only the module's public API is used.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -222,53 +225,103 @@ test("authorization code is bound to its redirect_uri at exchange time", () => {
 // 5. Refresh-token reuse
 // ---------------------------------------------------------------------------
 
-test("rotated refresh-token replay is rejected and the live chain is unpoisoned", () => {
-  // Invariant: rotation is single-use; a replayed (rotated) refresh token is
-  // rejected, and the failed replay does not invalidate the legitimate new
-  // chain. Regression: a "revoke on any failure" refactor would let an
-  // attacker's replay DoS the legitimate session.
+test("rotated refresh-token replay triggers theft response: distinct invalid_grant and the whole family dies", () => {
+  // Invariant (F-01 fixed): rotation is single-use; a replayed (rotated)
+  // refresh token is treated as theft, not a silent reject — the whole token
+  // family derived from the grant is revoked (OAuth Security BCP §4.12 /
+  // RFC 6749 §6) and the caller gets a distinct invalid_grant signal.
+  // This supersedes the old "live chain unpoisoned" invariant: the provider
+  // cannot distinguish attacker from legitimate user, so the safe action is
+  // to kill the family and let the user re-authenticate.
   const { provider } = setup();
   const { tokens } = fullGrant(provider);
   const second = provider.refresh({ refreshToken: tokens.refreshToken, clientId: CLIENT_A });
   // Attacker replays the old (rotated) refresh token.
   assert.throws(() => provider.refresh({
     refreshToken: tokens.refreshToken, clientId: CLIENT_A,
+  }), err => err instanceof OAuthProviderError
+    && err.code === "invalid_grant" && /reuse detected/.test(err.message));
+  // The theft response killed the whole family: every access and refresh
+  // token derived from the grant is dead, including the new chain.
+  assert.equal(provider.verifyAccessToken(second.accessToken), null);
+  assert.equal(provider.verifyAccessToken(tokens.accessToken), null);
+  assert.throws(() => provider.refresh({
+    refreshToken: second.refreshToken, clientId: CLIENT_A,
   }), /refresh token revoked/);
-  // Legitimate chain continues undisturbed on the new refresh token.
-  const third = provider.refresh({ refreshToken: second.refreshToken, clientId: CLIENT_A });
-  assert.ok(provider.verifyAccessToken(third.accessToken));
-  assert.deepEqual([...third.scopes], ["rooms:read"]);
+  assert.deepEqual([...second.scopes], ["rooms:read"]);
 });
 
-test("DOCUMENTED GAP (F-01): refresh-token reuse does not revoke the token family", () => {
+test("FIXED (F-01): refresh-token reuse revokes the whole token family and emits a signal", () => {
   // -----------------------------------------------------------------------
-  // SECURITY GAP — see REVIEW.md F-01. Desired behavior (OAuth Security BCP
-  // §4.12 / RFC 6749 §6): reuse of a rotated refresh token signals theft, so
-  // the provider should revoke the whole token family derived from the grant.
-  // Current behavior: the reuse is merely rejected; the attacker's chain
-  // stays valid and the legitimate user gets no signal. This test PINS the
-  // current behavior so the gap is visible; INVERT the family assertions
-  // when the fix lands.
+  // FIXED — see REVIEW.md F-01. Reuse of a rotated refresh token signals
+  // theft (OAuth Security BCP §4.12 / RFC 6749 §6): the provider revokes the
+  // whole token family derived from the grant, emits a
+  // refresh_token_reuse_detected security event, and answers with a distinct
+  // invalid_grant so the legitimate user gets a signal (previously: silent
+  // "revoked", attacker's chain stayed valid).
   // -----------------------------------------------------------------------
-  const { provider } = setup();
+  const events = [];
+  let t = 1_000_000;
+  const provider = createOAuthProvider({
+    clock: () => t,
+    onSecurityEvent: event => { events.push(event); },
+  });
+  provider.registerClient({ clientId: CLIENT_A, name: "Muse", redirectUris: [URI_A, URI_B] });
   const { tokens } = fullGrant(provider, { userId: "victim" });
   // Attacker steals the refresh token and uses it FIRST.
   const stolen = provider.refresh({ refreshToken: tokens.refreshToken, clientId: CLIENT_A });
   assert.ok(provider.verifyAccessToken(stolen.accessToken), "attacker chain works");
-  // Legitimate user now finds their token dead — with no theft signal.
+  // Legitimate user now finds their token dead — with a theft signal.
   assert.throws(() => provider.refresh({
     refreshToken: tokens.refreshToken, clientId: CLIENT_A,
-  }), /refresh token revoked/);
-  // GAP: the attacker's derived family is NOT revoked.
-  assert.ok(
+  }), err => err instanceof OAuthProviderError
+    && err.code === "invalid_grant" && /reuse detected/.test(err.message));
+  // The attacker's derived family IS revoked: access token dead, and the
+  // attacker cannot keep rotating.
+  assert.equal(
     provider.verifyAccessToken(stolen.accessToken),
-    "GAP F-01: attacker access token still valid after reuse detection",
+    null,
+    "F-01: attacker access token revoked after reuse detection",
   );
-  const attackerNext = provider.refresh({ refreshToken: stolen.refreshToken, clientId: CLIENT_A });
-  assert.ok(
-    provider.verifyAccessToken(attackerNext.accessToken),
-    "GAP F-01: attacker can keep rotating after reuse detection",
+  assert.throws(() => provider.refresh({
+    refreshToken: stolen.refreshToken, clientId: CLIENT_A,
+  }), /refresh token revoked/,
+    "F-01: attacker's refresh token is dead after the family nuke (plain revoked — the theft was already signaled once)");
+  // The victim's original access token (same family) is revoked too.
+  assert.equal(
+    provider.verifyAccessToken(tokens.accessToken),
+    null,
+    "F-01: victim's original access token revoked as part of the family",
   );
+  // The reuse-detected signal fired exactly once with the family context.
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "refresh_token_reuse_detected");
+  assert.equal(events[0].userId, "victim");
+  assert.equal(events[0].clientId, CLIENT_A);
+  assert.ok(typeof events[0].familyId === "string" && events[0].familyId.startsWith("oarf_"));
+  assert.ok(events[0].revokedCount >= 3);
+  assert.equal(events[0].detectedAt, t);
+});
+
+test("explicitly revoked refresh tokens do NOT trigger family revocation", () => {
+  // Invariant: the theft response fires only for reuse of a ROTATED token
+  // (one superseded by rotation). A token revoked explicitly via revoke() or
+  // revokeAllForUser() stays a plain "revoked" reject with no security
+  // event and no family nuke. Regression: a refactor that treats every
+  // revoked-token replay as reuse would nuke families on benign replays.
+  const events = [];
+  const provider = createOAuthProvider({ onSecurityEvent: event => { events.push(event); } });
+  provider.registerClient({ clientId: CLIENT_A, name: "Muse", redirectUris: [URI_A, URI_B] });
+  const { tokens } = fullGrant(provider);
+  const second = provider.refresh({ refreshToken: tokens.refreshToken, clientId: CLIENT_A });
+  provider.revoke(second.refreshToken);
+  assert.throws(() => provider.refresh({
+    refreshToken: second.refreshToken, clientId: CLIENT_A,
+  }), /refresh token revoked/);
+  assert.equal(events.length, 0, "explicit revocation must not emit a reuse signal");
+  // Family otherwise untouched: the access tokens issued alongside survive
+  // (single-token revocation semantics, per F-02's still-open gap).
+  assert.ok(provider.verifyAccessToken(second.accessToken));
 });
 
 // ---------------------------------------------------------------------------

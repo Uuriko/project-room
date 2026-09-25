@@ -51,18 +51,23 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, clock } = {}) {
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, clock, onSecurityEvent } = {}) {
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
   check(codes === undefined || codes instanceof Map, "codes must be a Map if given");
   check(accessTokens === undefined || accessTokens instanceof Map, "accessTokens must be a Map if given");
   check(refreshTokens === undefined || refreshTokens instanceof Map, "refreshTokens must be a Map if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
+  check(onSecurityEvent === undefined || typeof onSecurityEvent === "function",
+    "onSecurityEvent must be a function if given");
 
   const clientStore = clients ?? new Map();
   const codeStore = codes ?? new Map();
   const accessStore = accessTokens ?? new Map();
   const refreshStore = refreshTokens ?? new Map();
   const now = clock ?? Date.now;
+  // Caller-owned sink for security signals (e.g. reuse-detected). The module
+  // itself does no I/O; the HTTP layer wires this to its logging/journaling.
+  const emitSecurityEvent = onSecurityEvent ?? (() => {});
 
   // Register an OAuth client (e.g. Muse). redirectUris must be exact-match
   // https URIs (http allowed only for localhost, per RFC 6749 §3.1.2.1).
@@ -163,20 +168,24 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes] });
   };
 
-  const issueTokenPair = ({ clientId, userId, scopes }) => {
+  // Every access+refresh pair minted from one grant shares a familyId.
+  // Rotation carries the familyId forward; reuse of a rotated refresh token
+  // (record.rotatedBy set) then revokes the whole family (F-01).
+  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}` }) => {
     const validScopes = validateScopes(scopes);
     const accessToken = `oat_${newSecret()}`;
     const refreshToken = `oar_${newSecret()}`;
     const at = now();
     accessStore.set(sha256(accessToken), {
       tokenHash: sha256(accessToken),
-      clientId, userId, scopes: validScopes,
+      clientId, userId, scopes: validScopes, familyId,
       createdAt: at, expiresAt: at + ACCESS_TOKEN_TTL_MS, revoked: false,
     });
     refreshStore.set(sha256(refreshToken), {
       tokenHash: sha256(refreshToken),
-      clientId, userId, scopes: validScopes,
+      clientId, userId, scopes: validScopes, familyId,
       createdAt: at, expiresAt: at + REFRESH_TOKEN_TTL_MS, revoked: false,
+      rotatedBy: null, // hash of the refresh token that superseded this one
     });
     return Object.freeze({
       accessToken, refreshToken,
@@ -186,17 +195,51 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     });
   };
 
+  // Revoke every access and refresh token derived from the same original
+  // grant. Returns the number of tokens newly revoked.
+  const revokeTokenFamily = familyId => {
+    let count = 0;
+    for (const record of refreshStore.values()) {
+      if (record.familyId === familyId && !record.revoked) { record.revoked = true; count++; }
+    }
+    for (const record of accessStore.values()) {
+      if (record.familyId === familyId && !record.revoked) { record.revoked = true; count++; }
+    }
+    return count;
+  };
+
   // Refresh an access token. Rotates the refresh token (old one revoked).
+  // Reuse of a rotated (superseded) refresh token signals theft
+  // (OAuth Security BCP §4.12 / RFC 6749 §6): the whole token family is
+  // revoked and the caller gets a distinct invalid_grant so the legitimate
+  // user sees a theft signal instead of a silent "revoked".
   const refresh = ({ refreshToken, clientId }) => {
     check(typeof refreshToken === "string" && refreshToken.length > 0, "refresh_token is required");
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     const record = refreshStore.get(sha256(refreshToken));
     check(record, "invalid refresh token");
+    if (record.revoked && record.rotatedBy) {
+      const revokedCount = revokeTokenFamily(record.familyId);
+      emitSecurityEvent({
+        type: "refresh_token_reuse_detected",
+        familyId: record.familyId,
+        userId: record.userId,
+        clientId: record.clientId,
+        revokedCount,
+        detectedAt: now(),
+      });
+      fail("invalid_grant", "refresh token reuse detected: token family revoked");
+    }
     check(!record.revoked, "refresh token revoked");
     check(!isExpired(record, now), "refresh token expired");
     check(record.clientId === clientId, "client_id mismatch");
     record.revoked = true; // rotation: old refresh token is single-use
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes] });
+    const next = issueTokenPair({
+      clientId: record.clientId, userId: record.userId,
+      scopes: [...record.scopes], familyId: record.familyId,
+    });
+    record.rotatedBy = sha256(next.refreshToken);
+    return next;
   };
 
   // Verify a bearer access token. Returns { userId, clientId, scopes } or null.

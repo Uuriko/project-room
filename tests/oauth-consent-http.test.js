@@ -171,3 +171,55 @@ test("logged-out consent POST is rejected; unknown client fails on the consent s
   // No session at all -> login bounce takes precedence over client validation.
   assert.equal(bad.status, 302);
 });
+
+test("POST /oauth/token: reuse of a rotated refresh token is invalid_grant with a reuse signal, and kills the family", async t => {
+  // F-01 at the HTTP boundary: the theft response must be observable by the
+  // client as a distinct invalid_grant (not a silent "revoked"), and the
+  // whole family must die — the attacker's new chain included.
+  const f = createAcceptanceFixture();
+  const { origin } = await startServer(t, f);
+  const { slot } = loginAccount(f);
+  const cookie = "account_session=" + slot.token;
+  const { verifier, challenge } = pkce();
+
+  const screen = await fetch(origin + authzPath(challenge), { headers: { cookie } });
+  const csrf = (await screen.text()).match(/name="csrf_token" value="([^"]+)"/)[1];
+  const consent = await fetch(origin + "/oauth/authorize", {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },
+    body: "decision=allow&client_id=" + CLIENT.clientId
+      + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
+      + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
+      + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf),
+  });
+  assert.equal(consent.status, 302);
+  const code = new URL(consent.headers.get("location")).searchParams.get("code");
+  const tokenOf = async params => {
+    const res = await fetch(origin + "/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify(params),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const first = await tokenOf({ grant_type: "authorization_code", code, redirect_uri: CLIENT.redirectUris[0], client_id: CLIENT.clientId, code_verifier: verifier });
+  assert.equal(first.status, 200);
+  const rt1 = first.body.refresh_token;
+
+  const second = await tokenOf({ grant_type: "refresh_token", refresh_token: rt1, client_id: CLIENT.clientId });
+  assert.equal(second.status, 200);
+  const rt2 = second.body.refresh_token;
+
+  // Reuse the rotated refresh token: distinct invalid_grant, not a silent revoked.
+  const reuse = await tokenOf({ grant_type: "refresh_token", refresh_token: rt1, client_id: CLIENT.clientId });
+  assert.equal(reuse.status, 400);
+  assert.equal(reuse.body.error, "invalid_grant");
+  assert.match(reuse.body.error_description, /reuse detected/);
+
+  // Family is dead: the later refresh token fails too (plain revoked — the
+  // theft was already signaled once at detection time).
+  const dead = await tokenOf({ grant_type: "refresh_token", refresh_token: rt2, client_id: CLIENT.clientId });
+  assert.equal(dead.status, 400);
+  assert.equal(dead.body.error, "invalid_request");
+  assert.match(dead.body.error_description, /refresh token revoked/);
+});
