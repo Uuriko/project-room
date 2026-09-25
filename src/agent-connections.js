@@ -150,9 +150,6 @@ export function installAgentConnections({ client, getState }) {
       for (const row of result.connections) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName;
-        const state = row.status === "key_issued"
-          ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
-          : statuses[row.status];
         const members = getState()?.members;
         const seat = members ? members[row.memberId] : undefined;
         const standing = connectionStanding({

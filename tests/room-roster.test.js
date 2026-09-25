@@ -81,7 +81,17 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.match(chatOnly.compact, /Can read and post/);
   assert.match(chatOnly.detail, /Work grants not selected/);
   assert.doesNotMatch(chatOnly.summary, /cannot act|must receive|Seat can act/);
-  const limited = connectionStanding({ connectionStatus: "access_changed", memberFound: true, permissions: ["accept_work"], hostTools: [] });
+  const changed = connectionStanding({
+    connectionStatus: "access_changed",
+    memberFound: true,
+    permissions: ["accept_work", "complete_work", "verify", "write_external"],
+  });
+  assert.match(changed.compact, /Recheck required/);
+  assert.doesNotMatch(changed.summary, /Can read and post|Chat remains available|Work grants include/);
+  const unknown = connectionStanding({ connectionStatus: null, memberFound: null, permissions: ["accept_work"] });
+  assert.equal(unknown.compact, "Credential status not verified");
+  assert.doesNotMatch(unknown.summary, /Can read and post|Chat remains available/);
+  const limited = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: ["accept_work"], hostTools: [] });
   assert.match(limited.detail, /Owner-selected limit: complete_work, verify, write_external not granted/);
   assert.match(limited.detail, /Host tools missing/);
   assert.match(limited.detail, /Chat remains available/);

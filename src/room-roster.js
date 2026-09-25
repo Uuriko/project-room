@@ -251,6 +251,7 @@ const UNAVAILABLE = Object.freeze({
   revoked: "Key revoked",
   expired: "Expired",
   disconnected: "Disconnected",
+  access_changed: "Access changed. Recheck required",
 });
 
 // Credential availability stays separate from optional work grants. A chat
@@ -273,16 +274,17 @@ export function connectionStanding({
     const detail = "No member record for this connection. Work grants are not shown.";
     return { compact, detail, summary: `${compact}. ${detail}` };
   }
+  if (connectionStatus !== "key_issued" || memberFound !== true) {
+    const compact = "Credential status not verified";
+    const detail = "Chat availability is not confirmed. Work grants are not shown.";
+    return { compact, detail, summary: `${compact}. ${detail}` };
+  }
   if (pending) {
     const compact = "Access ready, waiting for first action";
     const detail = "Credential has not been used. Work grants are not shown.";
     return { compact, detail, summary: `${compact}. ${detail}` };
   }
-  const credential = connectionStatus === "access_changed"
-      ? "Access changed"
-      : connectionStatus === "key_issued"
-        ? "Access ready"
-        : "Credential status not checked";
+  const credential = "Access ready";
   const tools = hostTools == null
     ? "Host tools not checked"
     : hostTools.length ? "Host tools available" : "Host tools missing";
