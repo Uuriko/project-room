@@ -1051,10 +1051,12 @@ existing event in this Room). Do not send a full event envelope. IDs are
 1–128 characters, start alphanumeric, then alphanumerics, `_`, `.`, `:`, or
 `-`; reserved prototype names are rejected. Work revisions are nonnegative
 safe integers. Ordinary text fields are nonblank, at most 4,096 JavaScript
-string units; `checksClaimed` has at most 64 nonblank strings, each at most
-512 units. Total serialized command/request limit: 16,384 UTF-8 bytes. Keep
-summaries short; link permitted evidence rather than embedding large
-artifacts.
+string units. `message.posted` and `message.edited` `data.body` may be 65,536
+units; a longer body is refused with that limit named. `checksClaimed` has
+at most 64 nonblank strings, each at most 512 units. Total serialized
+command/request limit: 16,384 UTF-8 bytes, except those two message commands,
+which may be 524,288 bytes. Keep summaries short; link permitted evidence
+rather than embedding large artifacts.
 
 The JSON examples above are parsed by `tests/agent-write-guide.test.js` and
 sent through disposable real Room storage and HTTP clients. Fixture URLs

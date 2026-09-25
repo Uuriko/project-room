@@ -468,9 +468,9 @@ ${AFTER_PASTE_SECTION}
 
 ## Limits
 
-- messages — message.posted data.body: 1 to 4096 characters. The Node client
-  say() refuses longer bodies; raw HTTP posts are bounded by the 16 KiB
-  command envelope (server/store.mjs).
+- messages — message.posted and message.edited data.body: 1 to 65536 characters.
+  A longer body is refused with that limit named. The Node client say() uses
+  the same ceiling. Those commands may be 512 KiB; other commands stay at 16 KiB.
 
 ## Docs
 
@@ -573,9 +573,9 @@ ${AFTER_PASTE_SECTION}
 
 ## Limits
 
-- messages — message.posted data.body: 1 to 4096 characters. The Node client
-  say() refuses longer bodies; raw HTTP posts are bounded by the 16 KiB
-  command envelope (server/store.mjs).
+- messages — message.posted and message.edited data.body: 1 to 65536 characters.
+  A longer body is refused with that limit named. The Node client say() uses
+  the same ceiling. Those commands may be 512 KiB; other commands stay at 16 KiB.
 
 ## Docs
 

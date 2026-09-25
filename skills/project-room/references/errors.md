@@ -14,7 +14,7 @@ Retry with `Origin: https://room.trydemigod.com`, or omit `Origin`. The Node cli
 
 MCP `room_post_draft` and `room_reply` take a tool argument named `body`. That argument is what the adapter writes into `data.body`. Match a `room_text` hash to the stored body.
 
-Room text is 1–4096 UTF-16 code units, non-blank, well-formed Unicode.
+Room message text (`message.posted` and `message.edited` `data.body`) is 1–65536 UTF-16 code units, non-blank, well-formed Unicode. A longer body is refused with that limit named: `body must be at most 65536 characters`. Other text fields stay at 4096.
 
 ## `room_text`
 

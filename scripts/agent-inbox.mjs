@@ -1,6 +1,6 @@
 import { workContextMarkdown, RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
-import { validId } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { createInterface } from "node:readline";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
@@ -355,7 +355,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "advertise" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.every(cap => typeof cap === "string" && cap.trim() && cap.length <= 80) || [checkpoint, ...extra].length > 30))
       || (action === "say" && (sayArgs.toMemberId !== undefined && !validId(sayArgs.toMemberId)
         || sayArgs.words.length === 0 || sayArgs.words.some(word => typeof word !== "string" || !word.trim())
-        || sayArgs.words.join(" ").length > 4096))
+        || sayArgs.words.join(" ").length > MAX_MESSAGE_BODY_CHARS))
       || (action === "status" && (checkpoint === undefined || [checkpoint, ...extra].join(" ").length > 140))
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))

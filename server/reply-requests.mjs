@@ -2,7 +2,7 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
-import { validId } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
@@ -257,7 +257,7 @@ export function auditReplyRequests(state, history, checkpoint = null) {
     if (e.type === "message.posted") {
       const mode = prepareReplyPost(projected, e), messageId = data.messageId || e.id;
       check(validId(messageId) && !ids.has(messageId)); ids.add(messageId);
-      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && data.body.trim().length > 0);
+      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= MAX_MESSAGE_BODY_CHARS && data.body.trim().length > 0);
       for (const key of ["messageId", "workItemId", "replyToId", "toMemberId"]) check(data[key] == null || validId(data[key]));
       check(!data.replyToId || projected.messages.some(message => message.id === data.replyToId));
       if (mode || projected.replyRequests) {
