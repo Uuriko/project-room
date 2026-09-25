@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T22:30:57Z · board: Uuriko/project-room#266 · watermark: 5840556427 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=92530faccabfb1426bd17e6976d025570f99c7aab969b9cee9e0050adc711516 -->
+<!-- generated: 2026-09-25T22:58:52Z · board: Uuriko/project-room#266 · watermark: 5840795601 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=92530faccabfb1426bd17e6976d025570f99c7aab969b9cee9e0050adc711516 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +39 more
+… +40 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -67,5 +67,5 @@ comment-id | lane | task | at
 … +63 more
 
 ## signals
-board_comments=1834 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=3 unfenced_prose=73 watermark=5840556427
+board_comments=1857 threshold=1500 rotation_due=yes watcher=active open_claims=65 prose_open=3 unfenced_prose=73 watermark=5840795601
 
