@@ -68,11 +68,19 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   const missing = connectionStanding({ connectionStatus: "key_issued", memberFound: false, permissions: [] });
   assert.equal(missing.compact, "Member record missing");
   assert.doesNotMatch(missing.summary, /cannot act yet|joined/);
-  const chatOnly = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [], pending: true });
-  assert.match(chatOnly.compact, /waiting for first action/);
+  const pending = connectionStanding({
+    connectionStatus: "key_issued",
+    memberFound: true,
+    pending: true,
+    permissions: ["accept_work", "complete_work", "verify", "write_external"],
+  });
+  assert.match(pending.compact, /waiting for first action/);
+  assert.match(pending.detail, /Work grants are not shown/);
+  assert.doesNotMatch(pending.summary, /Seat can act|Can accept, complete, verify, and write|Work grants include/);
+  const chatOnly = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [] });
   assert.match(chatOnly.compact, /Can read and post/);
   assert.match(chatOnly.detail, /Work grants not selected/);
-  assert.doesNotMatch(chatOnly.summary, /cannot act|must receive|verify, write_external/);
+  assert.doesNotMatch(chatOnly.summary, /cannot act|must receive|Seat can act/);
   const limited = connectionStanding({ connectionStatus: "access_changed", memberFound: true, permissions: ["accept_work"], hostTools: [] });
   assert.match(limited.detail, /Owner-selected limit: complete_work, verify, write_external not granted/);
   assert.match(limited.detail, /Host tools missing/);

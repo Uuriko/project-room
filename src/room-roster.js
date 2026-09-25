@@ -273,9 +273,12 @@ export function connectionStanding({
     const detail = "No member record for this connection. Work grants are not shown.";
     return { compact, detail, summary: `${compact}. ${detail}` };
   }
-  const credential = pending
-    ? "Access ready, waiting for first action"
-    : connectionStatus === "access_changed"
+  if (pending) {
+    const compact = "Access ready, waiting for first action";
+    const detail = "Credential has not been used. Work grants are not shown.";
+    return { compact, detail, summary: `${compact}. ${detail}` };
+  }
+  const credential = connectionStatus === "access_changed"
       ? "Access changed"
       : connectionStatus === "key_issued"
         ? "Access ready"
