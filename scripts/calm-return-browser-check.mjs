@@ -1,1 +1,3 @@
-@/workspace/pr1007-fix/scripts/calm-return-browser-check.mjs
+// TEMP placeholder — land executor restoring broken @path commit; full file follows.
+import test from "node:test";
+test("calm return placeholder", () => {});
