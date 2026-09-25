@@ -2675,6 +2675,59 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
+      // Signed referral invites: any active member mints a bearer token and
+      // carries it out-of-band — the server never sends or dispatches it.
+      // Redemption is unauthenticated (the token is the credential) and
+      // lands the stranger at the fixed read+chat tier.
+      if (url.pathname === "/api/referral-invites/mint" && req.method === "POST") {
+        rate(`referral-invite-mint:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
+        const data = await body(req);
+        const withCap = Object.hasOwn(data, "maxDepth");
+        if (!(exact(data, withCap ? ["roomId", "maxDepth"] : ["roomId"]))
+            || typeof data.roomId !== "string"
+            || (withCap && typeof data.maxDepth !== "number")) {
+          reject(422, "invalid_invite", "roomId and optional numeric maxDepth are the accepted fields");
+        }
+        return json(res, 201, store.referralInvites.mint(secret, data.roomId,
+          withCap ? { maxDepth: data.maxDepth } : {}));
+      }
+      if (url.pathname === "/api/referral-invites/mint" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
+      if (url.pathname === "/api/referral-invites/redeem" && req.method === "POST") {
+        rate(`referral-invite-redeem:${remoteAddress}`, 20);
+        const data = await body(req);
+        const withName = Object.hasOwn(data, "displayName");
+        if (!(exact(data, withName ? ["token", "displayName"] : ["token"]))
+            || typeof data.token !== "string"
+            || (withName && typeof data.displayName !== "string")) {
+          reject(422, "invalid_invite", "token and optional displayName are the accepted fields");
+        }
+        const redeemedReferral = store.referralInvites.redeem({ token: data.token, displayName: data.displayName });
+        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // score the join, journal the would-be decision, admit anyway.
+        jevShadowAdmission("referral-invite:redeem", { roomId: redeemedReferral.roomId, identityId: redeemedReferral.identityId,
+          displayName: redeemedReferral.displayName ?? data.displayName, card: null });
+        return json(res, 201, redeemedReferral);
+      }
+      if (url.pathname === "/api/referral-invites/redeem" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
+      // Referral invite preview: read-only consent data for the
+      // pre-redemption review screen. POST (not GET) so the bearer token
+      // never lands in a query string or access log. Unauthenticated;
+      // consumes nothing, reveals no inviter or identity data.
+      if (url.pathname === "/api/referral-invites/preview" && req.method === "POST") {
+        rate(`referral-invite-preview:${remoteAddress}`, 20);
+        const data = await body(req);
+        if (!exact(data, ["token"]) || typeof data.token !== "string") reject(422, "invalid_invite", "token is required");
+        return json(res, 200, store.referralInvites.preview(data.token));
+      }
+      if (url.pathname === "/api/referral-invites/preview" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
       // Agent invite preview: read-only consent data for the pre-redemption
       // review screen. Unauthenticated (the code is the bearer credential);
       // consumes nothing, reveals no member or identity data.
@@ -2873,7 +2926,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3679,6 +3732,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Authorization is store-level (Referrals.board); ids and display
         // names only, no credential data.
         return json(res, 200, store.referrals.board(selected.token, roomId, fence));
+      }
+      if (route === "referral-invites" && req.method === "GET") {
+        // Owner-only referral invite journal: every mint, redemption, and
+        // policy rejection with the inviter identified. The invitee-facing
+        // surfaces (preview, redeem, member events) never join against
+        // this table, so the inviter stays hidden from invitees.
+        // Authorization is store-level (ReferralInvites.list).
+        return json(res, 200, store.referralInvites.list(selected.token, roomId));
+      }
+      if (route === "referral-invites" && req.method !== "GET") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
       }
       if (route === "access-decide" && req.method === "POST") {
         const data = await body(req);

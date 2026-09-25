@@ -259,7 +259,18 @@ export const unfencedAdditiveTables = Object.freeze([
   // land_queue (per-room pull-request land queue). Purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and
   // the module verifies its own schema on open. Rows never grant permission.
-  "land_queue"
+  "land_queue",
+  // referral_invite_keys + referral_invites + referral_chain_members
+  // (signed agent-carried referral invites): per-room Ed25519 signing keys
+  // (private half never leaves the database), the private mint/redeem/
+  // rejection journal, and per-member chain depths. Purely additive and
+  // intentionally NOT fenced — older writers have no code path to them,
+  // tokens are bearer (never stored), and the module verifies its own
+  // schema on open. DDL is shared with server/referral-invites.mjs
+  // (convergent).
+  "referral_invite_keys",
+  "referral_invites",
+  "referral_chain_members"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
