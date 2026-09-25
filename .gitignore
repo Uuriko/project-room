@@ -17,3 +17,4 @@ runlogs-tmp/
 # Expanded at import time by scripts/acceptance-fixture.mjs
 scripts/.acceptance-fixture.*.generated.mjs
 tests/.webhook-dispatch-store.*.generated.mjs
+tests/.telegram-webhook-rotation.*.generated.mjs
