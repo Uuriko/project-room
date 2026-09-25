@@ -14,8 +14,17 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 export function createAcceptanceFixture({ managedProducer = false, dmConsent = false } = {}) {
   if (typeof managedProducer !== "boolean") throw new Error("Choose a boolean managed-producer fixture mode");
   const directory = mkdtempSync(join(tmpdir(), "project-room-acceptance-"));
-  let offset = 0;
-  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => Date.now() + offset });
+  // Mutable fixture clock. Live chat posts spend the room flood budget
+  // (burst 30, refill 0.5/s); advance 2s before each message.posted /
+  // dm.posted so history seeds and acceptance loops stay under the limit
+  // without weakening the product guard. Tests may still replace store.now.
+  let nowMs = Date.now();
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => nowMs });
+  const rawCommand = store.command.bind(store);
+  store.command = (accessKey, roomId, command) => {
+    if (command?.type === T.MESSAGE_POSTED || command?.type === T.DM_POSTED) nowMs += 2000;
+    return rawCommand(accessKey, roomId, command);
+  };
   try {
     const seed = initialRoom();
     seed[0].data.title = "Project Room — Disposable Test";
@@ -61,11 +70,11 @@ export function createAcceptanceFixture({ managedProducer = false, dmConsent = f
     const links = {};
     function link(label, maxJoins = 10) {
       const token = randomBytes(32).toString("base64url");
-      const result = store.shareLinks.create(keys.owner, "commons", { requestId: randomUUID(), linkToken: token, expiresAt: Date.now() + offset + 3600000, maxJoins, expectedMemberRevision: 0 }, null);
+      const result = store.shareLinks.create(keys.owner, "commons", { requestId: randomUUID(), linkToken: token, expiresAt: nowMs + 3600000, maxJoins, expectedMemberRevision: 0 }, null);
       links[label] = token;
       return result.link;
     }
-    offset = -7200000; link("expired"); offset = 0;
+    nowMs = Date.now() - 7200000; link("expired"); nowMs = Date.now();
     const cancelled = link("cancelled"); store.shareLinks.cancel(keys.owner, "commons", cancelled.id, null);
     link("full", 1);
     const slot = store.createAccountSessionSlot();
