@@ -2,7 +2,13 @@
 import { randomUUID } from "node:crypto";
 import { emailConnection, emailDigest, emailInput, emailOpaqueId, emailSourceId, requireEmail } from "./email-envelope.mjs";
 import { graphFolderChanges, normalizeGraphEmail } from "./graph-email.mjs";
-import { ServiceError } from "./store.mjs";
+// ServiceError's canonical home is server/service-error.mjs (cycle-free);
+// importing it from ./store.mjs drags store -> inbox/email-import ->
+// channel-adapters/index -> channel-adapters/email -> here, and the cycle
+// leaves adapter `provider` bindings uninitialized when index.mjs reads them
+// at module top level (ReferenceError: Cannot access 'provider' before
+// initialization). Same class object either way; this import breaks the cycle.
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (code, message) => { throw new ServiceError(409, code, message); };
 const route = (connection, folderId) => "/v1.0/users/" + encodeURIComponent(connection.mailboxId)
