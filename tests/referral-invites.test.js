@@ -214,8 +214,16 @@ test("tampered and forged tokens are indistinguishable from unknown ones", async
   const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
   const [prefix, body, sig] = minted.json.token.split(".");
 
-  const tamperedBody = `${prefix}.${body.slice(0, -2)}AA.${sig}`;
-  const tamperedSig = `${prefix}.${body}.${sig.slice(0, -2)}AA`;
+  // Flip a character to a guaranteed-different one. For the body the signature
+  // covers the raw string, so flipping the last char is enough; for the
+  // signature the last char's low bits are unused by base64url decoding
+  // (64-byte Ed25519 sig = 86 chars), so flip the FIRST char instead —
+  // flipping unused bits decodes to the identical signature and the
+  // "tampered" token stays valid (flaky 200).
+  const flipLast = s => s.slice(0, -1) + (s.endsWith("A") ? "B" : "A");
+  const flipFirst = s => (s.startsWith("A") ? "B" : "A") + s.slice(1);
+  const tamperedBody = `${prefix}.${flipLast(body)}.${sig}`;
+  const tamperedSig = `${prefix}.${body}.${flipFirst(sig)}`;
   for (const bad of [tamperedBody, tamperedSig, "bogus.token.here", "ref1.onlyonepart", minted.json.token.slice(0, 20)]) {
     const previewed = await post(origin, "/api/referral-invites/preview", { token: bad });
     assert.equal(previewed.status, 404, `preview of ${bad.slice(0, 12)}...`);
