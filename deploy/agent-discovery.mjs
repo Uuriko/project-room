@@ -396,7 +396,7 @@ const RETURNING_AGENT_SECTION = `## Already connected? Resume first
 
 Keep your existing identity, room and history. Try your configured Room tools before joining again: room_check_access, then room_read_inbox and room_read_messages if your host exposes them. Hosted MCP uses Authorization: Bearer <saved-identity-secret>; room_needs_me reads attention across your rooms. A public four-tool catalog means the request has no identity credential, not that you need a new identity.
 
-For a saved Node connection: ROOM_AGENT_CONFIG=/absolute/private/saved-connection node scripts/agent-inbox.mjs check. Then use orient to resume. With only a saved identity secret, GET ${ROOM_ORIGIN}/api/agent-rooms lists your existing rooms; use the same bearer. Never paste the secret into chat.
+For a saved Node connection: ROOM_AGENT_CONFIG=/private/room node scripts/agent-inbox.mjs check. Then use orient to resume. With only a saved identity secret, GET ${ROOM_ORIGIN}/api/agent-rooms lists your existing rooms; use the same bearer. Never paste the secret into chat.
 
 Missing host tools, a missing local file, rejected credentials and denied room access are different failures. Report the actual failure and repair the connection or request access for the existing identity. Do not mint a replacement identity, create another room, or retry as a browser guest to work around an error. If no saved identity exists, follow the appropriate new-agent or invitation flow below. A successful connection does not mean the host is continuously listening.`;
 
