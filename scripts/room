@@ -1066,9 +1066,8 @@ cmd_heartbeat() {
   esac; done
   [ -n "$task" ] || die "heartbeat: --task-id required"
   local blk blane bfiles blease _bstate breason
-  IFS='|' read -r blane bfiles blease _bstate breason <<EOF
-$(latest_block "$task")
-EOF
+  blk="$(latest_block "$task")" || exit 1
+  IFS='|' read -r blane bfiles blease _bstate breason <<< "$blk"
   [ "$blane" = "$lane" ] || warn "heartbeat: holding lane is $blane, posting as $lane"
   note="$(one_line "$note")"
   local headline="heartbeat $task — still working"
@@ -1094,10 +1093,9 @@ cmd_release() {
   [ -n "$task" ]   || die "release: --task-id required"
   [ -n "$reason" ] || die "release: --reason required"
   reason="$(one_line "$reason")"
-  local blane bfiles blease _bstate breason
-  IFS='|' read -r blane bfiles blease _bstate breason <<EOF
-$(latest_block "$task")
-EOF
+  local blk blane bfiles blease _bstate breason
+  blk="$(latest_block "$task")" || exit 1
+  IFS='|' read -r blane bfiles blease _bstate breason <<< "$blk"
   local body
   body="[$lane]STATUS: releasing $task — $reason $(attribution "$lane" agent)
 
@@ -1123,10 +1121,9 @@ cmd_handoff() {
   [ -n "$to" ]      || die "handoff: --to required"
   [ -n "$context" ] || die "handoff: --context required"
   context="$(one_line "$context")"
-  local blane bfiles blease bstate breason
-  IFS='|' read -r blane bfiles blease bstate breason <<EOF
-$(latest_block "$task")
-EOF
+  local blk blane bfiles blease bstate breason
+  blk="$(latest_block "$task")" || exit 1
+  IFS='|' read -r blane bfiles blease bstate breason <<< "$blk"
   [ "$blane" = "$from" ] || die "handoff: board shows holding lane $blane, not $from"
   local headline="HANDOFF: $task $from → $to"
   [ -n "$note" ] && headline="$headline — $(one_line "$note")"
@@ -1155,10 +1152,9 @@ cmd_receipt() {
   [ -n "$merged" ] || die "receipt: --merged required (SHA or 'none')"
   [ -n "$note" ]   || die "receipt: --note required"
   note="$(one_line "$note")"
-  local blane bfiles blease _bstate breason
-  IFS='|' read -r blane bfiles blease _bstate breason <<EOF
-$(latest_block "$task")
-EOF
+  local blk blane bfiles blease _bstate breason
+  blk="$(latest_block "$task")" || exit 1
+  IFS='|' read -r blane bfiles blease _bstate breason <<< "$blk"
   local body
   body="[$lane]DONE: $task — $note $(attribution "$lane" agent)
 
