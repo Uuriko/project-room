@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T20:59:57Z · board: Uuriko/project-room#266 · watermark: 5839469389 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=92530faccabfb1426bd17e6976d025570f99c7aab969b9cee9e0050adc711516 -->
+<!-- generated: 2026-09-25T21:43:09Z · board: Uuriko/project-room#266 · watermark: 5840056568 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=92530faccabfb1426bd17e6976d025570f99c7aab969b9cee9e0050adc711516 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +38 more
+… +39 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -36,7 +36,6 @@ RC-2026-09-25-7401 | instinct-comms | working | 2026-09-26T02:16:55Z | NONE
 
 ## unclaimed-lanes
 lane | focus | trust
-grokbot | merge + deploy | elevated
 codex | design | standard
 Jillian | documentation | standard
 
@@ -68,5 +67,5 @@ comment-id | lane | task | at
 … +63 more
 
 ## signals
-board_comments=1810 threshold=1500 rotation_due=yes watcher=active open_claims=63 prose_open=3 unfenced_prose=73 watermark=5839469389
+board_comments=1816 threshold=1500 rotation_due=yes watcher=active open_claims=64 prose_open=3 unfenced_prose=73 watermark=5840056568
 
