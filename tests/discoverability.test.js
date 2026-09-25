@@ -161,6 +161,27 @@ test("canonical errors: 401s on listed routes name the mint path with non-empty 
   assert.ok(whBody.hint.includes("rak_"), "webhook 401 names the rak_ API key alternative");
 });
 
+test("cold access request 404 gives mint-first help without revealing room or identity existence", async t => {
+  const { origin } = await serve(t);
+  const body = (roomId, identityId) => ({ roomId, identityId, displayName: "Cold agent",
+    requestedPermissions: ["steer"], note: "join", requestId: randomUUID() });
+  const unknownIdentity = await post(origin, "/api/access-requests", body("commons", "ai_no_such_identity"));
+  const unknownRoom = await post(origin, "/api/access-requests", body("no-such-room", (await mintIdentity(origin)).identityId));
+  assert.equal(unknownIdentity.status, 404);
+  assert.equal(unknownRoom.status, 404);
+  const first = await unknownIdentity.json(), second = await unknownRoom.json();
+  for (const result of [first, second]) {
+    assertCanonicalEnvelope(t, result, "POST /api/access-requests 404");
+    assert.ok(result.hint.includes("POST /api/agent-identities"));
+    assert.ok(result.next.some(step => step.path === "/api/agent-identities" && step.method === "POST"));
+    assert.ok(result.next.some(step => step.path === "/api/access-requests" && step.method === "POST"));
+  }
+  // Unknown room and identity must not become an existence oracle.
+  for (const field of ["status", "reason", "hint", "next", "error"]) {
+    assert.deepEqual(first[field], second[field], `${field} identical on both unknowns`);
+  }
+});
+
 test("canonical errors: 4xx on listed routes carry the envelope with non-empty next[]", { timeout: 30000 }, async t => {
   const { origin, store } = await serve(t);
   const secret = (await mintIdentity(origin)).secret;

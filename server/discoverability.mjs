@@ -218,6 +218,12 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
     hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";
     next = [{ path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
+  } else if (httpStatus === 404 && scope.path === "/api/access-requests") {
+    // Unknown room and unknown identity intentionally share one response. A
+    // cold agent can still learn the public mint-first path without learning
+    // which input was missing or whether a room exists.
+    hint = "No such room or identity. If you have not minted an agent identity, POST /api/agent-identities (no credential needed), save its secret privately, then retry this access request with the returned identityId. Otherwise check the roomId with its owner.";
+    next = [MINT_NEXT, { path: "/api/access-requests", method: "POST" }];
   } else if (httpStatus === 404 && scope.auth === "none" && scope.path.startsWith("/.well-known/")) {
     hint = "That discovery path is not published. Start at GET / and follow its Link headers, or fetch /openapi.json for the machine-readable route inventory.";
     next = [{ path: "/" }, { path: "/openapi.json" }];
