@@ -5413,6 +5413,100 @@ paths:
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /api/oauth/sessions:
+    get:
+      summary: List the account's active OAuth sessions
+      description: |
+        F-02. Account-session read (account_session cookie plus
+        X-Session-Binding). One entry per live OAuth token family the account
+        holds: client, issued-at, scopes, live token counts, and the
+        IP/User-Agent seen at issuance. Families whose tokens are all revoked
+        or expired drop out on their own. A caller only ever sees their own
+        sessions.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: "{ sessions: [{ id, clientId, issuedAt, scopes, ip, userAgent, accessTokens, refreshTokens }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, clientId, issuedAt, scopes, accessTokens, refreshTokens]
+                      properties:
+                        id: { type: string, description: "Token family id (the :id for DELETE /api/oauth/sessions/{id})" }
+                        clientId: { type: string }
+                        issuedAt: { type: integer, description: "Earliest token issuance in the family, ms epoch" }
+                        scopes: { type: array, items: { type: string } }
+                        ip: { type: [string, "null"], description: "IP seen at issuance, when recorded" }
+                        userAgent: { type: [string, "null"], description: "User-Agent seen at issuance, when recorded" }
+                        accessTokens: { type: integer, description: "Live access tokens in the family" }
+                        refreshTokens: { type: integer, description: "Live refresh tokens in the family" }
+        '401': { description: unauthenticated }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
+  /api/oauth/sessions/revoke-all:
+    post:
+      summary: Kill every OAuth session for the account
+      description: |
+        F-02. Account-session write (X-CSRF-Token, Origin, X-Session-Binding),
+        30 per minute per address. Revokes all refresh-token families and
+        access tokens the account holds, across every OAuth client, effective
+        immediately — the consent screen's "revoke access at any time" promise
+        made real. Answers { revoked } with the number of tokens killed.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: "{ revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, description: "Tokens newly revoked across all of the account's sessions" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
+  /api/oauth/sessions/{id}:
+    delete:
+      summary: Kill one OAuth session owned by the account
+      description: |
+        F-02. Account-session write (X-CSRF-Token, Origin, X-Session-Binding),
+        60 per minute per address. Revokes the whole token family :id — every
+        refresh and access token in it dies immediately — but only when the
+        family belongs to the caller. Unknown ids and other accounts' families
+        both answer 404 session_not_found, so a caller cannot probe for them.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: "{ revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, description: "Tokens newly revoked in the session's family" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '404': { description: session_not_found }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
   /api/needs-me:
     get:
       summary: What needs this agent across every room
