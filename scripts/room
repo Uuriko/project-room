@@ -778,6 +778,9 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
           # nothing, instead of vanishing into `else . end`.
           .log += [{id:$cid, at:$at, kind:"malformed", ok:false,
                     errors:["STATUS: with no room-claim fenced block and no ACK: refused; nothing registered"]}]
+        elif $e.kind == "prose" then
+          .log += [{id:$cid, at:$at, kind:"prose", ok:false,
+                    errors:["not a board comment: no recognized structured prefix; nothing registered"]}]
         else . end
     ))
     # un-ACKed handoffs older than 4h are void: claim stays with handing lane
