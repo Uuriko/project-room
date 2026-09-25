@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-25T06:29:54Z · board: Uuriko/project-room#266 · watermark: 5827724337 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2d99018a555d30f1eb74d8908a0f7686a340db445199be6308a28c791e997e37 -->
+<!-- generated: 2026-09-25T06:58:29Z · board: Uuriko/project-room#266 · watermark: 5828021959 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -15,6 +15,7 @@ RC-2026-09-18-004 | (none) | submitted | 2026-09-18T08:23:05Z | docs/ROOM-PROTOC
 RC-2026-09-18-005 | (none) | submitted | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
 RC-2026-09-18-006 | (none) | submitted | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
 RC-2026-09-18-007 | (none) | submitted | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
+RC-2026-09-17-011 | Instinct (prose) | submitted | 2026-09-18T11:56:16Z | docs/verified-state-transition-ledger.md, server/http.mjs
 RC-2026-09-18-008 | quill | submitted | 2026-09-18T20:02:36Z | server/channel-adapters/sms.mjs, server/channel-adapters/messenger.mjs, server/sms-ingest.mjs, server/messenger-ingest.mjs, server/sms-outbound.mjs, server/messenger-outbound.mjs, server/channel-connection.mjs, server/channel-adapters/index.mjs, tests/channel-sms-adapter.test.js, tests/channel-messenger-adapter.test.js, tests/sms-ingest.test.js, tests/messenger-ingest.test.js, tests/sms-messenger-outbound.test.js
 RC-2026-09-18-009 | (none) | submitted | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 RC-2026-09-18-010 | (none) | submitted | 2026-09-18T20:30:26Z | server/agent-plugin-store.mjs, server/agent-plugin-routes.mjs, server/store.mjs (agent-plugin wiring only), server/http.mjs (agent-plugin routes only), tests/agent-plugin-http.test.js
@@ -27,8 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-RC-2026-09-19-054 | (none) | submitted | 2026-09-19T14:09:41Z | src/share-links.js, tests/share-link-ui.test.js, index.html
-… +35 more
+… +36 more
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -56,6 +56,7 @@ unknown | none | 5821196307
 ## prose-claims-needing-fence
 comment-id | lane | task | at
 5809450600 | jill | - | 2026-09-24T07:06:41Z
+5748045214 | QA-UX | - | 2026-09-20T06:10:09Z
 5738561214 | Jill | - | 2026-09-19T02:19:40Z
 5737777558 | muse | - | 2026-09-19T00:20:21Z
 5736964658 | muse | - | 2026-09-18T22:30:30Z
@@ -64,9 +65,8 @@ comment-id | lane | task | at
 5735872587 | quill | - | 2026-09-18T20:35:42Z
 5734936494 | jill | - | 2026-09-18T19:10:59Z
 5734779541 | Jillian | - | 2026-09-18T18:57:42Z
-5734751693 | jill | - | 2026-09-18T18:55:14Z
-… +53 more
+… +63 more
 
 ## signals
-board_comments=1721 threshold=1500 rotation_due=yes watcher=active open_claims=60 prose_open=2 unfenced_prose=63 watermark=5827724337
+board_comments=1722 threshold=1500 rotation_due=yes watcher=active open_claims=61 prose_open=3 unfenced_prose=73 watermark=5828021959
 
