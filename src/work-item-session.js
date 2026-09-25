@@ -77,7 +77,7 @@ export function ensureWorkControlDefaults(state) {
 // tool calls it may make (maxToolCalls); undeclared keys stay "unknown" —
 // never assumed zero or unlimited.
 export const SESSION_BUDGET_KEYS = Object.freeze(["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents", "maxRounds", "maxToolCalls"]);
-const BUDGET_CAPS = Object.freeze({ maxRuntimeMs: 30 * 86400000, maxAttempts: 1000, maxConcurrent: 25, maxSpendCents: 100000000, maxRounds: 10000, maxToolCalls: 1000000 });
+export const BUDGET_CAPS = Object.freeze({ maxRuntimeMs: 30 * 86400000, maxAttempts: 1000, maxConcurrent: 25, maxSpendCents: 100000000, maxRounds: 10000, maxToolCalls: 1000000 });
 export function validateSessionBudget(value) {
   if (value === undefined || value === null) return null;
   if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Budget must be an object");

@@ -6,6 +6,7 @@
 // idempotency are the same path as POST /api/rooms/:id/commands.
 // Shareable login links (#628) are not part of this surface.
 
+import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
@@ -610,7 +611,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (selection.error === "profile") {
       return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { profile: "must be core or full" } });
     }
-    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases) } };
+    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
   }
   if (message.method === "tools/call") {
     const called = message.params?.name;

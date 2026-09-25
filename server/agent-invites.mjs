@@ -19,6 +19,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
+import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 
@@ -222,7 +223,8 @@ export class AgentInvites {
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
         return { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
-          displayName: member.displayName, permissions: member.permissions, duplicate: true, next: redeemNext(row.room_id, member.displayName) };
+          displayName: member.displayName, permissions: member.permissions, duplicate: true,
+          next: redeemNext(row.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(row.room_id) };
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
@@ -297,7 +299,8 @@ export class AgentInvites {
       // response carries the same machine-readable next[] shape as signup
       // (RC-2026-09-18-018), tailored to the invite path, so a redeemed agent
       // knows its first moves without asking a human.
-      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { secret: identity.secret }), roomId: row.room_id, memberId, displayName: name, permissions, next: redeemNext(row.room_id, name) };
+      return { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { secret: identity.secret }), roomId: row.room_id, memberId, displayName: name, permissions,
+        next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) };
     });
   }
 

@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { nextActionsForRoomCreate } from "./discoverability.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -131,7 +132,8 @@ export class AgentRooms {
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
-        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true, next: roomCreateNext(roomId) };
+        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
+          next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
       }
       // The creation budget is spent here, past the idempotency short-circuit,
       // because it is a budget on rooms created and a replay creates none.
@@ -158,7 +160,8 @@ export class AgentRooms {
         .run(roomId, identity.identityId, memberId, this.store.now());
       this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
         .run(identity.identityId, roomId, this.store.now());
-      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, next: roomCreateNext(roomId) };
+      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false,
+        next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }
 

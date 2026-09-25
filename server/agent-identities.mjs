@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
+import { nextActionsForIdentityMint } from "./discoverability.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -127,6 +128,10 @@ const SIGNUP_NEXT = Object.freeze([
     description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface." }),
   Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
     description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
+  // Burs-IA steal A1: the mint response names the tools-list surface so a
+  // cold agent learns its capabilities without reading llms.txt.
+  Object.freeze({ action: "list-tools", method: "POST", path: "/room/mcp",
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists the four public join tools; with it, the enrolled room profile." }),
 ]);
 
 export class AgentIdentities {
@@ -158,7 +163,8 @@ export class AgentIdentities {
             this.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=? AND secret_hash=?")
               .run(v2, recoveredId, existing.secret_hash);
           }
-          return { identityId: recoveredId, displayName: existing.display_name, duplicate: true, next: SIGNUP_NEXT };
+          return { identityId: recoveredId, displayName: existing.display_name, duplicate: true,
+            next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
       }
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
@@ -177,7 +183,8 @@ export class AgentIdentities {
       const keyPair = generateEd25519KeyPair();
       this.store.keyRegistry.registerKey(identityId, keyPair.publicKey, { validFrom: now });
       return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }),
-        publicKey: keyPair.publicKey, privateKey: keyPair.privateKey, next: SIGNUP_NEXT };
+        publicKey: keyPair.publicKey, privateKey: keyPair.privateKey,
+        next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
     });
   }
 
