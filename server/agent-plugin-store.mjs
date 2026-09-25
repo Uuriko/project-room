@@ -1023,8 +1023,10 @@ export class AgentPluginStore {
   // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
   // injectable so tests never touch the network; omitted it defaults to the
   // real resolver and every target is re-validated before its POST
-  // (dispatch-time SSRF guard, QA-Sec 2026-09-19).
-  async drainWebhookDeliveries({ fetchImpl = (...args) => fetch(...args), now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+  // (dispatch-time SSRF guard, QA-Sec 2026-09-19). fetchImpl is an optional
+  // override (tests); omitted, postDelivery uses its DNS-pinned transport
+  // on Node (plain fetch on Workers) — the M-1 rebinding fix.
+  async drainWebhookDeliveries({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     // Only rows that can actually be attempted fill the batch. Deliveries of a
     // disabled subscription or of an identity no longer linked to the event's
     // room stay pending but are left out here; otherwise a large skipped

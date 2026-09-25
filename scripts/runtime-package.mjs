@@ -161,6 +161,7 @@ optional.push("server/agent-key-registry.mjs"); // Integration map slice 9: agen
 optional.push("server/signed-evidence.mjs"); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs; pure, imports bounty-receipts.mjs + agent-card-signing.mjs)
 optional.push("server/agent-directory.mjs"); // Lane D: agent card directory (imported by server/agent-plugin-store.mjs; imports agent-card-signing.mjs)
 optional.push("server/agent-plugin-manifest.mjs"); // Lane D: plug-in manifest builder/validator (imported by server/agent-plugin-store.mjs and server/agent-plugin-routes.mjs; pure, no imports)
+optional.push("server/ip-blocklist.mjs"); // RC-2026-09-25: shared SSRF IP blocklist + pinned lookup (imported by server/web-fetch.mjs, server/outbound-webhooks.mjs, server/webhook-dispatch.mjs; pure, no imports)
 optional.push("server/outbound-webhooks.mjs"); // webhook URL validation (imported by server/agent-webhook-subscriptions.mjs; pure, no imports)
 optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent webhook subscriptions (imported by server/agent-plugin-store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs; pure, node:crypto only)

@@ -289,8 +289,9 @@ export class AgentHeartbeats {
   }
 
   // Override the push delivery transport (fetch impl + DNS resolvers).
-  // Production never calls this: postDelivery then uses the real fetch and
-  // the real DNS resolver. Tests inject mocks here.
+  // Production never calls this: postDelivery then uses the DNS-pinned
+  // transport on Node (plain fetch on Workers) and the real DNS resolver.
+  // Tests inject mocks here.
   setPushTransport({ fetchImpl = null, dnsResolvers = null } = {}) {
     this.pushFetchImpl = fetchImpl;
     this.pushDnsResolvers = dnsResolvers;
@@ -361,8 +362,10 @@ export class AgentHeartbeats {
     });
     let result;
     try {
+      // No fetchImpl here: production uses postDelivery's DNS-pinned
+      // transport (M-1 fix). Tests inject one via setPushTransport.
       result = await postDelivery({
-        fetchImpl: this.pushFetchImpl ?? ((...args) => fetch(...args)),
+        ...(this.pushFetchImpl ? { fetchImpl: this.pushFetchImpl } : {}),
         url, envelope, headers,
         timeoutMs: PUSH_DELIVERY_TIMEOUT_MS,
         dnsResolvers: this.pushDnsResolvers ?? undefined,

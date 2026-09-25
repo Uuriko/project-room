@@ -5,9 +5,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   signDelivery, verifyDeliverySignature, isFresh, deliveryEnvelope, deliveryHeaders,
-  classifyHttpStatus, postDelivery, backoffDelayMs, REPLAY_TOLERANCE_MS,
+  classifyHttpStatus, postDelivery, pinnedDispatchPost, backoffDelayMs, REPLAY_TOLERANCE_MS,
   MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, MAX_REDIRECT_HOPS, WebhookDispatchError,
 } from "../server/webhook-dispatch.mjs";
+import { createServer } from "node:http";
 
 const SECRET = "signing-secret-0123456789abcdef";
 const DELIVERY = { deliveryId: "del_abc123", eventType: "message.posted", issuedAt: 1_700_000_000_000, data: { messageId: "m1" } };
@@ -294,4 +295,66 @@ test("postDelivery sends redirect: manual so fetch never follows on its own", as
     fetchImpl: async (url, opts) => { seen.push(opts); return { status: 200, text: async () => "ok" }; },
   }));
   assert.equal(seen[0].redirect, "manual");
+});
+
+// --- M-1 fix (RC-2026-09-25): the dispatch connection is pinned -----------
+
+test("pinnedDispatchPost connects to the checked address, never re-resolving the name", async t => {
+  // A POST server on a loopback port stands in for the address that passed
+  // the check. "rebind.invalid" can never resolve (RFC 6761), so a 200
+  // proves the socket used the pinned address and did no second lookup.
+  const seen = [];
+  const page = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, host: req.headers.host, body, sig: req.headers["x-webhook-signature"] });
+      res.writeHead(202, { "content-type": "text/plain" });
+      res.end("accepted");
+    });
+  });
+  await new Promise(resolve => page.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => page.close(resolve)));
+  const port = page.address().port;
+  const res = await pinnedDispatchPost(`http://rebind.invalid:${port}/hook`, ["127.0.0.1"], {
+    headers: { "content-type": "application/json", "x-webhook-signature": "sha256=ab" },
+    body: JSON.stringify({ deliveryId: "del_1" }),
+    timeoutMs: 5000,
+  });
+  assert.equal(res.status, 202);
+  assert.equal(await res.text(), "accepted");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].method, "POST");
+  assert.equal(seen[0].body, JSON.stringify({ deliveryId: "del_1" }));
+  assert.equal(seen[0].sig, "sha256=ab");
+  assert.match(seen[0].host, new RegExp(`^rebind\\.invalid:${port}$`), "Host header keeps the original name");
+  // Control: with no checked address the transport refuses to connect.
+  await assert.rejects(
+    pinnedDispatchPost(`http://rebind.invalid:${port}/hook`, [], { headers: {}, body: "{}", timeoutMs: 5000 }),
+    /no checked address/);
+});
+
+test("pinnedDispatchPost times out with a TimeoutError", async t => {
+  const hanging = createServer(() => { /* never responds */ });
+  await new Promise(resolve => hanging.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => hanging.close(resolve)));
+  const port = hanging.address().port;
+  const error = await pinnedDispatchPost(`http://rebind.invalid:${port}/hook`, ["127.0.0.1"],
+    { headers: {}, body: "{}", timeoutMs: 200 }).then(
+      () => { throw new Error("should have timed out"); },
+      error => error);
+  assert.equal(error.name, "TimeoutError");
+});
+
+test("postDelivery without fetchImpl still dead-letters a private target without touching the network", async () => {
+  // No fetchImpl: the pinned transport is selected, but the dispatch-time
+  // check rejects the target first, so no socket is ever opened.
+  const result = await postDelivery({
+    url: "https://[64:ff9b::a9fe:a9fe]/hook", // H-1 vector: NAT64 metadata
+    envelope: {},
+    headers: {},
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.classification, "dead");
+  assert.match(result.error, /private or reserved/);
 });

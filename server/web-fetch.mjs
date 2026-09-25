@@ -165,120 +165,38 @@ export function normalizeUrl(raw) {
 
 // ---------------------------------------------------------------------------
 // SSRF: IP parsing + blocked ranges (blocked_host)
+//
+// The canonical blocklist lives in ./ip-blocklist.mjs, shared with the
+// webhook path (server/outbound-webhooks.mjs) so a hardening fix can never
+// land here and miss the other. Only the test-only loopback allowance stays
+// here: it is web-fetch policy, not IP classification.
 // ---------------------------------------------------------------------------
-function parseIpv4(host) {
-  const parts = host.split(".");
-  if (parts.length !== 4) return null;
-  let n = 0;
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
-    const v = Number(part);
-    if (v > 255) return null;
-    n = (n << 8) | v;
-  }
-  return n >>> 0;
-}
-
-// Parse IPv6 (with :: compression and embedded IPv4) into a 128-bit BigInt.
-function parseIpv6(host) {
-  let h = host;
-  // IPv4-mapped tail: ::ffff:1.2.3.4
-  let tail = null;
-  const lastColon = h.lastIndexOf(":");
-  if (lastColon !== -1 && h.slice(lastColon + 1).includes(".")) {
-    const v4 = parseIpv4(h.slice(lastColon + 1));
-    if (v4 === null) return null;
-    tail = [(v4 >>> 16) & 0xffff, v4 & 0xffff];
-    h = h.slice(0, lastColon + 1) + "0:0";
-  }
-  const halves = h.split("::");
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(":") : [];
-  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
-  if (halves.length === 1 && left.length !== 8) return null;
-  if (left.length + right.length > 8) return null;
-  const groups = [...left, ...new Array(8 - left.length - right.length).fill("0"), ...right];
-  let n = 0n;
-  for (const g of groups) {
-    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
-    n = (n << 16n) | BigInt(parseInt(g, 16));
-  }
-  if (tail) n = (n & ~0xffffn) | BigInt(tail[0]) << 16n | BigInt(tail[1]);
-  return n;
-}
-
-const IPV4_BLOCKS = [
-  [0x00000000, 8], // 0.0.0.0/8 "this network"
-  [0x0a000000, 8], // 10.0.0.0/8 private
-  [0x64400000, 10], // 100.64.0.0/10 CGNAT
-  [0x7f000000, 8], // 127.0.0.0/8 loopback
-  [0xa9fe0000, 16], // 169.254.0.0/16 link-local
-  [0xac100000, 12], // 172.16.0.0/12 private
-  [0xc0a80000, 16], // 192.168.0.0/16 private
-  [0xc0000200, 24], // 192.0.2.0/24 documentation (TEST-NET-1)
-  [0xc6336400, 24], // 198.51.100.0/24 documentation (TEST-NET-2)
-  [0xcb007100, 24], // 203.0.113.0/24 documentation (TEST-NET-3)
-  [0xe0000000, 4], // 224.0.0.0/4 multicast
-  [0xf0000000, 4], // 240.0.0.0/4 reserved
-];
-const IPV6_BLOCKS = [
-  [0n, 128], // ::/128 unspecified
-  [1n, 128], // ::1/128 loopback
-  [0xfe800000000000000000000000000000n, 10], // fe80::/10 link-local
-  [0xfc000000000000000000000000000000n, 7], // fc00::/7 unique local
-  [0xff000000000000000000000000000000n, 8], // ff00::/8 multicast
-  [0x20010db8000000000000000000000000n, 32], // 2001:db8::/32 documentation
-  [0x20010000000000000000000000000000n, 32], // 2001::/32 Teredo (tunnels to arbitrary v4)
-  [0x0064ff9b000100000000000000000000n, 48], // 64:ff9b:1::/48 local-use NAT64 (RFC 8215)
-];
-// Prefixes that carry an IPv4 address inside the IPv6 one. The embedded
-// address inherits the IPv4 verdict, so 64:ff9b::a00:1 (NAT64 for 10.0.0.1)
-// or 2002:a00:1:: (6to4 for 10.0.0.1) cannot reach a private v4 host.
-// Each entry: [prefix, bits, extract(v6) -> embedded v4].
-const IPV6_EMBEDDED_V4 = [
-  [0xffff00000000n, 96, v6 => Number(v6 & 0xffffffffn)], // ::ffff:0:0/96 IPv4-mapped
-  [0x0064ff9b000000000000000000000000n, 96, v6 => Number(v6 & 0xffffffffn)], // 64:ff9b::/96 NAT64 (RFC 6052)
-  [0x20020000000000000000000000000000n, 16, v6 => Number((v6 >> 80n) & 0xffffffffn)], // 2002::/16 6to4
-  [0n, 96, v6 => Number(v6 & 0xffffffffn)], // ::/96 IPv4-compatible (deprecated)
-];
-const ipv4In = (ip, [base, bits]) => (ip >>> (32 - bits)) === (base >>> (32 - bits));
-const ipv6In = (ip, [base, bits]) => (ip >> BigInt(128 - bits)) === (base >> BigInt(128 - bits));
+import { isBlockedIp, parseIpv4, parseIpv6, extractEmbeddedIpv4, pinnedLookup, isWorkersRuntime } from "./ip-blocklist.mjs";
+// Re-exported so existing importers keep working (canonical definitions
+// live in ./ip-blocklist.mjs, shared with the webhook path).
+export { pinnedLookup, isWorkersRuntime };
 
 // True when a literal IP string is in a blocked range. Non-IP hostnames
 // return false here — they go through DNS resolution instead.
 export function ipLiteralBlocked(host) {
-  const v4 = parseIpv4(host);
-  if (v4 !== null) {
-    // The test-only loopback allowance opens 127/8 and ::1; every other
-    // private/reserved range stays blocked under it.
-    if (allowLoopback() && ipv4In(v4, [0x7f000000, 8])) return false;
-    return IPV4_BLOCKS.some(block => ipv4In(v4, block));
-  }
-  // Strip brackets if a caller passes [::1].
-  const v6 = parseIpv6(host.replace(/^\[|\]$/g, ""));
-  if (v6 !== null) {
-    if (allowLoopback() && v6 === 1n) return false; // ::1
-    // :: and ::1 sit inside ::/96 but are their own blocked addresses.
-    if (v6 === 0n || v6 === 1n) return true;
-    // Embedded IPv4 (mapped, NAT64, 6to4, v4-compatible) inherits the IPv4 verdict.
-    for (const [prefix, bits, extract] of IPV6_EMBEDDED_V4) {
-      if (!ipv6In(v6, [prefix, bits])) continue;
-      const embedded = extract(v6) >>> 0;
-      if (allowLoopback() && ipv4In(embedded, [0x7f000000, 8])) return false;
-      return IPV4_BLOCKS.some(block => ipv4In(embedded, block));
+  if (allowLoopback()) {
+    // The test-only loopback allowance opens 127/8 and ::1 — including
+    // 127/8 embedded in IPv6 — while every other private/reserved range
+    // stays blocked under it.
+    const v4 = parseIpv4(host);
+    if (v4 !== null && (v4 >>> 24) === 0x7f) return false;
+    const v6 = parseIpv6(host);
+    if (v6 !== null) {
+      if (v6 === 1n) return false; // ::1
+      const embedded = extractEmbeddedIpv4(host);
+      if (embedded !== null && (embedded >>> 24) === 0x7f) return false;
     }
-    return IPV6_BLOCKS.some(block => ipv6In(v6, block));
   }
-  return false;
+  return isBlockedIp(host);
 }
 
-// Cloudflare Workers: outbound fetch() runs in the Workers egress sandbox,
-// which cannot reach the host's private network, and the Workers fetch API
-// has no way to pin a connection to an address. There the DNS pre-check is
-// best-effort. Everywhere else (Node / self-hosted) the checks below are
-// the whole SSRF defence, so they fail closed and the connection is pinned.
-export const isWorkersRuntime = () => typeof navigator !== "undefined"
-  && navigator?.userAgent === "Cloudflare-Workers";
+// (Canonical definition lives in ./ip-blocklist.mjs; re-exported above so
+// existing importers keep working.)
 
 // Default resolver. On Node, dns.lookup is the same resolver the socket
 // would use (it honours /etc/hosts, so "localhost" and custom host entries
@@ -330,20 +248,9 @@ export async function resolveFetchTarget(href, options) {
   return { url, addresses };
 }
 
-// A dns.lookup-compatible function that only ever answers with addresses
-// that already passed assertPublicHost, whatever name it is asked for. This
-// closes the rebinding window: a short-TTL record that flips to 127.0.0.1
-// after the check is never consulted again.
-export function pinnedLookup(addresses) {
-  const checked = addresses.map(address => ({ address, family: parseIpv4(address) !== null ? 4 : 6 }));
-  return (_hostname, options, callback) => {
-    const cb = typeof options === "function" ? options : callback;
-    const opts = typeof options === "object" && options ? options : {};
-    if (!checked.length) return cb(Object.assign(new Error("no checked address"), { code: "ENOTFOUND" }));
-    if (opts.all) return cb(null, checked);
-    return cb(null, checked[0].address, checked[0].family);
-  };
-}
+// pinnedLookup: the dns.lookup-compatible function that only ever answers
+// with already-checked addresses (canonical definition in
+// ./ip-blocklist.mjs; re-exported above so existing importers keep working).
 
 // Node transport: node:http/https with the pinned lookup. TLS still uses the
 // URL hostname for SNI and certificate checks. agent:false means no pooled
