@@ -451,6 +451,50 @@ test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async 
   assert.deepEqual(swept.swept, { expired: [], escalated: [] });
 });
 
+// HTTP is the primary regression boundary: configured deadlines must be
+// enforced without relying on a separately invoked maintenance sweep.
+test("envelopes: configured expiry blocks late acceptance/completion but allows cleanup", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab/envelopes", initial = Date.now();
+  let now = initial; f.store.now = () => now;
+  const deadline = initial + 60000, later = deadline + 60000;
+  for (const humanRecipient of [false, true]) {
+    const sender = humanRecipient ? f.agent.secret : f.humanKey;
+    const recipient = humanRecipient ? f.humanKey : f.agent.secret;
+    for (const expires of ["authority", "termination"]) {
+      for (const status of ["accepted", "completed"]) {
+        for (const offset of [-1, 0, 1]) {
+          now = initial;
+          const created = await post(f, base, sender, {
+            to: humanRecipient ? "owner" : agentIdOf(f), objective: "Review this handoff",
+            inputs: [{ kind: "note", ref: "Current work context" }],
+            authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] },
+              expiresAt: new Date(expires === "authority" ? deadline : later).toISOString() },
+            expectedOutput: { kind: "report", description: "A reviewed result" },
+            acceptanceTest: { checks: [{ kind: "manual_review", reviewer: humanRecipient ? "owner" : agentIdOf(f) }] },
+            termination: { expiresAt: new Date(expires === "termination" ? deadline : later).toISOString(), onExpiry: "release" }
+          });
+          assert.equal(created.status, 201);
+          const { envelopeId } = await created.json();
+          const transition = (value, token = recipient) => post(f, `${base}/${envelopeId}/transition`, token, value);
+          if (status === "completed") assert.equal((await transition({ status: "accepted" })).status, 200);
+          const before = f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId);
+          now = deadline + offset;
+          const response = await transition({ status, ...(status === "completed" ? { checksPassed: ["manual_review"] } : {}) });
+          const label = `${humanRecipient ? "human" : "agent"} ${status} at ${expires} deadline ${offset}`;
+          assert.equal(response.status, offset < 0 ? 200 : 409, label);
+          if (offset < 0) { assert.equal((await response.json()).envelope.status, status); continue; }
+          assert.equal(await codeOf(response), "envelope_expired", label);
+          assert.deepEqual(f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId), before,
+            "late transition leaves the journal unchanged for explicit cleanup");
+          const cleanup = status === "accepted" ? "cancelled" : "escalated";
+          assert.equal((await transition({ status: cleanup }, sender)).status, 200, "sender can still clean up expired work");
+        }
+      }
+    }
+  }
+});
+
 test("restart persistence: every journal replays from SQLite", async t => {
   const f = setup(t); await f.serve();
   const base = "/api/rooms/commons/collab";
