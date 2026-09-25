@@ -23,7 +23,8 @@
 //   deliveryId — the dispatcher may retry the same deliveryId and redrives
 //   reuse it, so deliveryId is the idempotency key end to end.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { assertWebhookHostDnsPublic } from "./outbound-webhooks.mjs";
+import { resolveWebhookTarget } from "./outbound-webhooks.mjs";
+import { pinnedLookup, isWorkersRuntime } from "./ip-blocklist.mjs";
 
 class WebhookDispatchError extends Error {
   constructor(code, message) { super(message); this.name = "WebhookDispatchError"; this.code = code; }
@@ -125,6 +126,74 @@ export function classifyHttpStatus(status) {
   return "dead";
 }
 
+export const MAX_REDIRECT_HOPS = 3;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+// Cap on the response body the pinned transport buffers: deliveries only
+// need the status, the location header, and the first bytes of an error
+// body, so a hostile receiver cannot balloon memory.
+const PINNED_BODY_CAP_BYTES = 16 * 1024;
+
+// Node transport: POST via node:http/https with the DNS-pinned lookup, so
+// the socket connects only to addresses that passed resolveWebhookTarget —
+// a record that rebinds between the check and the POST is never consulted.
+// TLS still uses the URL hostname for SNI and certificate checks, and
+// agent:false means no pooled socket from an earlier resolution is reused.
+// Returns the small subset of the fetch Response shape postDelivery reads
+// (status, headers.get("location"), text()). Dynamic import keeps this
+// module loadable on Cloudflare Workers, where the pinned path is never
+// taken (see postDelivery).
+export async function pinnedDispatchPost(url, addresses, { headers, body, timeoutMs }) {
+  const parsed = new URL(url);
+  const mod = parsed.protocol === "https:" ? await import("node:https") : await import("node:http");
+  const signal = AbortSignal.timeout(timeoutMs);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (fn, value) => { if (!settled) { settled = true; fn(value); } };
+    const timedOut = () => Object.assign(new Error("delivery timed out"), { name: "TimeoutError" });
+    const req = mod.request(parsed, { method: "POST", headers, signal, agent: false, lookup: pinnedLookup(addresses) }, res => {
+      const chunks = [];
+      let size = 0;
+      res.on("data", chunk => {
+        // Keep at most the cap in memory; keep draining (not destroying) so
+        // "end" still fires and the delivery resolves instead of hanging
+        // until the request timeout misclassifies it as a timeout.
+        const room = PINNED_BODY_CAP_BYTES - size;
+        if (room > 0) {
+          chunks.push(chunk.length <= room ? chunk : chunk.subarray(0, room));
+          size += Math.min(chunk.length, room);
+        }
+      });
+      res.on("end", () => done(resolve, {
+        status: res.statusCode ?? 0,
+        headers: { get: name => { const v = res.headers[String(name).toLowerCase()]; return Array.isArray(v) ? v.join(", ") : (v ?? null); } },
+        text: async () => Buffer.concat(chunks).toString("utf8"),
+      }));
+      res.on("error", error => done(reject, error));
+    });
+    req.on("error", error => {
+      // node:http surfaces an aborted request as AbortError; keep the
+      // TimeoutError name postDelivery classifies as "delivery timed out".
+      if (signal.aborted && (error?.name === "AbortError" || error?.code === "ABORT_ERR")) done(reject, timedOut());
+      else done(reject, error);
+    });
+    req.end(body);
+  });
+}
+
+async function checkDispatchTarget(target, dnsResolvers) {
+  try {
+    const { url, addresses } = await resolveWebhookTarget(target, dnsResolvers ?? {});
+    return { ok: true, url, addresses };
+  } catch (error) {
+    const message = error?.message ?? "webhook target rejected";
+    // A hostile or malformed target can never succeed: dead-letter it. A
+    // name that fails to resolve may be transient: retry it.
+    const hostile = /private or reserved|valid https/.test(message);
+    return { ok: false, result: { ok: false, status: 0, error: `webhook target rejected: ${message}`.slice(0, 500),
+      classification: hostile ? "dead" : "retry" } };
+  }
+}
+
 // POST one delivery. Never throws for transport/HTTP failures — those come
 // back as { ok: false }. Throws only for programmer errors (bad arguments).
 //
@@ -138,25 +207,16 @@ export function classifyHttpStatus(status) {
 // right now is "retry". dnsResolvers ({ resolve4, resolve6 }) is injectable
 // so tests never touch the network; omitted it defaults to the real
 // resolver (fail closed in production).
-export const MAX_REDIRECT_HOPS = 3;
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-
-async function checkDispatchTarget(target, dnsResolvers) {
-  try {
-    await assertWebhookHostDnsPublic(target, dnsResolvers ?? {});
-    return null;
-  } catch (error) {
-    const message = error?.message ?? "webhook target rejected";
-    // A hostile or malformed target can never succeed: dead-letter it. A
-    // name that fails to resolve may be transient: retry it.
-    const hostile = /private or reserved|valid https/.test(message);
-    return { ok: false, status: 0, error: `webhook target rejected: ${message}`.slice(0, 500),
-      classification: hostile ? "dead" : "retry" };
-  }
-}
-
+//
+// M-1 fix (RC-2026-09-25): the connection is pinned to the addresses the
+// check vetted. On Node the default transport is pinnedDispatchPost (a
+// node:http/https request with a pinned lookup), closing the check-then-
+// fetch DNS-rebinding race. On Cloudflare Workers there is no pinning API,
+// so the Workers egress sandbox stays the backstop and plain fetch is used.
+// fetchImpl remains as an injectable override (tests); when it is given,
+// pinning is the caller's responsibility.
 export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutMs = DELIVERY_TIMEOUT_MS, dnsResolvers } = {}) {
-  check(typeof fetchImpl === "function", "fetchImpl must be a function");
+  check(fetchImpl === undefined || typeof fetchImpl === "function", "fetchImpl must be a function");
   check(typeof url === "string" && url.length > 0, "url must be a non-empty string");
   check(envelope !== null && typeof envelope === "object", "envelope must be an object");
   check(headers !== null && typeof headers === "object", "headers must be an object");
@@ -166,19 +226,24 @@ export async function postDelivery({ fetchImpl, url, envelope, headers, timeoutM
   const body = JSON.stringify(envelope);
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-    const blocked = await checkDispatchTarget(current, dnsResolvers);
-    if (blocked) return blocked;
+    const checked = await checkDispatchTarget(current, dnsResolvers);
+    if (!checked.ok) return checked.result;
     let response;
     try {
       // redirect: "manual" — every hop is re-validated below instead of
       // trusting the receiver's Location chain.
-      response = await fetchImpl(current, {
+      const init = {
         method: "POST",
         headers,
         body,
         signal: AbortSignal.timeout(timeoutMs),
         redirect: "manual",
-      });
+      };
+      response = fetchImpl
+        ? await fetchImpl(current, init)
+        : isWorkersRuntime()
+          ? await fetch(current, init)
+          : await pinnedDispatchPost(current, checked.addresses, { headers, body, timeoutMs });
     } catch (error) {
       const reason = error?.name === "TimeoutError" ? "delivery timed out" : (error?.message ?? "network error");
       return { ok: false, status: 0, error: String(reason).slice(0, 500), classification: "retry" };

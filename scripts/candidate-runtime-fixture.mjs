@@ -96,6 +96,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/magic-links.mjs'); // Magic-link mail sender seam (imported by server/http.mjs)
   paths.add('server/resend-mailer.mjs'); // Resend-backed magic-link sender (imported by server/boot-options.mjs)
   paths.add('server/webhook-dispatch.mjs'); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs)
+  paths.add('server/ip-blocklist.mjs'); // RC-2026-09-25: shared SSRF IP blocklist (imported by server/web-fetch.mjs, server/outbound-webhooks.mjs, server/webhook-dispatch.mjs)
   paths.add('server/agent-key-registry.mjs'); // Integration map slice 9 (imported by server/store.mjs and server/agent-identities.mjs)
   paths.add('server/signed-evidence.mjs'); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs)
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
