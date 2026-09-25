@@ -7,7 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { submitWorkAction } from "../client/work-actions.mjs";
-import { beginRequestId, beginSelectedWork, findAcceptReceipt } from "../client/begin-work.mjs";
+import { beginRequestId, beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -40,7 +40,7 @@ async function httpRoom(t) {
   return { f, client, identity: { roomId: "commons", memberId: "owner" } };
 }
 
-test("lost claim response keeps the recorded scope and a different scope does not start", async t => {
+test("lost claim response reconciles its receipt after a later revision without changing scope", async t => {
   const { f, client, identity } = await httpRoom(t);
   const item = () => f.store.room("commons").state.workItems["scope-repro"];
   const read = () => client.workContext("scope-repro");
@@ -74,10 +74,19 @@ test("lost claim response keeps the recorded scope and a different scope does no
   assert.equal(item().state, "accepted");
   assert.deepEqual(item().claim.paths, ["src/a.js"]);
 
-  const reconciled = await beginSelectedWork({
-    connected: true, scope: scopeA, invocation: { requestId: first.resume.requestId }, read,
-    execute: stage => submitWorkAction(client, identity, stage.action, stage.args)
+  await client.command({ id: randomUUID(), type: T.WORK_HANDOFF_RECORDED, data: {
+    workItemId: "scope-repro", expectedRevision: item().revision,
+    doneSummary: "Scope reserved", nextAction: "Start work", limitReason: "Handoff before retry"
+  } });
+  const wrong = await callHostedStdioTool(f.store, f.keys.owner, "room_begin_work", {
+    roomId: "commons", workItemId: "scope-repro", ...scopeA, invocationRequestId: "begin-not-the-claim-receipt"
   });
+  assert.equal(wrong.value.stopped, "invocation_mismatch");
+  assert.equal(item().state, "accepted");
+  const outcome = await callHostedStdioTool(f.store, f.keys.owner, "room_begin_work", {
+    roomId: "commons", workItemId: "scope-repro", ...scopeA, invocationRequestId: first.resume.requestId
+  });
+  const reconciled = outcome.value;
   assert.equal(reconciled.working, true);
   assert.equal(reconciled.roomState, "working");
   assert.equal(reconciled.stopped, null);
@@ -105,7 +114,7 @@ test("lost accept response reconciles the recorded receipt after a later revisio
   const identity = { roomId: "commons", memberId: "owner" };
   const item = () => f.store.room("commons").state.workItems["accept-repro"];
   const read = () => client.workContext("accept-repro");
-  const receipts = (requestId, work) => findAcceptReceipt(after => client.changes(after, 100), requestId, work);
+  const receipts = (requestId, work) => findBeginReceipt(after => client.changes(after, 100), requestId, work);
   const first = await beginSelectedWork({
     connected: true, read, receipts,
     execute: async stage => {

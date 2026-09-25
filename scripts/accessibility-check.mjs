@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
 import test from "node:test";
@@ -108,8 +108,12 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.locator("#cancel-work-button").click();
   await page.waitForFunction(() => document.activeElement.id === "new-work-button");
 
+  // The primary action stays visible while secondary evidence uses keyboard More.
+  const producerCard = page.locator('[data-work-record-id="producer-choice"]');
+  assert.equal(await producerCard.locator('.button.primary').isVisible(), true);
+  assert.equal(await producerCard.locator('[data-action="complete"]').isVisible(), false);
   // Completion requires a deliberate producer choice, including an explicit unknown option.
-  await page.locator('[data-work-record-id="producer-choice"] [data-action="complete"]').click();
+  await clickWorkAction(page.locator('[data-work-record-id="producer-choice"]'), "complete", { keyboard: true });
   const producerSelect = page.locator('#action-form select[name="producerId"]');
   assert.equal(await producerSelect.inputValue(), "", "producer is never inferred from the completion reporter");
   assert.deepEqual(await producerSelect.locator("option").allTextContents(), [
@@ -133,7 +137,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.match(knownReceipt, /Completion reporter\s*Room owner/);
   assert.match(knownReceipt, /Producer\s*Room owner/);
 
-  await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="complete"]').click();
+  await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "complete", { keyboard: true });
   await page.locator('#action-form select[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter cannot establish who produced the result");
   await page.locator('#action-form input[name="evidenceUrl"]').fill("https://example.com/unknown-result");
@@ -190,7 +194,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
-  await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').click();
+  await clickWorkAction(page.locator('[data-work-record-id="producer-unknown-choice"]'), "verify", { keyboard: true });
   assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
   assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy independent verification or unlock approval/s);
   await page.locator("#cancel-action").click();
