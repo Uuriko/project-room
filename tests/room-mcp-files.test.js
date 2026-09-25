@@ -87,7 +87,7 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   store.identities.link(owner.secret, created.roomId, {
     identityId: peer.identityId, displayName: "File peer", permissions: []
   });
-  const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
+  const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   for (const name of FILE_TOOLS) assert.equal(names.includes(name), true);
   const bytes = Buffer.from("room file bytes");
   const data = bytes.toString("base64");

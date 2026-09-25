@@ -82,8 +82,8 @@ test("wake tools stay behind a live identity secret", async t => {
     assert.equal(keyed.status, 401, name);
     assert.equal(keyed.body.result, undefined, name);
   }
-  const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
-  for (const name of WAKE_TOOLS) assert.equal(names.includes(name), true, name);
+  const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
+  for (const name of WAKE_TOOLS) assert.equal(names.includes(name.replaceAll(".", "_")), true, name);
   assert.equal(names.includes("room_join_packet"), true);
 });
 
