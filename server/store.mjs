@@ -76,6 +76,7 @@ import {
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
+import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
@@ -695,6 +696,7 @@ export class RoomStore {
     this.delegation = new MembershipDelegation(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
+    this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
@@ -826,6 +828,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${agentIdentitySchema}
       ${accountLoginMethodsSchema}
       ${agentInviteSchema}
+      ${referralInviteSchema}
       ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
@@ -904,6 +907,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // Signed referral invites: purely additive (no data migration, no
+      // fence impact); the ledger is written only by the mint/redeem paths
+      // and holds no credential data (tokens are bearer strings, never
+      // stored).
+      this.db.exec(referralInviteSchema);
       // Referral attribution (invite/access-request joins): purely additive —
       // no migration, no fence impact; referrals are only written by the join
       // paths, and the table holds no credential data.

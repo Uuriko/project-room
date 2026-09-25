@@ -98,6 +98,7 @@ optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP too
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
+optional.push("server/referral-invites.mjs"); // Signed agent-carried referral invites (imported by server/store.mjs and server/http.mjs)
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");
 optional.push("src/work-templates.js");

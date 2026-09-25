@@ -101,6 +101,10 @@ const PROBES = {
   // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
   // probe (no code query param) gets 422 invalid_invite.
   "GET /api/agent-invites/preview": [undefined, 422],
+  // Referral invite preview/redeem: a forged token is indistinguishable from
+  // an unknown one — 404 invite_unavailable, never an oracle.
+  "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
+  "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/share-links/preview": [{ linkToken: token() }, 410],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],
@@ -188,6 +192,7 @@ test("unauthenticated endpoint inventory equals the openapi security: [] set", a
     ["GET", "/api/rooms/commons/events"],
     ["GET", "/api/rooms/commons/export"],
     ["GET", "/api/rooms/commons/agent-invites"],
+    ["GET", "/api/rooms/commons/referral-invites"],
     ["POST", "/api/rooms/commons/agent-invites", { permissions: ["steer"] }],
     ["DELETE", "/api/rooms/commons/agent-invites", { inviteId: "0".repeat(8) }],
   ];
