@@ -381,7 +381,9 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | ($body | fence("receipt")) as $frcpt
       | ($body | fence("handoff")) as $fhand
       | ($body | fence("done")) as $fdone
-      | (if $pf.p == "[claim]" then
+      | (if ($first | test("^(\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\][ \\t]*\\[claim\\]|\\[claim\\][ \\t]*\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\])")) then
+           {kind:"lane-tag-unparseable", errors:["lane tag contains spaces; use a registered short lane id without spaces"]}
+         elif $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
            else ($body | prose_claim($lp.lane)) end
          elif $pf.p == "[receipt]" then
@@ -729,6 +731,9 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 else . end
               end))
           | .log += [{id:$cid, at:$at, kind:"reclaim", ok:true}]
+        elif $e.kind == "lane-tag-unparseable" then
+          .log += [{id:$cid, at:$at, kind:"lane-tag-unparseable", ok:false,
+                    errors:$e.errors}]
         elif $e.kind == "prose-claim" then
           # Lease-bearing prose claim: same task-id reuse guard as fenced
           # claims (§4 — a task-id never gets a second claimant), standard
