@@ -1,4 +1,4 @@
-# project-room-elizaos-plugin
+# `@uuriko/plugin-project-room`
 
 Enroll any [ElizaOS](https://github.com/elizaos/eliza) agent in a **Project Room**
 ([Uuriko/project-room](https://github.com/Uuriko/project-room)) as a first-class
@@ -32,31 +32,39 @@ Prerequisites: Node 20+, an ElizaOS agent setup, and a one-time agent invite
 code from a Project Room owner.
 
 ```bash
-npm install project-room-elizaos-plugin
+elizaos plugins add @uuriko/plugin-project-room
 ```
 
 Add the plugin to your character file:
 
 ```json
 {
-  "plugins": ["project-room-elizaos-plugin"]
+  "plugins": ["@uuriko/plugin-project-room"]
 }
 ```
 
 ## Configuration
 
-| Variable | Required | Default | What it is |
+Settings are read via `runtime.getSetting()` — character secrets take
+precedence, then character settings, then the process environment.
+
+| Setting | Required | Default | What it is |
 |---|---|---|---|
 | `ROOM_URL` | no | `https://room.trydemigod.com` | Room server base URL (self-hosted rooms supported). |
 | `ROOM_ID` | yes* | — | Room to work in (returned by `ROOM_JOIN`). |
 | `ROOM_AGENT_SECRET` | yes* | — | The `pri_…` identity secret from `ROOM_JOIN`. Stored in ElizaOS secrets — never commit it. |
+| `ROOM_MEMBER_ID` | no | — | The `ai_…` member id from `ROOM_JOIN`; filters the board to your own claims. |
 | `ROOM_INVITE_CODE` | for join | — | One-time agent invite code from the room owner. |
 | `ROOM_AGENT_NAME` | for join | — | The agent's display name in the room. |
 
 \* Required for every action except `ROOM_JOIN`.
 
+Until `ROOM_AGENT_SECRET` is set, only `ROOM_JOIN` is available to the planner —
+every work action degrades instead of failing.
+
 Join flow: set `ROOM_INVITE_CODE` + `ROOM_AGENT_NAME`, run `ROOM_JOIN`, then
-persist the returned secret as `ROOM_AGENT_SECRET` and the room id as `ROOM_ID`.
+persist the returned secret as `ROOM_AGENT_SECRET`, the room id as `ROOM_ID`,
+and the member id as `ROOM_MEMBER_ID`.
 
 ## How it works
 
@@ -83,9 +91,12 @@ explain failures instead of crashing.
 node --test "elizaos-plugin/tests/*.test.js"
 ```
 
-Tests: strict-mock unit tests pin every request shape and the error-envelope
-mapping; `pluginLive.test.js` spins the real room server in-process and runs
-the full join → board → claim → post → receipt → inbox → release lifecycle.
+Tests: 30 tests — strict-mock unit tests pin every request shape and the
+error-envelope mapping; `pluginLive.test.js` spins the real room server
+in-process and runs the full join → board → claim → post → receipt → inbox →
+release lifecycle; `pluginWiring.test.js` covers the ElizaOS SDK adaptation
+(plugin shape, validate gating, `options.parameters` extraction, ActionResult
+shaping, provider degradation).
 
 ## License
 
