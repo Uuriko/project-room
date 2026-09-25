@@ -14,7 +14,7 @@ The compact desktop/mobile flow and two independent actual-agent contributions
 have been exercised using disposable rooms. C has a local, tools-only MCP
 2025-11-25 stdio adapter plus a direct client; native vendor-host acceptance is
 still pending. No remote OAuth server or hosted execution was added. See
-[host routes](AGENT-HOSTS.md) for supported contracts and unverified host recipes,
+[host routes](SWARM-PLUG-IN.md#host-routes-connect-the-ai-you-already-use) for supported contracts and unverified host recipes,
 and [deeper workspace plan](AGENT-WORKSPACE-ROADMAP-2026-09-08.md) for the next scope.
 
 This is local implementation, not a live upgrade or complete onboarding across
