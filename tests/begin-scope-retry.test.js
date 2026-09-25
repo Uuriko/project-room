@@ -7,7 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { submitWorkAction } from "../client/work-actions.mjs";
-import { beginRequestId, beginSelectedWork } from "../client/begin-work.mjs";
+import { beginRequestId, beginSelectedWork, findAcceptReceipt } from "../client/begin-work.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -86,6 +86,107 @@ test("lost claim response keeps the recorded scope and a different scope does no
   assert.deepEqual(item().claim.paths, ["src/a.js"]);
   assert.equal(item().claim.repository, "test/repo");
   assert.equal(item().state, "working");
+});
+
+test("lost accept response reconciles the recorded receipt after a later revision and starts", async t => {
+  const f = createAcceptanceFixture();
+  const server = createRoomServer({ store: f.store });
+  const origin = await new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${server.address().port}`)));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: f.keys.owner });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
+    workItemId: "accept-repro", title: "Accept recovery", definitionOfDone: "A lost accept response still starts",
+    accountableMemberId: "owner", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const identity = { roomId: "commons", memberId: "owner" };
+  const item = () => f.store.room("commons").state.workItems["accept-repro"];
+  const read = () => client.workContext("accept-repro");
+  const receipts = (requestId, work) => findAcceptReceipt(after => client.changes(after, 100), requestId, work);
+  const first = await beginSelectedWork({
+    connected: true, read, receipts,
+    execute: async stage => {
+      const outcome = await submitWorkAction(client, identity, stage.action, stage.args);
+      if (stage.action === "room_accept_work") throw new Error("response lost after commit");
+      return outcome;
+    }
+  });
+  assert.equal(first.working, false);
+  assert.equal(first.stopped, "unknown");
+  assert.equal(first.invented, false);
+  assert.equal(first.resume.action, "room_accept_work");
+  assert.equal(first.resume.requestId, beginRequestId("accept-repro", "room_accept_work", 0));
+  assert.equal(first.resume.expectedRevision, 0);
+  assert.equal(first.resume.args.workItemId, "accept-repro");
+  assert.equal(first.resume.args.requestId, first.resume.requestId);
+  assert.equal(item().state, "accepted");
+  await client.command({ id: randomUUID(), type: T.WORK_HANDOFF_RECORDED, data: {
+    workItemId: "accept-repro", expectedRevision: item().revision,
+    doneSummary: "accepted", nextAction: "start", limitReason: "revision after lost accept"
+  }});
+  assert.equal(item().state, "accepted");
+  assert.notEqual(first.resume.requestId, beginRequestId("accept-repro", "room_accept_work", item().revision - 1));
+  let wrongWrites = 0;
+  const wrong = await beginSelectedWork({
+    connected: true, read, receipts, invocation: { requestId: "begin-not-the-accept-receipt" },
+    execute: async () => { wrongWrites += 1; return { status: "recorded" }; }
+  });
+  assert.equal(wrongWrites, 0);
+  assert.equal(wrong.stopped, "invocation_mismatch");
+  assert.equal(wrong.working, false);
+  assert.equal(wrong.resume.planned.action, "room_start_work");
+  assert.equal(wrong.resume.planned.expectedRevision, item().revision);
+  assert.equal(wrong.resume.planned.args.workItemId, "accept-repro");
+  assert.equal(item().state, "accepted");
+  const retried = await beginSelectedWork({
+    connected: true, read, receipts, invocation: { requestId: first.resume.requestId },
+    execute: stage => submitWorkAction(client, identity, stage.action, stage.args)
+  });
+  assert.equal(retried.working, true);
+  assert.equal(retried.roomState, "working");
+  assert.equal(retried.stopped, null);
+  assert.equal(retried.confirmed.some(row => row.action === "room_accept_work"), false);
+  assert.equal(retried.confirmed.some(row => row.action === "room_start_work"), true);
+  assert.equal(item().state, "working");
+});
+
+test("hosted Begin reconciles a lost accept receipt and starts", async t => {
+  const f = createAcceptanceFixture();
+  const server = createRoomServer({ store: f.store });
+  const origin = await new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${server.address().port}`)));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: f.keys.owner });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
+    workItemId: "hosted-accept", title: "Hosted accept recovery", definitionOfDone: "Hosted Begin starts after a lost accept",
+    accountableMemberId: "owner", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
+  const identity = { roomId: "commons", memberId: "owner" };
+  const read = () => client.workContext("hosted-accept");
+  const first = await beginSelectedWork({
+    connected: true, read,
+    execute: async stage => {
+      const outcome = await submitWorkAction(client, identity, stage.action, stage.args);
+      if (stage.action === "room_accept_work") throw new Error("response lost after commit");
+      return outcome;
+    }
+  });
+  assert.equal(first.stopped, "unknown");
+  assert.equal(f.store.room("commons").state.workItems["hosted-accept"].state, "accepted");
+  const outcome = await callHostedStdioTool(f.store, f.keys.owner, "room_begin_work", {
+    roomId: "commons", workItemId: "hosted-accept", invocationRequestId: first.resume.requestId
+  });
+  assert.equal(outcome.value.working, true);
+  assert.equal(outcome.value.stopped, null);
+  assert.equal(outcome.value.confirmed.some(row => row.action === "room_start_work"), true);
+  assert.equal(outcome.value.confirmed.some(row => row.action === "room_accept_work"), false);
+  assert.equal(f.store.room("commons").state.workItems["hosted-accept"].state, "working");
 });
 
 test("an unknown claim id is not reused to acquire a different scope", async t => {

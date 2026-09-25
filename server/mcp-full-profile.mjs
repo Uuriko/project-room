@@ -7,7 +7,7 @@
 // Local attention tools stay off this URL: they read an operator directory.
 
 import { prepareWork } from "../client/work-preparation.mjs";
-import { beginSelectedWork } from "../client/begin-work.mjs";
+import { beginSelectedWork, findAcceptReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
@@ -114,6 +114,7 @@ export async function callHostedStdioTool(store, secret, name, args) {
       scope: { workItemId: rest.workItemId, repository: rest.repository, ref: rest.ref, paths: rest.paths, expiresAt: rest.expiresAt },
       invocation: rest.invocationRequestId ? { requestId: rest.invocationRequestId } : null,
       read: () => store.workContext(secret, roomId, rest.workItemId, {}),
+      receipts: (requestId, item) => findAcceptReceipt(after => store.eventsAfter(secret, roomId, after, 100), requestId, item),
       execute: async stage => {
         try {
           const command = buildWorkCommand(stage.action, stage.args);

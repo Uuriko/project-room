@@ -144,11 +144,59 @@ function claimLanded(item, scope, invocation) {
     && invocation.requestId === beginRequestId(item.id, "room_acquire_claim", item.revision - 1, scope));
 }
 
+// The command receipt key. It identifies the recorded operation, not a guessed revision.
+export function operationKey(memberId, requestId) {
+  return createHash("sha256").update(`${memberId}:${requestId}`).digest("hex");
+}
+
+export function acceptReceipt(event, requestId, item) {
+  if (!event || !item || !requestId) return null;
+  if (event.type !== "work.accepted" || event.data?.workItemId !== item.id) return null;
+  if (event.actorId !== item.accountableMemberId) return null;
+  if (event.idempotencyKey !== operationKey(item.accountableMemberId, requestId)) return null;
+  return {
+    action: "room_accept_work", requestId, eventId: event.id, type: event.type,
+    workItemId: event.data.workItemId, actorId: event.actorId,
+    expectedRevision: event.data.expectedRevision ?? null
+  };
+}
+
+// Pages are { events, next, hasMore }. A missing receipt is null, not a guessed revision.
+export async function findAcceptReceipt(pages, requestId, item) {
+  let after = 0;
+  for (let page = 0; page < 100; page += 1) {
+    const result = await pages(after);
+    for (const row of result?.events || []) {
+      const found = acceptReceipt(row.event || row, requestId, item);
+      if (found) return found;
+    }
+    if (!result?.hasMore) return null;
+    if (!Number.isSafeInteger(result.next) || result.next <= after) return null;
+    after = result.next;
+  }
+  return null;
+}
+
+function preservedResume(pending, stage) {
+  return {
+    requestId: pending.requestId,
+    action: pending.action ?? null,
+    expectedRevision: pending.expectedRevision ?? null,
+    args: pending.args ?? null,
+    ...(stage ? { planned: {
+      action: stage.action, requestId: stage.requestId,
+      expectedRevision: stage.expectedRevision, args: stage.args
+    } } : {})
+  };
+}
+
 // Reads current work between stages. An unknown response keeps the same
 // request id. working is Room work state, not an external host start.
-// invocation pins an unknown stage: a different id is not executed, and a
-// later revision is not given a new write unless that exact claim already landed.
-export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null } = {}) {
+// invocation pins an unknown stage. A different id is not executed unless the
+// exact claim or the recorded accept receipt already landed. A later revision
+// is not proof of that accept. A response that never returned the stage id
+// cannot be recovered unless the caller already held that id.
+export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null, receipts = null } = {}) {
   if (connected !== true) {
     return { working: false, roomState: null, confirmed: [], stopped: "disconnected", invented: false };
   }
@@ -169,13 +217,29 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
     }
     const plan = planBegin(context.work, context.viewer, { scope, now });
     if (!plan.stage) return readResult(context, plan, confirmed);
-    if (pending && plan.stage.requestId !== pending.requestId && !claimLanded(context.work, scope, pending)) {
-      return stoppedResult(context, {
-        confirmed, stopped: "invocation_mismatch", resume: pending,
-        currentClaim: plan.currentClaim ?? claimView(context.work), next: plan.next
-      });
+    if (pending && plan.stage.requestId !== pending.requestId) {
+      const claim = claimLanded(context.work, scope, pending);
+      let accept = null;
+      if (!claim && plan.stage.action !== "room_accept_work") {
+        try {
+          const found = receipts ? await receipts(pending.requestId, context.work) : null;
+          accept = found && found.requestId === pending.requestId && found.type === "work.accepted"
+            && found.workItemId === context.work.id ? found : null;
+        } catch {
+          return stoppedResult(context, {
+            confirmed, stopped: "unknown", resume: preservedResume(pending, plan.stage),
+            currentClaim: plan.currentClaim ?? claimView(context.work), next: plan.next
+          });
+        }
+      }
+      if (!claim && !accept) {
+        return stoppedResult(context, {
+          confirmed, stopped: "invocation_mismatch", resume: preservedResume(pending, plan.stage),
+          currentClaim: plan.currentClaim ?? claimView(context.work), next: plan.next
+        });
+      }
+      pending = null;
     }
-    if (pending && plan.stage.requestId !== pending.requestId) pending = null;
     if (seen.has(plan.stage.requestId)) {
       return stoppedResult(context, { confirmed, stopped: "unknown", resume: plan.stage });
     }
