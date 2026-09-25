@@ -288,7 +288,7 @@ export function connectionStanding({
   const tools = hostTools == null
     ? "Host tools not checked"
     : hostTools.length ? "Host tools available" : "Host tools missing";
-  const compact = `${credential}. Can read and post when addressed.`;
+  const compact = `${credential}. Can read and post.`;
   if (permissions == null) {
     const detail = `${tools}. Work grants not checked.`;
     return { compact, detail, summary: `${compact} ${detail}` };

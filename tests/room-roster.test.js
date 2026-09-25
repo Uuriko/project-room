@@ -79,6 +79,8 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.doesNotMatch(pending.summary, /Seat can act|Can accept, complete, verify, and write|Work grants include/);
   const chatOnly = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [] });
   assert.match(chatOnly.compact, /Can read and post/);
+  assert.doesNotMatch(chatOnly.compact, /when addressed/);
+  assert.doesNotMatch(chatOnly.summary, /when addressed/);
   assert.match(chatOnly.detail, /Work grants not selected/);
   assert.doesNotMatch(chatOnly.summary, /cannot act|must receive|Seat can act/);
   const changed = connectionStanding({
