@@ -73,6 +73,14 @@ Rejection codes (machine-readable, no people-data in errors):
   pass per key per room.
 - Renewal = new request (re-presents the card; rate limits apply).
 
+**Explicit tradeoff (instinct's critique, recorded):** the 3/day-per-key budget
+plus the 10-live-guests cap means a determined key can hold a guest slot
+indefinitely by renewing every 24h. This is accepted for the stated threat
+model — the slot is read+chat only, the guest is badged and journaled, and the
+owner holds per-guest disconnect plus the room-wide panic revoke. If a room
+wants stricter tenure, it can lower the cap or shorten the TTL per-room; the
+defaults stay permissive because ejection is cheap.
+
 ### What guests can never do (machine-enforced, not policy prose)
 
 - `POST /api/claims/work` (and any claim/spend/verify/approve route) rejects
