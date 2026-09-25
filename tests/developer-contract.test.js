@@ -12,6 +12,7 @@ const quickstart = readFileSync("docs/AGENT-QUICKSTART.md", "utf8");
 const taxonomy = readFileSync("docs/ERROR-TAXONOMY.md", "utf8");
 const http = readFileSync("server/http.mjs", "utf8");
 const pluginRoutes = readFileSync("server/agent-plugin-routes.mjs", "utf8");
+const nextActionsRoutes = readFileSync("server/next-actions-routes.mjs", "utf8");
 const discovery = readFileSync("deploy/agent-discovery.mjs", "utf8");
 const hostMatrix = readFileSync("docs/HOST-MATRIX.md", "utf8");
 const agentError = readFileSync("src/agent-error.mjs", "utf8");
@@ -52,8 +53,9 @@ test("every OpenAPI path is a route template the server serves, and every served
   // Shared with the npm run check gate (scripts/route-docs-check.mjs): the
   // served set is extracted from server/http.mjs string literals and anchored
   // path regexes plus the agent plug-in surface in
-  // server/agent-plugin-routes.mjs, parameters reduced to {} on both sides.
-  const { failures, served, documented } = routeDocsDrift({ http, pluginRoutes, openapi });
+  // server/agent-plugin-routes.mjs and the next-actions surface in
+  // server/next-actions-routes.mjs, parameters reduced to {} on both sides.
+  const { failures, served, documented } = routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, openapi });
   assert.deepEqual(failures, []);
   assert.ok(served >= 60 && served === documented, `served ${served}, documented ${documented}`);
 });

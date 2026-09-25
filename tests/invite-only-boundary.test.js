@@ -17,7 +17,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { openRoutes, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
-import { pluginRouteTemplates } from "../scripts/route-docs-check.mjs";
+import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const DECLARED_OPEN = openRoutes(read("../docs/openapi.yaml"));
@@ -27,6 +27,10 @@ const SERVED_CANDIDATES = [
   // server/http.mjs; its templates are extracted from
   // server/agent-plugin-routes.mjs (same extraction as route-docs-check.mjs).
   ...pluginRouteTemplates(read("../server/agent-plugin-routes.mjs")),
+  // RC-2026-09-25-911: the next-actions surface is a third delegation in
+  // server/http.mjs. All four routes 401 for anonymous callers, so they are
+  // guarded, never served open.
+  ...nextActionsRouteTemplates(read("../server/next-actions-routes.mjs")),
 ];
 assert.ok(DECLARED_OPEN.length >= 10, "openapi open-route parse sanity");
 assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/health") && SERVED_CANDIDATES.includes("/api/rooms/{id}/commands"),

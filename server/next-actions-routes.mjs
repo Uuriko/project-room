@@ -21,7 +21,7 @@
 
 import { NextActionsError } from "./next-actions.mjs";
 
-const ROUTE = /^\/api\/rooms\/([^/]{1,384})\/(next-actions|next-actions-dismiss|next-actions-suppressions|next-actions-dismissals)$/;
+const ROUTE = /^\/api\/rooms\/([^\/]{1,384})\/(next-actions|next-actions-dismiss|next-actions-suppressions|next-actions-dismissals)$/;
 
 export function createNextActionsRoutes({ store, json, reject, body, rate, roomCredentials, expectedBinding, accountBinding }) {
   // Coded pure-module errors -> HTTP: validation reads as 422.
