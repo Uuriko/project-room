@@ -42,7 +42,7 @@ export function installReferralBoard({ client, getState, getSession }) {
   const countChip = $("#referral-count");
   if (!panel || !board || !button) return { sync() {}, reset() {} };
 
-  let loaded = false, busy = false;
+  let loaded = false, busy = false, generation = 0;
 
   // "My referral link" mints through the protected agent-invite route: only
   // members with invite authority see the button. Everyone else still gets
@@ -72,24 +72,26 @@ export function installReferralBoard({ client, getState, getSession }) {
   }
 
   async function load() {
-    if (loaded || busy) return;
+    const session = getSession(), epoch = generation;
+    if (!session || loaded || busy) return;
+    const current = () => epoch === generation && getSession() === session;
     busy = true;
     try {
-      const roomId = getSession().roomId;
-      const data = await client.request(client.path(`/rooms/${encodeURIComponent(roomId)}/referrals`), { method: "GET" });
-      render(data);
-      loaded = true;
+      const data = await client.request(client.path("/referrals"), { method: "GET" });
+      if (current()) { render(data); loaded = true; }
     } catch {
       // The board is informational; a failed load leaves the panel quiet.
-    } finally { busy = false; }
+    } finally { if (current()) busy = false; }
   }
 
   async function mintMyLink() {
-    if (busy) return;
+    const session = getSession(), epoch = generation;
+    if (busy || !canMintLink()) return;
+    const current = () => epoch === generation && getSession() === session;
     busy = true;
     status("Minting your referral link…");
     try {
-      const roomId = getSession().roomId;
+      const roomId = session.roomId;
       const link = await mintInviteLink({
         requestBody: () => inviteMintBody("contribute", ""),
         mintOne: async body => {
@@ -99,6 +101,7 @@ export function installReferralBoard({ client, getState, getSession }) {
         },
         locationLike: globalThis.location,
       });
+      if (!current()) return;
       status("");
       const input = document.createElement("input");
       input.value = link.link;
@@ -116,8 +119,8 @@ export function installReferralBoard({ client, getState, getSession }) {
       result.textContent = "";
       result.append(input, copy);
     } catch (error) {
-      status(error?.message ?? "Could not mint a referral link.");
-    } finally { busy = false; }
+      if (current()) status(error?.message ?? "Could not mint a referral link.");
+    } finally { if (current()) busy = false; }
   }
 
   button.addEventListener("click", mintMyLink);
@@ -125,6 +128,6 @@ export function installReferralBoard({ client, getState, getSession }) {
 
   return {
     sync() { syncLinkButton(); if (panel.open) load(); },
-    reset() { loaded = false; syncLinkButton(); render(null); status(""); },
+    reset() { generation++; loaded = false; busy = false; syncLinkButton(); render(null); status(""); },
   };
 }

@@ -393,21 +393,30 @@ export class RoomClient {
       && payload.viewerSessionBinding === session.sessionBinding
       && (!Number.isSafeInteger(session.sessionRevision) || payload.viewerSessionRevision === session.sessionRevision);
   }
-  refresh() {
+  refresh(receipt = null) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
+    // Only sequenced room events can prove a snapshot already contains a change.
+    // Reconnects, explicit refreshes and non-event receipts always revalidate access.
+    const sequence = receipt?.event?.roomId === this.session?.roomId && Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
+      ? receipt.sequence : null;
+    if (sequence !== null && sequence <= this.sequence) return Promise.resolve();
     const generation = this.generation;
-    if (this.flight?.generation === generation) { this.flight.again = true; return this.flight.promise; }
-    const flight = { generation, again: false };
+    if (this.flight?.generation === generation) {
+      if (sequence === null) this.flight.again = true;
+      else this.flight.sequence = Math.max(this.flight.sequence, sequence);
+      return this.flight.promise;
+    }
+    const flight = { generation, again: false, sequence: 0 };
     this.flight = flight;
     flight.promise = (async () => {
       try {
         do {
-          flight.again = false;
+          flight.again = false; flight.sequence = 0;
           const snapshot = await this.request(this.path(), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
           if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
-        } while (flight.again);
+        } while (flight.again || flight.sequence > this.sequence);
       } catch (error) {
         if (generation !== this.generation) return;
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
@@ -425,7 +434,7 @@ export class RoomClient {
       if (generation === this.generation && this.session) {
         if (!this.ownsAccountSession()) this.endAccess();
         else {
-          try { await this.refresh(); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
+          try { await this.refresh(receipt); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
         }
       }
       return receipt;
@@ -740,15 +749,18 @@ export class RoomClient {
     const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
-    const refreshStream = () => this.refresh().catch(error => { if (ownsStream()) this.handleFailure(error); });
+    const refreshStream = receipt => this.refresh(receipt).catch(error => { if (ownsStream()) this.handleFailure(error); });
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       this.streamRetryDelay = 1000;
       this.onStatus("Connected to room service · no peer read or processing receipt");
       refreshStream();
     });
-    stream.addEventListener("room-event", () => {
-      if (ownsStream()) refreshStream();
+    stream.addEventListener("room-event", message => {
+      if (!ownsStream()) return;
+      let receipt;
+      try { receipt = JSON.parse(message.data); } catch { /* Unknown notifications still force a read. */ }
+      refreshStream(receipt);
     });
     stream.addEventListener("access-ended", () => { if (ownsStream()) this.endAccess(); });
     stream.addEventListener("error", () => {

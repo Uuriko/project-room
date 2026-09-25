@@ -29,8 +29,6 @@ import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { installReferralBoard } from "./referral-board.js";
-import { installLandQueueBoard } from "./land-queue-board.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
@@ -405,11 +403,51 @@ const briefView = new ReturnBrief(client, {
     if ($("#catchup-dialog")?.open) renderReturnBrief(); else notice(briefReconcileNote, true);
   }
 });
+// Keep secondary views off the room-entry path. Installed views retain their
+// normal reset lifecycle; an import completing after reset cannot activate one.
+function lazyDisclosure({ panel, load, install, onError }) {
+  let view = null, flight = null, generation = 0;
+  async function sync() {
+    if (!panel.open) return;
+    if (view) { view.sync(); return; }
+    if (flight) return;
+    const epoch = generation;
+    const pending = load();
+    flight = pending;
+    try {
+      const module = await pending;
+      if (epoch !== generation || !panel.open) return;
+      view = install(module);
+      view.sync();
+    } catch (error) {
+      if (epoch === generation && panel.open) onError(error);
+    } finally {
+      if (flight === pending) flight = null;
+    }
+  }
+  panel.addEventListener("toggle", () => { void sync(); });
+  return {
+    sync,
+    reset() {
+      generation++;
+      flight = null;
+      panel.open = false;
+      view?.reset();
+    }
+  };
+}
+
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
-referralBoardUI = installReferralBoard({ client, getState: () => state, getSession: () => session });
-landQueueUI = installLandQueueBoard({ client, getSession: () => session });
+referralBoardUI = lazyDisclosure({ panel: $("#referral-panel"),
+  load: () => import("./referral-board.js"),
+  install: module => module.installReferralBoard({ client, getState: () => state, getSession: () => session }),
+  onError: () => notice("Could not load referrals. Close and reopen to retry.", true) });
+landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
+  load: () => import("./land-queue-board.js"),
+  install: module => module.installLandQueueBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load the land queue. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention") });
