@@ -1,15 +1,22 @@
-node_modules
-.data/
-*.sqlite
-*.sqlite-*
+# Dependencies
+node_modules/
+
+# Build / wrangler
+.wrangler/
+dist/
+
+# Local env and secrets
 .env
 .env.*
 !.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Test artifacts
 coverage/
-test-results/
+*.log
 
-# Local run logs (may contain tokens) — never commit
-runlogs-tmp/
-
-# RC-2026-09-18-051: local test TMPDIR (never commit test scratch)
-.tmp/
+# Expanded at import time by scripts/acceptance-fixture.mjs
+scripts/.acceptance-fixture.generated.mjs

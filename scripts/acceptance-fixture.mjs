@@ -1,15 +1,9 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createHash } from "node:crypto";
 const dir = dirname(fileURLToPath(import.meta.url));
-const payload = readFileSync(join(dir, ".acceptance-fixture.b64"), "utf8");
-const digest = createHash("sha256").update(payload).digest("hex").slice(0, 16);
-const destDir = join(tmpdir(), "project-room-acceptance-fixture");
-mkdirSync(destDir, { recursive: true });
-const dest = join(destDir, `acceptance-fixture.${digest}.mjs`);
-writeFileSync(dest, gunzipSync(Buffer.from(payload, "base64")));
+const dest = join(dir, ".acceptance-fixture.generated.mjs");
+writeFileSync(dest, gunzipSync(Buffer.from(readFileSync(join(dir, ".acceptance-fixture.b64"), "utf8"), "base64")));
 const mod = await import(pathToFileURL(dest).href);
 export const createAcceptanceFixture = mod.createAcceptanceFixture;
