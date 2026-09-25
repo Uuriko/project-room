@@ -2,11 +2,11 @@
 //
 // Threat-model review 2026-09-24 (200-list #95). Each test pins a security
 // invariant at the module boundary — the owner of the token/code lifecycle.
-// One test is a DOCUMENTED GAP (F-02): it asserts the CURRENT (weaker)
-// behavior on purpose so CI stays green while the finding is open; it is
-// tagged with its REVIEW.md finding id. F-01 (refresh-token reuse theft
-// detection) was FIXED 2026-09-25: the reuse test now asserts the new
-// behavior — whole-family revocation plus a reuse-detected signal.
+// F-01 (refresh-token reuse theft detection) was FIXED 2026-09-25: the reuse
+// test now asserts the new behavior — whole-family revocation plus a
+// reuse-detected signal. F-02 (refresh-token revoke cascade) was FIXED
+// 2026-09-25: the revocation tests now assert that revoking a refresh token
+// kills the whole family immediately.
 //
 // Authoring-gate notes (repo .agents/skills/test-audit/SKILL.md):
 //  1. Every test guards an observable security invariant of the OAuth2 flow.
@@ -14,13 +14,14 @@
 //     changes, redirect-URI matching loosened to prefix/subdomain, PKCE
 //     downgrade re-introduced, code store semantics changed.
 //  3. Existing tests/oauth-provider.test.js covers the happy path, single-use
-//     codes, wrong-verifier PKCE, expiry, basic rotation and single-token
-//     revocation. These attack cases cover what it does not: replay AFTER
-//     downstream refresh, failed-guess code survival, downgrade-shaped
-//     verifiers, refresh-chain scope pinning, redirect-URI lookalikes,
-//     cross-client binding, consent->grant binding, refresh-token reuse
-//     theft response (F-01 fixed), and the one remaining documented gap
-//     (F-02: no revoke cascade).
+//     codes, wrong-verifier PKCE, expiry, basic rotation, refresh-token
+//     revoke cascade (F-02 fixed), and single-token access revocation. These
+//     attack cases cover what it does not: replay AFTER downstream refresh,
+//     failed-guess code survival, downgrade-shaped verifiers, refresh-chain
+//     scope pinning, redirect-URI lookalikes, cross-client binding,
+//     consent->grant binding, refresh-token reuse theft response (F-01
+//     fixed), and explicit-revocation cascade without reuse signals (F-02
+//     fixed).
 //  4. No production seams: only the module's public API is used.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -303,12 +304,12 @@ test("FIXED (F-01): refresh-token reuse revokes the whole token family and emits
   assert.equal(events[0].detectedAt, t);
 });
 
-test("explicitly revoked refresh tokens do NOT trigger family revocation", () => {
-  // Invariant: the theft response fires only for reuse of a ROTATED token
-  // (one superseded by rotation). A token revoked explicitly via revoke() or
-  // revokeAllForUser() stays a plain "revoked" reject with no security
-  // event and no family nuke. Regression: a refactor that treats every
-  // revoked-token replay as reuse would nuke families on benign replays.
+test("F-02: explicitly revoked refresh tokens kill the family, without a reuse signal", () => {
+  // Invariant: explicit revocation via revoke() kills the whole token family
+  // (the consent screen's "revoke access at any time" promise), but it is
+  // not theft — no refresh_token_reuse_detected event fires. Regression: a
+  // refactor that treats every revoked-token replay as reuse would emit
+  // false theft signals on benign replays.
   const events = [];
   const provider = createOAuthProvider({ onSecurityEvent: event => { events.push(event); } });
   provider.registerClient({ clientId: CLIENT_A, name: "Muse", redirectUris: [URI_A, URI_B] });
@@ -319,23 +320,21 @@ test("explicitly revoked refresh tokens do NOT trigger family revocation", () =>
     refreshToken: second.refreshToken, clientId: CLIENT_A,
   }), /refresh token revoked/);
   assert.equal(events.length, 0, "explicit revocation must not emit a reuse signal");
-  // Family otherwise untouched: the access tokens issued alongside survive
-  // (single-token revocation semantics, per F-02's still-open gap).
-  assert.ok(provider.verifyAccessToken(second.accessToken));
+  // F-02 cascade: the access tokens issued alongside die with the family.
+  assert.equal(provider.verifyAccessToken(second.accessToken), null);
 });
 
 // ---------------------------------------------------------------------------
 // 6. Revocation completeness
 // ---------------------------------------------------------------------------
 
-test("DOCUMENTED GAP (F-02): revoking a refresh token leaves its access tokens live", () => {
+test("F-02 FIXED: revoking a refresh token kills its access tokens", () => {
   // -----------------------------------------------------------------------
-  // SECURITY GAP — see REVIEW.md F-02. Desired: revoking a refresh token
-  // cuts the whole grant (dependent access tokens die too), so "disconnect"
-  // is actually complete. Current: revoke() marks one token only; access
-  // tokens issued from the grant stay valid for up to their 1-hour TTL.
-  // This test PINS the current behavior; INVERT when cascade lands.
-  // (revokeAllForUser is the complete path today — covered by existing tests.)
+  // F-02 fixed 2026-09-25: revoking a refresh token cuts the whole grant —
+  // dependent access tokens die immediately, so "disconnect" is actually
+  // complete. Previously revoke() marked one token only and access tokens
+  // stayed valid for up to their 1-hour TTL. (revokeAllForUser was and is
+  // the complete path — covered by existing tests.)
   // -----------------------------------------------------------------------
   const { provider } = setup();
   const { tokens } = fullGrant(provider);
@@ -343,10 +342,10 @@ test("DOCUMENTED GAP (F-02): revoking a refresh token leaves its access tokens l
   assert.throws(() => provider.refresh({
     refreshToken: tokens.refreshToken, clientId: CLIENT_A,
   }), /refresh token revoked/);
-  // GAP: the access token from the same grant still verifies.
-  assert.ok(
-    provider.verifyAccessToken(tokens.accessToken),
-    "GAP F-02: access token still valid after its refresh token was revoked",
+  // FIXED: the access token from the same grant dies with the family.
+  assert.equal(
+    provider.verifyAccessToken(tokens.accessToken), null,
+    "F-02: access token must die when its refresh token is revoked",
   );
 });
 

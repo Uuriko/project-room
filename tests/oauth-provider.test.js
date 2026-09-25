@@ -225,3 +225,114 @@ test("exposes the documented scope list", () => {
   assert.deepEqual([...OAUTH_SCOPES],
     ["rooms:read", "chat:read", "chat:write", "work:read", "work:write"]);
 });
+
+// ---- F-02: access-token revocation cascade + session kill ----
+
+// Owner-boundary contract: revoking a refresh token must kill its whole
+// token family immediately. Regression: a "simpler" revoke() that only
+// flips the presented token leaves access tokens valid to their 1h TTL,
+// breaking the consent screen's "revoke access at any time" promise.
+const mkPair = (provider, user, clientId = "muse", session) => {
+  const client = provider.getClient(clientId);
+  const redirectUri = client.redirectUris[0];
+  const verifier = `v-${user}-${clientId}-`.padEnd(43, "h");
+  const { code } = provider.issueCode({
+    clientId, userId: user, redirectUri,
+    scopes: ["rooms:read", "chat:read"],
+    codeChallenge: challengeFor(verifier),
+  });
+  return provider.exchangeCode({
+    code, clientId, redirectUri, codeVerifier: verifier, session,
+  });
+};
+
+test("F-02: revoking a refresh token kills its access tokens immediately", () => {
+  const { provider } = setup();
+  const { accessToken, refreshToken } = mkPair(provider, "alice");
+  assert.ok(provider.verifyAccessToken(accessToken));
+  assert.equal(provider.revoke(refreshToken), true);
+  assert.equal(provider.verifyAccessToken(accessToken), null); // no 1h linger
+  assert.throws(() => provider.refresh({ refreshToken, clientId: "muse" }), /revoked/);
+});
+
+test("F-02: revoking an access token stays surgical", () => {
+  const { provider } = setup();
+  const { accessToken, refreshToken } = mkPair(provider, "alice");
+  assert.equal(provider.revoke(accessToken), true);
+  assert.equal(provider.verifyAccessToken(accessToken), null);
+  // The family survives: the refresh token still rotates into a live pair.
+  const next = provider.refresh({ refreshToken, clientId: "muse" });
+  assert.ok(provider.verifyAccessToken(next.accessToken));
+});
+
+test("F-02: refresh-token reuse still triggers family revocation (F-01 intact)", () => {
+  const { provider } = setup();
+  const first = mkPair(provider, "alice");
+  const second = provider.refresh({ refreshToken: first.refreshToken, clientId: "muse" });
+  assert.throws(
+    () => provider.refresh({ refreshToken: first.refreshToken, clientId: "muse" }),
+    /reuse detected/);
+  assert.equal(provider.verifyAccessToken(first.accessToken), null);
+  assert.equal(provider.verifyAccessToken(second.accessToken), null); // family dead
+});
+
+test("F-02: revokeAllForUser without clientId kills every client", () => {
+  const { provider } = setup();
+  provider.registerClient({
+    clientId: "other", name: "Other", redirectUris: ["https://other.example/cb"],
+  });
+  const a = mkPair(provider, "alice", "muse");
+  const b = mkPair(provider, "alice", "other");
+  const c = mkPair(provider, "bob", "muse");
+  const count = provider.revokeAllForUser({ userId: "alice" });
+  assert.equal(count, 4); // 2 access + 2 refresh across both clients
+  assert.equal(provider.verifyAccessToken(a.accessToken), null);
+  assert.equal(provider.verifyAccessToken(b.accessToken), null);
+  assert.ok(provider.verifyAccessToken(c.accessToken)); // bob untouched
+  assert.equal(provider.listSessions({ userId: "alice" }).length, 0);
+});
+
+test("F-02: listSessions shows live families with issuance metadata", () => {
+  const { provider } = setup();
+  const pair = mkPair(provider, "alice", "muse", { ip: "203.0.113.7", userAgent: "test-agent/1.0" });
+  const sessions = provider.listSessions({ userId: "alice" });
+  assert.equal(sessions.length, 1);
+  const [s] = sessions;
+  assert.ok(s.id.startsWith("oarf_"));
+  assert.equal(s.clientId, "muse");
+  assert.deepEqual([...s.scopes].sort(), ["chat:read", "rooms:read"]);
+  assert.equal(s.ip, "203.0.113.7");
+  assert.equal(s.userAgent, "test-agent/1.0");
+  assert.equal(s.accessTokens, 1);
+  assert.equal(s.refreshTokens, 1);
+  assert.equal(typeof s.issuedAt, "number");
+  // Cross-user isolation: nobody else's families are visible.
+  assert.equal(provider.listSessions({ userId: "mallory" }).length, 0);
+  // Rotation keeps one family (same id); a revoked family drops out.
+  const next = provider.refresh({ refreshToken: pair.refreshToken, clientId: "muse" });
+  const after = provider.listSessions({ userId: "alice" });
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, s.id);
+  provider.revoke(next.refreshToken);
+  assert.equal(provider.listSessions({ userId: "alice" }).length, 0);
+});
+
+test("F-02: revokeSession kills one family, ownership-checked", () => {
+  const { provider, advance } = setup();
+  const a = mkPair(provider, "alice");
+  advance(1000);
+  const b = mkPair(provider, "alice");
+  const c = mkPair(provider, "bob");
+  const [newest, oldest] = provider.listSessions({ userId: "alice" }); // newest first
+  const bobId = provider.listSessions({ userId: "bob" })[0].id;
+  // Cross-user kill attempt: rejected, bob's session untouched.
+  assert.equal(provider.revokeSession({ userId: "alice", familyId: bobId }), 0);
+  assert.ok(provider.verifyAccessToken(c.accessToken));
+  // Kill alice's older family only.
+  assert.equal(provider.revokeSession({ userId: "alice", familyId: oldest.id }), 2);
+  assert.equal(provider.verifyAccessToken(a.accessToken), null);
+  assert.ok(provider.verifyAccessToken(b.accessToken)); // other family alive
+  assert.equal(newest.id, provider.listSessions({ userId: "alice" })[0].id);
+  // Unknown family: no-op.
+  assert.equal(provider.revokeSession({ userId: "alice", familyId: "oarf_nope" }), 0);
+});
