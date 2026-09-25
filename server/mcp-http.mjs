@@ -9,8 +9,9 @@ import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
-import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
+import { closestToolName, diagnoseArguments, mcpCallError, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
+import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
 
@@ -79,7 +80,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     if (message.params?.cursor !== undefined) {
       return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message: "No pagination cursor is supported" } };
     }
-    return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools() } };
+    return { jsonrpc: "2.0", id: requestId, result: { tools: livePublicMcpTools(), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
   }
   if (message.method === "tools/call") {
     const name = message.params?.name;
@@ -158,7 +159,12 @@ export function roomMcpFetchResponse(request) {
     });
   }
   if (request.method !== "POST") {
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Method not allowed" } }), {
+    return new Response(JSON.stringify(mcpTransportError(-32600, "Method not allowed", {
+      reason: "method_not_allowed",
+      hint: "Send POST with a JSON-RPC body to this URL.",
+      next: [{ command: "POST {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}" }],
+      category: "input",
+    })), {
       status: 405, headers: { ...headers, Allow: "GET, HEAD, POST, OPTIONS", "Content-Type": "application/json; charset=utf-8" }
     });
   }
@@ -178,7 +184,12 @@ export async function roomMcpFetchPost(request, options = {}) {
   try {
     message = await request.json();
   } catch {
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON" } }), {
+    return new Response(JSON.stringify(mcpTransportError(-32700, "Invalid JSON", {
+      reason: "invalid_json",
+      hint: "Send a JSON-RPC 2.0 object: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}.",
+      next: [{ command: "tools/list" }],
+      category: "input",
+    })), {
       status: 400, headers
     });
   }
@@ -191,7 +202,13 @@ export async function roomMcpFetchPost(request, options = {}) {
       searchParams: url.searchParams
     });
   } catch {
-    reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };
+    reply = mcpTransportError(-32603, "Request could not be completed", {
+      reason: "internal_error",
+      hint: "Retry the same request; no success is claimed.",
+      next: [{ command: "retry the same JSON-RPC request" }],
+      category: "unavailable",
+      status: "failed",
+    });
   }
   if (!reply) return new Response(null, { status: 202, headers });
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers });
@@ -218,13 +235,23 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   }
   if (method !== "POST") {
     res.writeHead(405, { ...cors, Allow: "GET, HEAD, POST, OPTIONS", "Content-Type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Method not allowed" } }));
+    return res.end(JSON.stringify(mcpTransportError(-32600, "Method not allowed", {
+      reason: "method_not_allowed",
+      hint: "Send POST with a JSON-RPC body to this URL.",
+      next: [{ command: "POST {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}" }],
+      category: "input",
+    })));
   }
   let message;
   try { message = JSON.parse(bodyText); }
   catch {
     res.writeHead(400, { ...cors, "Content-Type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON" } }));
+    return res.end(JSON.stringify(mcpTransportError(-32700, "Invalid JSON", {
+      reason: "invalid_json",
+      hint: "Send a JSON-RPC 2.0 object: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}.",
+      next: [{ command: "tools/list" }],
+      category: "input",
+    })));
   }
   let reply;
   try {
@@ -235,7 +262,13 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       searchParams: url.searchParams
     });
   } catch {
-    reply = { jsonrpc: "2.0", id: null, error: { code: -32603, message: "Request could not be completed" } };
+    reply = mcpTransportError(-32603, "Request could not be completed", {
+      reason: "internal_error",
+      hint: "Retry the same request; no success is claimed.",
+      next: [{ command: "retry the same JSON-RPC request" }],
+      category: "unavailable",
+      status: "failed",
+    });
   }
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });

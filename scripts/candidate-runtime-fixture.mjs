@@ -72,6 +72,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/access-review.mjs');
   paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
+  paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
+  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by deploy/agent-discovery.mjs)
+  paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
   paths.add('server/attachment-schema.mjs');

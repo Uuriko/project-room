@@ -5,6 +5,7 @@ import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY } from "./agent-card-key.mjs";
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
+import { governanceJson } from "../server/governance.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
 export const ROOM_DOOR = "https://www.trydemigod.com/room";
@@ -192,6 +193,8 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: SKILLS_CATALOG_PATH, auth: false, first: "skills catalog" }),
   Object.freeze({ path: AGENTS_JSON_PATH, auth: false, first: "agents.json: how to work with this site (flows, steps, actions)" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
+  Object.freeze({ path: "/.well-known/governance.json", auth: false, first: "governance policy (generated from enforcing config)" }),
+  Object.freeze({ path: "/openapi.json", auth: false, first: "generated OpenAPI 3.1 route inventory" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   Object.freeze({ path: "/.well-known/ai-catalog.json", auth: false, first: "ARD ai-catalog (compat path)" }),
   Object.freeze({ path: "/.well-known/ard.json", auth: false, first: "ARD ai-catalog (normative path)" }),
@@ -341,7 +344,17 @@ export function agentCard() {
       llms_full: `${ROOM_ORIGIN}/llms-full.txt`,
       skills: `${ROOM_ORIGIN}${SKILLS_CATALOG_PATH}`,
       agents_json: `${ROOM_ORIGIN}${AGENTS_JSON_PATH}`,
-      agent_json: `${ROOM_ORIGIN}/.well-known/agent.json`
+      agent_json: `${ROOM_ORIGIN}/.well-known/agent.json`,
+      governance: `${ROOM_ORIGIN}/.well-known/governance.json`,
+      openapi: `${ROOM_ORIGIN}/openapi.json`,
+      // Enrollment chain (machine-readable; the cold-start chain test walks
+      // these links and next[] pointers from GET / to a first post).
+      identity_mint: `${ROOM_ORIGIN}/api/agent-identities`,
+      room_create: `${ROOM_ORIGIN}/api/agent-rooms`,
+      invite_redeem: `${ROOM_ORIGIN}/api/agent-invites/redeem`,
+      access_requests: `${ROOM_ORIGIN}/api/access-requests`,
+      needs_me: `${ROOM_ORIGIN}/api/needs-me`,
+      mcp: `${ROOM_PUBLIC_WWW}/mcp`
     }),
     key_routes: KEY_ROUTES,
     join: JOIN_TIERS,
@@ -413,6 +426,8 @@ www ${ROOM_PUBLIC_WWW}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+governance ${ROOM_ORIGIN}/.well-known/governance.json
+openapi ${ROOM_ORIGIN}/openapi.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
 skills ${ROOM_ORIGIN}/skills
@@ -518,6 +533,8 @@ www ${ROOM_PUBLIC_WWW}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+governance ${ROOM_ORIGIN}/.well-known/governance.json
+openapi ${ROOM_ORIGIN}/openapi.json
 mcp-card ${ROOM_PUBLIC_WWW}/mcp/server-card
 mcp-discovery ${ROOM_ORIGIN}/.well-known/mcp.json
 kits ${ROOM_ORIGIN}/kits.txt
@@ -983,6 +1000,10 @@ const CANONICAL = Object.freeze({
   // agents.json: the agent-world equivalent of llms.txt (Wildcard/Steinberger draft).
   [AGENTS_JSON_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentsJson() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  // Governance policy (Burs-IA steal A2): generated from enforcing config, so
+  // the served policy cannot drift from what the code enforces.
+  "/.well-known/governance.json": Object.freeze({ type: "application/json; charset=utf-8",
+    body: governanceJson({ origin: ROOM_ORIGIN, revision: deployedInfo().revision, buildId: deployedInfo().buildId }) }),
   [MCP_SERVER_CARD_PATH]: MCP_SERVER_CARD_DOC,
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
   // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
@@ -1008,6 +1029,8 @@ const ALIASES = Object.freeze({
     ["/room/skills", "/project-room/skills"].flatMap(path =>
       withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
+  "/room/.well-known/governance.json": "/.well-known/governance.json",
+  "/project-room/.well-known/governance.json": "/.well-known/governance.json",
   ...Object.fromEntries(
     [
       "/.well-known/mcp",

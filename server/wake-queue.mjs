@@ -15,12 +15,12 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { wakeQueueLimits as limits } from "./wake-queue-limits.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-export const wakeQueueLimits = Object.freeze({
-  active: 200, receipts: 5000, horizon: 365 * 86400000,
-  maxAttempts: 5, baseBackoffMs: 60000, maxBackoffMs: 3600000, leaseMs: 30000, intentBytes: 4096
-});
+// Re-exported from the leaf module so existing importers keep working; the
+// object identity is shared with the enforcing WakeQueue code below.
+export const wakeQueueLimits = limits;
 export const wakeQueueSchema = `
   CREATE TABLE IF NOT EXISTS wake_queue (
     room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, queue_key TEXT NOT NULL,

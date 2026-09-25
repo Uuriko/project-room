@@ -26,6 +26,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
+import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
@@ -47,7 +48,7 @@ import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
-import { AccessRequests } from "./access-requests.mjs";
+import { AccessRequests, REQUEST_TTL_MS } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
@@ -1469,6 +1470,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
+      // Burs-IA steal A1: GET /openapi.json is generated from the canonical
+      // route table (server/discoverability.mjs), never hand-maintained, so
+      // the served spec cannot drift from the live routes. The /room alias
+      // keeps the prefix-preserving www edge consistent with the packets.
+      if (url.pathname === "/openapi.json" || url.pathname === "/room/openapi.json") {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
+        return json(res, 200, buildOpenApiJson({ origin: expectedOrigin() }), req.method === "HEAD");
+      }
       // Public room directory (#605): owner opt-in listing so a freshly
       // minted identity can discover real rooms to request access to.
       // Sanitized field-by-field in the module: no member, identity, or
@@ -1562,6 +1571,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
+        // RFC 8288 discovery hints on the public HTML door too: a cold agent
+        // starting at GET / alone can find the agent card from Link headers.
+        res.setHeader("Link", discoveryLinks());
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
@@ -2326,7 +2338,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
           displayName: data.displayName, card: null });
-        return json(res, result.duplicate ? 200 : 201, result);
+        // Burs-IA steal A1: a guest join is a cold-start step — the response
+        // is self-describing. Guests get read+chat only, so the guidance is
+        // orientation + hello, never work claims or admin moves.
+        const guestRoom = `/api/rooms/${encodeURIComponent(result.roomId)}`;
+        return json(res, result.duplicate ? 200 : 201, {
+          ...result,
+          next: [
+            Object.freeze({ action: "see-who-is-around", method: "GET", path: `${guestRoom}/presence`,
+              description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
+            Object.freeze({ action: "say-hello", method: "POST", path: `${guestRoom}/commands`,
+              description: "Say hello: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }. Your guest pass grants read+chat; work claims, polls, and admin are out of scope." }),
+          ],
+          nextActions: nextActionsForInviteRedeem(result.roomId),
+        });
       }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
@@ -2675,7 +2700,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, fields) && !exact(data, withReferral)) {
           reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId are the accepted fields");
         }
-        return json(res, 201, accessRequests.request(data.roomId, data));
+        // Burs-IA steal A1: filing an access request is a cold-start step — the
+        // response teaches the status-poll path and the expected decision
+        // window (requests expire undecided after REQUEST_TTL_MS).
+        const filed = accessRequests.request(data.roomId, data);
+        return json(res, 201, {
+          ...filed,
+          next: [Object.freeze({
+            action: "poll-status",
+            method: "GET",
+            path: `/api/access-requests/${encodeURIComponent(filed.requestId)}?identityId=${encodeURIComponent(data.identityId)}`,
+            description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.`,
+          })],
+          nextActions: nextActionsForAccessRequest({
+            requestId: filed.requestId, identityId: data.identityId,
+            decisionWindowDays: REQUEST_TTL_MS / 86400000,
+          }),
+        });
       }
       // Agent room ownership, self-serve path: a self-minted identity
       // creates a room and becomes its owner. The pri_ secret travels in
@@ -3964,7 +4005,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           socket.once("close", () => clearTimeout(deadline));
         });
       }
-      json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
+      // Burs-IA steal A1: listed routes get route-aware hint/next guidance on
+      // top of the canonical envelope; everything else keeps the existing body.
+      let errorOverride = null;
+      try {
+        errorOverride = discoverabilityErrorOverride({ pathname: requestPathname(req.url), httpStatus, code });
+      } catch { /* base envelope keeps its shape on parse failure */ }
+      const errorBody = errorOverride
+        ? { error: { code, message }, ...errorOverride, operationId, category }
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category };
+      json(res, httpStatus, errorBody);
     }
   });
   server.requestTimeout = 15000;

@@ -3,6 +3,37 @@
 // string. The JSON-RPC code stays -32602 for schema problems and -32001 when
 // a room tool is called with no identity bearer.
 
+import { randomBytes } from "node:crypto";
+
+const operationId = () => `op_${randomBytes(6).toString("base64url")}`;
+
+// Canonical agent guidance attached to JSON-RPC errors under error.data. The
+// JSON-RPC error.code/message stay protocol-valid; the guidance fields mirror
+// the HTTP canonical envelope (status/reason/hint/non-empty next[]/
+// operationId/category) so MCP agents get the same machine-readable help.
+const canonicalData = ({ reason, category, hint, next, status = "action_required" }) => ({
+  reason,
+  hint,
+  next,
+  status,
+  operationId: operationId(),
+  category,
+});
+
+// Transport-level JSON-RPC errors (bad method, bad JSON, dispatch crash).
+// Used by server/mcp-http.mjs for the 405/400/500 replies.
+export function mcpTransportError(code, message, { reason, hint, next, category, status } = {}) {
+  return {
+    jsonrpc: "2.0",
+    id: null,
+    error: {
+      code,
+      message,
+      data: canonicalData({ reason, category, hint, next, status }),
+    },
+  };
+}
+
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export const MCP_AUTH_HINT = "mint one at POST /api/agent-identities";
@@ -118,7 +149,18 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
       error: {
         code: -32001,
         message: MCP_AUTH_MESSAGE,
-        data: { reason: "auth_required", tool: tool ?? null, hint: hint || MCP_AUTH_HINT }
+        data: {
+          tool: tool ?? null,
+          ...canonicalData({
+            reason: "auth_required",
+            category: "access",
+            hint: hint || MCP_AUTH_HINT,
+            next: [
+              Object.freeze({ path: "/api/agent-identities", method: "POST" }),
+              Object.freeze({ tool: "room_check_access" }),
+            ],
+          }),
+        },
       }
     };
   }
@@ -129,7 +171,21 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
       error: {
         code: -32602,
         message: "unknown_tool",
-        data: { reason: "unknown_tool", tool: tool ?? null, suggestion }
+        data: {
+          tool: tool ?? null,
+          suggestion,
+          ...canonicalData({
+            reason: "unknown_tool",
+            category: "not_found",
+            hint: suggestion
+              ? `Did you mean "${suggestion}"? Re-list tools with tools/list and use the exact snake_case name.`
+              : "Re-list tools with tools/list and use an exact snake_case name.",
+            next: [
+              Object.freeze({ command: "tools/list" }),
+              Object.freeze({ tool: "room_check_access" }),
+            ],
+          }),
+        },
       }
     };
   }
@@ -139,7 +195,18 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
     error: {
       code: -32602,
       message: "invalid_arguments",
-      data: { reason: "invalid_arguments", tool: tool ?? null, missing, unexpected, invalid }
-    }
+      data: {
+        tool: tool ?? null,
+        missing,
+        unexpected,
+        invalid,
+        ...canonicalData({
+          reason: "invalid_arguments",
+          category: "input",
+          hint: hint ?? "Fix the flagged arguments and retry; re-list the tool schema with tools/list.",
+          next: [Object.freeze({ command: "tools/list" })],
+        }),
+      },
+    },
   };
 }
