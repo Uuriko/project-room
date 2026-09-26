@@ -211,7 +211,7 @@ export default {
     // job is stale or failing, so a plain status check catches dead crons.
     if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
       const head = request.method === 'HEAD';
-      try { return jobHealthResponse(await env.ROOM.getByName('invite-only-pilot').readJobHealth(), { head }); }
+      try { return jobHealthResponse(await env.ROOM.getByName('invite-only-pilot-v2').readJobHealth(), { head }); }
       catch (error) { console.error(`[job-heartbeat] read failed: ${error?.message ?? error}`); return jobHealthUnavailable({ head }); }
     }
     const address = request.headers.get('CF-Connecting-IP');
@@ -223,7 +223,7 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
-    const response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+    const response = await env.ROOM.getByName('invite-only-pilot-v2').fetch(new Request(request, { headers }));
     const authFailure = response.headers.get('X-Room-Auth-Failure');
     if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}; ${response.headers.get("X-Room-Auth-Diagnostic") || ""}`);
     return response;
@@ -238,7 +238,7 @@ export default {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) { message.setReject(emailRoutingRejections.unavailable); return; }
     // Refuse before reading the stream: the size cap is the first defence.
     if (message.rawSize > emailRoutingLimits.rawBytes) { message.setReject(emailRoutingRejections.tooLarge); return; }
-    const room = env.ROOM.getByName('invite-only-pilot');
+    const room = env.ROOM.getByName('invite-only-pilot-v2');
     let routed;
     try {
       const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
@@ -264,7 +264,7 @@ export default {
   // tail show an exception instead of a green "ok" over swallowed warnings.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    const room = env.ROOM.getByName('invite-only-pilot');
+    const room = env.ROOM.getByName('invite-only-pilot-v2');
     const outcomes = await runCronJobs({
       'gmail-sync': () => room.syncGmailMailboxes(),
       'channel-drain': () => room.drainChannelBacklog(),
