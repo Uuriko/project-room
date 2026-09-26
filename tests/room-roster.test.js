@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   ROOM_ROSTER, rosterById, rosterSelection, rosterNameTaken,
-  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
+  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary, connectionStanding,
   setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
   claudeMcpAddCommand, reconnectCopy
 } from "../src/room-roster.js";
@@ -56,6 +56,47 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.match(capabilitySummary("chat")[1], /does not start a model/);
   assert.equal(capabilitySummary("contribute").some(line => /work drafts/.test(line)), true);
   assert.equal(capabilitySummary("review").some(line => /Review work/.test(line)), true);
+  const revoked = connectionStanding({ connectionStatus: "revoked", permissions: ["accept_work", "complete_work", "verify", "write_external"] });
+  assert.equal(revoked.compact, "Key revoked");
+  assert.doesNotMatch(revoked.summary, /Can accept, complete, verify, and write/);
+  const expired = connectionStanding({ connectionStatus: "expired", memberFound: true, permissions: [] });
+  assert.equal(expired.compact, "Expired");
+  assert.doesNotMatch(expired.summary, /joined/);
+  const disconnected = connectionStanding({ connectionStatus: "disconnected" });
+  assert.equal(disconnected.compact, "Disconnected");
+  assert.match(disconnected.detail, /not shown/);
+  const missing = connectionStanding({ connectionStatus: "key_issued", memberFound: false, permissions: [] });
+  assert.equal(missing.compact, "Member record missing");
+  assert.doesNotMatch(missing.summary, /cannot act yet|joined/);
+  const pending = connectionStanding({
+    connectionStatus: "key_issued",
+    memberFound: true,
+    pending: true,
+    permissions: ["accept_work", "complete_work", "verify", "write_external"],
+  });
+  assert.match(pending.compact, /waiting for first action/);
+  assert.match(pending.detail, /Work grants are not shown/);
+  assert.doesNotMatch(pending.summary, /Seat can act|Can accept, complete, verify, and write|Work grants include/);
+  const chatOnly = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: [] });
+  assert.match(chatOnly.compact, /Can read and post/);
+  assert.doesNotMatch(chatOnly.compact, /when addressed/);
+  assert.doesNotMatch(chatOnly.summary, /when addressed/);
+  assert.match(chatOnly.detail, /Work grants not selected/);
+  assert.doesNotMatch(chatOnly.summary, /cannot act|must receive|Seat can act/);
+  const changed = connectionStanding({
+    connectionStatus: "access_changed",
+    memberFound: true,
+    permissions: ["accept_work", "complete_work", "verify", "write_external"],
+  });
+  assert.match(changed.compact, /Recheck required/);
+  assert.doesNotMatch(changed.summary, /Can read and post|Chat remains available|Work grants include/);
+  const unknown = connectionStanding({ connectionStatus: null, memberFound: null, permissions: ["accept_work"] });
+  assert.equal(unknown.compact, "Credential status not verified");
+  assert.doesNotMatch(unknown.summary, /Can read and post|Chat remains available/);
+  const limited = connectionStanding({ connectionStatus: "key_issued", memberFound: true, permissions: ["accept_work"], hostTools: [] });
+  assert.match(limited.detail, /Owner-selected limit: complete_work, verify, write_external not granted/);
+  assert.match(limited.detail, /Host tools missing/);
+  assert.match(limited.detail, /Chat remains available/);
   assert.match(setupChecklist({ route: "mcp" }).join("\n"), /room_check_access/);
   assert.match(setupChecklist({ route: "packet" }).join("\n"), /Use my AI/);
   assert.match(setupChecklist({ route: "direct" }).join("\n"), /On that computer/);
