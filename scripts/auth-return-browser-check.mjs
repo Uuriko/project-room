@@ -88,8 +88,17 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   assert.equal(await passwordInput.getAttribute("autocomplete"), "new-password");
   assert.equal(await passwordInput.getAttribute("value"), null);
   await page.locator("#email-auth-panel input[name=email]").fill(email);
+  const assertCompactHeading = async () => {
+    const back = await page.locator("#email-auth-back").boundingBox();
+    const heading = await page.locator(".auth-email-title").boundingBox();
+    assert.ok(back.width >= 44 && back.height >= 44, "Back retains a usable target");
+    assert.ok(heading.x >= back.x + back.width, "heading does not overlap Back");
+    assert.ok(Math.abs((back.y + back.height / 2) - (heading.y + heading.height / 2)) <= 1, "Back and heading share a row");
+  };
+  await assertCompactHeading();
   await page.screenshot({ path: "test-results/signin-email-signup.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
+  await assertCompactHeading();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator("#email-auth-panel button[type=submit]").isVisible(), true);
   await page.screenshot({ path: "test-results/signin-email-signup-mobile.png", fullPage: true });

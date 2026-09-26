@@ -1464,10 +1464,12 @@ summary { overflow-wrap: anywhere; }
 .signin-methods { display: grid; gap: .75rem; }
 .signin-methods .button { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; line-height: 1.4; padding: .75rem 1rem; margin: 0; }
 .signin-methods #google-signin { font-size: 1rem; padding: .75rem 1rem; margin: 0; }
-#email-auth-back { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: 0 0 .75rem -.6rem; padding: .6rem; }
+#email-auth-step { position: relative; }
+#email-auth-step #email-auth-panel { margin-top: 0; }
+#email-auth-back { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0; padding: .6rem; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
 #auth-panel > #signin-more { margin-top: 1rem; }
 .join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
 .join-agent[open] > summary { margin-bottom: .75rem; }
 
-.auth-panel .auth-email-title { margin: 0; font-size: 1.15rem; }
+.auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }
