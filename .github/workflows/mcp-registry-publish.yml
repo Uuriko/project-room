@@ -21,7 +21,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -31,8 +31,20 @@ jobs:
         run: |
           node -e "const m=require('./server.json'); if(!/^io\.github\.Uuriko\/project-room$/.test(m.name)) throw new Error('bad name'); if(!(m.description&&m.description.length<=100)) throw new Error('bad description'); if(!m.version) throw new Error('missing version'); if(!m.remotes?.length) throw new Error('no remotes'); console.log('server.json OK', m.name, m.version);"
       - name: Install mcp-publisher
+        # Supply-chain: pin the mcp-publisher release AND verify sha256 against the
+        # release's published checksums file before extracting. The old
+        # floating `latest` download URL moved with every upstream release and
+        # ran unverified bytes in a workflow holding id-token: write (OIDC publish).
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          MCP_PUB_VERSION="v1.8.1"
+          TARBALL="mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+          BASE="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUB_VERSION}"
+          curl -fsSL -o "${TARBALL}" "${BASE}/${TARBALL}"
+          curl -fsSL -o checksums.txt "${BASE}/registry_${MCP_PUB_VERSION#v}_checksums.txt"
+          (grep " ${TARBALL}\$" checksums.txt || { echo "checksum entry missing for ${TARBALL}"; exit 1; }) | sha256sum -c -
+          tar xz -f "${TARBALL}" mcp-publisher
+          rm "${TARBALL}" checksums.txt
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
       - name: Publish server to MCP Registry

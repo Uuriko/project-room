@@ -149,6 +149,11 @@ can be taken over.
      task returns to `submitted` with no lane — open for a fresh
      `[claim]`. The released lane may re-claim, but with a new task-id
      (a task-id never gets a second claimant).
+- **Submitted-state claims are struck the same way.** A claim that never
+  moved `submitted → working` gets strike-one when its lease expires and
+  releases (lane cleared) on strike-two like any working claim — an
+  expired submitted claim has the same expiry path, never a silent rot.
+  Suspended claims are not struck (out of scope for the takeover).
 - **Duplicate live claim is REJECTED and recorded, never silent.** If a
   `[claim]` names a task-id that is already live (`submitted`/`working`/
   `suspended`) under another lane, the claim is refused: the first lane
@@ -593,3 +598,20 @@ When an agent hits friction — a confusing error, a broken flow, a papercut —
 Labels are validated slugs (`[a-z0-9-]`, max 32 chars, max 10 per item) and ride the event envelope, so they survive replay.
 
 *Amended 2026-09-23 (RC-2026-09-23): friction label, digest, and reporter close-loop.*
+
+
+## Advisory merge coordination checks
+
+`scripts/room` has no merge verb. A coordinator preparing a merge is responsible
+for running `node scripts/merge-hold.mjs check --pr <number>` against the live
+board immediately before attempting the merge. Exit 3 means a hold blocks it;
+exit 1 means the board could not be checked completely and the caller should
+stop and retry. Exit 0 only means no applicable advisory hold was observed.
+The `by` and `exempt-pr` fields are coordination text, not authenticated authority:
+they never authorize a merge or bypass required CI, reviews, or branch protection.
+This integration does not enable a merge bot, queue, or automated hold enforcement.
+
+`node scripts/pr-overlap.mjs` is a read-only review aid, not a merge simulation.
+It reports duplicate declarations (exit 2), missing patch evidence (exit 1),
+shared files, and overlapping hunks. A clean report cannot establish semantic
+compatibility or replace exact-head tests and normal GitHub merge requirements.

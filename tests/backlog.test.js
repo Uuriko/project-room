@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,10 +29,29 @@ function backlogFile() {
   return f;
 }
 
-function run(...args) {
-  const res = spawnSync("bash", [roomScript, ...args], { encoding: "utf8", timeout: 30000 });
-  return res;
+// Exercise the real board transport through a strict fake gh executable.
+// Unexpected commands fail; no production-only test bypass is needed.
+const fakeBin = mkdtempSync(join(tmpdir(), "backlog-gh-"));
+writeFileSync(join(fakeBin, "gh"), `#!/bin/sh
+case "$*" in
+  "api --paginate repos/Uuriko/project-room/issues/266/comments?per_page=100")
+    case "$BACKLOG_BOARD_MODE" in
+      unavailable) exit 1 ;;
+      malformed) printf 'not-json\\n' ;;
+      *) printf '[]\\n' ;;
+    esac ;;
+  "api -i /rate_limit") printf 'HTTP/2 200\\nDate: %s\\n\\n{}\\n' "$(date -u '+%a, %d %b %Y %H:%M:%S GMT')" ;;
+  *) printf 'unexpected gh call: %s\\n' "$*" >&2; exit 91 ;;
+esac
+`);
+chmodSync(join(fakeBin, "gh"), 0o755);
+function runWithBoard(mode, ...args) {
+  return spawnSync("bash", [roomScript, ...args], {
+    encoding: "utf8", timeout: 30000,
+    env: { ...process.env, ROOM_BOARD_FIXTURE: "", ROOM_ENFORCER_ALLOW_STALE: "1", BACKLOG_BOARD_MODE: mode, PATH: `${fakeBin}:${process.env.PATH}` },
+  });
 }
+const run = (...args) => runWithBoard("empty", ...args);
 
 // Authoring gate answers (per .agents/skills/test-audit/SKILL.md):
 // 1. Protects the S2 backlog contract: list order (top-first), pull marks the
@@ -42,8 +61,7 @@ function run(...args) {
 //    the in-place sed/awk edit corrupting the file or dropping sections;
 //    field extraction breaking on multi-word titles.
 // 3. No existing coverage: this is new functionality (S2).
-// 4. No production seam: tests drive the real script via --file against a
-//    temp BACKLOG.md. No new exports.
+// 4. No production seam: fake gh on PATH supplies only the actual read calls.
 
 test("backlog list shows ready items top-first", () => {
   const f = backlogFile();
@@ -126,4 +144,16 @@ test("backlog rejects an invalid lane tag", () => {
   const res = run("backlog", "pull", "--lane", "bad lane", "--file", f);
   assert.notEqual(res.status, 0);
   assert.ok(res.stderr.includes("--lane must match"));
+});
+
+
+test("backlog pull refuses an unavailable or malformed board without claiming files", () => {
+  for (const mode of ["unavailable", "malformed"]) {
+    const file = backlogFile();
+    const before = readFileSync(file, "utf8");
+    const result = runWithBoard(mode, "backlog", "pull", "--lane", "testlane", "--file", file);
+    assert.notEqual(result.status, 0, `${mode} board must not mean unclaimed`);
+    assert.equal(readFileSync(file, "utf8"), before);
+    assert.ok(!result.stdout.includes("[testlane][claim]"));
+  }
 });

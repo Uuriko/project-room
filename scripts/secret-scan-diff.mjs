@@ -23,7 +23,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scanLines } from "../server/secret-scan.mjs";
-import { ALLOWLIST, SKIP_FILES, SCAN_DIRS, SCAN_EXT } from "./secret-scan-check.mjs";
+import { ALLOWLIST, SAFE_ENTROPY_TOKENS, SKIP_FILES, SCAN_DIRS, SCAN_EXT } from "./secret-scan-check.mjs";
 
 // ---------------------------------------------------------------------------
 // Path-based allowlist (.github/secret-scan-allowlist.txt)
@@ -205,7 +205,7 @@ export function scanAddedUnits(units, pathAllowlist) {
   const findings = [];
   for (const [file, fileUnits] of byFile) {
     const texts = fileUnits.map((u) => u.text);
-    const hits = scanLines(texts, { allowlist: ALLOWLIST });
+    const hits = scanLines(texts, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
     for (const h of hits) {
       const unit = fileUnits[h.line - 1];
       findings.push(`${file}:${unit.line} [${h.rule}] ${h.label} (${h.preview})`);

@@ -79,6 +79,20 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
+
+];
+
+
+// Exact non-secret tokens only. Unlike the line allowlist, these suppress
+// entropy noise without skipping credential-pattern checks or adjacent tokens.
+export const SAFE_ENTROPY_TOKENS = [
+  "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",
+  "REHEARSAL_SCRATCH:-$HOME/workspace/rotation-rehearsal",
+  "ROTATION_CUTOVER:-$HOME/workspace/pr-board2/scripts/rotation-cutover.sh",
+  "repos/$REPO/issues/$OLD_ISSUE/comments?per_page=100",
+  "$SCRATCH/fb-repo/fallback/jill-20260926T214500Z.md",
+  "$SCRATCH/fb-repo/fallback/codex-20260926T214700Z.md",
+  "https://api.github.com/repos/Uuriko/project-room/issues/266/comments?per_page=100&page=$",
 ];
 
 // Directories scanned: source code where a real secret could hide.
@@ -120,7 +134,7 @@ function runTreeScan() {
   for (const file of filtered) {
     let text;
     try { text = readFileSync(file, "utf8"); } catch { continue; }
-    const findings = scanText(text, { allowlist: ALLOWLIST });
+    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
     for (const f of findings) {
       console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
       total++;
