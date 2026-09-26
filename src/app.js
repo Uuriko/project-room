@@ -5,7 +5,7 @@ import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
@@ -330,6 +330,7 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     signinUI?.clear();
+    showSigninMethods();
     agentSigninUI?.clear();
     clearStoredPasswords();
     const accessKey = $("#access-key");
@@ -2516,7 +2517,8 @@ function revealLocationHash() {
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
-  return workActions(i, state.members[session.member.id], now).filter(([action]) => (["release", "renew"].includes(action)) === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  if (!scopeOnly) return renderWorkActions(i, state.members[session.member.id], { now, busy, esc, workId: i.id });
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => ["release", "renew"].includes(action)).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
   try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
@@ -2961,7 +2963,9 @@ $("#invitation-accept").addEventListener("click", async () => {
 $("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
 function focusSignin() {
   const keyVisible = !$("#signin-extra").hidden && $("#key-signin").open;
-  $(keyVisible ? "#access-key" : "#google-signin").focus({ preventScroll: true });
+  const emailVisible = !$("#email-auth-step").hidden;
+  const target = keyVisible ? $("#access-key") : emailVisible ? $("#email-auth-panel [name=email]") : $("#google-signin");
+  target?.focus({ preventScroll: true });
 }
 function setSigninExtra(open) {
   const extra = $("#signin-extra"), toggle = $("#signin-more");
@@ -2974,28 +2978,40 @@ $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
   setSigninExtra(extra ? extra.hidden : false);
 });
+function showSigninMethods() {
+  $("#signin-methods").hidden = false;
+  $("#email-auth-step").hidden = true;
+  $("#signin-more").hidden = false;
+}
 function openEmailAuth(mode) {
   const panel = $("#email-auth-panel");
-  signinUI.openEmail(mode, panel);
+  if (!signinUI.openEmail(mode, panel)) return;
+  $("#signin-methods").hidden = true;
+  $("#email-auth-step").hidden = false;
+  $("#signin-more").hidden = true;
+  setSigninExtra(false);
   panel?.querySelector('[name="email"]')?.focus();
 }
-$("#email-signup")?.addEventListener("click", () => openEmailAuth("signup"));
+$("#email-auth-back")?.addEventListener("click", () => {
+  if (!signinUI.closeEmail()) return;
+  showSigninMethods();
+  $("#email-signin").focus();
+});
 $("#email-signin")?.addEventListener("click", () => openEmailAuth("login"));
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
 $("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
 $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
-// Connecting an agent is the thing this room does that a chat app does not,
-// and the sign-in screen showed no sign of it: "Welcome.", one Google button,
-// and a More options disclosure hiding everything else. So the prompt sits
-// here, outside that disclosure, readable before anything is clicked, and the
-// explanation is what goes behind a summary instead.
-//
-// The address is built from location.origin rather than written down, so it
-// always names the host the reader is actually on. A hardcoded one goes stale
-// the first time this is served elsewhere, and a staging address in
-// agent-facing copy is already something live-audit fails the build for.
+// Keep the agent path discoverable without asking everyone to read setup
+// instructions. Existing links open the disclosure directly.
+function revealAgentSigninLink() {
+  if (location.hash !== "#join-agent") return;
+  const details = $("#join-agent");
+  if (details) details.open = true;
+}
+revealAgentSigninLink();
+// Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
 function fillJoinAgent() {
   const field = $("#join-agent-prompt");
@@ -4018,6 +4034,7 @@ window.addEventListener("popstate", () => {
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
+  revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (fragment) openInvitation(fragment);
   else revealLocationHash();

@@ -114,3 +114,25 @@ export async function clickChrome(page, selector) {
   }
   await control.click();
 }
+
+// Work cards expose one primary action; secondary actions use the native More
+// disclosure. Use real input so visibility, focus, and keyboard behavior matter.
+export async function clickWorkAction(card, action, { keyboard = false } = {}) {
+  const control = card.locator(`[data-action="${action}"]`);
+  await control.waitFor({ state: "attached" });
+  if (await control.evaluate(node => Boolean(node.closest("details.work-more:not([open])")))) {
+    const summary = card.locator(".work-more > summary");
+    if (keyboard) {
+      await summary.focus();
+      await summary.press("Enter");
+    } else {
+      await summary.click();
+    }
+  }
+  if (keyboard) {
+    await control.focus();
+    await control.press("Enter");
+  } else {
+    await control.click();
+  }
+}
