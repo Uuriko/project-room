@@ -140,9 +140,9 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
   f.store.db.prepare(`INSERT INTO guest_selfserve(member_id,room_id,key_hash,created_at,last_active_at)
     VALUES('guest-agent-selfserve','commons',?,?,?)`)
     .run("b".repeat(64), f.now(), f.now());
-  f.store.db.prepare(`INSERT INTO guest_selfserve_idem(room_id,key_hash,request_id,token,member_id,expires_at,renewed,created_at)
-    VALUES('commons',?,'recovery-selfserve-request','recovery-selfserve-token','guest-agent-selfserve',?,0,?)`)
-    .run("b".repeat(64), f.now() + 86400000, f.now());
+  f.store.db.prepare(`INSERT INTO guest_selfserve_idem(room_id,key_hash,request_id,token_hash,member_id,expires_at,renewed,created_at)
+    VALUES('commons',?,'recovery-selfserve-request',?,'guest-agent-selfserve',?,0,?)`)
+    .run("b".repeat(64), "c".repeat(64), f.now() + 86400000, f.now());
   // Seed one referral invite (redeemed) + its key row + chain membership so
   // the capture covers referral_invite_keys, referral_invites and
   // referral_chain_members (#1025 signed agent-carried referral invites).
