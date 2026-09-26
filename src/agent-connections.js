@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionStanding, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -150,11 +150,23 @@ export function installAgentConnections({ client, getState }) {
       for (const row of result.connections) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName;
-        const state = row.status === "key_issued"
-          ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
-          : statuses[row.status];
-        text.textContent = `${state} · ${new Date(row.expiresAt).toLocaleString()}`;
-        li.append(name, text);
+        const members = getState()?.members;
+        const seat = members ? members[row.memberId] : undefined;
+        const standing = connectionStanding({
+          connectionStatus: row.status,
+          memberFound: members ? seat != null : null,
+          permissions: seat ? seat.permissions ?? [] : null,
+          hostTools: null,
+          pending: row.status === "key_issued" && !row.firstActionAt,
+        });
+        text.textContent = `${standing.compact} · ${new Date(row.expiresAt).toLocaleString()}`;
+        const detail = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = "Permission detail";
+        const detailText = document.createElement("p");
+        detailText.textContent = standing.detail;
+        detail.append(summary, detailText);
+        li.append(name, text, detail);
         if (row.status !== "disconnected") {
           const copySteps = document.createElement("button");
           copySteps.type = "button"; copySteps.className = "button ghost"; copySteps.textContent = "Copy plug-in steps";

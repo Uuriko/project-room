@@ -156,7 +156,7 @@ export function touchLruEntry(map, key, makeValue, capacity) {
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
-  telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
+  telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
@@ -2109,7 +2109,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // account instead of the sign-in find-or-provision order.
       const requireAccountSession = () => {
         const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage your account");
         let session;
         try {
           session = store.authenticateAccountSession(slotToken);
@@ -2117,7 +2117,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (error.status !== 401) throw error;
           reject(401, "invalid_session", "That session is no longer valid; sign in again");
         }
-        if (!session.account) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!session.account) reject(401, "account_session_required", "Sign in to manage your account");
         return { ...session, slotToken };
       };
       const providerConfigured = probe => {
@@ -2407,6 +2407,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ],
           nextActions: nextActionsForInviteRedeem(result.roomId),
         });
+      }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/share-links/join-agent" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
@@ -2831,6 +2836,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             decisionWindowDays: REQUEST_TTL_MS / 86400000,
           }),
         });
+      }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity
       // creates a room and becomes its owner. The pri_ secret travels in
