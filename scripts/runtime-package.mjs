@@ -44,6 +44,7 @@ optional.push("client/request-notices.mjs");
 optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
+optional.push("client/begin-work.mjs"); // selected-work Begin (imported by client/mcp-stdio.mjs and server/mcp-full-profile.mjs)
 optional.push("server/inbox.mjs");
 optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
 optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
@@ -124,6 +125,7 @@ optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs", "server/sms-ingest.mjs", "server/messenger-ingest.mjs", "server/sms-outbound.mjs", "server/messenger-outbound.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/channel-live-status.mjs"); // Task 10: durable Telegram live-delivery/send facts (imported by server/store.mjs)
+optional.push("server/delivery-tracing.mjs"); // R1: opt-in OTel delivery-path tracing (pure, no store.mjs imports)
 optional.push("server/channel-send-budgets.mjs"); // Task 41: per-connection send budgets (imported by server/http.mjs; imports token-bucket.mjs and store.mjs)
 optional.push("server/token-bucket.mjs"); // token-bucket limiter (imported by server/channel-send-budgets.mjs; pure, no imports)
 optional.push("server/spam-quarantine-journal.mjs"); // Durable spam-guard quarantine journal (imported by server/store.mjs)

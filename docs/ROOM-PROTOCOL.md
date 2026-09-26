@@ -174,6 +174,74 @@ a lane SHOULD run its intended file set through the detector against the
 current board — a hit means negotiate first, then claim non-overlapping
 files. The detector is advisory: it flags, it never blocks.
 
+### 4b. Live file-claim registry (S1)
+
+`scripts/room rebuild` renders two machine sections into ROOM-STATE.md from
+the live (submitted/working/suspended) claims:
+
+- `## file-claims` — inverted index: `file | lane | task-id | state`, one
+  row per file per live claim, sorted by file then task-id. This is the
+  live map of who is touching what, right now.
+- `## overlap-warnings` — `file | lanes | task-ids` for every file held by
+  two or more live claims. Empty (rendered as `(none)`) in the healthy case.
+
+The `## signals` line carries `files_claimed=<n>` (unique files across live
+claims) and `overlap_files=<n>` (files with 2+ live holders) for machine
+consumers.
+
+`scripts/room overlaps` is the read-only pre-claim check: `--files "a,b"`
+reports which live claims already hold those files (`(unclaimed)` when
+free); without `--files` it reports all current overlaps. The `claim` verb
+hard-refuses when the requested files collide with another lane's live
+claim; `overlaps` is the soft check a lane runs before drafting.
+
+### 4c. Durable knowledge base (kb/)
+
+`kb/` is the room's durable agent memory: markdown, git-versioned,
+human-readable. State belongs in git, not in agent memory — the next
+lane recovers cold from these files.
+
+- **Layout.** `kb/index.md` (hand-maintained front door),
+  `kb/notes/` (reusable learnings: gotchas, tool quirks),
+  `kb/plans/` (per-claim: what was attempted, what worked, what
+  didn't, what the next lane should know), `kb/decisions/` (why, with
+  date and decider).
+- **Write path.** When a lane posts `[done]`, it also writes
+  `kb/plans/<task-id>.md`. When it learns something reusable, it writes
+  `kb/notes/<slug>.md`. A `[done]` block may carry an optional `kb:`
+  line linking the plan note. Keep AGENTS.md for the *critical*
+  lessons; kb/ holds the long tail.
+- **Read path.** Workers `grep -r kb/` at task start. Promote to an
+  index (sqlite FTS or similar) only when grep stops being enough —
+  markdown stays authoritative, any index is derived and rebuildable.
+- **Index discipline.** A stale index is worse than none: every kb file
+  must be linked from `kb/index.md`, and every link must resolve. The
+  `tests/kb-index.test.js` suite enforces this.
+
+### 4d. Backlog — the fed queue
+
+`BACKLOG.md` (repo root) is the prioritized fed queue. The claims board is
+self-declared work; the backlog is fed work. Sections: `## ready`
+(ranked, top first), `## blocked`, `## done` (archive, newest last).
+One line per item: `- [ ] BL-NNN · title · scope: ... · accept: ... ·
+files: f1, f2`, with optional `· blocked on: ...`, `· claimed: RC-...`,
+`· shipped as: #NNNN` trailers.
+
+The dispatch convention (GUPP — "if there's work on your hook, you run
+it"): an idle lane runs `scripts/room backlog pull`, which takes the top
+unclaimed ready item, marks it `claimed: <task-id>` in place, and emits a
+pre-filled `[lane][claim]` fenced block (task-id, title, `files:` from the
+backlog line) for the lane to post. The lane works it in its own
+persistent worktree, opens a PR, posts `[done]`, then runs `scripts/room
+backlog done BL-NNN --pr NNNN` to archive it. One agent per item.
+
+`backlog pull` refuses when the item's files are held live by another lane
+(via the S1 overlaps check, when present). Room-watch `metrics` reports
+`backlog_ready` / `backlog_blocked` depth; "backlog empty" in the digest is
+a signal for John (add items or pause the loop).
+
+John's single lever: reorder `BACKLOG.md` (or comment the desired order on
+#266 and a lane applies it). The file is the schedule.
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:

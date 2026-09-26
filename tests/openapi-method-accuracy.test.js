@@ -5,8 +5,10 @@
 // probe depends on.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { classify, concrete, probeMethodAccuracy, renderReport } from "../scripts/openapi-method-accuracy.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { classify, concrete, probeMethodAccuracy, renderReport, scratchParent } from "../scripts/openapi-method-accuracy.mjs";
+import { openapiOperations } from "../scripts/open-routes.mjs";
 
 test("classifier: 405 on the documented method is a method mismatch", () => {
   assert.equal(classify({ status: 405, code: "method_not_allowed", other404: false }).verdict, "method_mismatch");
@@ -42,6 +44,23 @@ test("every documented operation is served with its documented method", async ()
   const { failures, checked } = await probeMethodAccuracy({ openapi });
   assert.deepEqual(failures.map(f => `${f.method} ${f.path}: ${f.detail}`), []);
   assert.ok(checked >= 100, `checked ${checked}`);
+  // The probe must check exactly the servable operations (parsed ops minus
+  // worker-only ones the Node server never answers): a parser or filter
+  // regression that silently drops operations must not shrink coverage
+  // unnoticed.
+  const servable = openapiOperations(openapi).filter(op => !op.workerOnly).length;
+  assert.equal(checked, servable, `probe checked ${checked} of ${servable} servable operations`);
+});
+
+test("scratch parent honors TMPDIR, else defaults to repo-local .tmp", t => {
+  const saved = process.env.TMPDIR;
+  t.after(() => { if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved; });
+  process.env.TMPDIR = "/explicit-tmp-parent";
+  assert.equal(scratchParent(), "/explicit-tmp-parent");
+  delete process.env.TMPDIR;
+  const expected = fileURLToPath(new URL("../.tmp", import.meta.url));
+  assert.equal(scratchParent(), expected);
+  assert.ok(existsSync(expected), "the default parent is created");
 });
 
 test("concrete() uses a declared vocabulary where the server constrains the segment", () => {

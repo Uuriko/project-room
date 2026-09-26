@@ -1,0 +1,59 @@
+# INERT WITHOUT THE TAP — see docs/MERGE-QUEUE-DESIGN.md §7.2.
+#
+# Merge-queue receipts backstop for the claims board (#266).
+#
+# Trigger: ONLY `merge_group` events. GitHub dispatches these exclusively for
+# merge-queue entries, so until John enables the queue (§6 of the spec) this
+# workflow can never run — it is documentation, not behavior.
+#
+# Second gate: every job requires the repo variable MERGE_QUEUE_BOT == '1'
+# (repo → Settings → Secrets and variables → Actions → Variables; UNSET by
+# default). Even after the queue is enabled, the bot stays silent until the
+# room explicitly opts in — #266 is near its comment capacity and bot chatter
+# stays opt-in by design.
+#
+# What it does when both gates are open: posts short machine-readable status
+# comments to #266 when the queue starts validating a group
+# (checks_requested) or removes an entry (destroyed), so queue state is
+# visible on the board per spec §5.3. It never merges, never dequeues, never
+# touches code.
+name: merge-queue-receipts
+
+on:
+  merge_group:
+    types: [checks_requested, destroyed]
+
+permissions:
+  issues: write
+
+jobs:
+  validating:
+    if: vars.MERGE_QUEUE_BOT == '1' && github.event.action == 'checks_requested'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post queue-validating notice to #266
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: |
+          prs=$(echo "$HEAD_REF" | grep -oP 'pr-\K[0-9]+' | tr '\n' ',' | sed 's/,$//')
+          [ -z "$prs" ] && prs="(unparsed ref: $HEAD_REF)"
+          gh issue comment 266 --repo Uuriko/project-room --body "[jill][queue] validating merge group on $BASE_REF — PRs #$prs (queue head ${HEAD_SHA:0:7}). See docs/MERGE-QUEUE-DESIGN.md §5.3."
+
+  removed:
+    if: vars.MERGE_QUEUE_BOT == '1' && github.event.action == 'destroyed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post queue-removal notice to #266
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+          REASON: ${{ github.event.reason }}
+        run: |
+          prs=$(echo "$HEAD_REF" | grep -oP 'pr-\K[0-9]+' | tr '\n' ',' | sed 's/,$//')
+          [ -z "$prs" ] && prs="(unparsed ref: $HEAD_REF)"
+          gh issue comment 266 --repo Uuriko/project-room --body "[jill][queue] entry removed from queue on $BASE_REF — PRs #$prs (was ${HEAD_SHA:0:7}; reason: ${REASON:-see PR timeline}). Ejection is not done: claim stays working, rebase/re-verify/re-enqueue per docs/MERGE-QUEUE-DESIGN.md §3."

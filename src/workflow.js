@@ -190,6 +190,44 @@ export function workActions(item, member, now = Date.now()) {
   return actions;
 }
 
+const NEXT_ACTION = Object.freeze({
+  accept: "accept",
+  claim: "claim",
+  start: "start",
+  revise: "resolve",
+  verify: "verify",
+  decide: "decide",
+  provide_evidence: "complete"
+});
+
+// One primary action from the current next step. Other actions stay available
+// behind More. Release and renew stay on the scope record, not in this row.
+export function presentedWorkActions(item, member, now = Date.now()) {
+  const available = workActions(item, member, now).filter(([action]) => !["release", "renew"].includes(action));
+  const next = nextWorkStep(item, now);
+  const actionId = NEXT_ACTION[next.action] ?? null;
+  const match = actionId ? available.find(([action]) => action === actionId) : null;
+  if (!match) return { primary: null, more: available, nextAction: next.action, nextLabel: next.label };
+  return {
+    primary: { action: match[0], label: match[0] === "verify" ? match[1] : next.label },
+    more: available.filter(([action]) => action !== match[0]),
+    nextAction: next.action,
+    nextLabel: next.label
+  };
+}
+
+export function renderWorkActions(item, member, { now = Date.now(), busy = false, esc = value => String(value ?? ""), workId = item?.id } = {}) {
+  const presented = presentedWorkActions(item, member, now);
+  const button = (action, label, prominence) => `<button type="button" class="button ${prominence}" data-action="${esc(action)}" data-work-id="${esc(workId)}" data-focus-key="work-action:${esc(workId)}:${esc(action)}"${busy ? " disabled" : ""}>${esc(label)}</button>`;
+  const primary = presented.primary ? button(presented.primary.action, presented.primary.label, "primary") : "";
+  const moreButtons = presented.more.map(([action, label]) => button(action, label, "secondary")).join("");
+  const more = moreButtons
+    ? `<details class="work-more"><summary data-focus-key="work-more:${esc(workId)}">More</summary><div class="work-more-actions">${moreButtons}</div></details>`
+    : "";
+  const limit = `<p class="work-begin-limit">Records the Room action. Does not invoke Begin or start a host.</p>`;
+  return limit + primary + more;
+}
+
 // Round-2 #117: done chip. Marks terminally finished work at a glance — a
 // small chip distinct from the state badge, rendered on work cards and on
 // message links that reference finished work. HTML-escaped by construction

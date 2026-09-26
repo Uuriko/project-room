@@ -44,6 +44,7 @@ import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_D
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
+import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -1902,6 +1903,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const bodyHash = createHash("sha256").update(data.body, "utf8").digest("hex");
             recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
               to: data.to, subject: data.subject, bodyHash, threadId: data.threadId ?? null, at: store.now() });
+            // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send
+            // spans the provider send; delivery.receipt spans the journal settle
+            // that records the delivery confirmation. Only the channel, the send
+            // id, and outcomes are recorded — never bodies or recipients.
+            const tracer = getTracer();
+            const bridgeSpan = tracer.startSpan(SPAN_NAMES.BRIDGE_SEND, { attributes: {
+              [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
             let providerId = null, sendError = null;
             try {
               if (data.channel === "gmail") {
@@ -1911,14 +1919,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
                 providerId = (await sendTelegramDirect({ config: telegram, to: data.to, text: data.body, fetchImpl })).messageId;
                 telegramStatus.sent(auth.account.id, null, { at: store.now(), outcome: "sent", code: "direct" });
               }
-            } catch (error) { sendError = error; }
-            const settled = completeDirectSend(store.db, sendId, sendError
-              ? { status: "failed", errorCode: sendError instanceof ServiceError ? sendError.code : "channel_send_failed", at: store.now() }
-              : { status: "sent", providerId, at: store.now() });
-            if (sendError) throw sendError;
-            return json(res, 200, { contractVersion: 1,
-              viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision },
-              send: publicDirectSend(settled) });
+              bridgeSpan.setAttribute(ATTR.OUTCOME, "ok");
+              bridgeSpan.setStatusOk();
+            } catch (error) { sendError = error; bridgeSpan.recordException(error); }
+            finally { bridgeSpan.end(); }
+            const receiptSpan = tracer.startSpan(SPAN_NAMES.RECEIPT, { parent: bridgeSpan, attributes: {
+              [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
+            try {
+              const settled = completeDirectSend(store.db, sendId, sendError
+                ? { status: "failed", errorCode: sendError instanceof ServiceError ? sendError.code : "channel_send_failed", at: store.now() }
+                : { status: "sent", providerId, at: store.now() });
+              receiptSpan.setAttribute(ATTR.OUTCOME, sendError ? "error" : "ok");
+              receiptSpan.setStatusOk();
+              if (sendError) throw sendError;
+              return json(res, 200, { contractVersion: 1,
+                viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision },
+                send: publicDirectSend(settled) });
+            } finally {
+              receiptSpan.end();
+            }
           }
           if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
             || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
@@ -2847,6 +2866,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             method: "GET",
             path: `/api/access-requests/${encodeURIComponent(filed.requestId)}?identityId=${encodeURIComponent(data.identityId)}`,
             description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.`,
+          }), Object.freeze({
+            action: "cancel-request",
+            method: "POST",
+            path: `/api/access-requests/${encodeURIComponent(filed.requestId)}`,
+            description: "Withdraw this pending request. Send { identityId } and Authorization: Bearer with that identity's current secret.",
           })],
           nextActions: nextActionsForAccessRequest({
             requestId: filed.requestId, identityId: data.identityId,
@@ -2908,6 +2932,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
+      }
+      if (accessStatusMatch && req.method === "POST") {
+        rate(`access-request-cancel:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "The requesting identity's current bearer secret is required");
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is required");
+        return json(res, 200, accessRequests.cancel(pathId(accessStatusMatch[1]), data.identityId, secret));
       }
       // Land queue. Any member can add, list, or remove a pull request, and
       // report the tip they are landing. Names match the hosted MCP tools.
@@ -4077,8 +4109,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
           rate(`guest-post:${rateHash(selected.token)}`, 120);
         }
-        const result = store.command(selected.token, roomId, await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES }), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        const command = await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES });
+        // R1 delivery-path tracing (RC-2026-09-26-966): delivery.inbound spans
+        // request receipt through store.command. Opt-in via TELEMETRY=true;
+        // disabled tracers return null spans, so the default path pays nothing
+        // and needs no branching. Only ids and the command type are recorded —
+        // never bodies.
+        const inboundSpan = getTracer().startSpan(SPAN_NAMES.INBOUND, { attributes: {
+          [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
+        try {
+          if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
+          const result = store.command(selected.token, roomId, command, fence);
+          const messageId = result?.event?.data?.messageId ?? result?.event?.id;
+          if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
+          inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
+          inboundSpan.setStatusOk();
+          return json(res, result.duplicate ? 200 : 201, result);
+        } catch (error) {
+          inboundSpan.recordException(error);
+          throw error;
+        } finally {
+          inboundSpan.end();
+        }
       }
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");

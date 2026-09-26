@@ -11,6 +11,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { createRoomFloodGuard } from "../server/room-flood-guard.mjs";
 
 function openStore(t, now = () => Date.now()) {
   const directory = mkdtempSync(join(tmpdir(), "room-flood-"));
@@ -159,4 +160,21 @@ test("room_post_message surfaces 429 rate_limited and a replay does not", async 
   const replay = await call("hello 0", "post-0");
   assert.notEqual(replay.result.isError, true);
   assert.equal(replay.result.structuredContent.status, "duplicate");
+});
+
+
+test("dm.posted spends from the same budget as message.posted (guard unit level)", () => {
+  // Route-level DM posting needs identity-linked agents (bonds.mjs); the
+  // budget rule itself lives in the guard, so pin it here directly.
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const guard = createRoomFloodGuard({ now: () => clock.now });
+  for (let i = 0; i < 25; i++) guard.consume("commons", "alice", "message.posted");
+  for (let i = 0; i < 5; i++) guard.consume("commons", "alice", "dm.posted");
+  assert.throws(() => guard.consume("commons", "alice", "message.posted"), error => {
+    assert.equal(error.status, 429);
+    assert.equal(error.headers["Retry-After"], "2");
+    return true;
+  }, "26th chat-equivalent is limited after 25 posts + 5 DMs: DMs are not a side channel");
+  clock.now += 2000;
+  guard.consume("commons", "alice", "dm.posted");
 });

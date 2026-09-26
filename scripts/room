@@ -200,11 +200,24 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             --live rebuilds from the board instead. --work-for answers
             "is there work for me?": submitted-but-unclaimed tasks, leases
             expiring <6h, unclaimed lanes.
+  overlaps  [--files "a,b"] [--state PATH] [--live]
+            Read-only file-claim registry check. With --files, reports which
+            live claims already hold those files (pre-claim collision check).
+            Without --files, reports every file held by 2+ live claims.
   handoff   --task-id ID --from LANE --to LANE --context "..." [--note "..."] [--dry-run]
             Post [lane]HANDOFF: with room-handoff block + restated claim block
             naming the receiving lane. (Transfers on ACK, not on post.)
   receipt   --task-id ID --lane LANE --merged SHA|none --note "..." [--dry-run]
             Post [lane]DONE: + room-receipt block (24h receipt SLO).
+  backlog   [list] [--file PATH]
+            List BACKLOG.md ready items, top first.
+  backlog   pull [--lane LANE] [--task-id ID] [--lease Nh] [--file PATH] [--dry-run]
+            Take the top unclaimed ready item: mark it claimed in place and
+            emit a pre-filled [lane][claim] fenced block to post. Refuses if
+            the item's files are held live by another lane (S1 overlaps verb,
+            when present).
+  backlog   done BL-NNN [--pr NNNN] [--file PATH] [--dry-run]
+            Archive the item under ## done with the PR link.
 
 Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
   Fail closed when the running scripts/room is not byte-identical to
@@ -388,6 +401,13 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | ($body | fence("receipt")) as $frcpt
       | ($body | fence("handoff")) as $fhand
       | ($body | fence("done")) as $fdone
+      # 2026-09-26 (RC-2026-09-26-969): a valid room-receipt fence is
+      # authoritative wherever it appears, even in a prose comment
+      # (5825166515 closed RC-2026-09-23-953 with a fenced block but no
+      # [receipt] prefix, so the receipt was invisible to receipts-scan).
+      | (($body | fence("receipt") | fields) // {}) as $rrf
+      | (if (($rrf["task-id"] // "") | test("^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$"))
+         then $rrf else {} end) as $rrf
       | (if ($first | test("^(\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\][ \\t]*\\[claim\\]|\\[claim\\][ \\t]*\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\])")) then
            {kind:"lane-tag-unparseable", errors:["lane tag contains spaces; use a registered short lane id without spaces"]}
          elif $pf.p == "[claim]" then
@@ -416,7 +436,14 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
             else {ack:false, ack_task:null} end) as $a
            | if $fclaim then {kind:"status", block:($fclaim|fields), ack:$a.ack, ack_task:$a.ack_task}
              elif $a.ack then {kind:"ack", ack_task:$a.ack_task}
-             else {kind:"malformed", want:"room-claim"} end
+             # 2026-09-26 (RC-2026-09-26-969): still malformed (no fenced
+             # block — nothing registers), but carry a voluntary-release
+             # signal + the referenced task-id: RC-2026-09-25-7401 posted
+             # a prose STATUS release 14 min after strike-one and sweep
+             # proposed strike-two because the parser never saw it.
+             else {kind:"malformed", want:"room-claim",
+                   release:($pf.tail | test("(?i)(releas|clos|abandon|withdraw|cancel)|\\bdone\\b")),
+                   task_ref:($pf.tail | first_rc)} end
          elif $pf.p == "DONE:" then
            {kind:"done", ref:($pf.tail | first_rc),
             receipt:(if $frcpt then ($frcpt|fields) else null end)}
@@ -452,6 +479,18 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
                             pr:(($body | first_pr) // null),
                             attribution:($lp.lane // null)},
                    via:"prose-terminal"} end
+         elif (($rrf | length) > 0) then
+           # 2026-09-26 (RC-2026-09-26-969): a prose comment can still
+           # carry a real receipt. 5825166515 closed RC-2026-09-23-953
+           # with a valid room-receipt fence but no [receipt] prefix;
+           # dropping the fence made receipts-scan re-flag it forever.
+           {kind:"receipt",
+            task:$rrf["task-id"],
+            pr:(($rrf.pr // null) // ($body | first_pr)),
+            merged:((($rrf.merged // null) // ($rrf.sha // null))
+                    // ($body | first_sha) // "none"),
+            ref:$rrf["task-id"],
+            receipt:$rrf}
          else {kind:"prose"} end) as $ev
       | {id:$id, at:$at, lane:$lp.lane, prefix:$pf.p} + $ev
     ;
@@ -790,6 +829,18 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
           # nothing, instead of vanishing into `else . end`.
           .log += [{id:$cid, at:$at, kind:"malformed", ok:false,
                     errors:["STATUS: with no room-claim fenced block and no ACK: refused; nothing registered"]}]
+          # 2026-09-26 (RC-2026-09-26-969): a voluntary prose release from
+          # the holding lane registers nothing as a claim action (still
+          # malformed), but it is recorded for sweep: a release newer than
+          # a strike-one counts as a heartbeat for strike-two purposes
+          # (RC-2026-09-25-7401). It deliberately does NOT touch
+          # heartbeat_at — a release must not renew the lease.
+          | if ($e.release // false)
+                and (($e.task_ref // null) != null)
+                and ((.tasks[$e.task_ref] // null) != null)
+                and ($e.lane == .tasks[$e.task_ref].lane) then
+              .tasks[$e.task_ref] |= (.voluntary_release_at = $at)
+            else . end
         elif $e.kind == "prose" then
           .log += [{id:$cid, at:$at, kind:"prose", ok:false,
                     errors:["not a board comment: no recognized structured prefix; nothing registered"]}]
@@ -894,6 +945,17 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
     | ($unclaimed | map("\(.lane) | \(.focus) | \(.trust)")) as $urows
     | ($rcpts | map("\(.task_id) | \(.merged) | \(.comment_id)")) as $rrows
     | (if .comments >= 1500 then "yes" else "no" end) as $rot
+    | ([$open_all[]
+        | .task_id as $t | .lane as $l | .state as $s
+        | .files[] | {file: ., lane: $l, task: $t, state: $s}]
+       | sort_by(.file, .task)) as $fmap
+    | ([$fmap[] | .file] | unique | length) as $nfiles
+    | ([$fmap[] | .file] | unique
+       | map(. as $f | {file: $f, holders: [$fmap[] | select(.file == $f)]})
+       | map(select(.holders | length > 1))) as $overlaps
+    | ($fmap | map("\(.file) | \(.lane // "(none)") | \(.task) | \(.state)")) as $frows
+    | ($overlaps
+       | map("\(.file) | \([.holders[].lane] | unique | sort | join(", ")) | \([.holders[].task] | unique | sort | join(", "))")) as $vrows
     | ["# ROOM-STATE — machine board",
       "<!-- generated: \(.generated_at) · board: \($board) · watermark: \(.watermark) · by: scripts/room rebuild · do-not-hand-edit -->",
       "",
@@ -902,6 +964,14 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       ($orows | join("\n")),
       (if $orest > 0 then "… +\($orest) more" else empty end),
       (if ($orows | length) == 0 then "(none)" else empty end),
+      "",
+      "## file-claims",
+      "file | lane | task-id | state",
+      (if ($frows | length) == 0 then "(none)" else ($frows | join("\n")) end),
+      "",
+      "## overlap-warnings",
+      "file | lanes | task-ids",
+      (if ($vrows | length) == 0 then "(none)" else ($vrows | join("\n")) end),
       "",
       "## expiring-soon (<6h)",
       "task-id | lane | state | lease-expires-utc | files",
@@ -921,7 +991,7 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       (if $frest > 0 then "… +\($frest) more" else empty end),
       "",
       "## signals",
-      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) prose_open=\($popen | length) unfenced_prose=\(.unleased_prose_claims | length) watermark=\(.watermark)"]
+      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) prose_open=\($popen | length) unfenced_prose=\(.unleased_prose_claims | length) files_claimed=\($nfiles) overlap_files=\($overlaps | length) watermark=\(.watermark)"]
     | join("\n") + "\n"
   '
 }
@@ -1266,6 +1336,55 @@ cmd_query() {
       else (.[] | "\(.task_id) | \(.lane) | \(.state) | \(.expires) | \(.files)") end'
 }
 
+# Live file/region claim registry (S1, software-factory brief 2026-09-26).
+# Read-only: reports which live claims hold which files, and where they
+# overlap. A lane runs this BEFORE drafting a claim to avoid the rebase
+# churn that file collisions cause. The `claim` verb hard-refuses on
+# collision; this verb is the soft pre-check.
+cmd_overlaps() {
+  local files="" state_path="" live=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --files) need_val "overlaps" "$1" "$#" "${2:-}"; files="$2"; shift 2 ;;
+    --state) need_val "overlaps" "$1" "$#" "${2:-}"; state_path="$2"; shift 2 ;;
+    --live)  live=1; shift ;;
+    *) die "overlaps: unknown flag $1" ;;
+  esac; done
+  local st
+  if [ -n "$state_path" ]; then
+    st="$(cat "$state_path")"
+  else
+    st="$(build_state)"
+  fi
+  [ -n "$files" ] && files="$(printf '%s' "$files" | tr ',' '\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' | paste -sd, -)"
+  printf '%s' "$st" | jq -r --arg fs "$files" '
+    def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
+    ([.tasks[] | select(is_live(.state))]
+     | map({task_id, lane: (.lane // "(none)"), state, files})) as $open
+    | ([$open[] | .task_id as $t | .lane as $l | .state as $s
+        | .files[] | {file: ., lane: $l, task: $t, state: $s}]
+       | sort_by(.file, .task)) as $fmap
+    | (if $fs == "" then null
+       else ($fs | split(",") | map(select(length > 0))) end) as $want
+    | (if $want == null then
+         # No --files: report every file held by 2+ live claims.
+         ([$fmap[] | .file] | unique
+          | map(. as $f | {file: $f, holders: [$fmap[] | select(.file == $f)]})
+          | map(select(.holders | length > 1)))
+       else
+         # --files: report live holders for each requested file.
+         ($want | map(. as $f | {file: $f, holders: [$fmap[] | select(.file == $f)]}))
+       end) as $rows
+    | if ($rows | length) == 0 then
+        (if $want == null then "(no overlapping file claims)"
+         else "(no live claims hold the requested files)" end)
+      else
+        ($rows[]
+         | if (.holders | length) == 0 then "\(.file) | (unclaimed)"
+           else "\(.file) | \([.holders[].lane] | unique | sort | join(", ")) | \([.holders[].task] | unique | sort | join(", "))" end)
+      end'
+}
+
 # ---------------------------------------------------------------------------
 # Enforcer freshness guard — fail closed on stale script copies
 # ---------------------------------------------------------------------------
@@ -1448,27 +1567,47 @@ $(suffix_line "$task_id" "${by:-(unknown)}")"
   sweep_emit "illegal-transition rejection for $task_id ($from → $attempted)" "$body"
 }
 
-cmd_sweep() {
-  # Flags after the verb were ignored, so `sweep --dry-run` posted live
-  # strikes. Unknown flags die before any board read.
-  while [ $# -gt 0 ]; do case "$1" in
-    --dry-run) DRY_RUN=1; shift ;;
-    *) die "sweep: unknown flag $1" ;;
-  esac; done
-  local st now actions=0 lock_dir=""
-  # F2: the initial read is unlocked (concurrent runs may read together);
-  # the enforcer lock is then taken and the board re-read, so the deciding
-  # state is always fresher than any overlapping run's posts — two
-  # overlapping sweeps can never both emit strike-one. (The duplicate used
-  # to silently reset the strike-two grace clock.) Dry runs never lock.
-  st="$(build_state)"
-  now="$(lease_now)"
-  if [ "$DRY_RUN" = 0 ]; then
-    lock_dir="$(enforcer_lock sweep)"
-    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
-    st="$(build_state)"
-    now="$(lease_now)"
+# 2026-09-26 (RC-2026-09-26-969): closed-PRs JSON for the
+# deliverable-landed check. Cached per run; ROOM_TEST_PRS_JSON overrides it
+# for fixture tests (same seam style as ROOM_CLOCK_OP for _clock).
+closed_prs_json() {
+  if [ -n "${ROOM_TEST_PRS_JSON+x}" ]; then printf '%s' "$ROOM_TEST_PRS_JSON"; return 0; fi
+  if [ -z "${_CLOSED_PRS_CACHE:-}" ]; then
+    _CLOSED_PRS_CACHE="$(gh_api "repos/$REPO/pulls?state=closed&per_page=100&sort=updated&direction=desc")"
   fi
+  printf '%s' "$_CLOSED_PRS_CACHE"
+}
+
+deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable already landed
+  # 2026-09-26 (RC-2026-09-26-969): RC-2026-09-25-301..304 got strike-one
+  # nudges while PRs #1072-#1075 were already merged — the claims needed
+  # DONE closeout, not a nudge. Either board-visible signal suppresses the
+  # strike-one:
+  #   1. a receipt on the board naming the task with a merge SHA or PR, or
+  #   2. a merged PR whose title/body names the task-id.
+  local task_id="$1" st="$2"
+  if printf '%s' "$st" | jq -e --arg t "$task_id" '
+       [.prose_receipts[]
+        | select(.task == $t)
+        | select(((.merged // "none") != "none" and (.merged // "") != "")
+                 or ((.pr // null) != null))]
+       | length > 0' >/dev/null; then
+    return 0
+  fi
+  if closed_prs_json | jq -e --arg t "$task_id" '
+       [.[] | select(.merged_at != null)
+        | ((.title // "") + "\n" + (.body // ""))
+        | select(test($t + "([^0-9]|$)"))]
+       | length > 0' >/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
+  # Shared by cmd_sweep (live, under the enforcer lock) and the _sweep-plan
+  # fixture verb (dry-run, fixture comments on stdin).
+  local st="$1" now="$2" actions=0
   while IFS= read -r t; do
     [ -n "$t" ] || continue
     local task_id lane exp strike hb
@@ -1481,16 +1620,33 @@ cmd_sweep() {
     local exp_e; exp_e="$(iso_epoch "$exp")"
     if [ "$now" -gt "$exp_e" ]; then
       if [ -z "$strike" ]; then
-        sweep_strike_one "$task_id" "$lane" "$t" "$exp" "$now"; actions=$((actions + 1))
+        # 2026-09-26 (RC-2026-09-26-969 §c): the deliverable already
+        # landed — the claim needs DONE closeout, not a strike nudge.
+        if deliverable_landed "$task_id" "$st"; then
+          printf 'room: strike-one suppressed for %s: deliverable already landed (needs DONE closeout, not a nudge)\n' "$task_id"
+        else
+          sweep_strike_one "$task_id" "$lane" "$t" "$exp" "$now"; actions=$((actions + 1))
+        fi
       else
-        local strike_e hb_ok=0
+        local strike_e hb_ok=0 rel rel_e=0
         strike_e="$(iso_epoch "$strike")"
         if [ -n "$hb" ]; then
           local hb_e; hb_e="$(iso_epoch "$hb")"
           [ "$hb_e" -gt "$strike_e" ] && hb_ok=1
         fi
+        # 2026-09-26 (RC-2026-09-26-969 §a): a voluntary prose release
+        # after the strike-one counts as a heartbeat (RC-2026-09-25-7401:
+        # strike-one, then a prose STATUS release 14 min later, then a
+        # bogus strike-two because the parser never saw the release).
+        rel="$(jq -r '.voluntary_release_at // empty' <<<"$t")"
+        if [ -n "$rel" ]; then
+          rel_e="$(iso_epoch "$rel")"
+          [ "$rel_e" -gt "$strike_e" ] && hb_ok=1
+        fi
         if [ $((now - strike_e)) -gt 14400 ] && [ "$hb_ok" = 0 ]; then
           sweep_strike_two "$task_id" "$lane" "$t"; actions=$((actions + 1))
+        elif [ $((now - strike_e)) -gt 14400 ] && [ "$rel_e" -gt "$strike_e" ]; then
+          printf 'room: strike-two suppressed for %s: voluntary release %s after strike-one (no strike)\n' "$task_id" "$rel"
         fi
       fi
     fi
@@ -1512,6 +1668,30 @@ cmd_sweep() {
   printf 'room: sweep done, %s action(s)\n' "$actions"
 }
 
+cmd_sweep() {
+  # Flags after the verb were ignored, so `sweep --dry-run` posted live
+  # strikes. Unknown flags die before any board read.
+  while [ $# -gt 0 ]; do case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "sweep: unknown flag $1" ;;
+  esac; done
+  local st now lock_dir=""
+  # F2: the initial read is unlocked (concurrent runs may read together);
+  # the enforcer lock is then taken and the board re-read, so the deciding
+  # state is always fresher than any overlapping run's posts — two
+  # overlapping sweeps can never both emit strike-one. (The duplicate used
+  # to silently reset the strike-two grace clock.) Dry runs never lock.
+  st="$(build_state)"
+  now="$(lease_now)"
+  if [ "$DRY_RUN" = 0 ]; then
+    lock_dir="$(enforcer_lock sweep)"
+    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
+    st="$(build_state)"
+    now="$(lease_now)"
+  fi
+  sweep_decide "$st" "$now"
+}
+
 # ---------------------------------------------------------------------------
 # receipts-scan (enforcer, cron-only)
 # ---------------------------------------------------------------------------
@@ -1525,34 +1705,49 @@ digest_items_unchanged() { # $1 = digest body -> 0 when the newest board digest 
   [ "$new_items" = "$old_items" ]
 }
 
-cmd_receipts_scan() {
-  local post=0
-  while [ $# -gt 0 ]; do case "$1" in
-    --post) post=1; shift ;;
-    --dry-run) DRY_RUN=1; shift ;;
-    *) die "receipts-scan: unknown flag $1" ;;
-  esac; done
-  local st now cutoff trows prows lock_dir=""
-  st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
-  if [ "$DRY_RUN" = 0 ] && [ "$post" = 1 ]; then
-    # F2: same discipline as sweep — the initial read is unlocked, then the
-    # lock is taken and the board re-read before posting, so an overlapping
-    # run's digest is always visible before this run posts.
-    lock_dir="$(enforcer_lock receipts-scan)"
-    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
-    st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
-  fi
-  trows="$(printf '%s' "$st" | jq -r --argjson cut "$cutoff" '
-    [.tasks[]
-     | select(.state == "completed" and (.receipts | length) == 0)
-     | select(((.last_at | fromdate) // 0) < $cut)
-     | "TASK\t\(.task_id)\t\(.lane // "(none)")\tcompleted \(.last_at)\tclaim-comment \(.claim_id)"]
-    | join("\n")')"
-  local prs rcpt_shas
-  prs="$(gh_api "repos/$REPO/pulls?state=closed&per_page=100&sort=updated&direction=desc")"
-  rcpt_shas="$(printf '%s' "$st" | jq -r '[.tasks[] | .receipts[] | .merged]
-    | map(select(. != null and . != "none")) | join(" ")')"
-  prows="$(printf '%s' "$prs" | jq -r --argjson cut "$cutoff" --arg shas "$rcpt_shas" '
+# 2026-09-26 (RC-2026-09-26-969): task rows for receipts-scan, with the
+# digest-closeout dedup. $1 = state JSON, $2 = comments JSON, $3 = cutoff epoch.
+scan_task_rows() {
+  local st="$1" comments="$2" cutoff="$3"
+  # Latest posted digest; a lane closeout posted after it (closing response
+  # referencing the digest, a receipt fence, or explicit closing language)
+  # means the claim was already handled — re-flagging is noise
+  # (RC-2026-09-23-903/953: digest 5824967872, closing response 5825166515).
+  local digest_id closed
+  digest_id="$(printf '%s' "$comments" | jq -r '[.[] | select((.body // "") | startswith("[room-watch] missing receipts"))] | last | .id // 0')"
+  closed="$(printf '%s' "$comments" | jq -r --argjson d "$digest_id" '
+    [.[]
+     | select(.id > $d)
+     | (.body // "") as $b
+     | ($b | [match("RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+"; "g") | .string]) as $tids
+     | select(($tids | length) > 0)
+     | select((($d > 0) and ($b | contains(($d | tostring))))
+              or ($b | test("```room-receipt"))
+              or ($b | test("(?i)closing|already on the board")))
+     | $tids[]]
+    | unique | join("\n")')"
+  printf '%s' "$st" | jq -r --argjson cut "$cutoff" --arg closed "$closed" '
+    (($closed | split("\n") | map(select(length > 0))) as $closed_ids
+     # A parsed receipt (fenced room-receipt block, even in a prose
+     # comment) naming the task with a merge SHA or PR covers it.
+     | ([.prose_receipts[]
+          | select(((.merged // "none") != "none" and (.merged // "") != "")
+                   or ((.pr // null) != null))
+          | .task] | unique) as $receipted
+     | [.tasks[]
+        | select(.state == "completed" and (.receipts | length) == 0)
+        | select(((.last_at | fromdate) // 0) < $cut)
+        | select((.task_id as $t | (($closed_ids | index($t)) | not)))
+        | select((.task_id as $t | (($receipted | index($t)) | not)))
+        | "TASK\t\(.task_id)\t\(.lane // "(none)")\tcompleted \(.last_at)\tclaim-comment \(.claim_id)"]
+       | join("\n"))'
+}
+
+# 2026-09-26 (RC-2026-09-26-969): PR rows for receipts-scan.
+# $1 = closed-PRs JSON, $2 = receipted SHAs (space-joined), $3 = cutoff epoch.
+scan_pr_rows() {
+  local prs="$1" rcpt_shas="$2" cutoff="$3"
+  printf '%s' "$prs" | jq -r --argjson cut "$cutoff" --arg shas "$rcpt_shas" '
     [($shas | split(" ") | map(select(length > 0))) as $have
      | .[]
      | select(.merged_at != null)
@@ -1561,7 +1756,43 @@ cmd_receipts_scan() {
      | select([$have[] | select($sha | startswith(.))] | length == 0)
      | ((.body // "") | ([capture("·[ \t]*claim:(?<t>[A-Za-z0-9_-]+)")] | .[0].t) // "-") as $ctid
      | "PR\t#\(.number)\tclaim \($ctid)\tmerged \(.merged_at)\tsha \($sha[0:7])"]
-    | join("\n")')"
+    | join("\n")'
+}
+
+# 2026-09-26 (RC-2026-09-26-969): merge SHAs already receipted on the board,
+# including prose/parsed receipts (a fenced room-receipt block in a prose
+# closing response counts). $1 = state JSON.
+scan_receipted_shas() {
+  printf '%s' "$1" | jq -r '
+    ([.tasks[] | .receipts[] | .merged] + [.prose_receipts[] | .merged])
+    | map(select(. != null and . != "none" and . != ""))
+    | join(" ")'
+}
+
+cmd_receipts_scan() {
+  local post=0
+  while [ $# -gt 0 ]; do case "$1" in
+    --post) post=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "receipts-scan: unknown flag $1" ;;
+  esac; done
+  local st now cutoff comments trows prows lock_dir=""
+  st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
+  comments="$(fetch_comments)"
+  if [ "$DRY_RUN" = 0 ] && [ "$post" = 1 ]; then
+    # F2: same discipline as sweep — the initial read is unlocked, then the
+    # lock is taken and the board re-read before posting, so an overlapping
+    # run's digest is always visible before this run posts.
+    lock_dir="$(enforcer_lock receipts-scan)"
+    trap "rmdir \"$lock_dir\" 2>/dev/null || true" EXIT
+    st="$(build_state)"; now="$(lease_now)"; cutoff=$((now - 86400))
+    comments="$(fetch_comments)"
+  fi
+  local prs rcpt_shas
+  prs="$(closed_prs_json)"
+  rcpt_shas="$(scan_receipted_shas "$st")"
+  trows="$(scan_task_rows "$st" "$comments" "$cutoff")"
+  prows="$(scan_pr_rows "$prs" "$rcpt_shas" "$cutoff")"
   printf 'room: missing receipts (24h SLO)\n'
   local out=""
   if [ -n "$trows" ]; then out="${out}${trows}"$'\n'; fi
@@ -1676,6 +1907,186 @@ cmd_metrics() {
   printf 'missing_receipts=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed" and (.receipts | length) == 0)] | length')"
   printf 'distinct_lanes=%s\n'   "$(printf '%s' "$st" | jq '.lanes | length')"
   printf 'comments_per_day=%s\n' "$cpd"
+  # S2 backlog depth (file-based; BACKLOG.md may not exist in older checkouts).
+  local blf
+  blf="$(repo_root)/BACKLOG.md"
+  if [ -f "$blf" ]; then
+    printf 'backlog_ready=%s\n'   "$(backlog_count "$blf" ready)"
+    printf 'backlog_blocked=%s\n' "$(backlog_count "$blf" blocked)"
+  else
+    printf 'backlog_ready=0\nbacklog_blocked=0\n'
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# backlog — prioritized fed queue (S2). File-based: BACKLOG.md at repo root,
+# greppable, diffable, reorderable in one edit. John's single lever is the
+# file order under ## ready (top = next).
+# ---------------------------------------------------------------------------
+
+# backlog_count <file> <section> -> number of unchecked items in section
+backlog_count() {
+  awk -v sec="$2" '
+    /^## / { cur = ($2 == sec); next }
+    cur && /^- \[ \] BL-[0-9]+/ { n++ }
+    END { print n+0 }
+  ' "$1"
+}
+
+# backlog_top <file> -> "BL-ID|title|scope|accept|files" of first unchecked
+# ready item, or empty. Fields are " · "-separated; title is the first field.
+backlog_top() {
+  awk '
+    /^## ready/ { cur=1; next }
+    /^## / { cur=0; next }
+    cur && /^- \[ \] BL-[0-9]+/ {
+      line=$0
+      sub(/^- \[ \] /, "", line)
+      match(line, /BL-[0-9]+/); id=substr(line, RSTART, RLENGTH)
+      rest=line; sub(/^BL-[0-9]+ · /, "", rest)
+      # split rest on " · " — first piece is the title
+      n=split(rest, parts, / · /)
+      title=parts[1]
+      scope=""; accept=""; files=""
+      for (i=2; i<=n; i++) {
+        if (parts[i] ~ /^scope: /) { scope=parts[i]; sub(/^scope: /, "", scope) }
+        else if (parts[i] ~ /^accept: /) { accept=parts[i]; sub(/^accept: /, "", accept) }
+        else if (parts[i] ~ /^files: /) { files=parts[i]; sub(/^files: /, "", files) }
+      }
+      # skip already-claimed items (claimed: trailer present)
+      if (rest ~ / · claimed: /) next
+      print id "|" title "|" scope "|" accept "|" files
+      exit
+    }
+  ' "$1"
+}
+
+# backlog_list <file> — print ready items, top first.
+backlog_list() {
+  local file="$1"
+  awk '
+    /^## ready/ { cur=1; next }
+    /^## / { cur=0; next }
+    cur && /^- \[[ x]\] BL-[0-9]+/ { print }
+  ' "$file"
+}
+
+# backlog_next_task_id <file> -> RC-YYYY-MM-DD-NNN (next sequence for today)
+backlog_next_task_id() {
+  local file="$1" today seq
+  today="$(date -u +%Y-%m-%d)"
+  seq="$(grep -o "claimed: RC-${today}-[0-9]*" "$file" 2>/dev/null \
+    | grep -o '[0-9]*$' | sort -n | tail -1)"
+  seq="${seq:-0}"
+  printf 'RC-%s-%03d' "$today" "$((10#$seq + 1))"
+}
+
+cmd_backlog() {
+  local sub="list" file="" lane="$DEFAULT_LANE" task="" lease="6h" pr="" bl_id=""
+  case "${1:-}" in
+    list|pull|done) sub="$1"; shift ;;
+  esac
+  while [ $# -gt 0 ]; do case "$1" in
+    --file) need_val "backlog $sub" "$1" "$#" "${2:-}"; file="$2"; shift 2 ;;
+    --lane) need_val "backlog $sub" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
+    --task-id) need_val "backlog $sub" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --lease) need_val "backlog $sub" "$1" "$#" "${2:-}"; lease="$2"; shift 2 ;;
+    --pr) need_val "backlog $sub" "$1" "$#" "${2:-}"; pr="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *)
+      if [ "$sub" = "done" ] && [ -z "$bl_id" ]; then bl_id="$1"; shift
+      else die "backlog $sub: unknown argument $1"; fi ;;
+  esac; done
+  [ -n "$file" ] || file="$(repo_root)/BACKLOG.md"
+  [ -f "$file" ] || die "backlog: no BACKLOG.md at $file"
+  case "$lane" in ""|*[!A-Za-z0-9_-]*) die "backlog: --lane must match [A-Za-z0-9_-]+" ;; esac
+
+  case "$sub" in
+  list)
+    backlog_list "$file"
+    ;;
+  pull)
+    local top id title scope accept files
+    top="$(backlog_top "$file")"
+    [ -n "$top" ] || die "backlog pull: no unclaimed ready items"
+    id="${top%%|*}"; top="${top#*|}"
+    title="${top%%|*}"; top="${top#*|}"
+    scope="${top%%|*}"; top="${top#*|}"
+    accept="${top%%|*}"; files="${top##*|}"
+    [ -n "$task" ] || task="$(backlog_next_task_id "$file")"
+    case "$task" in
+      RC-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9]*) ;;
+      *) die "backlog pull: --task-id must match RC-YYYY-MM-DD-NNN" ;;
+    esac
+    [ -n "$files" ] || die "backlog pull: item $id has no files: field"
+    # S1 overlap guard: if the overlaps verb exists (S1 merged), refuse to
+    # pull an item whose files are held live by another lane. The overlaps
+    # verb reports per-file lines; "(unclaimed)" means free. Only die if
+    # some file has a real holder (a line not ending in "(unclaimed)").
+    if type cmd_overlaps >/dev/null 2>&1; then
+      local ov
+      ov="$(cmd_overlaps --files "$files" 2>/dev/null || true)"
+      if [ -n "$ov" ] && printf '%s' "$ov" | grep -v '(unclaimed)$' | grep -q .; then
+        die "backlog pull: files held by a live claim:\n$ov"
+      fi
+    fi
+    # Mark claimed in place (unless dry-run).
+    if [ "$DRY_RUN" != 1 ]; then
+      # Portable in-place: no GNU/BSD sed -i split.
+      local tmp
+      tmp="$(mktemp)"
+      sed "s/^- \\[ \\] \\(${id}\\)/&/" "$file" > "$tmp" # no-op guard
+      awk -v id="$id" -v task="$task" '
+        $0 ~ "^- \\[ \\] " id " · " {
+          if ($0 ~ / · claimed: /) sub(/ · claimed: [^ ·]*/, " · claimed: " task)
+          else sub(/$/, " · claimed: " task)
+        }
+        { print }
+      ' "$file" > "$tmp" && cat "$tmp" > "$file"
+      rm -f "$tmp"
+    fi
+    # Emit the pre-filled claim block for the lane to post.
+    local reason
+    reason="$scope"
+    [ -n "$accept" ] && reason="$reason (accept: $accept)"
+    reason="backlog $id: $reason"
+    printf '[%s][claim] %s\n\n' "$lane" "$title"
+    claim_block_text "$task" "$lane" "$files" "lease=${lease%h}h" "submitted" "$(one_line "$reason")"
+    printf '\n%s\n' "$(suffix_line "$task" "$lane")"
+    ;;
+  done)
+    [ -n "$bl_id" ] || die "backlog done: BL-NNN required"
+    case "$bl_id" in BL-[0-9]*) ;; *) die "backlog done: BL-NNN must match BL-<digits>" ;; esac
+    local line
+    line="$(grep -m1 "^- \\[[ x]\\] ${bl_id} · " "$file" || true)"
+    [ -n "$line" ] || die "backlog done: $bl_id not found"
+    # Remove from current section, append to ## done as checked.
+    if [ "$DRY_RUN" != 1 ]; then
+      local tmp newline
+      tmp="$(mktemp)"
+      newline="$(printf '%s' "$line" | sed 's/^- \[ \]/- [x]/')"
+      # drop any claimed: trailer, add shipped-as trailer
+      newline="$(printf '%s' "$newline" | sed 's/ · claimed: [^ ·]*//')"
+      [ -n "$pr" ] && newline="$newline · shipped as: #$pr"
+      grep -v "^- \\[[ x]\\] ${bl_id} · " "$file" > "$tmp"
+      # append under ## done (create section if missing)
+      if grep -q '^## done' "$tmp"; then
+        awk -v nl="$newline" '
+          /^## done/ { indone=1; print; next }
+          indone && /^## / { print nl; indone=0 }
+          { print }
+          END { if (indone) print nl }
+        ' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
+      else
+        printf '\n## done\n%s\n' "$newline" >> "$tmp"
+      fi
+      cat "$tmp" > "$file"
+      rm -f "$tmp"
+    fi
+    printf 'backlog done: %s archived\n' "$bl_id"
+    ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -1683,6 +2094,59 @@ cmd_metrics() {
 # ---------------------------------------------------------------------------
 
 cmd__parse() { parse_events; }
+
+cmd__sweep_plan() {
+  # fixture/testing: _sweep-plan --now ISO|EPOCH -> dry-run sweep plan for
+  # fixture comments on stdin. Never locks, never posts; ROOM_TEST_PRS_JSON
+  # supplies the closed-PRs list for the deliverable-landed check.
+  local now=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --now) need_val "_sweep-plan" "$1" "$#" "${2:-}"; now="$2"; shift 2 ;;
+    *) die "_sweep-plan: unknown flag $1" ;;
+  esac; done
+  [ -n "$now" ] || die "_sweep-plan: --now ISO-or-epoch required"
+  case "$now" in *[!0-9]*) now="$(iso_epoch "$now")" ;; esac
+  local comments n wm st
+  comments="$(cat)"
+  n="$(printf '%s' "$comments" | jq 'length')"
+  wm="$(printf '%s' "$comments" | jq '[.[].id] | max // 0')"
+  st="$(printf '%s' "$comments" | parse_events | reduce_state "$now" "$n" "$wm")"
+  DRY_RUN=1
+  sweep_decide "$st" "$now"
+}
+
+cmd__receipts_plan() {
+  # fixture/testing: _receipts-plan --now ISO|EPOCH [--prs JSON] -> the
+  # receipts-scan report rows for fixture comments on stdin. Never posts;
+  # --prs (or ROOM_TEST_PRS_JSON) supplies the closed-PRs list. Exit 1 when
+  # anything is still flagged missing, 0 when clean.
+  local now="" prs="[]"
+  while [ $# -gt 0 ]; do case "$1" in
+    --now) need_val "_receipts-plan" "$1" "$#" "${2:-}"; now="$2"; shift 2 ;;
+    --prs) need_val "_receipts-plan" "$1" "$#" "${2:-}"; prs="$2"; shift 2 ;;
+    *) die "_receipts-plan: unknown flag $1" ;;
+  esac; done
+  [ -n "$now" ] || die "_receipts-plan: --now ISO-or-epoch required"
+  case "$now" in *[!0-9]*) now="$(iso_epoch "$now")" ;; esac
+  [ -n "${ROOM_TEST_PRS_JSON+x}" ] && prs="$ROOM_TEST_PRS_JSON"
+  local comments n wm st cutoff trows prows rcpt_shas out=""
+  comments="$(cat)"
+  n="$(printf '%s' "$comments" | jq 'length')"
+  wm="$(printf '%s' "$comments" | jq '[.[].id] | max // 0')"
+  st="$(printf '%s' "$comments" | parse_events | reduce_state "$now" "$n" "$wm")"
+  cutoff=$((now - 86400))
+  trows="$(scan_task_rows "$st" "$comments" "$cutoff")"
+  rcpt_shas="$(scan_receipted_shas "$st")"
+  prows="$(scan_pr_rows "$prs" "$rcpt_shas" "$cutoff")"
+  printf 'room: missing receipts (24h SLO)\n'
+  if [ -n "$trows" ]; then out="${out}${trows}"$'\n'; fi
+  if [ -n "$prows" ]; then out="${out}${prows}"$'\n'; fi
+  if [ -n "$out" ]; then
+    printf '%s' "$out" | awk -F'\t' '{printf "%-6s %-14s %-22s %s\n", $1, $2, $3, $4}'
+    return 1
+  fi
+  return 0
+}
 
 cmd__clock() { # testing: _clock [--op EPOCH] [--ref EPOCH] [--date "Date: ..."] -> clock_now result
   # Exercises the skew-correction logic without network: --op simulates the
@@ -1744,7 +2208,7 @@ main() {
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
       guard_enforcer_freshness "$verb"
       "cmd_${verb//-/_}" "$@" ;;
-    claim|heartbeat|release|query|handoff|receipt|_parse|_state|_clock|jev-shadow)
+    claim|heartbeat|release|query|overlaps|handoff|receipt|backlog|_parse|_state|_clock|_sweep-plan|_receipts-plan|jev-shadow)
       # Per-verb --help must not fall through to a live run (2026-09-19:
       # `sweep --help` executed a live sweep because cmd_sweep ignores args).
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
