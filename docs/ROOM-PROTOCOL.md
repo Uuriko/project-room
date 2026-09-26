@@ -174,6 +174,28 @@ a lane SHOULD run its intended file set through the detector against the
 current board — a hit means negotiate first, then claim non-overlapping
 files. The detector is advisory: it flags, it never blocks.
 
+### 4b. Live file-claim registry (S1)
+
+`scripts/room rebuild` renders two machine sections into ROOM-STATE.md from
+the live (submitted/working/suspended) claims:
+
+- `## file-claims` — inverted index: `file | lane | task-id | state`, one
+  row per file per live claim, sorted by file then task-id. This is the
+  live map of who is touching what, right now.
+- `## overlap-warnings` — `file | lanes | task-ids` for every file held by
+  two or more live claims. Empty (rendered as `(none)`) in the healthy case.
+
+The `## signals` line carries `files_claimed=<n>` (unique files across live
+claims) and `overlap_files=<n>` (files with 2+ live holders) for machine
+consumers.
+
+`scripts/room overlaps` is the read-only pre-claim check: `--files "a,b"`
+reports which live claims already hold those files (`(unclaimed)` when
+free); without `--files` it reports all current overlaps. The `claim` verb
+hard-refuses when the requested files collide with another lane's live
+claim; `overlaps` is the soft check a lane runs before drafting.
+
+
 ### 4c. Backlog — the fed queue
 
 `BACKLOG.md` (repo root) is the prioritized fed queue. The claims board is
@@ -198,7 +220,6 @@ a signal for John (add items or pause the loop).
 
 John's single lever: reorder `BACKLOG.md` (or comment the desired order on
 #266 and a lane applies it). The file is the schedule.
-
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
