@@ -3304,7 +3304,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
-          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null, helpers: { json, reject, body } });
+          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+            protectWrite(req, current, selected.bearer);
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
+              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       // Work claims (task RC-2026-09-18-041): room-scoped claim registry
       // routes share the credential, fence and rate-limit checks above; the
