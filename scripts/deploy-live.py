@@ -7,7 +7,7 @@ with ROOM_ORIGIN kept at the live access origin (room.trydemigod.com).
 Deliberately preserves live behavior otherwise: no migration (DO exists),
 no schedule changes (live has none), routes/custom domains untouched.
 
-Usage: deploy-live.py <account_id> <public_dir> <bundle_path>
+Usage: deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>
 """
 import sys, os, json, hashlib, base64, mimetypes, uuid
 import urllib.request, urllib.error
@@ -35,21 +35,40 @@ def api(method, path, body=None, content_type="application/json"):
         sys.exit(1)
     return json.loads(raw.decode("utf-8"))
 
-def main():
-    script_name, account_id, public_dir, bundle_path = sys.argv[1:5]
-    SCRIPT = script_name
+def build_manifest(public_dir):
+    """Hash every regular file under public_dir into the asset manifest.
 
-    # 1. Manifest
+    Symlinks (and other non-regular files) are refused loudly: following a
+    file symlink would upload the target's bytes as a public asset, so a
+    stray or malicious link in the build output must fail the deploy rather
+    than silently exfiltrate local file contents.
+    """
     manifest, files = {}, {}
     for root, _, names in os.walk(public_dir):
         for n in names:
             full = os.path.join(root, n)
+            if os.path.islink(full) or not os.path.isfile(full):
+                print(f"refusing to upload non-regular asset: {full}", file=sys.stderr)
+                sys.exit(1)
             rel = "/" + os.path.relpath(full, public_dir).replace(os.sep, "/")
             with open(full, "rb") as f:
                 content = f.read()
             h = hashlib.sha256(content).hexdigest()[:32]
             manifest[rel] = {"hash": h, "size": len(content)}
             files[h] = (rel, content)
+    return manifest, files
+
+
+def main():
+    if len(sys.argv) != 5:
+        print("Usage: deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>",
+              file=sys.stderr)
+        sys.exit(2)
+    script_name, account_id, public_dir, bundle_path = sys.argv[1:5]
+    SCRIPT = script_name
+
+    # 1. Manifest
+    manifest, files = build_manifest(public_dir)
     print(f"manifest: {len(manifest)} files", flush=True)
 
     # 2. Asset upload session

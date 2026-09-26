@@ -67,5 +67,5 @@ Durable repair: the script's script-upload metadata pins the bindings
 `ROOM_GMAIL_PILOT_ONLY=1` (plus `ROOM_ORIGIN` and `ROOM_SERVICE_MODE`), the
 `cpu_ms: 30000` production CPU budget, and `assets.config.run_worker_first`.
 Every use of the helper re-applies these bindings; they are not optional
-flags. Usage: `deploy-live.py <account_id> <public_dir> <bundle_path>` —
+flags. Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>` —
 see the script's docstring for the exact signature.
