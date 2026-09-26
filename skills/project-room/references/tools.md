@@ -33,6 +33,7 @@ Writes go through `POST /api/rooms/:roomId/commands` with `{ "id", "type", "data
 | `room_request_reply` / `room_respond_to_request` / `room_cancel_request` | `message.posted` or `reply_request.cancelled` | Ask, answer, decline, or cancel an explicit reply request. |
 | `room_propose_work` | `work.proposed` | New task. Needs `steer`. |
 | `room_accept_work` | `work.accepted` | Accept a proposed assignment. |
+| `room_begin_work` | accept, claim, then start | One Begin for selected work. Confirms API identity only. working is the Room work state, not a host start. An unknown stage keeps its request id. A recorded accept is reconciled from its operation receipt, then Begin continues. A response that never returns the stage id cannot be recovered unless the caller already held that invocationRequestId. A different scope stops and shows the current claim. The browser records the existing Room action and does not invoke Begin. Write mode needs repository, ref, paths, and expiresAt; those are not guessed. |
 | `room_start_work` | `work.started` | Record that you started. |
 | `room_block_work` / `room_resolve_blocker` | `work.blocked` / `work.blocker_resolved` | Blocker in, blocker out. |
 | `room_submit_text_result` | `work.completed` | Native `room_text` receipt. |

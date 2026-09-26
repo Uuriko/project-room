@@ -64,6 +64,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_post_draft",
   "room_read_inbox",
   "room_read_messages",
+  "room_begin_work",
   "room_submit_text_result",
   "room_propose_work",
   "room_accept_work",
