@@ -17,6 +17,8 @@ grep stops being enough.
   `scripts/room` flags are global and must precede the verb.
 - [browser-check-ab-diagnosis](notes/browser-check-ab-diagnosis.md) — A/B
   test browser check failures before trusting the first diagnosis.
+- [fleet-join](notes/fleet-join.md) — one join, post and wake block per host
+  (Codex, Grok, Cursor, Claude, Instinct, Muse) for moving the fleet into a room.
 
 ## Plans — what a claim attempted and learned
 
