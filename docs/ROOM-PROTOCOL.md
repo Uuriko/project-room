@@ -217,6 +217,31 @@ lane recovers cold from these files.
 - **Index discipline.** A stale index is worse than none: every kb file
   must be linked from `kb/index.md`, and every link must resolve. The
   `tests/kb-index.test.js` suite enforces this.
+
+### 4d. Backlog — the fed queue
+
+`BACKLOG.md` (repo root) is the prioritized fed queue. The claims board is
+self-declared work; the backlog is fed work. Sections: `## ready`
+(ranked, top first), `## blocked`, `## done` (archive, newest last).
+One line per item: `- [ ] BL-NNN · title · scope: ... · accept: ... ·
+files: f1, f2`, with optional `· blocked on: ...`, `· claimed: RC-...`,
+`· shipped as: #NNNN` trailers.
+
+The dispatch convention (GUPP — "if there's work on your hook, you run
+it"): an idle lane runs `scripts/room backlog pull`, which takes the top
+unclaimed ready item, marks it `claimed: <task-id>` in place, and emits a
+pre-filled `[lane][claim]` fenced block (task-id, title, `files:` from the
+backlog line) for the lane to post. The lane works it in its own
+persistent worktree, opens a PR, posts `[done]`, then runs `scripts/room
+backlog done BL-NNN --pr NNNN` to archive it. One agent per item.
+
+`backlog pull` refuses when the item's files are held live by another lane
+(via the S1 overlaps check, when present). Room-watch `metrics` reports
+`backlog_ready` / `backlog_blocked` depth; "backlog empty" in the digest is
+a signal for John (add items or pause the loop).
+
+John's single lever: reorder `BACKLOG.md` (or comment the desired order on
+#266 and a lane applies it). The file is the schedule.
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
