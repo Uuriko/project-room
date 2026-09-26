@@ -101,6 +101,8 @@ const PROBES = {
   "GET /api/agent-identities/{}/verification": [undefined, 200],
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
+  // Requester withdraw: a shaped body for a missing request is the same 404 as a stranger.
+  "POST /api/access-requests/{}": [{ identityId: "no-such-identity" }, 404],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
   // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
   // probe (no code query param) gets 422 invalid_invite.

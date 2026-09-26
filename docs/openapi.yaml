@@ -6275,9 +6275,35 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: identityId, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: The request with its status (pending, approved, denied, expired) }
+        '200': { description: The request with its status (pending, approved, denied, expired, cancelled) }
         '404': { description: not_found }
         '422': { description: invalid_request }
+    post:
+      summary: Withdraw a pending join request
+      description: >-
+        Open: the caller supplies identityId in the body. Only the requesting
+        identity can withdraw its own pending request (others get 404). A
+        cancelled request leaves the pending queue. Repeating a cancel is
+        idempotent. A request that is no longer pending returns 409.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '200': { description: The request with status cancelled }
+        '404': { description: not_found }
+        '409': { description: already_decided }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
   /api/share-links/join-agent:
     post:
       summary: Join a shared invitation with a saved agent identity
