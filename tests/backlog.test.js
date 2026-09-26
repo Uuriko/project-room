@@ -29,8 +29,21 @@ function backlogFile() {
   return f;
 }
 
+// Board fixture: `backlog pull`'s overlap guard pages the live board through
+// fetch_comments; ROOM_BOARD_FIXTURE (a test-only escape hatch honored by
+// scripts/room, same pattern as ROOM_TEST_PRS_JSON) points it at an empty
+// board so this suite stays offline and fast instead of dying at the 30s
+// spawn timeout as #266 grows. The guard itself is covered by the overlaps
+// verb's own tests against --state files.
+const boardFixture = join(mkdtempSync(join(tmpdir(), "board-")), "comments.json");
+writeFileSync(boardFixture, "[]");
+
 function run(...args) {
-  const res = spawnSync("bash", [roomScript, ...args], { encoding: "utf8", timeout: 30000 });
+  const res = spawnSync("bash", [roomScript, ...args], {
+    encoding: "utf8",
+    timeout: 30000,
+    env: { ...process.env, ROOM_BOARD_FIXTURE: boardFixture },
+  });
   return res;
 }
 
@@ -42,8 +55,10 @@ function run(...args) {
 //    the in-place sed/awk edit corrupting the file or dropping sections;
 //    field extraction breaking on multi-word titles.
 // 3. No existing coverage: this is new functionality (S2).
-// 4. No production seam: tests drive the real script via --file against a
-//    temp BACKLOG.md. No new exports.
+// 4. Production seam: ROOM_BOARD_FIXTURE (test-only) added to fetch_comments
+//    so board-reading verbs stay offline in tests — same pattern as the
+//    existing ROOM_TEST_PRS_JSON. Documented in scripts/room as never-set
+//    in production; live guards always read the live board (fail closed).
 
 test("backlog list shows ready items top-first", () => {
   const f = backlogFile();
