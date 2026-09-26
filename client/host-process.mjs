@@ -12,6 +12,7 @@ export function configuredHost(config) {
       || Object.entries(config.env).some(([key, value]) => typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))))
     throw new Error("Host configuration requires absolute command/cwd, argument array and timeoutMs (100–3600000)");
   validateHostVerification(config.verification);
+  if (config.env && Object.keys(config.env).length) throw new Error("Automatic host cannot receive configured environment variables");
   const settings = structuredClone(config);
   return async ({ signal, ...input }) => {
     if (signal?.aborted) throw new Error("Host cancelled");
@@ -26,10 +27,10 @@ export function configuredHost(config) {
       mkdirSync(lock, { mode: 0o700 });
     } catch { throw new Error("Checkout has an active or unresolved host, or its lock is unavailable; reconcile before running"); }
     try {
-      // The lock above uses the parent homedir(). HOME is not inherited; config.env may set it.
+      // The lock uses the operator home; the host sees only an isolated /tmp HOME.
       const env = Object.fromEntries(["PATH", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
-      Object.assign(env, settings.env ?? {});
-      const options = { cwd: settings.cwd, env, signal };
+      // No operator credentials are forwarded into the isolated process.
+      const options = { cwd: settings.cwd, env, signal, isolate: true };
       const output = await hostSubprocess(settings, { ...options, input: payload });
       if (output.exitCode !== 0) throw new Error("Host exited unsuccessfully; reconcile the original attempt");
       let result;
@@ -38,7 +39,7 @@ export function configuredHost(config) {
         hostReplyBody(result);
       } catch { throw new Error("Host must return one JSON object with body and optional valid codeResult, totaling at most 4096 reply characters"); }
       if (settings.verification && result.codeResult) {
-        recordObservedChecks(result, await observeHostChecks(result.codeResult, settings.verification, options));
+        recordObservedChecks(result, await observeHostChecks(result.codeResult, settings.verification, { ...options, isolate: false }));
         hostReplyBody(result); // Include observations in the existing reply size limit.
       }
       return result;

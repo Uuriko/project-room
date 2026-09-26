@@ -5,29 +5,28 @@ import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 const host = (code, extra = {}) => configuredHost({ command: process.execPath, args: ["-e", code], cwd: process.cwd(), timeoutMs: 2000, ...extra });
-test("default host env omits HOME so a room path stays literal", async () => {
+test("default host has isolated HOME so a room path cannot expand to operator HOME", async () => {
   const operatorHome = process.env.HOME;
   assert.equal(typeof operatorHome, "string");
   assert.ok(operatorHome.length > 1);
   const code = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);const text=v.messages[0].text;const expanded=process.env.HOME?text.replace(/^~/,process.env.HOME):text;process.stdout.write(JSON.stringify({body:JSON.stringify({home:process.env.HOME??null,path:process.env.PATH??null,tmpdir:process.env.TMPDIR??null,lang:process.env.LANG??null,text,expanded})}));});`;
   const observed = JSON.parse((await host(code)({ messages: [{ text: "~/secret" }] })).body);
-  assert.equal(observed.home, null);
+  assert.equal(observed.home, "/tmp");
   assert.equal(observed.text, "~/secret");
-  assert.equal(observed.expanded, "~/secret");
+  assert.equal(observed.expanded, "/tmp/secret");
   assert.equal(observed.expanded.includes(operatorHome), false);
-  assert.equal(observed.path, process.env.PATH ?? null);
-  assert.equal(observed.tmpdir, process.env.TMPDIR ?? null);
-  assert.equal(observed.lang, process.env.LANG ?? null);
+  assert.equal(observed.path, "/usr/bin:/bin");
+  assert.equal(observed.tmpdir, null);
+  assert.equal(observed.lang, null);
 });
-test("explicit host config can still set HOME", async () => {
-  const result = await host(`process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({body:process.env.HOME??''})));`, { env: { HOME: "/configured/host-home" } })({});
-  assert.equal(result.body, "/configured/host-home");
+test("explicit host config cannot override isolated HOME", () => {
+  assert.throws(() => host("console.log('test')", { env: { HOME: "/configured/host-home" } }), /cannot receive configured environment/);
 });
-test("host process receives JSON, literal arguments and only explicitly allowed environment", async () => {
+test("host process receives JSON and literal arguments without ambient environment", async () => {
   process.env.ROOM_HOST_TEST_SECRET = "must-not-inherit";
   try {
-    const result = await host(`let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(process.env.ROOM_HOST_TEST_SECRET)process.exit(3);process.stdout.write(JSON.stringify({body:v.requestId+':'+process.env.EXPLICIT_HOST_SETTING}));});`, { env: { EXPLICIT_HOST_SETTING: "configured" } })({ requestId: "hello" });
-    assert.equal(result.body, "hello:configured");
+    const result = await host(`let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(process.env.ROOM_HOST_TEST_SECRET)process.exit(3);process.stdout.write(JSON.stringify({body:v.requestId+':'+process.env.HOME}));});`)({ requestId: "hello" });
+    assert.equal(result.body, "hello:/tmp");
   } finally { delete process.env.ROOM_HOST_TEST_SECRET; }
 });
 for (const [name, code, expected] of [
