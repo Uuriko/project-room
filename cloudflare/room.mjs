@@ -22,7 +22,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/
 import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
-import { scheduledRetentionTick } from '../server/retention-run.mjs';
+import { runLiveStoreRetention } from '../server/retention-run.mjs';
 import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
 
 function roomOrigin(env) {
@@ -161,15 +161,12 @@ export class ProjectRoom extends DurableObject {
     this.store.landQueue.configure({ env: this.env });
     return this.store.landQueue.refreshDue();
   }
-  // Records an analytics/audit retention plan. The tick passes no live rows
-  // and no deleter, so a config flag cannot delete production room data.
+  // Scans only disposable web-fetch/research logs. The deletion flag is
+  // explicit; authoritative room and security audit journals are excluded.
   planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
-    return scheduledRetentionTick({
-      env: this.env,
-      now: new Date().toISOString(),
-      record: plan => { this.lastRetentionPlan = plan; }
-    });
+    return runLiveStoreRetention({ store: this.store, env: this.env,
+      now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
