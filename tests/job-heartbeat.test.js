@@ -156,3 +156,83 @@ test("GET /api/health/jobs is read-only, no-store, and 503 when stale", async ()
   assert.equal(res.status, 503);
   assert.equal((await res.json()).status, "unavailable");
 });
+
+// Storage tests cover a running Node server; these cover failure before a DO
+// handler exists and a rejected cross-object request at the public Worker.
+test("Room request boundary contains DO failures without leaking or replaying", async () => {
+  const failures = [
+    () => { throw new Error("private constructor detail token=secret"); },
+    () => ({ fetch() { throw new Error("private synchronous detail"); } }),
+    () => ({ fetch() { return Promise.reject(new Error("private storage detail")); } }),
+    () => ({ fetch(request) {
+      // Execute the actual DO constructor: its storage failure happens before
+      // ProjectRoom.fetch can run, so catching only there is insufficient.
+      const room = new ProjectRoom({ get storage() { throw new Error("private storage detail"); } }, { ROOM_ORIGIN: "https://room.example.test" });
+      return room.fetch(request);
+    } })
+  ];
+  const origin = "https://room.example.test";
+  for (const getStub of failures) for (const [method, url, json] of [
+    ["GET", origin + "/", false], ["HEAD", origin + "/api/version", true],
+    ["GET", origin + "/api/version", true], ["POST", origin + "/api/rooms", true],
+    ["GET", origin + "/room/api/version", true],
+    ["GET", "https://www.getdasha.com/room/api/version", true],
+    ["POST", "https://www.getdasha.com/room/mcp", true]
+  ]) {
+    let attempts = 0, fetches = 0;
+    const env = { ROOM_ORIGIN: origin, ROOM: { getByName() {
+      attempts++;
+      const stub = getStub();
+      return { fetch(request) { fetches++; return stub.fetch(request); } };
+    } } };
+    const res = await worker.fetch(new Request(url, { method, headers: { "CF-Connecting-IP": "192.0.2.1" } }), env);
+    assert.equal(res.status, 503);
+    assert.equal(attempts, 1);
+    assert.ok(fetches <= 1, "must not replay a possibly committed mutation");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.equal(res.headers.get("retry-after"), "30");
+    const text = await res.text();
+    assert.doesNotMatch(text, /private|secret|constructor|storage detail/);
+    if (method === "HEAD") { assert.equal(text, ""); continue; }
+    if (json) {
+      assert.match(res.headers.get("content-type"), /application\/json/);
+      const body = JSON.parse(text);
+      assert.equal(body.error.code, "room_unavailable");
+      assert.match(body.error.message, method === "POST" ? /Check.*before repeating/ : /try again/);
+    } else assert.match(text, /Project Room.*temporarily unavailable/);
+  }
+});
+
+test("Room outage containment preserves guards and maintenance before DO access", async () => {
+  const origin = "https://room.example.test";
+  const env = { ROOM_ORIGIN: origin, ROOM: { getByName() { assert.fail("must not access DO"); } } };
+  for (const [url, ip, status] of [
+    ["https://wrong.example/api/version", "192.0.2.1", 403],
+    [origin + "/api/version", "invalid", 403], [origin + "/api/version", "", 403],
+    ["https://www.getdasha.com/roommates", "192.0.2.1", 404]
+  ]) assert.equal((await worker.fetch(new Request(url, { headers: { "CF-Connecting-IP": ip } }), env)).status, status);
+  const paused = await worker.fetch(new Request(origin + "/api/version"), { ...env, ROOM_MAINTENANCE: "1" });
+  assert.equal(paused.status, 503);
+  assert.equal((await paused.json()).error.code, "maintenance");
+});
+
+test("Room boundary passes responses through and retains trusted forwarding headers", async () => {
+  const origin = "https://room.example.test";
+  for (const status of [200, 401, 503]) {
+    const expected = new Response("existing response", { status, headers: { "X-Test": "preserved" } });
+    let calls = 0;
+    const env = { ROOM_ORIGIN: origin, ROOM: { getByName() { return { async fetch(request) {
+      calls++;
+      assert.equal(request.headers.get("host"), "room.example.test");
+      assert.equal(request.headers.get("x-room-visitor-ip"), "192.0.2.1");
+      assert.equal(request.headers.get("x-real-ip"), null);
+      assert.equal(request.headers.get("x-forwarded-for"), null);
+      return expected;
+    } }; } } };
+    const response = await worker.fetch(new Request(origin + "/api/version", { headers: {
+      "CF-Connecting-IP": "192.0.2.1", "X-Room-Visitor-IP": "203.0.113.1", "X-Real-IP": "203.0.113.1", "X-Forwarded-For": "203.0.113.1"
+    } }), env);
+    assert.equal(response, expected);
+    assert.equal(calls, 1);
+  }
+});
