@@ -97,6 +97,7 @@ optional.push("server/needs-me.mjs"); // cross-room room_needs_me (imported by s
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
 optional.push("server/agent-identities.mjs");
+optional.push("server/display-name-guard.mjs"); // #938 agent identity mint/link guard imported by server/agent-identities.mjs
 optional.push("server/agent-invites.mjs");
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("server/referral-invites.mjs"); // Signed agent-carried referral invites (imported by server/store.mjs and server/http.mjs)
