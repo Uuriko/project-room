@@ -34,6 +34,9 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run lint
+      # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, no
+      # install needed, runs before the heavier suites would even finish.
+      - run: node scripts/untested-modules-lint.mjs
   unit:
     # Root-suite unit tests (tests/*.test.js at the repo root). The five
     # path-scoped workflows run `npm test` inside their shard subdirectories
