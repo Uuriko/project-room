@@ -1,98 +1,124 @@
-// Contract fixtures for RC-2026-09-25-912 self-serve join (guest-agent-links v2).
-// Activation condition: un-skip both tests when the RC-912 self-serve-join route lands.
-// FIXTURES FIRST: written against docs/self-serve-join.md (branch
-// jill/self-serve-join-912) before the build lands. These tests are EXPECTED
-// TO FAIL until the v2 route ships - that is the point: the build is done when
-// these pass. Scope: the two durability guarantees the doc makes that map to
-// known incident classes, not the whole contract.
+// Contract fixtures for RC-2026-09-25-912 self-serve join.
+// Updated for post-#1078 (Burs-IA) replay behavior: an identical requestId
+// replay returns member/status metadata with replayed:true and NEVER the
+// Bearer credential again.
 //
+// Scope: the two durability guarantees the contract makes that map to known
+// incident classes:
 //   1. Identity durability (#770 class): the same card key re-joining after
 //      its pass expired returns the SAME memberId, holds ONE slot, and its
 //      history is intact - never a duplicate guest member.
-//   2. requestId idempotency: an identical retry (client lost the response)
-//      returns the SAME credential, not a second pass.
+//   2. requestId idempotency (post-#1078): an identical retry returns
+//      replayed:true with the same member/status metadata but NO credential.
+//      The client must persist the token from the first response.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { isGuestAgentMemberId } from "../server/guest-agent-links.mjs";
 
-async function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), "project-room-selfserve-"));
-  const clock = { now: Date.parse("2026-09-25T12:00:00.000Z") };
-  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock.now });
-  store.initialize(initialRoom("commons"));
+const ROOM = "commons";
+
+async function serve(t) {
+  const directory = mkdtempSync(join(tmpdir(), "room-selfserve-contract-"));
+  let clock = Date.now();
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock });
+  store.initialize(initialRoom());
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  t.after(() => { server.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, origin, clock };
-}
-
-// Minimal Ed25519-signed agent card, matching the doc's contract: the server
-// verifies the signature against the card's own public key (self-attested).
-function agentCard(name) {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
-  const payload = JSON.stringify({ name, publicKey: publicKeyPem });
-  const signature = cryptoSign(null, Buffer.from(payload), privateKey).toString("base64");
-  return { name, publicKey: publicKeyPem, signature };
-}
-
-const requestJoin = (origin, body) => fetch(origin + "/api/guest-agent-links/request", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(body)
-}).then(async response => ({ status: response.status, body: await response.json().catch(() => null) }));
-
-test.skip("fixture 1: identity durability - same card key re-joins after expiry to the same memberId, one slot, history intact", async t => {
-  const { store, origin, clock } = await setup(t);
-  const card = agentCard("durability-agent");
-  const first = await requestJoin(origin, { displayName: "Durability Agent", agentCard: card, requestId: "req-durability-1" });
-  assert.equal(first.status, 200, "initial self-serve join is accepted");
-  const firstMemberId = first.body.memberId;
-  assert.match(firstMemberId, /^guest-agent-/, "guest memberId is badged by shape");
-
-  // The guest leaves history behind while its first pass is live. The issued
-  // credential is the member's bearer key (v0 ga1. shape), so it commands
-  // as that member.
-  const posted = store.command(first.body.credential, "commons", {
-    id: "durability-msg-1", type: "message.posted",
-    data: { messageId: "durability-m1", body: "hello from the first pass" }
+  const request = (path, { method = "GET", data, token } = {}) => fetch(origin + path, {
+    method, headers: {
+      Origin: origin,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(data === undefined ? {} : { "Content-Type": "application/json" })
+    },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) })
   });
-  assert.equal(posted.duplicate, false);
+  return { store, request, advance: ms => { clock += ms; }, now: () => clock };
+}
 
-  // The pass expires: advance past the documented 24h TTL.
-  clock.now += 25 * 60 * 60 * 1000;
+// A self-signed agent card carrying a joinRequest, signed the way an
+// outside agent would: signCard over the card body (joinRequest included).
+function signedCard(roomId, { name, keyPair, issuedAt, requestId, agentId } = {}) {
+  const kp = keyPair ?? generateKeyPair();
+  const card = {
+    agentId: agentId ?? `test-${randomBytes(4).toString("hex")}`,
+    name: name ?? `Test Bot ${randomBytes(3).toString("hex")}`,
+    capabilities: ["chat"],
+    publicKey: kp.publicKey,
+    joinRequest: { roomId, requestId: requestId ?? randomUUID(), issuedAt: issuedAt ?? Date.now() },
+  };
+  const signature = signCard({ agentId: card.agentId, card, privateKey: kp.privateKey });
+  return { card: { ...card, signature }, keyPair: kp };
+}
 
-  const second = await requestJoin(origin, { displayName: "Durability Agent", agentCard: card, requestId: "req-durability-2" });
-  assert.equal(second.status, 200, "re-join after expiry is a renewal, not an error");
-  assert.equal(second.body.memberId, firstMemberId, "#770 class: same card key must keep the same memberId");
+const postJoin = (request, card) => request("/api/guest-invites/request", { method: "POST", data: { card } });
 
-  const guests = store.db.prepare("SELECT id FROM members WHERE room_id='commons' AND id LIKE 'guest-agent-%'").all();
+test("fixture 1: identity durability - same card key re-joins after expiry to the same memberId, one slot, history intact", async t => {
+  const { store, request, advance, now } = await serve(t);
+  const requestId1 = randomUUID();
+  const { card, keyPair } = signedCard(ROOM, { name: "Durability Agent", requestId: requestId1 });
+  const first = await postJoin(request, card);
+  assert.equal(first.status, 201);
+  const firstBody = await first.json();
+  assert.ok(firstBody.token, "first join issues a Bearer credential");
+  const firstMemberId = firstBody.member.id;
+  assert.ok(isGuestAgentMemberId(firstMemberId), "guest memberId is badged by shape");
+
+  // The guest leaves history behind while its first pass is live.
+  const posted = await request(`/api/rooms/${ROOM}/commands`, {
+    method: "POST",
+    token: firstBody.token,
+    data: { id: "durability-msg-1", type: "message.posted", data: { messageId: "durability-m1", body: "hello from the first pass" } }
+  });
+  assert.equal(posted.status, 201, "guest can post with its credential");
+
+  // The pass expires: advance past the 24h TTL.
+  advance(25 * 60 * 60 * 1000);
+
+  // Re-join with the SAME key but a NEW requestId (fresh joinRequest).
+  // Note: issuedAt must use the advanced clock, not real time.
+  const { card: card2 } = signedCard(ROOM, { name: "Durability Agent", keyPair, requestId: randomUUID(), agentId: card.agentId, issuedAt: now() });
+  const second = await postJoin(request, card2);
+  assert.ok([200, 201].includes(second.status), "re-join after expiry succeeds (200 renewal or 201 new)");
+  const secondBody = await second.json();
+  assert.equal(secondBody.member.id, firstMemberId, "#770 class: same card key must keep the same memberId");
+
+  const guests = Object.values(store.room(ROOM).state.members).filter(m => isGuestAgentMemberId(m.id));
   assert.equal(guests.length, 1, "one live slot per key, not a duplicate guest member");
 
   // History survives the expiry: the first pass's message is still there and
   // still attributed to the SAME member, not to a tombstoned duplicate.
-  const history = store.db.prepare("SELECT json_extract(body,'$.actorId') AS actorId, body FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.messageId')='durability-m1'").all();
+  const history = store.db.prepare("SELECT json_extract(body,'$.actorId') AS actorId FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.messageId')='durability-m1'").all(ROOM);
   assert.equal(history.length, 1, "the first pass's message survives the expiry");
   assert.equal(history[0].actorId, firstMemberId, "history stays attributed to the durable memberId");
 });
 
-test.skip("fixture 2: requestId idempotency - identical retry returns the same credential", async t => {
-  const { origin } = await setup(t);
-  const card = agentCard("idempotent-agent");
-  const body = { displayName: "Idempotent Agent", agentCard: card, requestId: "req-idem-1" };
-  const first = await requestJoin(origin, body);
-  assert.equal(first.status, 200);
-  assert.ok(first.body.credential?.startsWith("ga1."), "credential keeps the ga1. shape from v0");
+test("fixture 2: requestId idempotency (post-#1078) - identical retry returns replayed:true with NO credential", async t => {
+  const { request } = await serve(t);
+  const requestId = randomUUID();
+  const { card } = signedCard(ROOM, { name: "Idempotent Agent", requestId });
+  const first = await postJoin(request, card);
+  assert.equal(first.status, 201);
+  const firstBody = await first.json();
+  assert.ok(firstBody.token, "first join issues a Bearer credential");
 
-  const retry = await requestJoin(origin, body);
-  assert.equal(retry.status, 200, "a retry is not 409 already_joined - it is the same request");
-  assert.equal(retry.body.credential, first.body.credential, "same requestId returns the same credential");
-  assert.equal(retry.body.memberId, first.body.memberId);
+  // Identical retry: the exact same signed card bytes. Post-#1078, the replay
+  // must NOT return the credential — a captured request body must not be
+  // sufficient to recover the live token (Burs-IA review).
+  const retry = await postJoin(request, card);
+  assert.equal(retry.status, 200, "a retry is 200, not 409");
+  const retryBody = await retry.json();
+  assert.equal(retryBody.replayed, true, "replay is flagged");
+  assert.equal(retryBody.token, undefined, "replay never discloses the Bearer credential");
+  assert.equal(retryBody.member.id, firstBody.member.id, "same member");
+  assert.equal(retryBody.expiresAt, firstBody.expiresAt, "same expiry");
 });
