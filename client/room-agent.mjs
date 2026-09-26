@@ -15,6 +15,7 @@ import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -393,6 +394,36 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  // Agents named before they have a seat. Reading the room snapshot assembles
+  // the network. It grants no access, mints no identity, and issues no invite.
+  async outsideAgents({ signal } = {}) {
+    const snapshot = await this.snapshot({ signal });
+    return {
+      contractVersion: 1,
+      grantsAccess: false,
+      evaluatedThrough: snapshot.sequence,
+      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {})
+    };
+  }
+  // Name an agent who has no seat. The post is an ordinary room message.
+  // Reading it grants no access, mints no identity, and issues no invite.
+  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  async recordOutsideAgent(input, { signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
+    const snapshot = await this.snapshot({ signal });
+    let plan;
+    try {
+      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
+    } catch (error) {
+      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
+      throw error;
+    }
+    if (plan.recorded !== "replay") {
+      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    }
+    const network = await this.outsideAgents({ signal });
+    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+  }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
   agentInbox({ limit, signal } = {}) {
@@ -908,13 +939,19 @@ export class RoomAgentClient {
   // Post a room message as the connected agent member. With toMemberId the
   // message is a targeted DM (only the sender and the addressed member can
   // read it); without it the message goes to everyone in the room.
-  say(body, { toMemberId, signal } = {}) {
+  // replyToId threads the post under an existing message. Omitting it is an
+  // unthreaded post, not a reply.
+  say(body, { toMemberId, replyToId, signal } = {}) {
     if (typeof body !== "string" || !body.trim() || body.length > MAX_MESSAGE_BODY_CHARS)
       throw new Error(`Say a message of 1 to ${MAX_MESSAGE_BODY_CHARS} characters`);
     if (toMemberId !== undefined && !validId(toMemberId))
       throw new Error("toMemberId must be a member id");
+    if (replyToId !== undefined && !validId(replyToId))
+      throw new Error("replyToId must be a message id");
     return this.command({ id: randomUUID(), type: "message.posted",
-      data: { messageId: randomUUID(), body, ...(toMemberId ? { toMemberId } : {}) } }, { signal });
+      data: { messageId: randomUUID(), body,
+        ...(toMemberId ? { toMemberId } : {}),
+        ...(replyToId ? { replyToId } : {}) } }, { signal });
   }
   workSessions({ status, signal } = {}) {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");

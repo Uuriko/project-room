@@ -283,11 +283,14 @@ export function markActivityRead(store, token, roomId, data, expectedSessionBind
   const member = auth.member;
   return store.transaction(() => {
     const now = store.now();
-    const placeholders = data.ids.map(() => "?").join(",");
-    const result = store.db.prepare(
-      `UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL AND id IN (${placeholders})`
-    ).run(now, roomId, member.id, ...data.ids);
-    return { ...viewerEnvelope(auth, roomId), read: result.changes };
+    // One row per statement. The route accepts 200 ids, and an IN list plus
+    // the three scope binds exceeds Durable Object SQL's 100-bind limit.
+    const update = store.db.prepare(
+      "UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL AND id=?"
+    );
+    let read = 0;
+    for (const id of data.ids) read += update.run(now, roomId, member.id, id).changes;
+    return { ...viewerEnvelope(auth, roomId), read };
   });
 }
 

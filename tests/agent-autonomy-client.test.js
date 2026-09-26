@@ -4,9 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { outsideAgentBody, parseOutsideAgentBody } from "../server/outside-agents.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -40,7 +41,7 @@ async function fixture(t) {
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const client = memberId => new RoomAgentClient({ version: 1, origin, roomId: "commons", memberId, token: keys[memberId] });
-  return { origin, client, keys };
+  return { origin, client, keys, store };
 }
 
 test("agent client: presence, capabilities, and session claims end to end", async t => {
@@ -127,6 +128,18 @@ test("agent client: say posts room messages and targeted DMs", async t => {
   assert.throws(() => me.say("hi", { toMemberId: "not an id!" }), /member id/);
 });
 
+test("agent client say keeps a reply under the message it answers", async t => {
+  const { client } = await fixture(t);
+  const me = client("agent");
+  const peer = client("agent-two");
+  const root = await me.say("Root for the thread");
+  const reply = await peer.say("Answer in the thread", { replyToId: root.event.data.messageId });
+  assert.equal(reply.event.data.replyToId, root.event.data.messageId);
+  const thread = await me.messageThread(root.event.data.messageId);
+  assert.ok(JSON.stringify(thread).includes("Answer in the thread"));
+  assert.throws(() => peer.say("nope", { replyToId: "not an id!" }), /message id/);
+});
+
 test("agent inbox CLI exposes the autonomy primitives", async t => {
   const { origin, keys } = await fixture(t);
   const env = { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
@@ -161,10 +174,120 @@ test("agent inbox CLI exposes the autonomy primitives", async t => {
   const dm = await run(["say", "--to", "agent-two", "private", "hello"]);
   assert.equal(dm.status, 0, dm.stderr);
   assert.equal(JSON.parse(dm.stdout).event.data.toMemberId, "agent-two");
-  for (const args of [["say"], ["say", "--to"], ["say", "--to", "agent-two"]]) {
+  const threadedSay = await run(["say", "--reply-to", posted.event.data.messageId, "threaded", "from", "the", "cli"]);
+  assert.equal(threadedSay.status, 0, threadedSay.stderr);
+  assert.equal(JSON.parse(threadedSay.stdout).event.data.replyToId, posted.event.data.messageId);
+  for (const args of [["say"], ["say", "--to"], ["say", "--to", "agent-two"], ["say", "--stdin", "extra"]]) {
     const result = await run(args);
     assert.notEqual(result.status, 0, `expected usage error for [${args.join(" ")}]`);
   }
+});
+
+test("agent inbox say --stdin posts an outside-agent envelope with its newline", async t => {
+  const { origin, keys } = await fixture(t);
+  const env = { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
+    ROOM_AGENT_MEMBER: "agent", ROOM_AGENT_TOKEN: keys.agent };
+  const envelope = 'outside-agent.v1\n{"v":1,"kind":"introduce","externalRef":"bus:stdin","displayName":"Stdin bus","origin":"bus","reach":"bus:stdin","note":null}';
+  const run = (args, input) => new Promise(resolve => {
+    const clean = { ...process.env };
+    for (const name of Object.keys(clean)) if (name.startsWith("ROOM_AGENT_")) delete clean[name];
+    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env } });
+    let stdout = "", stderr = "";
+    const timer = setTimeout(() => child.kill(), 15000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.on("close", status => { clearTimeout(timer); resolve({ stdout, stderr, status }); });
+    child.stdin.end(input ?? "");
+  });
+  const joined = await run(["say", "outside-agent.v1", envelope.slice("outside-agent.v1\n".length)]);
+  assert.equal(joined.status, 0, joined.stderr);
+  assert.equal(parseOutsideAgentBody(JSON.parse(joined.stdout).event.data.body), null);
+  const posted = await run(["say", "--stdin"], envelope);
+  assert.equal(posted.status, 0, posted.stderr);
+  const body = JSON.parse(posted.stdout).event.data.body;
+  assert.equal(body, envelope);
+  assert.equal(parseOutsideAgentBody(body)?.externalRef, "bus:stdin");
+  assert.equal(parseOutsideAgentBody(body)?.kind, "introduce");
+});
+
+test("a saved seat can introduce an outside agent the room can see, and a changed retry does not rewrite the card", async t => {
+  const { origin, client, keys, store } = await fixture(t);
+  const env = { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
+    ROOM_AGENT_MEMBER: "agent", ROOM_AGENT_TOKEN: keys.agent };
+  const run = args => new Promise(resolve => {
+    const clean = { ...process.env };
+    for (const name of Object.keys(clean)) if (name.startsWith("ROOM_AGENT_")) delete clean[name];
+    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env } });
+    let stdout = "", stderr = "";
+    const timer = setTimeout(() => child.kill(), 15000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.on("close", status => { clearTimeout(timer); resolve({ stdout, stderr, status }); });
+    child.stdin.end();
+  });
+  const introduced = await run(["outside-agents", "introduce", "--ref", "bus:cli", "--name", "CLI bus", "--origin", "bus", "--reach", "bus:cli"]);
+  assert.equal(introduced.status, 0, introduced.stderr);
+  const posted = JSON.parse(introduced.stdout);
+  assert.equal(posted.recorded, "introduce");
+  assert.equal(posted.grantsAccess, false);
+  const peer = client("agent-two");
+  const before = await peer.snapshot();
+  const network = await peer.outsideAgents();
+  const card = network.agents.find(agent => agent.externalRef === "bus:cli");
+  assert.equal(card?.displayName, "CLI bus");
+  assert.equal(card?.introducedBy, "agent");
+  assert.equal(card?.linkedMemberId, null);
+  assert.equal(network.grantsAccess, false);
+  assert.equal(before.state.members["bus:cli"], undefined);
+  const replay = await run(["outside-agents", "introduce", "--ref", "bus:cli", "--name", "CLI bus", "--origin", "bus", "--reach", "bus:cli"]);
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).recorded, "replay");
+  const changed = await run(["outside-agents", "introduce", "--ref", "bus:cli", "--name", "CLI renamed", "--origin", "bus", "--reach", "bus:cli"]);
+  assert.notEqual(changed.status, 0);
+  assert.equal(JSON.parse(changed.stderr).code, "outside_agent_changed");
+  const still = await peer.outsideAgents();
+  assert.equal(still.agents.find(agent => agent.externalRef === "bus:cli").displayName, "CLI bus");
+  assert.equal(still.evaluatedThrough, before.sequence);
+  const sighting = await client("agent-two").recordOutsideAgent({
+    externalRef: "bus:cli", displayName: "Seen by two", origin: "host", reach: "https://example.test/cli"
+  });
+  assert.equal(sighting.recorded, "sighting");
+  assert.equal(sighting.grantsAccess, false);
+  const confirmed = sighting.agents.find(agent => agent.externalRef === "bus:cli");
+  assert.equal(confirmed.displayName, "CLI bus");
+  assert.equal(confirmed.introducedBy, "agent");
+  assert.deepEqual(confirmed.sightings.map(row => row.memberId), ["agent-two"]);
+  assert.equal((await peer.snapshot()).state.members["bus:cli"], undefined);
+  setTier(store.db, "commons", "agent", "t1_readonly");
+  await assert.rejects(() => client("agent").recordOutsideAgent({
+    externalRef: "bus:blocked", displayName: "Blocked", origin: "bus", reach: "bus:blocked"
+  }), error => error.code === "agent_readonly" && error.status === 403);
+  assert.equal((await peer.outsideAgents()).agents.find(agent => agent.externalRef === "bus:blocked"), undefined);
+});
+
+test("a saved seat can read an outside agent another member introduced, and that read grants nothing", async t => {
+  const { client } = await fixture(t);
+  const me = client("agent");
+  const peer = client("agent-two");
+  const before = await peer.snapshot();
+  const beforeMembers = Object.keys(before.state.members).sort();
+  await me.say(outsideAgentBody({
+    v: 1, kind: "introduce", externalRef: "bus:client", displayName: "Client bus",
+    origin: "bus", reach: "bus:client", note: null
+  }));
+  const network = await peer.outsideAgents();
+  assert.equal(network.grantsAccess, false);
+  const card = network.agents.find(agent => agent.externalRef === "bus:client");
+  assert.equal(card?.displayName, "Client bus");
+  assert.equal(card?.introducedBy, "agent");
+  assert.equal(card?.linkedMemberId, null);
+  const after = await peer.snapshot();
+  assert.deepEqual(Object.keys(after.state.members).sort(), beforeMembers);
+  assert.equal(after.state.members["bus:client"], undefined);
 });
 
 test("agent client: createAgentInvite falls back to explicit permissions when profile:collaborate is rejected", async t => {

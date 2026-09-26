@@ -378,11 +378,16 @@ test("HTTP: identical submissions flag a cluster; the queue lists and dismisses 
   // Dismiss with a reason; the queue reflects the resolution.
   const dismissed = await httpPost(origin,
     `/api/rooms/${HTTPROOM}/bounties/sybil-flags/${flagId}/dismiss`,
-    { reason: "same template on a trivial task" }, keys.owner);
+    { reason: "same template on a trivial task", idempotencyKey: "same-key-different-flag" }, keys.owner);
   assert.equal(dismissed.status, 200);
   const { flag } = await dismissed.json();
   assert.equal(flag.status, "dismissed");
   assert.equal(flag.resolutionReason, "same template on a trivial task");
+  const wrongTarget = await httpPost(origin,
+    `/api/rooms/${HTTPROOM}/bounties/sybil-flags/sybf_missing/dismiss`,
+    { reason: "same template on a trivial task", idempotencyKey: "same-key-different-flag" }, keys.owner);
+  assert.equal(wrongTarget.status, 404, "another flag must not replay this flag's receipt");
+  assert.equal((await wrongTarget.json()).flag, undefined);
   const dismissedOnly = await (await httpGet(
     origin, `/api/rooms/${HTTPROOM}/bounties/sybil-flags?status=dismissed`, keys.owner)).json();
   assert.equal(dismissedOnly.flags.length, 1);

@@ -116,11 +116,18 @@ export class ChannelUpdateJournal {
   }
   // Mark exactly these pending updates imported. Called inside the page
   // transaction, so the page and its acknowledgement commit or roll back together.
+  // One row per statement: a legal batch is 500 ids, and an IN list plus the
+  // three scope binds exceeds Durable Object SQL's 100-bind limit.
   imported(accountId, connectionId, ids) {
     scope(accountId, connectionId);
     const unique = updateIds(ids);
-    return this.store.transaction(() => this.db.prepare("UPDATE pending_channel_updates SET status='imported',updated_at=? WHERE account_id=? AND connection_id=? AND status='pending' AND update_id IN (" + unique.map(() => "?").join(",") + ")")
-      .run(this.store.now(), accountId, connectionId, ...unique).changes);
+    return this.store.transaction(() => {
+      const now = this.store.now();
+      const update = this.db.prepare("UPDATE pending_channel_updates SET status='imported',updated_at=? WHERE account_id=? AND connection_id=? AND status='pending' AND update_id=?");
+      let changes = 0;
+      for (const id of unique) changes += update.run(now, accountId, connectionId, id).changes;
+      return changes;
+    });
   }
   // Record one failed import attempt on the pending rows of a slice. The
   // error text is bounded; rows that reach maxAttempts park as failed and stop
@@ -137,8 +144,11 @@ export class ChannelUpdateJournal {
         WHERE account_id=? AND connection_id=? AND update_id=? AND status='pending'`);
       let retried = 0;
       for (const id of unique) retried += update.run(message, now, accountId, connectionId, id).changes;
-      const exhausted = this.db.prepare("SELECT count(*) n FROM pending_channel_updates WHERE account_id=? AND connection_id=? AND status='failed' AND update_id IN (" + unique.map(() => "?").join(",") + ")")
-        .get(accountId, connectionId, ...unique).n;
+      // Scan this connection, then filter. An IN list of the batch would bind
+      // one variable per id and exceed Durable Object SQL's 100-bind limit.
+      const failedIds = new Set(this.db.prepare("SELECT update_id FROM pending_channel_updates WHERE account_id=? AND connection_id=? AND status='failed'")
+        .all(accountId, connectionId).map(row => row.update_id));
+      const exhausted = unique.filter(id => failedIds.has(id)).length;
       return { attempted: retried, exhausted, error: message };
     });
   }
