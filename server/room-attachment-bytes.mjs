@@ -13,6 +13,7 @@ import { ServiceError } from "./service-error.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
 import { validId } from "../src/events.js";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -98,6 +99,7 @@ export class RoomAttachmentBytes {
   stage(token, roomId, { id, filename, mediaType, data } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -192,6 +194,7 @@ export class RoomAttachmentBytes {
   discard(token, roomId, id) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -214,6 +217,7 @@ export class RoomAttachmentBytes {
   commit(token, roomId, { id, messageId } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
+      enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
       this.expire(roomId, this.store.now());
