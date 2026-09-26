@@ -6281,11 +6281,13 @@ paths:
     post:
       summary: Withdraw a pending join request
       description: >-
-        Open: the caller supplies identityId in the body. Only the requesting
-        identity can withdraw its own pending request (others get 404). A
+        Requires the current, unrevoked identity secret as Authorization: Bearer
+        and its identityId in the body. Public IDs alone confer no authority.
+        A valid different identity receives 404 for another identity's request. A
         cancelled request leaves the pending queue. Repeating a cancel is
         idempotent. A request that is no longer pending returns 409.
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -6300,6 +6302,7 @@ paths:
                 identityId: { type: string }
       responses:
         '200': { description: The request with status cancelled }
+        '401': { description: Missing, mismatched, stale, or revoked identity credential }
         '404': { description: not_found }
         '409': { description: already_decided }
         '422': { description: invalid_request }

@@ -353,12 +353,13 @@ export class AccessRequests {
     });
   }
 
-  // The requester withdraws a still-pending request. A different identity gets
-  // the same 404 as status(), so this is not an enumeration or admin path.
+  // Only the current identity-secret holder may withdraw a request. Public
+  // request/identity IDs alone confer no cancellation authority.
   // A repeated cancel returns the cancelled row so a lost response can retry.
-  cancel(requestId, identityId) {
+  cancel(requestId, identityId, secret) {
     if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
     return this.store.transaction(() => {
+      this.store.identities.authenticateIdentitySecret(identityId, secret);
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
       if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
       const live = this.maybeExpire(row);

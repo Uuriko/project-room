@@ -36,28 +36,49 @@ test("requester cancel removes a pending access request from the owner queue", a
     rmSync(directory, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const postCancel = identityId => fetch(`${origin}/api/access-requests/ar_cancel`, {
+  const postCancel = (identityId, secret) => fetch(`${origin}/api/access-requests/ar_cancel`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
     body: JSON.stringify({ identityId })
   });
 
-  const stranger = await postCancel(other.identityId);
+  // Both IDs are room-visible. Supplying them is not proof of ownership.
+  const publicEvent = JSON.parse(store.db.prepare("SELECT body FROM events WHERE json_extract(body,'$.type')='access.requested' LIMIT 1").get().body);
+  assert.equal(publicEvent.data.identityId, identity.identityId);
+  assert.equal(publicEvent.data.requestId, "ar_cancel");
+  for (const secret of [undefined, other.secret]) {
+    const forged = await postCancel(identity.identityId, secret);
+    assert.equal(forged.status, 401);
+    assert.equal(requests.status("ar_cancel", identity.identityId).status, "pending");
+  }
+  const revoked = store.identities.create("Revoked Requester");
+  requests.request("commons", { identityId: revoked.identityId, displayName: "Revoked Requester", requestId: "ar_revoked", requestedPermissions: [] });
+  store.identities.revoke(revoked.identityId, revoked.secret);
+  const revokedReply = await fetch(`${origin}/api/access-requests/ar_revoked`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${revoked.secret}` },
+    body: JSON.stringify({ identityId: revoked.identityId })
+  });
+  assert.equal(revokedReply.status, 401);
+  assert.equal(requests.status("ar_revoked", revoked.identityId).status, "pending");
+  const stranger = await postCancel(other.identityId, other.secret);
   assert.equal(stranger.status, 404);
   assert.equal(requests.status("ar_cancel", identity.identityId).status, "pending");
 
-  const cancelled = await postCancel(identity.identityId);
+  const current = store.identities.rotate(identity.identityId, identity.secret);
+  assert.equal((await postCancel(identity.identityId, identity.secret)).status, 401);
+  assert.equal(requests.status("ar_cancel", identity.identityId).status, "pending");
+  const cancelled = await postCancel(identity.identityId, current.secret);
   assert.equal(cancelled.status, 200);
   const body = await cancelled.json();
   assert.equal(body.status, "cancelled");
   assert.equal(body.requestId, "ar_cancel");
-  assert.equal(requests.list(ownerToken, "commons").length, 0);
+  assert.equal(requests.list(ownerToken, "commons").some(row => row.requestId === "ar_cancel"), false);
   const withdrawn = requests.list(ownerToken, "commons", { status: "cancelled" });
   assert.equal(withdrawn.length, 1);
   assert.equal(withdrawn[0].requestId, "ar_cancel");
   assert.equal(withdrawn[0].decisionNote, "withdrawn by requester");
 
-  const again = await postCancel(identity.identityId);
+  const again = await postCancel(identity.identityId, current.secret);
   assert.equal(again.status, 200);
   assert.equal((await again.json()).status, "cancelled");
   assert.throws(
