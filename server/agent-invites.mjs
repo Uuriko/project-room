@@ -17,6 +17,7 @@
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -152,6 +153,9 @@ export class AgentInvites {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
+    // Minting invites is a membership write: the read-only autonomy tier
+    // applies even when the agent holds an invite grant (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_create", fail });
     let profileName = null;
     if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
