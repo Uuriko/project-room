@@ -41,7 +41,7 @@ export function configuredHost(config) {
       // No operator credentials are forwarded into the isolated process.
       const options = { cwd: settings.cwd, env, signal, isolate: true };
       const output = await hostSubprocess(settings, { ...options, input: payload });
-      if (output.exitCode !== 0) throw new Error("Host exited unsuccessfully; reconcile the original attempt");
+      if (output.exitCode !== 0) throw new Error("Host exited unsuccessfully; verify Linux bubblewrap namespace support and reconcile the original attempt. Automatic execution has no unsandboxed fallback.");
       let result;
       try {
         result = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(output.stdout));
