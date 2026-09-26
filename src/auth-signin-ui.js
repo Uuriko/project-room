@@ -93,7 +93,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function passwordHtml() {
     const signup = passwordMode === "signup";
     return `<form data-signin-form="password" autocomplete="on">
-      ${passwordHost === "email" ? `<h2 class="auth-email-title">${signup ? "Create account" : "Sign in with email"}</h2>` : `<div class="auth-method-tabs" role="group" aria-label="Create account or sign in">
+      ${passwordHost === "email" ? `<h2 class="auth-email-title">${signup ? "Create account" : "Sign in"}</h2>` : `<div class="auth-method-tabs" role="group" aria-label="Create account or sign in">
         <button type="button" class="button ghost" data-password-mode="signup" aria-pressed="${signup}">Create account</button>
         <button type="button" class="button ghost" data-password-mode="login" aria-pressed="${!signup}">Sign in</button>
       </div>`}
