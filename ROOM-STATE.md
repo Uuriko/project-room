@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T20:00:50Z · board: Uuriko/project-room#266 · watermark: 5849417227 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1417620845b5a59538a039d5f37d23155406608b2373c9f75db01605284636fb -->
+<!-- generated: 2026-09-26T20:31:02Z · board: Uuriko/project-room#266 · watermark: 5849597880 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=c9625bc2e5dc604f6011e952dd6e2aaf024b40a8db6828d9ec38405c4e4ecded -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +51 more
+… +52 more
 
 ## file-claims
 file | lane | task-id | state
@@ -116,6 +116,7 @@ scripts/release-checkpoint.mjs | jill | RC-2026-09-26-965 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
+scripts/room | jill | RC-2026-09-26-969 | working
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
 scripts/room-chrome.mjs | jill | RC-2026-09-26-965 | working
 scripts/room-digest | quill-s2 | RC-2026-09-16-005 | submitted
@@ -323,6 +324,7 @@ tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-deep-link.test.js | jill | RC-2026-09-26-965 | working
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/room-roster.test.js | jill | RC-2026-09-26-965 | working
+tests/room-watch-enforcer.test.sh | jill | RC-2026-09-26-969 | working
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/route-docs-check.test.js | jill | RC-2026-09-26-965 | working
 tests/runtime-package.test.js | (none) | RC-2026-09-18-017 | submitted
@@ -353,7 +355,7 @@ docs/SWARM-PLUG-IN.md | jill, quill-s2 | RC-2026-09-16-005, RC-2026-09-26-965
 docs/openapi.yaml | , jill, quill | RC-2026-09-18-017, RC-2026-09-19-068, RC-2026-09-23-102, RC-2026-09-24-110, RC-2026-09-24-206, RC-2026-09-26-965
 index.html | , jill, quill | RC-2026-09-19-054, RC-2026-09-19-068, RC-2026-09-19-088, RC-2026-09-26-965
 scripts/openapi-method-accuracy.mjs | jill | RC-2026-09-26-962, RC-2026-09-26-965
-scripts/room | quill, quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001, RC-2026-09-17-006
+scripts/room | jill, quill, quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001, RC-2026-09-17-006, RC-2026-09-26-969
 scripts/room-chrome.mjs | jill, quill | RC-2026-09-19-068, RC-2026-09-26-965
 scripts/route-docs-check.mjs | jill, quill | RC-2026-09-19-081, RC-2026-09-26-965
 scripts/runtime-package.mjs | , grokbot, jill | RC-2026-09-18-017, RC-2026-09-23-102, RC-2026-09-23-105, RC-2026-09-24-110, RC-2026-09-25-910, RC-2026-09-26-965
@@ -392,6 +394,7 @@ RC-2026-09-26-965 | jill | working | 2026-09-27T01:48:56Z | .github/workflows/te
 RC-2026-09-26-964 | jill | working | 2026-09-27T01:49:19Z | scripts/ralph-loop.mjs, docs/RALPH-BURNDOWN.md
 RC-2026-09-26-967 | jill | working | 2026-09-27T01:49:21Z | server/photon-channel-provider.mjs, server/photon-channel-telegram.mjs, tests/photon-channel-provider.test.js
 RC-2026-09-26-966 | jill | working | 2026-09-27T01:50:29Z | server/http.mjs, server/store.mjs, server/inbox-transport.mjs, tests/otel-wiring.test.js
+RC-2026-09-26-969 | jill | working | 2026-09-27T02:02:44Z | scripts/room, tests/room-watch-enforcer.test.sh
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -400,6 +403,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 6c5f56441b86f2f30a5ad97c8ded57c89d058a3a | 5849553042
+unknown | 1d7b77c777354c5e8a59568660d4c424f3c95658 | 5849424661
 BL-002 | 46ebae3bbee593335d134927db9254ea14f6ef5d | 5849417227
 unknown | 5ef6d852183456fe72332405c1cbad592b6fd74c | 5849409217
 BL-005 | 65a9e4859cf86c9163c0609923abd1050e40c0c5 | 5849378447
@@ -408,8 +413,6 @@ unknown | 4512e20b6f64175b35ee89d5b215c5f7342f58f3 | 5849340899
 BL-003 | 5e01d008c52ca4d64b5b4bebeb369d46bc8c256f | 5849339314
 unknown | none | 5847470278
 unknown | none | 5845328845
-RC-304 | none | 5845201515
-RC-303 | none | 5845061979
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -497,6 +500,7 @@ scripts/release-checkpoint.mjs | jill | RC-2026-09-26-965 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
+scripts/room | jill | RC-2026-09-26-969 | working
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
 scripts/room-chrome.mjs | jill | RC-2026-09-26-965 | working
 scripts/room-digest | quill-s2 | RC-2026-09-16-005 | submitted
@@ -704,6 +708,7 @@ tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-deep-link.test.js | jill | RC-2026-09-26-965 | working
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/room-roster.test.js | jill | RC-2026-09-26-965 | working
+tests/room-watch-enforcer.test.sh | jill | RC-2026-09-26-969 | working
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/route-docs-check.test.js | jill | RC-2026-09-26-965 | working
 tests/runtime-package.test.js | (none) | RC-2026-09-18-017 | submitted
@@ -725,5 +730,5 @@ tests/workflow.test.js | jill | RC-2026-09-26-965 | working
 … +63 more
 
 ## signals
-board_comments=2041 threshold=1500 rotation_due=yes watcher=active open_claims=76 prose_open=3 unfenced_prose=73 files_claimed=238 overlap_files=35 watermark=5849417227
+board_comments=2052 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=239 overlap_files=35 watermark=5849597880
 
