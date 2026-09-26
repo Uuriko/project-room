@@ -2,7 +2,7 @@
 // agent can hand work to any other agent — or to John — with everything the
 // receiver needs: objective → status → next → blockers → files → validation.
 // Pure validator: no store, no network. A later slice persists handoffs.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PERMISSIONS } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 class HandoffError extends Error { constructor(code, message) { super(message); this.name = "HandoffError"; this.code = code; } }
@@ -332,22 +332,35 @@ export class HandoffEnvelopeJournal {
   }
   // Journal an envelope: the sender hands typed work to a named agent. The
   // envelope id is journal-assigned; the sender supplies everything else.
-  create(roomId, fields, { from }) {
+  create(roomId, fields, { from, requestId }) {
     envelopeScope(roomId);
     envelopeCheck(fields !== null && typeof fields === "object" && !Array.isArray(fields), ENVELOPE_CODE, "an envelope must be an object");
     const sender = agentId(from, "from");
+    if (requestId !== undefined) agentId(requestId, "requestId");
+    const id = requestId === undefined ? `he_${randomUUID()}`
+      : `he_req_${createHash("sha256").update(JSON.stringify(["handoff-create-v1", roomId, sender, requestId])).digest("base64url")}`;
     return this.store.transaction(() => {
-      const now = this.store.now();
+      const existing = requestId === undefined ? null
+        : this.db.prepare("SELECT * FROM handoff_envelopes WHERE room_id=? AND from_agent=? AND envelope_id=?").get(roomId, sender, id);
+      const now = existing?.created_at ?? this.store.now();
       const createdAt = new Date(now).toISOString();
       const envelope = handoffEnvelope({ ...fields, envelopeVersion: handoffEnvelopeVersion,
-        id: `he_${randomUUID()}`, from: sender, createdAt,
+        id, from: sender, createdAt,
         provenance: { ...(fields.provenance ?? {}), createdBy: sender } });
+      if (existing) {
+        // Compare normalized input at the original creation time: a retry is
+        // still valid after expiry and must never rewind the current lifecycle.
+        if (JSON.stringify(envelope) !== existing.envelope)
+          envelopeFail(409, "envelope_request_conflict", "This requestId was already used for a different handoff.");
+        return { ...envelopeReceiptOf(existing), duplicate: true };
+      }
       const history = JSON.stringify([{ status: "proposed", at: createdAt, by: sender }]);
       this.db.prepare(`INSERT INTO handoff_envelopes
         (envelope_id,room_id,from_agent,to_agent,status,envelope,created_at,updated_at,history)
         VALUES(?,?,?,?,?,?,?,?,?)`)
         .run(envelope.id, roomId, envelope.from, envelope.to, "proposed", JSON.stringify(envelope), now, now, history);
-      return envelopeReceiptOf(this.db.prepare("SELECT * FROM handoff_envelopes WHERE envelope_id=?").get(envelope.id));
+      const receipt = envelopeReceiptOf(this.db.prepare("SELECT * FROM handoff_envelopes WHERE envelope_id=?").get(envelope.id));
+      return requestId === undefined ? receipt : { ...receipt, duplicate: false };
     });
   }
   list(roomId, { status = null, to = null } = {}) {
@@ -394,6 +407,12 @@ export class HandoffEnvelopeJournal {
         if (status === "escalated" && actor !== envelope.to && actor !== envelope.from)
           envelopeFail(403, "envelope_party_only", "Only the sender or recipient can escalate this envelope.");
       }
+      const now = this.store.now();
+      // A delayed recipient must not revive a delegation after either of its
+      // configured deadlines. Cleanup remains available until the explicit sweep.
+      if ((status === "accepted" || status === "completed")
+        && (now >= Date.parse(envelope.authority.expiresAt) || now >= Date.parse(envelope.termination.expiresAt)))
+        envelopeFail(409, "envelope_expired", "This handoff has expired. Ask the sender for a new handoff.");
       let passed = null;
       if (status === "completed") {
         envelopeCheck(Array.isArray(checksPassed) && checksPassed.length >= 1, "envelope_checks_required",
@@ -406,7 +425,6 @@ export class HandoffEnvelopeJournal {
         }))]);
         envelopeCheck(passed.length >= 1, "envelope_checks_required", "At least one declared acceptance check must pass.");
       }
-      const now = this.store.now();
       const entry = { status, at: new Date(now).toISOString(), ...(actor ? { by: actor } : {}),
         ...(trimmed ? { note: trimmed } : {}), ...(passed ? { checksPassed: [...passed] } : {}) };
       const history = [...JSON.parse(row.history), entry];
