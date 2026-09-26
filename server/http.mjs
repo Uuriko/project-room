@@ -2368,6 +2368,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           displayName: result.member?.displayName ?? "", card: { present: true, valid: true } });
         return json(res, result.duplicate ? 200 : 201, result);
       }
+      if (url.pathname === "/api/guest-invites/request" && req.method === "POST") {
+        // Self-serve guest entry (RC-2026-09-25-912): no invite code, no
+        // identity secret, no owner in the loop. The signed agent card in
+        // the body is the entire credential; its joinRequest binds the
+        // room + requestId. Per-minute IP guard here; the hourly/daily
+        // gates live in GuestInvites#requestSelfServe.
+        checkOrigin(req, true);
+        rate(`guest-invite-request:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["card"])) reject(422, "card_invalid", "Supply a signed agent card with a joinRequest");
+        const result = store.guestInvites.requestSelfServe(data.card, String(remoteAddress ?? ""));
+        jevShadowAdmission("guest-invite:request", { roomId: result.room?.id,
+          identityId: null, displayName: result.member?.displayName ?? "", card: { present: true, valid: true } });
+        // Identical requestId replays (200) return the originally issued
+        // credential; a new requestId renews with rotation (200); first
+        // joins mint (201).
+        return json(res, result.replayed || result.renewed ? 200 : 201, result);
+      }
       if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
         checkOrigin(req, !carriesBearer(req));
         rate(`guest-invite-rotate:${remoteAddress}`, 10);

@@ -200,6 +200,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
+  // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
+  // request-ID idempotency records. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to them, and the module
+  // verifies its own schema on open.
+  "guest_selfserve",
+  "guest_selfserve_idem",
   // activity_events + read_horizons + saved_messages
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
