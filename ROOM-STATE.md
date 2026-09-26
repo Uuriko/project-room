@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T15:59:20Z · board: Uuriko/project-room#266 · watermark: 5847470278 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2b81bf378bf01009f157e09950bc1db940fd6b454668d747334275208820ce1d -->
+<!-- generated: 2026-09-26T16:28:58Z · board: Uuriko/project-room#266 · watermark: 5847718181 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=959bc30c4167d861cffc59042e2cd710c7dcf17cc9b186dd9bcbdb5f5112f277 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -108,7 +108,7 @@ server/agent-heartbeat-routes.mjs | grokbot | RC-2026-09-25-910 | submitted
 server/agent-heartbeat-view.mjs | grokbot | RC-2026-09-25-910 | submitted
 server/agent-identities.mjs | (none) | RC-2026-09-18-018 | submitted
 server/agent-identities.mjs | quill | RC-2026-09-19-086 | submitted
-server/agent-identities.mjs | jillian | RC-2026-09-25-938 | working
+server/agent-identities.mjs | (none) | RC-2026-09-25-938 | submitted
 server/agent-invites.mjs | (none) | RC-2026-09-18-020 | submitted
 server/agent-plugin-manifest.mjs | (none) | RC-2026-09-18-009 | submitted
 server/agent-plugin-manifest.mjs | (none) | RC-2026-09-18-019 | submitted
@@ -146,7 +146,7 @@ server/http.mjs | jill | RC-2026-09-23-102 | working
 server/http.mjs | (none) | RC-2026-09-24-206 | submitted
 server/http.mjs (agent-plugin routes only) | (none) | RC-2026-09-18-010 | submitted
 server/http.mjs (collab routes only) | (none) | RC-2026-09-18-011 | submitted
-server/identity-display-name.mjs | jillian | RC-2026-09-25-938 | working
+server/identity-display-name.mjs | (none) | RC-2026-09-25-938 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-011 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-023 | submitted
 server/inbox-collab-store.mjs | (none) | RC-2026-09-18-011 | submitted
@@ -231,7 +231,7 @@ tests/first-run-landing.test.js | quill | RC-2026-09-19-088 | submitted
 tests/google-oauth-email.test.js | quill | RC-2026-09-19-075 | submitted
 tests/guest-join.test.js | jill | RC-2026-09-25-912 | submitted
 tests/handoff-renderer.test.js | quill | RC-2026-09-19-072 | submitted
-tests/identity-display-name.test.js | jillian | RC-2026-09-25-938 | working
+tests/identity-display-name.test.js | (none) | RC-2026-09-25-938 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-011 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-023 | submitted
 tests/join-p2s.test.js | quill | RC-2026-09-19-071 | submitted
@@ -271,7 +271,7 @@ index.html | , quill | RC-2026-09-19-054, RC-2026-09-19-068, RC-2026-09-19-088
 scripts/room | quill, quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001, RC-2026-09-17-006
 scripts/runtime-package.mjs | , grokbot, jill | RC-2026-09-18-017, RC-2026-09-23-102, RC-2026-09-23-105, RC-2026-09-24-110, RC-2026-09-25-910
 server/access-requests.mjs | , quill | RC-2026-09-18-022, RC-2026-09-19-071
-server/agent-identities.mjs | , jillian, quill | RC-2026-09-18-018, RC-2026-09-19-086, RC-2026-09-25-938
+server/agent-identities.mjs | , quill | RC-2026-09-18-018, RC-2026-09-19-086, RC-2026-09-25-938
 server/agent-plugin-manifest.mjs |  | RC-2026-09-18-009, RC-2026-09-18-019
 server/bounty-disputes.mjs |  | RC-2026-09-17-026, RC-2026-09-18-003
 server/dispute-arbiters.mjs |  | RC-2026-09-18-001, RC-2026-09-18-002
@@ -295,6 +295,7 @@ tests/runtime-package.test.js | , grokbot | RC-2026-09-18-017, RC-2026-09-25-910
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-25-943 | jillian | working | 2026-09-26T17:40:09Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
+RC-2026-09-23-902 | instinct | working | 2026-09-26T22:03:18Z | NONE (external black-box monitor)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -392,7 +393,7 @@ server/agent-heartbeat-routes.mjs | grokbot | RC-2026-09-25-910 | submitted
 server/agent-heartbeat-view.mjs | grokbot | RC-2026-09-25-910 | submitted
 server/agent-identities.mjs | (none) | RC-2026-09-18-018 | submitted
 server/agent-identities.mjs | quill | RC-2026-09-19-086 | submitted
-server/agent-identities.mjs | jillian | RC-2026-09-25-938 | working
+server/agent-identities.mjs | (none) | RC-2026-09-25-938 | submitted
 server/agent-invites.mjs | (none) | RC-2026-09-18-020 | submitted
 server/agent-plugin-manifest.mjs | (none) | RC-2026-09-18-009 | submitted
 server/agent-plugin-manifest.mjs | (none) | RC-2026-09-18-019 | submitted
@@ -430,7 +431,7 @@ server/http.mjs | jill | RC-2026-09-23-102 | working
 server/http.mjs | (none) | RC-2026-09-24-206 | submitted
 server/http.mjs (agent-plugin routes only) | (none) | RC-2026-09-18-010 | submitted
 server/http.mjs (collab routes only) | (none) | RC-2026-09-18-011 | submitted
-server/identity-display-name.mjs | jillian | RC-2026-09-25-938 | working
+server/identity-display-name.mjs | (none) | RC-2026-09-25-938 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-011 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-023 | submitted
 server/inbox-collab-store.mjs | (none) | RC-2026-09-18-011 | submitted
@@ -515,7 +516,7 @@ tests/first-run-landing.test.js | quill | RC-2026-09-19-088 | submitted
 tests/google-oauth-email.test.js | quill | RC-2026-09-19-075 | submitted
 tests/guest-join.test.js | jill | RC-2026-09-25-912 | submitted
 tests/handoff-renderer.test.js | quill | RC-2026-09-19-072 | submitted
-tests/identity-display-name.test.js | jillian | RC-2026-09-25-938 | working
+tests/identity-display-name.test.js | (none) | RC-2026-09-25-938 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-011 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-023 | submitted
 tests/join-p2s.test.js | quill | RC-2026-09-19-071 | submitted
@@ -546,5 +547,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2019 threshold=1500 rotation_due=yes watcher=active open_claims=71 prose_open=3 unfenced_prose=73 files_claimed=175 overlap_files=29 watermark=5847470278
+board_comments=2020 threshold=1500 rotation_due=yes watcher=active open_claims=71 prose_open=3 unfenced_prose=73 files_claimed=175 overlap_files=29 watermark=5847718181
 
