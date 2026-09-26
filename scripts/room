@@ -229,10 +229,10 @@ Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
             commits on branch room-state (from origin/main if missing) and
             pushes; never force-pushes; never touches main.
   sweep     [--dry-run]
-            Lease sweep: expired working claims get a RECLAIM strike-one nudge
-            (@-mention, 4h grace); strike-two releases the task back to
-            submitted with no lane; illegal transitions get a RECLAIM
-            rejection notice.
+            Lease sweep: expired working/submitted claims get a RECLAIM
+            strike-one nudge (@-mention, 4h grace); strike-two releases the
+            task back to submitted with no lane; illegal transitions get a
+            RECLAIM rejection notice.
   receipts-scan [--post] [--dry-run]
             Completed tasks / merged PRs older than 24h without a room-receipt
             block. --post posts one prose digest comment (no protocol prefix;
@@ -682,17 +682,24 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             ($e[$k] // null) as $m
             | if ($m | not) then .
               else ($m.t) as $tid
-              # Strike stamps only bite live held claims. A stamp replayed
-              # against a terminal or already-released claim is ignored, so a
-              # rogue or duplicate strike can never flip a done claim back to
-              # submitted (2026-09-19: strike-two hit completed
+              # Strike stamps bite working- or submitted-state held claims
+              # (2026-09-26: submitted-state rot fix — a claim that never
+              # moved submitted→working previously had no expiry path: the
+              # sweep never nominated it and the reducer ignored its stamps.
+              # The two-strike takeover now applies uniformly, per §4
+              # "when a lease expires with no heartbeat, expiry is
+              # two-strike"). A stamp replayed against a terminal,
+              # suspended, or already-released claim is ignored, so a
+              # rogue or duplicate strike can never flip a done claim back
+              # to submitted (2026-09-19: strike-two hit completed
               # RC-2026-09-18-031).
               | if (($k == "strike_one") or ($k == "strike_two"))
                    and ((.tasks[$tid] // null) != null)
-                   and (state_word(.tasks[$tid].state) != "working"
+                   and ((state_word(.tasks[$tid].state) != "working"
+                         and state_word(.tasks[$tid].state) != "submitted")
                         or ((.tasks[$tid].lane // null) == null)) then
                   .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
-                            ignored:($k + " ignored: claim not working/held")}]
+                            ignored:($k + " ignored: claim not held (working/submitted)")}]
                 elif $k == "strike_one" and ((.tasks[$tid] // null) != null) then
                   # F1/F2: strike-one is set-once. Strike stamps are
                   # unauthenticated comment text: anyone who can post can
@@ -1575,7 +1582,11 @@ cmd_sweep() {
         fi
       fi
     fi
-  done < <(printf '%s' "$st" | jq -c '.tasks[] | select(.state == "working" and .lane != null and ((.terminal // false) | not))')
+  # Strike candidates: working OR submitted held claims whose lease expired.
+  # (2026-09-26: submitted-state claims were previously never nominated, so a
+  # claim that never moved submitted→working had no expiry path at all —
+  # the submitted-state rot gap. Suspended claims stay out of scope.)
+  done < <(printf '%s' "$st" | jq -c '.tasks[] | select((.state == "working" or .state == "submitted") and .lane != null and ((.terminal // false) | not))')
   while IFS= read -r ill; do
     [ -n "$ill" ] || continue
     local task_id from attempted by at cid noticed
