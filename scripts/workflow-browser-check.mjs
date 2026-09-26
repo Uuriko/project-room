@@ -1,3 +1,4 @@
+import { clickWorkAction } from "./room-chrome.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -118,7 +119,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       if (needsDecision) {
         fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED,
           data: { messageId: `rationale-${id}`, body: "Rationale: accept this version." } });
-        await card.locator('[data-action="decide"]').click();
+        await clickWorkAction(card, "decide");
         await page.locator('#action-fields select[name="decision"]').selectOption("approved");
         await page.locator('#action-fields textarea[name="reason"]').fill("Accept this version.");
         await page.locator('#action-fields input[name="sourceMessageId"]').fill(`rationale-${id}`);
@@ -160,7 +161,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const reviewer = await reviewerContext.newPage();
     reviewer.on("pageerror", error => errors.push(error.message));
     await login(reviewer, reviewerKey);
-    await reviewer.locator(`[data-work-record-id="${reviewedId}"]`).getByRole("button", { name: "Review evidence again" }).click();
+    await clickWorkAction(reviewer.locator(`[data-work-record-id="${reviewedId}"]`), "verify");
     await reviewer.locator('#action-fields select[name="result"]').selectOption("fail");
     await reviewer.locator('#action-fields textarea[name="summary"]').fill("The source has a correction. Revise the finding.");
     await reviewer.locator('#action-form button[type="submit"]').click();

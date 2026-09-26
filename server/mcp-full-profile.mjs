@@ -6,6 +6,8 @@
 // Writes call the same command builders as stdio, then RoomStore.command.
 // Local attention tools stay off this URL: they read an operator directory.
 
+import { prepareWork } from "../client/work-preparation.mjs";
+import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
@@ -93,7 +95,7 @@ function recorded(store, secret, roomId, identity, command, present) {
   return { value: stampRoom(present(receipt), roomId), isError: false };
 }
 
-export function callHostedStdioTool(store, secret, name, args) {
+export async function callHostedStdioTool(store, secret, name, args) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
   const identity = { roomId, memberId: auth.member.id };
@@ -105,6 +107,26 @@ export function callHostedStdioTool(store, secret, name, args) {
     if (replyRoute(name)) return { value: replyRead(store, secret, roomId, name, rest), isError: false };
     const command = buildReplyCommand(identity, name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedReplyAction(name, rest, command, receipt));
+  }
+  if (name === "room_begin_work") {
+    const value = await beginSelectedWork({
+      connected: true,
+      scope: { workItemId: rest.workItemId, repository: rest.repository, ref: rest.ref, paths: rest.paths, expiresAt: rest.expiresAt },
+      invocation: rest.invocationRequestId ? { requestId: rest.invocationRequestId } : null,
+      read: () => store.workContext(secret, roomId, rest.workItemId, {}),
+      receipts: (requestId, item) => findBeginReceipt(after => store.eventsAfter(secret, roomId, after, 100), requestId, item),
+      execute: async stage => {
+        try {
+          const command = buildWorkCommand(stage.action, stage.args);
+          const outcome = await recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(stage.action, command, receipt));
+          return outcome.value;
+        } catch (error) {
+          if ([409, 422].includes(error?.status)) return { status: "refused", code: error.code };
+          return { status: "unconfirmed", requestId: stage.requestId };
+        }
+      }
+    });
+    return { value, isError: value.stopped === "unknown" || value.stopped === "disconnected" };
   }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);
@@ -121,13 +143,17 @@ export function callHostedStdioTool(store, secret, name, args) {
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() }, isError: false };
   }
   if (name === "room_read_work") {
-    const context = store.workContext(secret, roomId, rest.workItemId, {
-      includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false
-    });
+    const options = { includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false };
+    const context = rest.includeDiscussion ? await prepareWork({
+      workContext: (id, options) => store.workContext(secret, roomId, id, options),
+      workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
+    }, rest.workItemId, { ...options, discussionSince: rest.discussionSince }) : store.workContext(secret, roomId, rest.workItemId, options);
+    if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = roomId;
     if (!rest.brief) return { value: context, isError: false };
     return { value: {
       roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
-      evaluatedThrough: context.evaluatedThrough, brief: workContextMarkdown(context)
+      evaluatedThrough: context.evaluatedThrough, brief: workContextMarkdown(context),
+      ...(context.preparation ? { preparation: context.preparation } : {})
     }, isError: false };
   }
   if (name === "room_read_work_discussion") {
