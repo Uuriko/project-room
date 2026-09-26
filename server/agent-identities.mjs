@@ -197,7 +197,7 @@ export class AgentIdentities {
   // RC-2026-09-18-038: a membership-administration delegate may also link,
   // because decide() drives link() with the approver's token — approving an
   // access request is exactly what the delegation exists for.
-  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy }, expectedSessionBinding = null) {
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
@@ -246,6 +246,7 @@ export class AgentIdentities {
         }
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
+        if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
@@ -253,8 +254,23 @@ export class AgentIdentities {
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
+      if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
+  }
+
+  // A direct grant used to leave the identity's pending join request in the
+  // owner queue. Close those rows when this link is the grant. Callers that
+  // record their own decision (access-request approve) pass
+  // settleAccessRequests: false. Fixtures without the access-request table
+  // are unchanged.
+  closePendingAccessRequests(roomId, identityId, decidedBy) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return 0;
+    return this.db.prepare(
+      `UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=?
+       WHERE room_id=? AND identity_id=? AND status='pending'`
+    ).run(this.store.now(), decidedBy, "closed because this identity was linked directly", roomId, identityId).changes;
   }
 
   // Owner-only: unlink an identity; the room member is deactivated but its

@@ -2825,6 +2825,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             method: "GET",
             path: `/api/access-requests/${encodeURIComponent(filed.requestId)}?identityId=${encodeURIComponent(data.identityId)}`,
             description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${REQUEST_TTL_MS / 86400000} days.`,
+          }), Object.freeze({
+            action: "cancel-request",
+            method: "POST",
+            path: `/api/access-requests/${encodeURIComponent(filed.requestId)}`,
+            description: "Withdraw this pending request. Send { identityId } and Authorization: Bearer with that identity's current secret.",
           })],
           nextActions: nextActionsForAccessRequest({
             requestId: filed.requestId, identityId: data.identityId,
@@ -2886,6 +2891,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
+      }
+      if (accessStatusMatch && req.method === "POST") {
+        rate(`access-request-cancel:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "The requesting identity's current bearer secret is required");
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is required");
+        return json(res, 200, accessRequests.cancel(pathId(accessStatusMatch[1]), data.identityId, secret));
       }
       // Land queue. Any member can add, list, or remove a pull request, and
       // report the tip they are landing. Names match the hosted MCP tools.
