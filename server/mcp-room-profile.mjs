@@ -629,7 +629,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
       if (isHostedStdioTool(name)) {
-        const outcome = callHostedStdioTool(store, secret, name, args);
+        const outcome = await callHostedStdioTool(store, secret, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {

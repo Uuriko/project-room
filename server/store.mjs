@@ -39,6 +39,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
 import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
@@ -62,7 +63,7 @@ import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
@@ -729,6 +730,7 @@ export class RoomStore {
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
+    this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
@@ -786,6 +788,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
+        this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -962,6 +965,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(membersDirectorySchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      // The durable Telegram live status (task 10) is purely additive as well.
+      this.db.exec(telegramLiveStatusSchema);
       // The spam-guard quarantine journal is purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
@@ -983,6 +988,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
+      // records — purely additive side tables (no events, no projection
+      // impact), same pattern.
+      this.db.exec(guestSelfServeSchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -3424,6 +3433,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
           fail(422, "invalid_arguments", error.message);
+        }
+        // The reducer's generic "Invalid title" also covers values longer
+        // than 4096 characters. Recognize that precise size failure here so
+        // clients can shorten the field without treating it as a conflict.
+        const tooLongField = /^Invalid ([A-Za-z][A-Za-z0-9_]*)$/.exec(error.message);
+        if (tooLongField && typeof command.data[tooLongField[1]] === "string"
+          && command.data[tooLongField[1]].length > 4096) {
+          fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
         }
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
