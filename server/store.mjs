@@ -81,6 +81,7 @@ import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attent
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
+import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -724,6 +725,7 @@ export class RoomStore {
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
+    this.humanPush = new HumanPush(this); // Human browser push (mentions and DMs).
     this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard, commit).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
@@ -1015,6 +1017,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence. DDL matches the
       // attention slice's table so the two converge on merge.
       this.db.exec(threadMutesSchema);
+      // Human browser push subscriptions. Purely additive side table (no
+      // events, no projection impact): IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence.
+      this.db.exec(humanPushSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -3504,6 +3510,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
+        this.humanPush.notifyPosted({
+          roomId, state, senderMemberId: auth.member.id,
+          body: command.data.body, toMemberId: command.data.toMemberId,
+          messageId: command.data.messageId || incoming.id, sequence
+        });
       }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
         // Same agent.wake path as room mentions: queue a signal, then journal

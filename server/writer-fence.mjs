@@ -288,7 +288,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // telegram_live_status (durable Telegram live-delivery/send facts, task 10)
   // is purely additive and intentionally NOT fenced: same rationale — older
   // writers have no code path to it, and the class verifies its own schema.
-  "telegram_live_status"
+  "telegram_live_status",
+  // human_push_subscriptions (browser push for human members): one row per
+  // device endpoint in a room. Purely additive and intentionally NOT fenced
+  // — older writers have no code path to it. Rows are a delivery address,
+  // never room content and never a grant.
+  "human_push_subscriptions"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
