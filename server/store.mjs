@@ -39,6 +39,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
 import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
@@ -729,6 +730,7 @@ export class RoomStore {
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
+    this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
@@ -962,6 +964,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(membersDirectorySchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      // The durable Telegram live status (task 10) is purely additive as well.
+      this.db.exec(telegramLiveStatusSchema);
       // The spam-guard quarantine journal is purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
