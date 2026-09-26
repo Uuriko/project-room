@@ -172,12 +172,16 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
 
   const roomIds = listedRoomIds(db, roomId);
   const opportunities = [];
+  // The feed needs both work and bounty titles. Parse each listed room once
+  // rather than reading and JSON-parsing its projection again for bounties.
+  const titles = new Map();
 
   for (const id of roomIds) {
     const projection = roomProjection(db, id);
     if (!projection) continue; // silently skip unusable rooms, like the directory listing
     const roomTitle = cleanText(projection?.room?.title, 200);
     if (!roomTitle) continue;
+    titles.set(id, roomTitle);
     const workItems = projection.workItems && typeof projection.workItems === "object" ? Object.values(projection.workItems) : [];
     for (const item of workItems) {
       if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
@@ -194,10 +198,6 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
         WHERE room_id IN (${placeholders})
           AND state IN ('proposed','funded')
           AND deadline_ms > ?`).all(...roomIds, now);
-    const titles = new Map(roomIds.map(id => {
-      const projection = roomProjection(db, id);
-      return [id, cleanText(projection?.room?.title, 200)];
-    }));
     for (const row of bountyRows) {
       const roomTitle = titles.get(row.room_id);
       if (!roomTitle) continue;

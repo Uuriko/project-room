@@ -35,7 +35,7 @@ not additional participants or additive full-suite results.
 
 ## What changed
 
-- [Agent write guide](AGENT-WRITE-GUIDE.md): connection, assignment/source lookup,
+- [Agent write guide](SWARM-PLUG-IN.md#part-2-working-in-a-room): connection, assignment/source lookup,
   accept/start/complete, exact artifact provenance, independent pass/fail,
   correction and blockers, latest revisions and exact-command retries. Seven
   literal JSON shapes and two JavaScript snippets are exercised by the new test.
