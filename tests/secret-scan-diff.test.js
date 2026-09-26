@@ -279,7 +279,7 @@ test("zero false positives against the origin/main tree", () => {
         }
         if (buf.length > 2 * 1024 * 1024) continue;
         if (buf.subarray(0, 8000).includes(0)) continue; // binary
-        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST })) {
+        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS })) {
           findings.push(`${rel}:${f.line} [${f.rule}]`);
         }
       }
