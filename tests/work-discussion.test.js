@@ -217,3 +217,58 @@ test("real MCP and CLI read a newer clarification, page and inspect their exact 
   assert.equal(f.store.snapshot(f.keys.producer, "commons").cursor, 0);
   assert.equal(f.view().current.workRevision, 0);
 });
+
+test('prepared MCP reads resume after a completed checkpoint without skipping a truncated discussion', async t => {
+  for (const transport of ['stdio', 'hosted']) await t.test(transport, async t => {
+  const f = await fixture(t);
+  const identity = f.store.identities.create('Hosted observer');
+  f.store.identities.link(f.keys.owner, 'commons', { identityId: identity.identityId, permissions: [] });
+  const mcp = transport === 'stdio' ? await f.open() : { async call(name, args) {
+    const response = await fetch(`${f.origin}/room/mcp`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.secret}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'checkpoint', method: 'tools/call', params: { name, arguments: { roomId: 'commons', ...args } } }) });
+    assert.equal(response.status, 200); return response.json();
+  } };
+  let at = Date.now(); f.store.now = () => at;
+  const add = (prefix, count) => {
+    for (let n = 0; n < count; n++) { at += 2000; f.post(`${prefix}-${n}`, { replyToId: 'test-request', body: `${prefix}-${n}: ${'Discussion context. '.repeat(20)}` }); }
+  };
+  const read = async options => {
+    const response = await mcp.call('room_read_work', { workItemId: 'test-handoff', includeDiscussion: true, ...options });
+    assert.equal(response.error, undefined); assert.notEqual(response.result?.isError, true);
+    return response.result.structuredContent.preparation;
+  };
+  add('history', 60);
+  const initial = await read();
+  assert.equal(initial.discussion.items.length, 61);
+  assert.equal(initial.discussion.hasMore, false);
+  add('new', 26);
+  const resumed = await read({ discussionSince: initial.discussion.checkpoint });
+  const full = await read();
+  assert.deepEqual(resumed.discussion.items.map(row => row.message.id), Array.from({ length: 26 }, (_, n) => `new-${n}`));
+  assert.equal(resumed.discussion.since, initial.discussion.checkpoint);
+  assert.equal(resumed.discussion.checkpoint, full.discussion.checkpoint);
+  const fullBytes = Buffer.byteLength(JSON.stringify(full.discussion)), resumedBytes = Buffer.byteLength(JSON.stringify(resumed.discussion));
+  assert.ok(resumedBytes < fullBytes / 2);
+  t.diagnostic(`Discussion replay: ${full.discussion.items.length} items/${fullBytes} bytes; checkpoint resume: ${resumed.discussion.items.length} items/${resumedBytes} bytes`);
+  add('burst', 110);
+  const partial = await read({ discussionSince: resumed.discussion.checkpoint, brief: true });
+  assert.equal(partial.discussion.items.length, 100);
+  assert.equal(partial.discussion.checkpoint, null);
+  assert.equal(partial.discussion.hasMore, true);
+  if (transport === 'hosted') assert.equal(partial.nextRead.arguments.roomId, 'commons');
+  const tail = (await mcp.call(partial.nextRead.tool, partial.nextRead.arguments)).result.structuredContent.discussion;
+  assert.equal(tail.hasMore, false);
+  assert.deepEqual([...partial.discussion.items, ...tail.items].map(row => row.message.id), Array.from({ length: 110 }, (_, n) => `burst-${n}`));
+  assert.deepEqual((await read({ discussionSince: tail.checkpoint })).discussion.items, []);
+  for (const args of [{ discussionSince: null }, { discussionSince: -1 }, { discussionSince: 1.5 }, { discussionSince: '1' },
+    { discussionSince: Number.MAX_SAFE_INTEGER + 1 }, { discussionSince: 0, includeDiscussion: false }]) {
+    const invalid = await mcp.call('room_read_work', { workItemId: 'test-handoff', includeDiscussion: true, ...args });
+    assert.equal(invalid.error.code, -32602);
+  }
+  f.post('private-after-checkpoint', { replyToId: 'test-request', toMemberId: 'producer', body: 'Private clarification' }, 'guest');
+  const privateRead = await read({ discussionSince: tail.checkpoint });
+  assert.deepEqual(privateRead.discussion.items.map(row => row.message.id), transport === 'hosted' ? [] : ['private-after-checkpoint']);
+  assert.equal(f.store.snapshot(f.keys.producer, 'commons').cursor, 0);
+  });
+});
