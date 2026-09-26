@@ -4,7 +4,7 @@
 // own test files (telegram-transport, telegram-adapter).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defineChannelProvider, createChannelProviderRegistry, ChannelProviderError, CHANNEL_CAPABILITIES } from "../server/photon-channel-provider.mjs";
+import { defineChannelProvider, createChannelProviderRegistry, CHANNEL_CAPABILITIES } from "../server/photon-channel-provider.mjs";
 import { telegramChannelProvider, validateTelegramProviderConfig } from "../server/photon-channel-telegram.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 
