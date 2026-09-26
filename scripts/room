@@ -1871,11 +1871,13 @@ cmd_backlog() {
     esac
     [ -n "$files" ] || die "backlog pull: item $id has no files: field"
     # S1 overlap guard: if the overlaps verb exists (S1 merged), refuse to
-    # pull an item whose files are held live by another lane.
+    # pull an item whose files are held live by another lane. The overlaps
+    # verb reports per-file lines; "(unclaimed)" means free. Only die if
+    # some file has a real holder (a line not ending in "(unclaimed)").
     if type cmd_overlaps >/dev/null 2>&1; then
       local ov
       ov="$(cmd_overlaps --files "$files" 2>/dev/null || true)"
-      if [ -n "$ov" ] && [ "$ov" != "(none)" ]; then
+      if [ -n "$ov" ] && printf '%s' "$ov" | grep -v '(unclaimed)$' | grep -q .; then
         die "backlog pull: files held by a live claim:\n$ov"
       fi
     fi
