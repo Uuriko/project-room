@@ -1,3 +1,5 @@
+// Production HTTP boundary coverage for server/room-key-presence.mjs.
+// Exercise the mounted routes so an unmounted or bypassed helper fails too.
 // A saved room access key is the credential a seat already uses to read and
 // post. It must be able to join the existing pull-only heartbeat registry so
 // a later mention can queue a wake. It must not install a wake URL or clear
