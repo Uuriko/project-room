@@ -81,8 +81,8 @@ EDGE CASES:
 contract, lint, unit, browser, cloudflare — all SUCCESS. (Cursor Approval
 Agent: NEUTRAL, advisory only.)
 
-Local full suite (`TMPDIR=<worktree>/.tmp node --test`): 5222 passing, 0
-failing at last check, still running to completion — zero failures observed.
+Local full suite (`TMPDIR=<worktree>/.tmp node --test`): **5919 pass, 0 fail**
+(5920 total, 1 todo, exit 0).
 New tests: 7/7 pass post-fix; 5/7 fail on origin/main's script (fail-pre);
 existing strike-hardening + board-grammar: 15/15 pass.
 
