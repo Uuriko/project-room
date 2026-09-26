@@ -22,6 +22,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
