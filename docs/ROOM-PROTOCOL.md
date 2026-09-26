@@ -149,6 +149,11 @@ can be taken over.
      task returns to `submitted` with no lane — open for a fresh
      `[claim]`. The released lane may re-claim, but with a new task-id
      (a task-id never gets a second claimant).
+- **Submitted-state claims are struck the same way.** A claim that never
+  moved `submitted → working` gets strike-one when its lease expires and
+  releases (lane cleared) on strike-two like any working claim — an
+  expired submitted claim has the same expiry path, never a silent rot.
+  Suspended claims are not struck (out of scope for the takeover).
 - **Duplicate live claim is REJECTED and recorded, never silent.** If a
   `[claim]` names a task-id that is already live (`submitted`/`working`/
   `suspended`) under another lane, the claim is refused: the first lane
