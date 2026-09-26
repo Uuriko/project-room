@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T22:01:28Z · board: Uuriko/project-room#266 · watermark: 5850265126 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=224c1322201e609ebcc8fdc7c857ce39fcee9d7f96abfbee1f3df4cdad30c6fd -->
+<!-- generated: 2026-09-26T22:29:31Z · board: Uuriko/project-room#266 · watermark: 5850460311 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1789b76925af09578dea291b231159f28da4c9f42476cc2f9597afe24d4dab47 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -77,10 +77,10 @@ docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
 docs/CAPABILITY-REGISTRY.md | (none) | RC-2026-09-24-110 | submitted
 docs/HEARTBEAT.md | grokbot | RC-2026-09-25-910 | submitted
 docs/INVITE-ONLY-CHECKLIST.md | jill | RC-2026-09-26-965 | working
-docs/MERGE-QUEUE-DESIGN.md | jill | RC-2026-09-26-1117 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/RELEASE-CHECKPOINT.md | jill | RC-2026-09-26-965 | working
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
+docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-1132 | submitted
 docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-965 | working
 docs/ROOM-MUTATION-TESTING.md | jill | RC-2026-09-26-1112 | working
 docs/ROOM-PROTOCOL.md | quill-s2 | RC-2026-09-17-001 | submitted
@@ -119,11 +119,13 @@ scripts/candidate-runtime-fixture.mjs | (none) | RC-2026-09-23-105 | submitted
 scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-18-011 | submitted
 scripts/connect-agent-first-screen-check.mjs | jill | RC-2026-09-26-965 | working
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
+scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/open-routes.mjs | jill | RC-2026-09-26-965 | working
 scripts/openapi-method-accuracy.mjs | jill | RC-2026-09-26-965 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/quiet-copy-browser-check.mjs | jill | RC-2026-09-26-965 | working
+scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131 | submitted
 scripts/release-checkpoint.mjs | jill | RC-2026-09-26-965 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
@@ -169,7 +171,6 @@ server/agent-rooms.mjs | (none) | RC-2026-09-18-021 | submitted
 server/agent-webhook-subscriptions.mjs | (none) | RC-2026-09-18-009 | submitted
 server/attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/autonomy-tiers.mjs | (none) | RC-2026-09-24-206 | submitted
-server/autonomy-tiers.mjs | jill | RC-2026-09-26-1110 | working
 server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
@@ -222,7 +223,6 @@ server/open-join.mjs | (none) | RC-2026-09-18-017 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
-server/referral-invites.mjs | jill | RC-2026-09-26-1110 | working
 server/reply-requests.mjs | codex | RC-2026-09-26-1120 | working
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-088 | submitted
@@ -341,8 +341,8 @@ tests/messenger-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/next-actions.test.js | jill | RC-2026-09-25-911 | submitted
 tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
+tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
-tests/referral-invites.test.js | jill | RC-2026-09-26-1110 | working
 tests/release-checkpoint.test.js | jill | RC-2026-09-26-965 | working
 tests/reply-requests.test.js | codex | RC-2026-09-26-1120 | working
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
@@ -380,6 +380,7 @@ client/room-agent.mjs | codex, quill | RC-2026-09-18-033, RC-2026-09-26-1120
 cloudflare/wrangler.jsonc | , jill | RC-2026-09-23-105, RC-2026-09-26-965
 deploy/agent-discovery.mjs | , jill | RC-2026-09-23-105, RC-2026-09-24-010, RC-2026-09-26-965
 docs/AGENT-QUICKSTART.md | codex, quill | RC-2026-09-18-033, RC-2026-09-26-1120
+docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-1132, RC-2026-09-26-965
 docs/ROOM-PROTOCOL.md | , quill-s2 | RC-2026-09-17-001, RC-2026-09-18-004
 docs/ROOM-WATCH.md | quill-s2 | RC-2026-09-16-004, RC-2026-09-16-005
 docs/SWARM-PLUG-IN.md | jill, quill-s2 | RC-2026-09-16-005, RC-2026-09-26-965
@@ -392,7 +393,6 @@ scripts/runtime-package.mjs | , grokbot, jill | RC-2026-09-18-017, RC-2026-09-23
 server/access-requests.mjs | , jill, quill | RC-2026-09-18-022, RC-2026-09-19-071, RC-2026-09-26-965
 server/agent-identities.mjs | , jill, quill | RC-2026-09-18-018, RC-2026-09-19-086, RC-2026-09-25-938, RC-2026-09-26-965
 server/agent-plugin-manifest.mjs |  | RC-2026-09-18-009, RC-2026-09-18-019
-server/autonomy-tiers.mjs | , jill | RC-2026-09-24-206, RC-2026-09-26-1110
 server/bounty-disputes.mjs |  | RC-2026-09-17-026, RC-2026-09-18-003
 server/dispute-arbiters.mjs |  | RC-2026-09-18-001, RC-2026-09-18-002
 server/google-oauth.mjs | quill | RC-2026-09-19-075, RC-2026-09-19-076
@@ -418,14 +418,11 @@ tests/work-discussion.test.js | codex, jill | RC-2026-09-26-1120, RC-2026-09-26-
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-23-902 | instinct | working | 2026-09-26T22:03:18Z | NONE (external black-box monitor)
 RC-2026-09-26-1120 | codex | working | 2026-09-26T23:29:08Z | server/mention-lifecycle.mjs, server/activity.mjs, server/store.mjs, server/work-context.mjs, server/work-discussion.mjs, server/http.mjs, client/reply-actions.mjs, client/room-agent.mjs, server/reply-requests.mjs, server/mcp-room-profile.mjs, client/mcp-stdio.mjs, server/mcp-hosted-tools.mjs, scripts/agent-inbox.mjs, docs/AGENT-QUICKSTART.md, docs/openapi.yaml, skills/project-room-onboarding/SKILL.md, tests/mention-lifecycle.test.js, tests/work-context.test.js, tests/work-discussion.test.js, tests/reply-requests.test.js
 RC-2026-09-25-943 | jillian | working | 2026-09-27T00:40:39Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
 RC-2026-09-26-965 | jill | working | 2026-09-27T01:48:56Z | .github/workflows/test.yml, client/agent-connection.mjs, client/begin-work.mjs, client/mcp-stdio.mjs, client/work-preparation.mjs, cloudflare/package.json, cloudflare/room.mjs, cloudflare/version-signal.check.mjs, cloudflare/wrangler.jsonc, deploy/agent-discovery.mjs, docs/INVITE-ONLY-CHECKLIST.md, docs/RELEASE-CHECKPOINT.md, docs/ROOM-DEPLOYMENT.md, docs/ROUTE-AUTH-TABLE.md, docs/SAVED-AGENT-RECOVERY.md, docs/SWARM-PLUG-IN.md, docs/openapi.yaml, index.html, scripts/accessibility-check.mjs, scripts/action-recovery-browser-check.mjs, scripts/auth-return-browser-check.mjs, scripts/connect-agent-first-screen-check.mjs, scripts/open-routes.mjs, scripts/openapi-method-accuracy.mjs, scripts/quiet-copy-browser-check.mjs, scripts/release-checkpoint.mjs, scripts/room-chrome.mjs, scripts/route-docs-check.mjs, scripts/runtime-package.mjs, scripts/workflow-browser-check.mjs, server/access-requests.mjs, server/agent-identities.mjs, server/discoverability.mjs, server/http.mjs, server/mcp-arg-errors.mjs, server/mcp-full-profile.mjs, server/mcp-room-profile.mjs, skills/ProjectRoom/AUTO-INVOKE.md, skills/ProjectRoom/SKILL.md, skills/project-room-onboarding/SKILL.md, skills/project-room/SKILL.md, skills/project-room/references/deep-connection.md, skills/project-room/references/tools.md, src/agent-error.mjs, src/app.js, src/auth-signin-ui.js, src/room-deep-link.js, src/room-mcp-join.js, src/styles.css, src/workflow.js, tests/access-request-cancel.test.js, tests/agent-connection.test.js, tests/agent-error-next.test.js, tests/agent-work-search.test.js, tests/begin-scope-retry.test.js, tests/begin-work.test.js, tests/cold-start-friction.test.js, tests/current-attention-integration.test.js, tests/discoverability.test.js, tests/focused-orientation.test.js, tests/guest-agent-links.test.js, tests/help-discovery.test.js, tests/job-heartbeat.test.js, tests/mcp-integration.test.js, tests/mcp-stdio.test.js, tests/release-checkpoint.test.js, tests/room-deep-link.test.js, tests/room-roster.test.js, tests/route-docs-check.test.js, tests/runtime-package.test.js, tests/work-discussion.test.js, tests/work-preparation.test.js, tests/workflow.test.js
-RC-2026-09-26-1117 | jill | working | 2026-09-27T03:25:32Z | docs/MERGE-QUEUE-DESIGN.md
 RC-2026-09-26-1115 | jill | working | 2026-09-27T03:26:23Z | tests/claims-state-machine.property.test.js, package.json
 RC-2026-09-26-1112 | jill | working | 2026-09-27T03:29:16Z | tests/room-protocol-mutation.test.js, scripts/room-mutate.mjs, docs/ROOM-MUTATION-TESTING.md
-RC-2026-09-26-1110 | jill | working | 2026-09-27T03:32:21Z | server/referral-invites.mjs, server/autonomy-tiers.mjs, tests/referral-invites.test.js
 RC-2026-09-26-1121 | jill | working | 2026-09-27T03:53:23Z | .github/workflows/test.yml, .github/workflows/act-components.yml, .github/workflows/activity-inbox.yml, .github/workflows/contribution-rollup.yml, .github/workflows/hosted-denial-conformance.yml, .github/workflows/mcp-registry-publish.yml, .github/workflows/member-capabilities.yml, .github/workflows/schema-gate.yml
 
 ## unclaimed-lanes
@@ -434,16 +431,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-26-1110 | ca1a174cb76c446062178aa5e339e5a4393ad418 | 5850416896
+RC-2026-09-26-1110 | ca1a174cb76c446062178aa5e339e5a4393ad418 | 5850415704
+RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850318678
+RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850296794
+RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850295901
 RC-2026-09-25-304 | fb2ef7aa7811b7beab62f1fdd39203748ac17851 | 5850220126
 RC-2026-09-25-303 | 70baf7d1dced374cd3d4083a0027036294890058 | 5850219368
 RC-2026-09-26-966 | 008d95758e54803d31319fb567512b4ae749e35e | 5850118285
 RC-2026-09-26-969 | cd05f2e743cf27e2b89b8460c81c4b32ce092ff3 | 5850117681
 RC-2026-09-26-962 | 2ca51653fe382d6b45ad77ac8878bdeb578bd0a6 | 5850117193
-RC-2026-09-26-967 | 98b73d261defbb012306b30fbe6aaecdb155d91f | 5850116737
-RC-2026-09-26-964 | dde9e015b168fe5516f8e9510b9fa19f2d1f3151 | 5850116217
-RC-2026-09-26-968 | 09fbf8b4420e9436481f524d21b5f2f5f3976796 | 5850115669
-RC-2026-09-26-961 | 5c1fa20dba71da25faa408e063f1d93262236b87 | 5850115140
-COORD-1 | none | 5850033852
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -492,10 +489,10 @@ docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
 docs/CAPABILITY-REGISTRY.md | (none) | RC-2026-09-24-110 | submitted
 docs/HEARTBEAT.md | grokbot | RC-2026-09-25-910 | submitted
 docs/INVITE-ONLY-CHECKLIST.md | jill | RC-2026-09-26-965 | working
-docs/MERGE-QUEUE-DESIGN.md | jill | RC-2026-09-26-1117 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/RELEASE-CHECKPOINT.md | jill | RC-2026-09-26-965 | working
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
+docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-1132 | submitted
 docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-965 | working
 docs/ROOM-MUTATION-TESTING.md | jill | RC-2026-09-26-1112 | working
 docs/ROOM-PROTOCOL.md | quill-s2 | RC-2026-09-17-001 | submitted
@@ -534,11 +531,13 @@ scripts/candidate-runtime-fixture.mjs | (none) | RC-2026-09-23-105 | submitted
 scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-18-011 | submitted
 scripts/connect-agent-first-screen-check.mjs | jill | RC-2026-09-26-965 | working
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
+scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/open-routes.mjs | jill | RC-2026-09-26-965 | working
 scripts/openapi-method-accuracy.mjs | jill | RC-2026-09-26-965 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/quiet-copy-browser-check.mjs | jill | RC-2026-09-26-965 | working
+scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131 | submitted
 scripts/release-checkpoint.mjs | jill | RC-2026-09-26-965 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
@@ -584,7 +583,6 @@ server/agent-rooms.mjs | (none) | RC-2026-09-18-021 | submitted
 server/agent-webhook-subscriptions.mjs | (none) | RC-2026-09-18-009 | submitted
 server/attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/autonomy-tiers.mjs | (none) | RC-2026-09-24-206 | submitted
-server/autonomy-tiers.mjs | jill | RC-2026-09-26-1110 | working
 server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
@@ -637,7 +635,6 @@ server/open-join.mjs | (none) | RC-2026-09-18-017 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
-server/referral-invites.mjs | jill | RC-2026-09-26-1110 | working
 server/reply-requests.mjs | codex | RC-2026-09-26-1120 | working
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-088 | submitted
@@ -756,8 +753,8 @@ tests/messenger-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/next-actions.test.js | jill | RC-2026-09-25-911 | submitted
 tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
+tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
-tests/referral-invites.test.js | jill | RC-2026-09-26-1110 | working
 tests/release-checkpoint.test.js | jill | RC-2026-09-26-965 | working
 tests/reply-requests.test.js | codex | RC-2026-09-26-1120 | working
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
@@ -788,5 +785,5 @@ tests/workflow.test.js | jill | RC-2026-09-26-965 | working
 … +63 more
 
 ## signals
-board_comments=2123 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=259 overlap_files=42 watermark=5850265126
+board_comments=2143 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=259 overlap_files=42 watermark=5850460311
 
