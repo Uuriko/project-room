@@ -6245,6 +6245,14 @@ paths:
       description: >-
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:report` scope (403 `insufficient_scope` without it).
+        A room access key may also report pull-only presence when its active
+        agent member is unambiguously linked to one unrevoked identity active
+        in this room alone. It cannot install wake URLs or push configuration.
+        Its stable input hostId maps to an opaque credential-specific hostId
+        in responses; keep sending the original input name on later reports.
+        Identity-owned hosts remain unchanged, and pendingWakes contains only
+        this room's signals. Revocation and identity binding are checked again
+        after body upload, before the synchronous write.
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), `mode` (`wakeable` — this host can be woken and must register an
         HTTPS `wakeUrl`; or `pull-only` — the host only polls and may not
@@ -6304,7 +6312,9 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:read` scope. Returns `{ agentId, status
         (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
-        wakeUrl, lastSeenAt, state }] }`. 120 per identity per minute.
+        wakeUrl, lastSeenAt, state }] }`. A room access key meeting the same
+        single-room binding requirements sees only its own credential-specific
+        pull-only hosts, never identity-owned wake URLs. 120 per identity per minute.
       security:
         - bearerAuth: []
       responses:
@@ -6318,7 +6328,10 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:report` scope. Signals stay queued until acknowledged —
         receiving them on a heartbeat does not consume them. Returns
-        `{ acknowledged: [signalId] }`. 120 per address per minute.
+        `{ acknowledged: [signalId] }`. A room access key meeting the same
+        single-room binding requirements can acknowledge only this room's
+        signals; other-room and unknown ids are not applied or disclosed.
+        Authorization is rechecked after upload. 120 per address per minute.
       security:
         - bearerAuth: []
       requestBody:

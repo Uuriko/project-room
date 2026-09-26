@@ -505,6 +505,16 @@ export class AgentIdentities {
     return { identityId, member };
   }
 
+  // The room-key heartbeat door looks up the identity from the authenticated
+  // member. Member id and identity id are not always the same.
+  identityIdForMember(roomId, memberId) {
+    if (!roomId || typeof memberId !== "string" || !memberId) return null;
+    const rows = this.db.prepare(`SELECT l.identity_id AS identityId, i.revoked_at AS revokedAt
+      FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
+      WHERE l.room_id=? AND l.member_id=?`).all(roomId, memberId);
+    return rows.length === 1 && rows[0].revokedAt === null ? rows[0].identityId : null;
+  }
+
   // Lists all rooms where an identity is linked as an active member.
   // Used by the agent browser sign-in flow: after verifying the identity
   // secret, the agent picks which room to open. Returns [{ roomId, title,

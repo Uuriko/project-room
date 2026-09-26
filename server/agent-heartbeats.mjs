@@ -392,7 +392,7 @@ export class AgentHeartbeats {
   // Mark wake signals delivered after the host handled them. Returns the
   // ids that were actually pending (unknown or already-delivered ids are
   // reported, not applied — ack is idempotent).
-  ackWakes({ agentId, signalIds }) {
+  ackWakes({ agentId, signalIds, roomId = null }) {
     checkAgentId(agentId);
     check(Array.isArray(signalIds) && signalIds.length > 0
       && signalIds.every(id => typeof id === "string" && id.length > 0),
@@ -400,9 +400,9 @@ export class AgentHeartbeats {
     const at = this.now();
     const acknowledged = [];
     const stmt = this.db.prepare(
-      "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL");
+      "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)");
     for (const signalId of signalIds) {
-      if (stmt.run(at, agentId, signalId).changes > 0) acknowledged.push(signalId);
+      if (stmt.run(at, agentId, signalId, roomId, roomId).changes > 0) acknowledged.push(signalId);
     }
     return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
   }
@@ -428,13 +428,13 @@ export class AgentHeartbeats {
   }
 
   // Undelivered wake signals, oldest first.
-  pendingWakes(agentId, { limit = MAX_PENDING_WAKES } = {}) {
+  pendingWakes(agentId, { limit = MAX_PENDING_WAKES, roomId = null } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
     return Object.freeze(this.db.prepare(`SELECT * FROM agent_wake_signals
-      WHERE agent_id=? AND delivered_at IS NULL ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, limit).map(signalView));
+      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
+      .all(agentId, roomId, roomId, limit).map(signalView));
   }
 
   // Effective presence for an agent: online when any host was seen inside
