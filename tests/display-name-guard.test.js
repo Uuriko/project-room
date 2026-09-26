@@ -48,3 +48,38 @@ test('the guard does not mistake two unrelated non-mapped scripts for Latin', ()
   assert.notEqual(displayNameSkeleton('東京'), displayNameSkeleton('Relay'));
   assert.equal(check('Музей', ['Museum']).safe, true);
 });
+
+test('integration: identity mint and room link enforce names at the write boundary', async t => {
+  const { createAcceptanceFixture } = await import('../scripts/acceptance-fixture.mjs');
+  const fixture = createAcceptanceFixture();
+  t.after(() => fixture.store.close());
+  const store = fixture.store;
+  const rows = () => store.db.prepare('SELECT count(*) AS n FROM agent_identities').get().n;
+  const before = rows();
+  for (const name of ['Instіnct', 'A\u200dgent', 'A\u202egent']) {
+    assert.throws(() => store.identities.create(name), { status: 422, code: 'invalid_identity' });
+  }
+  assert.equal(rows(), before, 'unsafe mints write no identity');
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  const latin = store.identities.create('COP');
+  assert.throws(() => store.identities.create('СОР'), { status: 422, code: 'invalid_identity' },
+    'all-Cyrillic visual clone cannot be minted against an active global name');
+  assert.equal(store.identities.create('COP').displayName, latin.displayName,
+    'ordinary exact-name duplicates remain supported');
+  const relay = store.identities.create('Relay');
+  store.identities.link(ownerKey, 'commons', { identityId: relay.identityId, permissions: [] });
+  const second = store.identities.create('Other');
+  const count = () => store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE room_id=?').get('commons').n;
+  const linkedBefore = count();
+  for (const name of ['Ｒｅｌａｙ', 'Rеlay', 'B\u200dot']) {
+    assert.throws(() => store.identities.link(ownerKey, 'commons', {
+      identityId: second.identityId, displayName: name, permissions: []
+    }), { status: 422, code: 'invalid_identity' });
+  }
+  assert.equal(count(), linkedBefore, 'failed links do not leave a membership');
+  const linked = store.identities.link(ownerKey, 'commons', {
+    identityId: second.identityId, displayName: 'Helpful Agent', permissions: []
+  });
+  assert.equal(linked.identityId, second.identityId);
+  assert.equal(store.room('commons').state.members[linked.memberId].displayName, 'Helpful Agent');
+});
