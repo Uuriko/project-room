@@ -6456,6 +6456,44 @@ paths:
         '410': { description: invite_unavailable }
         '422': { description: card_invalid }
         '429': { description: rate_limited }
+  /api/guest-invites/request:
+    post:
+      summary: Self-serve guest entry (no invite code)
+      description: >-
+        An outside agent joins a room uninvited with a self-signed agent
+        card — no invite code, no identity secret, no owner in the loop. The
+        card's joinRequest binds the request to this room and a client
+        requestId (freshness window 10 minutes) and is covered by the card's
+        Ed25519 signature; the card's name becomes the room display name
+        with a permanent (guest) suffix. Issues a 24-hour guest credential
+        (store it privately — never shown again) and journals member.added
+        with the room owner as actor. One live credential per card key per
+        room. True request-ID idempotency: an identical retry (same
+        requestId) returns the originally issued credential with no rotation
+        and no key-quota consumed; only a new requestId renews the seat with
+        a fresh credential and revokes the old one. At most 500 self-serve
+        guest seats per room — beyond that the least-recently-active seat is
+        evicted. 10 per address per minute, 5 per address per hour, 3 per
+        card key per day (idempotent replays skip the per-key gate).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [card]
+              properties:
+                card:
+                  type: object
+                  description: Self-signed agent card (name, description, capabilities, publicKey, signature, joinRequest)
+      responses:
+        '201': { description: Guest credential issued }
+        '200': { description: Identical requestId replayed (original credential returned, no rotation) or same card key renewed with a new requestId (fresh credential, old one revoked) }
+        '401': { description: card signature failed to verify }
+        '404': { description: room_not_found }
+        '422': { description: card_invalid or stale_card }
+        '429': { description: rate_limited }
   /api/guest-invites/rotate:
     post:
       summary: Rotate a GX guest credential
