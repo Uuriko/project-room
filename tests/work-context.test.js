@@ -5,11 +5,12 @@ import { spawn } from "node:child_process";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
-import { RoomAgentClient } from "../client/room-agent.mjs";
+import { RoomAgentClient, workContextMarkdown } from "../client/room-agent.mjs";
 import { selectedWorkContext, WORK_CONTEXT_OMISSIONS } from "../server/work-context.mjs";
 import { verifyAccessSummary } from "../src/client.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { workContinuity, SESSION_HEARTBEAT_STALE_MS } from "../src/work-item-session.js";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
@@ -313,4 +314,61 @@ test("restart brief follows the persisted handoff without acknowledging, assigni
   const tampered = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
     fetchImpl: async () => new Response(JSON.stringify({ ...context, resume: { ...context.resume, next: { action: "complete" } } }), { status: 200 }) });
   await assert.rejects(tampered.workContext("test-handoff"), error => error.code === "invalid_response");
+});
+
+// The selected HTTP/SDK boundary must retain the browser's worker state while
+// excluding attempt logs. Session unit tests cannot catch a lossy read projection.
+test("selected resume preserves worker continuity without exposing attempt history", async t => {
+  const f = await fixture(t), client = f.client("producer");
+  let now = Date.now(); f.store.now = () => now;
+  const item = () => f.store.snapshot(f.keys.owner, "commons").state.workItems["test-handoff"];
+  const mutate = (data, actor = "producer") => f.store.mutateWorkSession(f.keys[actor], "commons", {
+    requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: item().revision, ...data
+  });
+  const read = async expected => {
+    const before = f.store.snapshot(f.keys.producer, "commons");
+    const result = await client.workContext("test-handoff");
+    assert.equal(result.resume.continuity?.state ?? null, expected);
+    assert.deepEqual(result.resume.continuity, workContinuity(before.state.workItems["test-handoff"], now));
+    assert.deepEqual(result.context.omitted, [...WORK_CONTEXT_OMISSIONS]);
+    assert.equal(result.context.source.status, "not_requested");
+    for (const key of ["attempts", "receiptHistory", "verificationHistory", "decisionHistory", "worker_member_id"])
+      assert.equal(Object.hasOwn(result.work, key), false, key);
+    for (const omitted of ["ATTEMPT-ENVIRONMENT-SENTINEL", "ATTEMPT-OUTPUT-SENTINEL", "UNRELATED-MESSAGE-SENTINEL", f.keys.producer])
+      assert.equal(JSON.stringify(result).includes(omitted), false, omitted);
+    assert.deepEqual(f.store.snapshot(f.keys.producer, "commons"), before, "reading neither starts nor acknowledges work");
+    return result;
+  };
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "continuity-unrelated", body: "UNRELATED-MESSAGE-SENTINEL" });
+  await read(null); // Never-started work is not an unresponsive worker.
+  mutate({ action: "set_status", status: "processing", environment: "ATTEMPT-ENVIRONMENT-SENTINEL" });
+  const running = await read("running");
+  assert.equal(running.resume.continuity.attempt, 1);
+  now += SESSION_HEARTBEAT_STALE_MS + 1;
+  const stale = await read("unknown");
+  assert.match(workContextMarkdown(stale), /Process state is unknown/);
+  mutate({ action: "request_stop" }, "owner");
+  const stopping = await read("stopping");
+  assert.equal(stopping.work.status, "processing");
+  assert.match(workContextMarkdown(stopping), /Stop requested/);
+  assert.match(workContextMarkdown(stopping), /Confirm the worker stopped/);
+  mutate({ action: "set_status", status: "failed", outputs: ["ATTEMPT-OUTPUT-SENTINEL"] });
+  const failed = await read("interrupted");
+  assert.match(workContextMarkdown(failed), /Run interrupted/);
+  mutate({ action: "set_status", status: "processing" });
+  const restarted = await read("running");
+  assert.equal(restarted.resume.continuity.attempt, 2);
+  assert.equal(restarted.work.stop_requested_at, null);
+  mutate({ action: "set_status", status: "suspended" });
+  const paused = await read("paused");
+  assert.match(workContextMarkdown(paused), /Run paused/);
+  mutate({ action: "set_status", status: "done" });
+  const finished = await read("finished");
+  assert.match(workContextMarkdown(finished), /Run finished/);
+  assert.notEqual(finished.work.state, "completed", "session completion is not work-result approval");
+  mutate({ action: "set_status", status: "processing", budget: { maxRounds: 1 } });
+  assert.throws(() => mutate({ action: "set_status", status: "active", rounds: 2 }), error => error.code === "round_limit_exceeded");
+  const roundPaused = await read("paused");
+  assert.equal(roundPaused.work.suspended_by, "round_limit");
+  assert.match(workContextMarkdown(roundPaused), /next mention or post resumes this run/);
 });
