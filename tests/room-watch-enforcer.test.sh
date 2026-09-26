@@ -12,6 +12,13 @@
 #     RC-2026-09-23-903/953, digest 5824967872, closeout 5825166515);
 #     (c) no strike-one when the claim's deliverable already merged (real
 #     cases RC-2026-09-25-301..304, PRs #1072-#1075).
+#     Companion false-positive cases (RC-2026-09-26-1130) guard the bypasses
+#     the (a)/(b)/(c) checks introduced: progress prose must not read as a
+#     voluntary release ("closing in on the fix"), promise language must not
+#     close a receipts digest ("closing in on the receipt"), and a mere PR
+#     mention must not count as a landed deliverable (subject-line form
+#     `RC-<id>:` required). Each fails on the pre-1130 regexes and passes
+#     after the tightening.
 #     Observable at the script's own fixture boundary: `_sweep-plan` and
 #     `_receipts-plan` output for fixture board comments.
 #  2. Credible regression: a later edit to scripts/room that drops any of
@@ -84,6 +91,29 @@ expect_in     "a/control: strike-two still fires with no release" \
   "$TMPD/a-control.out" "PLAN: strike-two release for RC-2026-09-26-900"
 
 # ---------------------------------------------------------------------------
+# (a2) weasel-worded progress prose must NOT read as a voluntary release
+# Same board shape as (a), but the lane's STATUS says "closing in on the
+# fix ... Not giving up this claim." The release regex must not fire on
+# "closing", so strike-two must still be planned.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/a2.json" <<'EOF'
+[
+ {"id": 1, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] fixture a2\n\n```room-claim\ntask-id:    RC-2026-09-26-907\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```\n\n· claim:RC-2026-09-26-907 · lane:jill"},
+ {"id": 2, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-907 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-907:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-907 · lane:jill"},
+ {"id": 3, "created_at": "2026-09-26T06:30:00Z", "body": "[jill]STATUS: still in progress on RC-2026-09-26-907 — closing in on the fix, need a few more hours. Not giving up this claim."}
+]
+EOF
+
+export ROOM_TEST_PRS_JSON='[]'
+"$ROOM" _sweep-plan --now 2026-09-26T12:00:00Z < "$TMPD/a2.json" > "$TMPD/a2.out"
+
+expect_in     "a2/progress prose is not a release: strike-two fires" \
+  "$TMPD/a2.out" "PLAN: strike-two release for RC-2026-09-26-907"
+expect_not_in "a2/no voluntary-release suppression on weasel prose" \
+  "$TMPD/a2.out" "strike-two suppressed for RC-2026-09-26-907"
+
+# ---------------------------------------------------------------------------
 # (b) receipts-scan re-flagging digest-closed claims (RC-2026-09-23-903/953)
 # 901: completed, digest-listed, lane closed it in prose after the digest
 #      (references the digest id, "already on the board" — the 903 shape).
@@ -116,6 +146,29 @@ expect_in     "b/unclosed claim is still flagged (903)" \
   "$TMPD/b.out" "RC-2026-09-26-903"
 
 # ---------------------------------------------------------------------------
+# (b2) promise language must NOT close a receipts digest
+# 908: completed, digest-listed, then the lane posts a weasel promise after
+# the digest ("still closing in on the receipt ... not closing this out
+# yet" — deliberately NOT referencing the digest id and carrying no
+# room-receipt fence). It must still be flagged.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/b2.json" <<'EOF'
+[
+ {"id": 16, "created_at": "2026-09-25T00:15:00Z", "body": "[jill][claim] b908\n\n```room-claim\ntask-id:    RC-2026-09-26-908\nlane:       jill\nfiles:      docs/d.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 17, "created_at": "2026-09-25T12:15:00Z", "body": "[jill]DONE: RC-2026-09-26-908 finished"},
+ {"id": 200, "created_at": "2026-09-26T01:00:00Z", "body": "[room-watch] missing receipts (24h SLO)\n\nThe following completed tasks have no room-receipt block on the board:\n\n- TASK RC-2026-09-26-908 (jill, completed 2026-09-25T12:15:00Z)"},
+ {"id": 201, "created_at": "2026-09-26T03:00:00Z", "body": "[jill] still closing in on the receipt for RC-2026-09-26-908 — will post it tomorrow. Not closing this out yet."}
+]
+EOF
+
+"$ROOM" _receipts-plan --now 2026-09-27T12:00:00Z --prs '[]' \
+  < "$TMPD/b2.json" > "$TMPD/b2.out" || true
+
+expect_in     "b2/promise language does not close the digest (908 flagged)" \
+  "$TMPD/b2.out" "RC-2026-09-26-908"
+
+# ---------------------------------------------------------------------------
 # (c) strike-one on already-merged deliverables (RC-2026-09-25-301..304)
 # 904: working, lease expired, merged PR #1087 names the task-id in its body.
 # 905: working, lease expired, no PR — the negative control.
@@ -143,6 +196,28 @@ expect_in     "c/board receipt suppresses strike-one (906)" \
   "$TMPD/c.out" "strike-one suppressed for RC-2026-09-26-906"
 expect_in     "c/control: strike-one still fires with no PR (905)" \
   "$TMPD/c.out" "PLAN: strike-one nudge for RC-2026-09-26-905"
+
+# ---------------------------------------------------------------------------
+# (c2) a mere PR mention must NOT count as a landed deliverable
+# 909: working, lease expired, merged PR #1089 mentions the task-id
+# mid-sentence ("touches the same area as RC-... but does not implement
+# it") without the subject-line form. Strike-one must still fire.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/c2.json" <<'EOF'
+[
+ {"id": 24, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] c909\n\n```room-claim\ntask-id:    RC-2026-09-26-909\nlane:       jill\nfiles:      docs/z.md\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"}
+]
+EOF
+
+export ROOM_TEST_PRS_JSON='[{"number":1089,"merged_at":"2026-09-26T07:00:00Z","title":"[jill] drive-by area touch","body":"Drive-by note: this touches the same area as RC-2026-09-26-909 but does not implement it."}]'
+
+"$ROOM" _sweep-plan --now 2026-09-26T08:00:00Z < "$TMPD/c2.json" > "$TMPD/c2.out"
+
+expect_in     "c2/drive-by PR mention does not suppress strike-one (909)" \
+  "$TMPD/c2.out" "PLAN: strike-one nudge for RC-2026-09-26-909"
+expect_not_in "c2/no deliverable-landed suppression on mere mention" \
+  "$TMPD/c2.out" "strike-one suppressed for RC-2026-09-26-909"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
