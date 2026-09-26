@@ -6,6 +6,7 @@
 // on-chain touch, no real money.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
@@ -369,4 +370,50 @@ test("claim still journals 101 decayed flakes when SQL rejects more than 100 bin
   assert.equal(decayed.length, 1);
   assert.equal(decayed[0].strikesDecayed, 101);
   assert.equal(db.prepare("SELECT count(*) AS n FROM bounty_flakes WHERE room_id=? AND lane=? AND decayed_journaled=0").get(ROOM, "producer").n, 0);
+});
+
+// Real slow-body requests cross the asynchronous boundary after initial auth.
+// Replay bypasses ledger mutation checks, so it needs the same fresh credential
+// and tier gate as a new write, inside the synchronous operation transaction.
+for (const scenario of ["revoked replay", "downgraded new write"]) test(`bounty refuses ${scenario} when access changes during body upload`, async t => {
+  const { origin, keys, fixture } = await startServer(t), store = fixture.store;
+  const data = bountyBody({ amount: 10 }), key = "body-race";
+  if (scenario === "revoked replay") {
+    const first = await post(origin, `/api/rooms/${ROOM}/bounties`, data, keys.producer, { "idempotency-key": key });
+    assert.equal(first.status, 201);
+  }
+  const before = store.db.prepare("SELECT count(*) AS n FROM bounty_records WHERE room_id=?").get(ROOM).n;
+  let observed;
+  const authenticated = new Promise(resolve => { observed = resolve; });
+  const original = store.authenticate.bind(store);
+  store.authenticate = (...args) => {
+    const result = original(...args);
+    if (args[0] === keys.producer) { store.authenticate = original; observed(); }
+    return result;
+  };
+  t.after(() => { store.authenticate = original; });
+  const serialized = JSON.stringify(data);
+  let request;
+  const completed = new Promise((resolve, reject) => {
+    request = httpRequest(new URL(`/api/rooms/${ROOM}/bounties`, origin), { method: "POST", headers: {
+      authorization: `Bearer ${keys.producer}`, "content-type": "application/json", "idempotency-key": key,
+      "content-length": Buffer.byteLength(serialized)
+    } }, response => {
+      let text = "";
+      response.setEncoding("utf8"); response.on("data", chunk => { text += chunk; });
+      response.on("end", () => resolve({ status: response.statusCode, body: JSON.parse(text) }));
+    });
+    request.on("error", reject);
+  });
+  t.after(() => request.destroy());
+  request.write(serialized.slice(0, 1));
+  await authenticated;
+  if (scenario === "revoked replay") store.revoke(keys.producer);
+  else setTier(store.db, ROOM, "producer", "t1_readonly");
+  request.end(serialized.slice(1));
+  const result = await completed;
+  assert.equal(result.status, scenario === "revoked replay" ? 401 : 403);
+  assert.equal(result.body.error.code, scenario === "revoked replay" ? "unauthenticated" : "agent_readonly");
+  assert.equal(result.body.bounty, undefined);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM bounty_records WHERE room_id=?").get(ROOM).n, before);
 });

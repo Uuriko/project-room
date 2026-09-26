@@ -3345,7 +3345,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
-          identity: identityMatch ? identityMatch[2] : null, helpers: { json, reject, body } });
+          identity: identityMatch ? identityMatch[2] : null,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
+              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       if (route === "thread" && req.method === "GET") {
         // RC-2026-09-19-070: a DM thread root is invisible to non-participants
