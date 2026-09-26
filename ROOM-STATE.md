@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T18:23:41Z · board: Uuriko/project-room#266 · watermark: 5847718181 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=73042e3e6acd84df8dba68db0159c92f9306570d60cf3bcd69abb3391c90ed1c -->
+<!-- generated: 2026-09-26T19:01:00Z · board: Uuriko/project-room#266 · watermark: 5848849448 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=baa67f72148a2b58f28f9767d393958d1f72e92ccd91f6583a23f5848b75df42 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,11 +28,10 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +46 more
+… +44 more
 
 ## file-claims
 file | lane | task-id | state
-.github/workflows/test.yml | instinct | RC-2026-09-25-302 | working
 NONE | instinct-comms | RC-2026-09-25-7401 | working
 NONE | instinct-comms | RC-2026-09-25-7403 | submitted
 NONE (external black-box monitor) | instinct | RC-2026-09-23-902 | working
@@ -54,7 +53,6 @@ docs/AGENT-CARD-CUSTODY.md | (none) | RC-2026-09-23-105 | submitted
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/CAPABILITY-REGISTRY.md | (none) | RC-2026-09-24-110 | submitted
 docs/HEARTBEAT.md | grokbot | RC-2026-09-25-910 | submitted
-docs/INCIDENT-1101-RUNBOOK.md | instinct | RC-2026-09-25-301 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
 docs/ROOM-PROTOCOL.md | quill-s2 | RC-2026-09-17-001 | submitted
@@ -82,8 +80,6 @@ scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
-scripts/probe-prod-lib.mjs | instinct | RC-2026-09-25-301 | working
-scripts/probe-prod.mjs | instinct | RC-2026-09-25-301 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
@@ -96,7 +92,6 @@ scripts/runtime-package.mjs | (none) | RC-2026-09-23-105 | submitted
 scripts/runtime-package.mjs | (none) | RC-2026-09-24-110 | submitted
 scripts/runtime-package.mjs | grokbot | RC-2026-09-25-910 | submitted
 scripts/sign-agent-card.mjs | (none) | RC-2026-09-23-105 | submitted
-scripts/untested-modules-lint.mjs | instinct | RC-2026-09-25-302 | working
 scripts/watch-deploy-drift.mjs | instinct | RC-2026-09-25-304 | working
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
@@ -244,7 +239,6 @@ tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
-tests/room-flood-guard.test.js | instinct | RC-2026-09-25-302 | working
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/runtime-package.test.js | (none) | RC-2026-09-18-017 | submitted
@@ -295,6 +289,7 @@ tests/runtime-package.test.js | , grokbot | RC-2026-09-18-017, RC-2026-09-25-910
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-23-902 | instinct | working | 2026-09-26T22:03:18Z | NONE (external black-box monitor)
+RC-2026-09-25-943 | jillian | working | 2026-09-27T00:40:39Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -316,7 +311,6 @@ unknown | none | 5844796382
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
-.github/workflows/test.yml | instinct | RC-2026-09-25-302 | working
 NONE | instinct-comms | RC-2026-09-25-7401 | working
 NONE | instinct-comms | RC-2026-09-25-7403 | submitted
 NONE (external black-box monitor) | instinct | RC-2026-09-23-902 | working
@@ -338,7 +332,6 @@ docs/AGENT-CARD-CUSTODY.md | (none) | RC-2026-09-23-105 | submitted
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/CAPABILITY-REGISTRY.md | (none) | RC-2026-09-24-110 | submitted
 docs/HEARTBEAT.md | grokbot | RC-2026-09-25-910 | submitted
-docs/INCIDENT-1101-RUNBOOK.md | instinct | RC-2026-09-25-301 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
 docs/ROOM-PROTOCOL.md | quill-s2 | RC-2026-09-17-001 | submitted
@@ -366,8 +359,6 @@ scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
-scripts/probe-prod-lib.mjs | instinct | RC-2026-09-25-301 | working
-scripts/probe-prod.mjs | instinct | RC-2026-09-25-301 | working
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
@@ -380,7 +371,6 @@ scripts/runtime-package.mjs | (none) | RC-2026-09-23-105 | submitted
 scripts/runtime-package.mjs | (none) | RC-2026-09-24-110 | submitted
 scripts/runtime-package.mjs | grokbot | RC-2026-09-25-910 | submitted
 scripts/sign-agent-card.mjs | (none) | RC-2026-09-23-105 | submitted
-scripts/untested-modules-lint.mjs | instinct | RC-2026-09-25-302 | working
 scripts/watch-deploy-drift.mjs | instinct | RC-2026-09-25-304 | working
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
@@ -528,7 +518,6 @@ tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
-tests/room-flood-guard.test.js | instinct | RC-2026-09-25-302 | working
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/runtime-package.test.js | (none) | RC-2026-09-18-017 | submitted
@@ -546,5 +535,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2020 threshold=1500 rotation_due=yes watcher=active open_claims=71 prose_open=3 unfenced_prose=73 files_claimed=175 overlap_files=29 watermark=5847718181
+board_comments=2023 threshold=1500 rotation_due=yes watcher=active open_claims=69 prose_open=3 unfenced_prose=73 files_claimed=169 overlap_files=29 watermark=5848849448
 
