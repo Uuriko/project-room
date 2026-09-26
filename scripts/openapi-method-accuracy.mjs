@@ -87,7 +87,7 @@ export async function serveScratch() {
 }
 
 export async function probeMethodAccuracy({ openapi }) {
-  const operations = openapiOperations(openapi);
+  const operations = openapiOperations(openapi).filter(op => !op.workerOnly);
   if (operations.length < 50) throw new Error("openapi parse sanity failed");
   const { origin, close } = await serveScratch();
   const results = [];

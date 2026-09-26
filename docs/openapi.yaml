@@ -4656,6 +4656,7 @@ paths:
   /api/health/jobs:
     get:
       summary: Cron job heartbeat
+      x-worker-only: true
       description: >-
         Open (also HEAD). Answered by the Worker: per-job lastSuccessAt /
         lastError for the cron jobs, read through one Durable Object RPC.
@@ -4676,6 +4677,7 @@ paths:
   /api/version/worker:
     get:
       summary: Worker-only deployment signal
+      x-worker-only: true
       description: >-
         Open (also HEAD). Answered by the Worker from module scope and env -
         never touches the Durable Object - so deploy verification stays

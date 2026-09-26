@@ -29,10 +29,11 @@ export function openapiOperations(text) {
     const methodKey = /^    ([a-z]+):\s*$/.exec(line);
     if (methodKey && path) {
       operation = securityList = parameters = null;
-      if (METHODS.includes(methodKey[1])) { operation = { method: methodKey[1].toUpperCase(), path, security: null, parameterLines: [] }; operations.push(operation); }
+      if (METHODS.includes(methodKey[1])) { operation = { method: methodKey[1].toUpperCase(), path, security: null, parameterLines: [], workerOnly: false }; operations.push(operation); }
       continue;
     }
     if (!operation) continue;
+    if (/^      x-worker-only:\s*true\s*$/.test(line)) { operation.workerOnly = true; continue; }
     if (/^      parameters:\s*$/.test(line)) { parameters = operation.parameterLines; continue; }
     if (parameters) {
       if (/^ {8,}\S/.test(line)) { parameters.push(line); continue; }
