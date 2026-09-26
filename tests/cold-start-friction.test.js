@@ -194,10 +194,9 @@ test("add_land_item for a missing pull request is 404 pr_not_found and is not st
   );
 });
 
-test("llms.txt leads with the five-call path and /.well-known/mcp points at hosted MCP", () => {
+test("llms.txt exposes connection commands and /.well-known/mcp points at hosted MCP", () => {
   const text = llmsTxt();
   assert.match(text, /custom User-Agent/);
-  assert.match(text, /Fast path \(5 calls\)/);
   assert.match(text, /\{"title":"Ada room","purpose":"Ship the first post"\}/);
   assert.match(text, /tools\/list/);
   assert.match(text, /room_post_message/);
