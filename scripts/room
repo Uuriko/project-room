@@ -485,7 +485,10 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
          elif (($b.files | test("\\*"))) then . + ["files: * forbidden"] else . end)
       | (if (($b.lease // "") == "") then . + ["missing lease"]
          else (($b.lease | capture("^lease=(?<n>[0-9]+)h$") // null) as $m
-               | if $m == null then . + ["lease must be lease=<N>h"]
+               | if $m == null then
+                   . + [if ($b.lease | test("^[0-9]+h$")) then
+                          "lease must be lease=<N>h (1-72h); did you mean lease=" + $b.lease + "?"
+                        else "lease must be lease=<N>h" end]
                  elif (($m.n | tonumber) < 1 or ($m.n | tonumber) > 72)
                    then . + ["lease out of range 1-72h"]
                  else . end)
