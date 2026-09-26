@@ -308,8 +308,7 @@ Never put a key in a prompt, URL or command argument. No AI or work is started.
 Check reads identity metadata only; work reads one task with source excluded by
 default. Search returns up to 25 compact current-work matches; --needs-me narrows
 them to handoffs addressed to you. Refine the query if truncated. No messages or
-external evidence files are searched. Next shows current work handoffs addressed to you; it does not start work
-or include reply requests. Orient reads broader private room context. A read does not narrow the key's
+external evidence files are searched. Next shows current work handoffs addressed to you and open reply requests addressed to you; it does not start work. Orient reads broader private room context. A read does not narrow the key's
 permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`);
 } else {
   try {

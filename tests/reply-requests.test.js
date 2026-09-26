@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent, replay, event } from "../src/events.js";
 import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t, extra = []) {
@@ -401,4 +406,96 @@ test("follow-up chains stop at eight prior exchanges and never carry another wor
   f.send("owner", { id: "propose-branch", type: "work.proposed", data: { workItemId: "another-work", title: "Other work", definitionOfDone: "Done", accountableMemberId: "agent", mode: "read" } });
   const other = f.open("guest", { replyToId: parent, workItemId: "another-work" });
   assert.deepEqual(f.store.replyRequests.selected(f.keys.agent, "commons", other.command.data.messageId).preparation.previousExchanges, []);
+});
+
+// These regressions guard discovery without bypassing scoped context preparation.
+// Existing selected-read tests do not exercise list pointers or either orientation adapter.
+// They use the real store/HTTP/hosted MCP boundaries and require no production seams.
+test("reply discovery points to selected context and cannot bypass unfinished pages", t => {
+  const f = fixture(t);
+  const q = f.open("guest", { messageId: "visible-request", body: "Visible question body" });
+  f.post("guest", { messageId: "visible-context", body: "Visible clarification body", replyToId: "visible-request" });
+  const listed = f.store.replyRequests.list(f.keys.agent, "commons");
+  assert.equal(JSON.stringify(listed).includes("Visible question body"), false);
+  const row = listed.requests[0];
+  assert.deepEqual(listed.nextReads, [{ requestMessageId: "visible-request", nextRead: { tool: "room_read_request", arguments: { requestMessageId: "visible-request" } } }]);
+  assert.equal(Object.hasOwn(row, "nextRead"), false, "wire rows retain the legacy exact-key contract");
+  assert.equal(Object.hasOwn(row, "answerBasis"), false);
+  assert.equal(Object.hasOwn(row, "actions"), false);
+  const opts = { name: "room_list_requests", args: { direction: "incoming", status: "open" }, roomId: "commons" };
+  assert.equal(validateReplyRead(listed, opts).requests[0].id, row.id);
+  const legacy = structuredClone(listed); delete legacy.nextReads;
+  assert.equal(validateReplyRead(legacy, opts).requests[0].id, row.id);
+  const forged = structuredClone(listed); forged.nextReads[0].nextRead.arguments.requestMessageId = "another-request";
+  assert.throws(() => validateReplyRead(forged, opts), { code: "invalid_response" });
+  const first = f.store.replyRequests.selected(f.keys.agent, "commons", row.id, { limit: 1 });
+  assert.equal(first.page.hasMore, true);
+  assert.equal(first.current.answerBasis, null);
+  assert.ok(first.preparation.instructions);
+  const last = f.store.replyRequests.selected(f.keys.agent, "commons", row.id, { limit: 1, cursor: first.page.nextCursor });
+  assert.equal(last.page.hasMore, false);
+  assert.ok(last.current.answerBasis);
+  f.send("agent", f.answer(q, { event: { id: last.current.answerBasis.contextEventId }, sequence: last.current.answerBasis.contextSequence }));
+  assert.equal(f.store.replyRequests.list(f.keys.agent, "commons").requests.length, 0);
+});
+
+test("needs-me orientation includes only incoming open request metadata", async t => {
+  const f = fixture(t);
+  f.open("guest", { messageId: "needs-me-request", body: "Needs-me question body" });
+  const answered = f.open("guest", { messageId: "answered-request" });
+  f.send("agent", f.answer(answered));
+  const cancelled = f.open("guest", { messageId: "cancelled-request" });
+  f.send("guest", f.cancel(cancelled));
+  const declined = f.open("guest", { messageId: "declined-request" });
+  f.send("agent", f.answer(declined, declined.receipt, { responseOutcome: "declined" }));
+  f.open("agent", { messageId: "outgoing-request", toMemberId: "guest" });
+  f.open("guest", { messageId: "someone-else-request", toMemberId: "reviewer" });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  let raced = false;
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", token: f.keys.agent, memberId: "agent",
+    fetchImpl: async (url, init) => {
+      if (!raced && new URL(url).pathname.endsWith("/reply-requests")) {
+        raced = true;
+        f.post("guest", { messageId: "between-reads", body: "A newer clarification", replyToId: "needs-me-request" });
+      }
+      return fetch(url, init);
+    } });
+  const needs = await client.orient({ focus: "needs_me" });
+  assert.ok(needs.replyRequestsEvaluatedThrough > needs.evaluatedThrough, "reply discovery must not claim the earlier work snapshot sequence");
+  assert.equal(needs.selection.openReplyRequests, 1);
+  assert.deepEqual(needs.replyRequests.map(r => r.id), ["needs-me-request"]);
+  assert.deepEqual(needs.replyRequests[0].nextRead, { tool: "room_read_request", arguments: { requestMessageId: "needs-me-request" } });
+  assert.equal(needs.replyRequestsEvaluatedThrough, f.store.room("commons").sequence);
+  assert.equal(Object.hasOwn(needs.replyRequests[0], "answerBasis"), false);
+  assert.equal(JSON.stringify(needs).includes("Needs-me question body"), false);
+  assert.equal(Object.hasOwn(await client.orient(), "replyRequests"), false);
+});
+
+// Hosted MCP has a separate orientation implementation and identity authenticator.
+test("hosted needs-me discovers private incoming requests without exposing their bodies", async t => {
+  const f = fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder");
+  const rooms = new AgentRooms(f.store);
+  const created = rooms.create(owner.secret, { roomId: "hosted-replies", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
+  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Responder", permissions: [] });
+  f.store.dmConsents.request(created.roomId, created.ownerMemberId, peer.identityId, "Fixture");
+  f.store.dmConsents.decide(created.roomId, peer.identityId, created.ownerMemberId, "approve");
+  const send = command => f.store.command(owner.secret, created.roomId, command);
+  send({ id: "hosted-open", type: "message.posted", data: { messageId: "hosted-question", body: "Private hosted question", toMemberId: peer.identityId, requestKind: "reply" } });
+  const mcp = createHostedRoomMcp(f.store, { agentRooms: rooms });
+  const list = async secret => {
+    const response = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "room_list_work", arguments: { roomId: created.roomId, focus: "needs_me" } } }, { authorization: `Bearer ${secret}` });
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const before = await list(peer.secret);
+  assert.deepEqual(before.replyRequests.map(r => r.id), ["hosted-question"]);
+  assert.deepEqual(before.replyRequests[0].nextRead, { tool: "room_read_request", arguments: { requestMessageId: "hosted-question" } });
+  assert.equal(before.replyRequestsEvaluatedThrough, f.store.room(created.roomId).sequence);
+  assert.equal(JSON.stringify(before).includes("Private hosted question"), false);
+  assert.equal(Object.hasOwn(before.replyRequests[0], "answerBasis"), false);
+  assert.deepEqual((await list(owner.secret)).replyRequests, []);
+  send({ id: "hosted-cancel", type: "reply_request.cancelled", data: { requestMessageId: "hosted-question", expectedRequestRevision: 0, reason: "Resolved elsewhere" } });
+  assert.deepEqual((await list(peer.secret)).replyRequests, []);
 });

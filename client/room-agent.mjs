@@ -977,6 +977,11 @@ export class RoomAgentClient {
       });
       const matches = query === undefined ? null : searchWork({ members: snapshot.state.members,
         workItems: Object.fromEntries(candidates.map(item => [item.id, item])) }, query);
+      const replyListing = focus === "needs_me" ? await this.replyRequests({ direction: "incoming", status: "open", signal }) : null;
+      const openReplies = replyListing?.requests.map(request => ({
+        id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
+        nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+      })) ?? null;
       const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
           ...(excerpt === undefined ? {} : { excerpt }),
@@ -993,14 +998,15 @@ export class RoomAgentClient {
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
           guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
+            + (focus === "needs_me" ? " Reply requests are listed separately at replyRequestsEvaluatedThrough and are not filtered by the work query; follow nextRead before answering." : "")
             + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
           : focus === "results" ? { totalWork: items.length, results: work.length,
           guidance: "Current completed results with required review and decision gates satisfied. Approval is not execution or reuse permission. Native results have exact read pointers; read work for external evidence links. Reopened, superseded and awaiting-review work are excluded. No external content fetched." }
           : focus === "help_wanted" ? { totalWork: items.length, helpWanted: work.length,
           guidance: "Explicit current invitations, not assignments, queue eligibility or permission to execute. All matching invitations in this bounded Room are included. Follow nextRead to inspect current offer capacity and selection; review scope and discussion before contributing. Unsupported offer reads fail explicitly. No automatic offer or dispatch." }
-          : { totalWork: items.length, needsMe: work.length,
-          guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
-        work };
+          : { totalWork: items.length, needsMe: work.length, openReplyRequests: openReplies.length,
+          guidance: "Current next steps addressed to you, including those missing a Room permission, plus open reply requests addressed to you in replyRequests. Not all your ongoing work. Follow nextRead and finish every conversation page before answering with current.answerBasis. room_request_reply opens a new question, not an answer. Reply requests are a separate read at replyRequestsEvaluatedThrough. Empty work and empty reply requests do not mean the room is done." },
+        work, ...(focus === "needs_me" ? { replyRequests: openReplies, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {}) };
     }
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,

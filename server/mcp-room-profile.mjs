@@ -291,12 +291,17 @@ function listWork(store, secret, args) {
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
+  const replyRequests = replyListing?.requests.map(request => ({
+    id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
+    nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+  })) ?? null;
   return {
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
-    work
+    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   };
 }
 

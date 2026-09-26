@@ -51,9 +51,11 @@ export class ReplyRequests {
     return this.read(token, roomId, expectedSessionBinding, ({ auth, room }) => {
       const requests = Object.values(room.state.replyRequests ?? {}).filter(request => directionMatches(request, auth.member.id, direction)
         && (status === "all" || request.status === status)).map(compactRequest);
+      const nextReads = requests.map(request => ({ requestMessageId: request.id,
+        nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
       // At most 500 retained subjects; no bodies and no mutable paging boundary.
-      if (Buffer.byteLength(JSON.stringify(requests)) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
-      return { evaluatedThrough: room.sequence, selection: { direction, status }, requests };
+      if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
+      return { evaluatedThrough: room.sequence, selection: { direction, status }, requests, nextReads };
     });
   }
   selected(token, roomId, requestMessageId, options = {}) {
