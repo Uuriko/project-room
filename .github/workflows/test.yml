@@ -56,6 +56,26 @@ jobs:
       - run: npm ci
       - name: Install Linux host isolation for automatic-run unit tests
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - name: Permit the sandbox launcher to create its isolated namespaces
+        # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
+        # unless the launcher has an application profile. Scope the exception to
+        # distro bubblewrap; keep global AppArmor restrictions and --unshare-all.
+        # https://documentation.ubuntu.com/release-notes/24.04/#unprivileged-user-namespace-restrictions
+        run: |
+          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
+            if [ -f /etc/apparmor.d/bwrap ]; then
+              sudo apparmor_parser -r /etc/apparmor.d/bwrap
+            else
+              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
+          abi <abi/4.0>,
+          include <tunables/global>
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
+            fi
+          fi
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - run: npm test
