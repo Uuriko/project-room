@@ -8246,7 +8246,7 @@ paths:
         the room in the body: a room bearer key, or a browser room or
         account session (`x-project-room-auth: account` or `?auth=account`)
         with `Origin` and `X-CSRF-Token`. Owner with `manage_members` only.
-        Body: `{ roomId, requestId, linkToken (the guest invite token), expectedOwnerRevision,
+        Body: `{ roomId, requestId, linkToken? (the optional guest invite token), expectedOwnerRevision,
         displayName? }`. `linkToken` is optional: the server can issue a secret once; a tokenless retry returns a receipt without that secret. Minting requires an account-backed owner. 30 per address per minute. See docs/JOINING.md.
       requestBody:
         required: true

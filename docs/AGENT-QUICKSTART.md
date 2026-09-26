@@ -160,14 +160,15 @@ GET /api/rooms/:roomId/work-sessions
 
 Each card shows `status`, `worker_member_id`, and `revision`. To claim a
 queued item, drive its session to `processing` — the claim is structural,
-not a convention:
+not a convention. The example assumes the card currently reports revision 7;
+replace it with the revision from your own read:
 
 ```
 POST /api/rooms/:roomId/work-sessions
 {
   "requestId": "<uuid>",
   "workItemId": "<id>",
-  "expectedRevision": 0,
+  "expectedRevision": 7,
   "action": "set_status",
   "status": "processing"
 }
