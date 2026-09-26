@@ -33,6 +33,13 @@ DRY_RUN=0
 die() { printf 'room: error: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'room: warn: %s\n' "$*" >&2; }
 
+# Consume a value flag before reading $2 under set -u. Refuse another flag as
+# its value as well: an omitted --task-id must not silently eat --lane.
+need_val() {
+  local verb="$1" flag="$2" count="$3" next="${4:-}"
+  [ "$count" -ge 2 ] && [ -n "$next" ] && [[ "$next" != --* ]] || die "$verb: $flag needs a value"
+}
+
 need() {
   command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (need bash + gh + jq)"
 }
@@ -972,13 +979,13 @@ latest_block() { # $1 = task-id -> prints "lane|files|lease|state|reason" or die
 cmd_claim() {
   local task="" lane="$DEFAULT_LANE" files="" lease="" reason="" state="submitted" title=""
   while [ $# -gt 0 ]; do case "$1" in
-    --task-id) task="$2"; shift 2 ;;
-    --lane)    lane="$2"; shift 2 ;;
-    --files)   files="$2"; shift 2 ;;
-    --lease)   lease="$2"; shift 2 ;;
-    --reason)  reason="$2"; shift 2 ;;
-    --state)   state="$2"; shift 2 ;;
-    --title)   title="$2"; shift 2 ;;
+    --task-id) need_val "claim" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --lane) need_val "claim" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
+    --files) need_val "claim" "$1" "$#" "${2:-}"; files="$2"; shift 2 ;;
+    --lease) need_val "claim" "$1" "$#" "${2:-}"; lease="$2"; shift 2 ;;
+    --reason) need_val "claim" "$1" "$#" "${2:-}"; reason="$2"; shift 2 ;;
+    --state) need_val "claim" "$1" "$#" "${2:-}"; state="$2"; shift 2 ;;
+    --title) need_val "claim" "$1" "$#" "${2:-}"; title="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "claim: unknown flag $1" ;;
   esac; done
@@ -1061,9 +1068,9 @@ $(suffix_line "$task" "$lane")"
 cmd_heartbeat() {
   local task="" lane="$DEFAULT_LANE" note=""
   while [ $# -gt 0 ]; do case "$1" in
-    --task-id) task="$2"; shift 2 ;;
-    --lane)    lane="$2"; shift 2 ;;
-    --note)    note="$2"; shift 2 ;;
+    --task-id) need_val "heartbeat" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --lane) need_val "heartbeat" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
+    --note) need_val "heartbeat" "$1" "$#" "${2:-}"; note="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "heartbeat: unknown flag $1" ;;
   esac; done
@@ -1088,9 +1095,9 @@ $(suffix_line "$task" "$lane")"
 cmd_release() {
   local task="" lane="$DEFAULT_LANE" reason=""
   while [ $# -gt 0 ]; do case "$1" in
-    --task-id) task="$2"; shift 2 ;;
-    --lane)    lane="$2"; shift 2 ;;
-    --reason)  reason="$2"; shift 2 ;;
+    --task-id) need_val "release" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --lane) need_val "release" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
+    --reason) need_val "release" "$1" "$#" "${2:-}"; reason="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "release: unknown flag $1" ;;
   esac; done
@@ -1113,11 +1120,11 @@ $(suffix_line "$task" "$lane")"
 cmd_handoff() {
   local task="" from="" to="" context="" note=""
   while [ $# -gt 0 ]; do case "$1" in
-    --task-id)  task="$2"; shift 2 ;;
-    --from)     from="$2"; shift 2 ;;
-    --to)       to="$2"; shift 2 ;;
-    --context)  context="$2"; shift 2 ;;
-    --note)     note="$2"; shift 2 ;;
+    --task-id) need_val "handoff" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --from) need_val "handoff" "$1" "$#" "${2:-}"; from="$2"; shift 2 ;;
+    --to) need_val "handoff" "$1" "$#" "${2:-}"; to="$2"; shift 2 ;;
+    --context) need_val "handoff" "$1" "$#" "${2:-}"; context="$2"; shift 2 ;;
+    --note) need_val "handoff" "$1" "$#" "${2:-}"; note="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "handoff: unknown flag $1" ;;
   esac; done
@@ -1147,10 +1154,10 @@ $(suffix_line "$task" "$from")"
 cmd_receipt() {
   local task="" lane="$DEFAULT_LANE" merged="" note=""
   while [ $# -gt 0 ]; do case "$1" in
-    --task-id) task="$2"; shift 2 ;;
-    --lane)    lane="$2"; shift 2 ;;
-    --merged)  merged="$2"; shift 2 ;;
-    --note)    note="$2"; shift 2 ;;
+    --task-id) need_val "receipt" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --lane) need_val "receipt" "$1" "$#" "${2:-}"; lane="$2"; shift 2 ;;
+    --merged) need_val "receipt" "$1" "$#" "${2:-}"; merged="$2"; shift 2 ;;
+    --note) need_val "receipt" "$1" "$#" "${2:-}"; note="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     *) die "receipt: unknown flag $1" ;;
   esac; done
@@ -1225,12 +1232,12 @@ live_rows_json() { # -> {open,expiring,lanes} rebuilt from the board
 cmd_query() {
   local qlane="" qstatus="" qfile="" workfor="" live=0 state_path=""
   while [ $# -gt 0 ]; do case "$1" in
-    --lane)     qlane="$2"; shift 2 ;;
-    --status)   qstatus="$2"; shift 2 ;;
-    --file)     qfile="$2"; shift 2 ;;
-    --work-for) workfor="$2"; shift 2 ;;
+    --lane) need_val "query" "$1" "$#" "${2:-}"; qlane="$2"; shift 2 ;;
+    --status) need_val "query" "$1" "$#" "${2:-}"; qstatus="$2"; shift 2 ;;
+    --file) need_val "query" "$1" "$#" "${2:-}"; qfile="$2"; shift 2 ;;
+    --work-for) need_val "query" "$1" "$#" "${2:-}"; workfor="$2"; shift 2 ;;
     --live)     live=1; shift ;;
-    --state)    state_path="$2"; shift 2 ;;
+    --state) need_val "query" "$1" "$#" "${2:-}"; state_path="$2"; shift 2 ;;
     *) die "query: unknown flag $1" ;;
   esac; done
   local rows
@@ -1303,7 +1310,7 @@ guard_enforcer_freshness() { # $1 = verb
 cmd_rebuild() {
   local out="" commit_push=0
   while [ $# -gt 0 ]; do case "$1" in
-    --out) out="$2"; shift 2 ;;
+    --out) need_val "rebuild" "$1" "$#" "${2:-}"; out="$2"; shift 2 ;;
     --commit-push) commit_push=1; shift ;;
     *) die "rebuild: unknown flag $1" ;;
   esac; done
@@ -1640,7 +1647,7 @@ cmd_jev_shadow() {
 cmd_metrics() {
   local since=""
   while [ $# -gt 0 ]; do case "$1" in
-    --since) since="$2"; shift 2 ;;
+    --since) need_val "metrics" "$1" "$#" "${2:-}"; since="$2"; shift 2 ;;
     *) die "metrics: unknown flag $1" ;;
   esac; done
   local comments n wm st lo hi days cpd
@@ -1682,9 +1689,9 @@ cmd__clock() { # testing: _clock [--op EPOCH] [--ref EPOCH] [--date "Date: ..."]
   # reference directly, --date parses an HTTP Date header into the reference.
   local op="" ref="" datehdr=""
   while [ $# -gt 0 ]; do case "$1" in
-    --op)   op="$2"; shift 2 ;;
-    --ref)  ref="$2"; shift 2 ;;
-    --date) datehdr="$2"; shift 2 ;;
+    --op) need_val "_clock" "$1" "$#" "${2:-}"; op="$2"; shift 2 ;;
+    --ref) need_val "_clock" "$1" "$#" "${2:-}"; ref="$2"; shift 2 ;;
+    --date) need_val "_clock" "$1" "$#" "${2:-}"; datehdr="$2"; shift 2 ;;
     *) die "_clock: unknown flag $1" ;;
   esac; done
   if [ -n "$datehdr" ]; then
@@ -1697,9 +1704,9 @@ cmd__clock() { # testing: _clock [--op EPOCH] [--ref EPOCH] [--date "Date: ..."]
 cmd__state() {
   local now_iso="" n="" wm=""
   while [ $# -gt 0 ]; do case "$1" in
-    --now)       now_iso="$2"; shift 2 ;;
-    --comments)  n="$2"; shift 2 ;;
-    --watermark) wm="$2"; shift 2 ;;
+    --now) need_val "_state" "$1" "$#" "${2:-}"; now_iso="$2"; shift 2 ;;
+    --comments) need_val "_state" "$1" "$#" "${2:-}"; n="$2"; shift 2 ;;
+    --watermark) need_val "_state" "$1" "$#" "${2:-}"; wm="$2"; shift 2 ;;
     *) die "_state: unknown flag $1" ;;
   esac; done
   local now events
@@ -1717,8 +1724,8 @@ cmd__state() {
 main() {
   while [ $# -gt 0 ]; do case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
-    --repo)    REPO="$2"; shift 2 ;;
-    --issue)   ISSUE="$2"; shift 2 ;;
+    --repo) need_val "global" "$1" "$#" "${2:-}"; REPO="$2"; shift 2 ;;
+    --issue) need_val "global" "$1" "$#" "${2:-}"; ISSUE="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     --) shift; break ;;
     -*) die "unknown global flag $1" ;;
