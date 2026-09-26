@@ -13,6 +13,7 @@ import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
+import { checkAgentDisplayName } from "./display-name-guard.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -167,6 +168,15 @@ export class AgentIdentities {
             next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
         }
       }
+      // Keep the existing credential-recovery path above idempotent. Global
+      // identity names are not unique: ordinary exact-name duplicates remain
+      // possible, but a visually deceptive spelling of an existing active
+      // name cannot be minted. Room-local collisions are checked at link.
+      const canonical = value => value.normalize("NFKC").trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+      const activeNames = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE revoked_at IS NULL").all()
+        .filter(row => canonical(row.displayName) !== canonical(name));
+      const checked = checkAgentDisplayName(name, { activeNames });
+      if (!checked.safe) fail(422, "invalid_identity", "displayName contains unsafe characters");
       const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
       if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const now = this.store.now();
@@ -249,8 +259,16 @@ export class AgentIdentities {
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
+      const memberName = displayName?.trim() || identity.displayName;
+      // Compare against active room members inside the writer transaction,
+      // not an earlier snapshot. Preserve same-identity relinks above.
+      const activeNames = Object.values(this.store.room(roomId).state.members)
+        .filter(member => member.active !== false && member.id !== resolvedMemberId)
+        .map(member => ({ memberId: member.id, displayName: member.displayName }));
+      const checked = checkAgentDisplayName(memberName, { activeNames });
+      if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
-        data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId,
+        data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
