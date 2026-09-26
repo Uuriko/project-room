@@ -1,17 +1,4 @@
-// Agent-operated usability regression, not evidence from human participants.
-//
-// The requirement: someone who has not signed in can see how to connect an
-// agent without clicking anything. The sign-in screen is now "Welcome.", one
-// Continue with Google button, and a More options disclosure that hides
-// everything else - so anything placed inside that disclosure is invisible on
-// arrival, and connecting an agent is the one thing this room does that a chat
-// app does not.
-//
-// Every assertion before the interaction section is about the state of the page
-// on arrival with zero clicks performed, because "before I click on anything"
-// is the requirement. The check that #signin-extra is still hidden is the one
-// that matters most: it proves the prompt is genuinely outside the disclosure
-// rather than only visible because the disclosure happened to be open.
+// Agent instructions stay discoverable behind one disclosure; direct links open it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,7 +10,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 
 for (const touch of [false, true]) {
-  test(`connect an agent ${touch ? 'touch' : 'desktop'}: the prompt is readable before any click`, { timeout: 60000 }, async t => {
+  test(`connect an agent ${touch ? 'touch' : 'desktop'}: instructions open on request and direct links`, { timeout: 60000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'room-connect-agent-'));
     const store = new RoomStore(join(directory, 'room.sqlite'));
     store.initialize(initialRoom());
@@ -53,14 +40,15 @@ for (const touch of [false, true]) {
     await page.goto(origin);
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
 
-    // 1. Visible with nothing clicked. Playwright walks the ancestors, so this
-    //    fails if the block is inside a closed <details>, a hidden div, or a
-    //    dialog that has not been opened.
+    // Instructions are hidden until requested; the summary remains keyboard-accessible.
     const prompt = page.locator('#join-agent-prompt');
+    assert.equal(await prompt.isVisible(), false, 'setup instructions start collapsed');
+    await page.locator('#join-agent > summary').focus();
+    await page.keyboard.press('Enter');
     await prompt.waitFor({ state: 'visible' });
     assert.ok(await page.locator('#join-agent-title').isVisible(), 'the heading is on the first screen');
 
-    // 2. And genuinely outside the More options disclosure, not merely lucky.
+    // The agent route works independently of advanced sign-in options.
     assert.equal(await page.locator('#signin-extra').isVisible(), false, 'the disclosure is still closed');
     assert.equal(await page.locator('#signin-more').getAttribute('aria-expanded'), 'false');
 
@@ -97,6 +85,10 @@ for (const touch of [false, true]) {
     assert.equal(response.status(), 200, 'the address in the prompt is a live door');
     assert.ok((await response.text()).length > 0);
 
+    await page.goto(origin + '/#join-agent');
+    await prompt.waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#join-agent').evaluate(node => node.open), true, 'direct links reveal the setup');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(errors, [], 'no page errors');
   });
 }
