@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, event, replay, matchesReceipt as domainMatches } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { matchesReceipt, nextWorkStep, terminalWork, workStatus, workActions } from "../src/workflow.js";
+import { matchesReceipt, nextWorkStep, terminalWork, workStatus, workActions, presentedWorkActions, renderWorkActions } from "../src/workflow.js";
 import { needsAttention, workInvolvingMe } from "../src/work-selectors.js";
 import * as serviceSelectors from "../server/return-selectors.mjs";
 
@@ -125,3 +125,48 @@ test("domain and presentation use the same exact-receipt matcher", () => {
   assert.equal(matchesReceipt({ completionEventId: "r", evidenceVersion: "v" }, { eventId: "r", evidenceVersion: "v" }), true);
   assert.equal(matchesReceipt({ completionEventId: "r", evidenceVersion: "old" }, { eventId: "r", evidenceVersion: "v" }), false);
 });
+
+test("selected work shows one primary next action and keeps the others behind More", () => {
+  const member = { id: "producer", active: true, permissions: ["accept_work", "complete_work", "write_external"] };
+  const now = 1000;
+  const accepted = { id: "work", state: "accepted", mode: "read", accountableMemberId: "producer", revision: 2 };
+  const presented = presentedWorkActions(accepted, member, now);
+  assert.equal(presented.primary.action, "start");
+  assert.equal(presented.primary.label, nextWorkStep(accepted, now).label);
+  assert.deepEqual(presented.more.map(([action]) => action), ["block", "complete"]);
+  const html = renderWorkActions(accepted, member, { now, workId: accepted.id });
+  const primaryAt = html.indexOf('class="button primary"');
+  const moreAt = html.indexOf('<details class="work-more">');
+  assert.ok(primaryAt >= 0 && moreAt > primaryAt);
+  assert.match(html.slice(0, moreAt), /Start the work/);
+  assert.match(html.slice(moreAt), /Report blocker/);
+  assert.match(html.slice(moreAt), /Post evidence/);
+  assert.doesNotMatch(html.slice(0, moreAt), /Report blocker|Post evidence/);
+  assert.equal(html.match(/<button type="button"/g).length, 3);
+  assert.match(html, /data-focus-key="work-more:work"/);
+  assert.match(html, /Does not invoke Begin or start a host/);
+  const write = { ...accepted, mode: "write" };
+  const claim = presentedWorkActions(write, member, now);
+  assert.equal(claim.primary.action, "claim");
+  assert.equal(claim.primary.label, "Confirm permission and reserve write scope");
+  assert.deepEqual(claim.more.map(([action]) => action), ["block"]);
+});
+
+for (const producerId of ["producer", null]) {
+  test(`review actions preserve provenance label for ${producerId ?? "unknown producer"}`, () => {
+    const f = room(true, false);
+    f.mutate("producer", T.WORK_ACCEPTED);
+    f.mutate("producer", T.WORK_COMPLETED, { summary: "A finding", evidenceUrl: "https://example.invalid/finding",
+      evidenceVersion: "v1", producerId, nextAction: "Review the finding" });
+    const presented = presentedWorkActions(f.item(), f.member("reviewer"));
+    const label = producerId ? "Record independent check" : "Record evidence check";
+    if (producerId) {
+      assert.equal(presented.primary?.action, "verify");
+      assert.equal(presented.primary?.label, label);
+      assert.equal(presented.more.some(([action]) => action === "verify"), false);
+    } else {
+      assert.equal(presented.primary, null, "unknown provenance does not suggest independent verification");
+      assert.deepEqual(presented.more.find(([action]) => action === "verify"), ["verify", label]);
+    }
+  });
+}

@@ -139,7 +139,7 @@ test("cold-start chain: GET / alone reaches a first post without llms.txt", { ti
 // 2. Canonical scoped errors.
 // ---------------------------------------------------------------------------
 
-test("canonical errors: 401s on listed routes name the mint path with non-empty next[]", { timeout: 30000 }, async t => {
+test("canonical errors: 401s on listed routes preserve saved connections with read-first next steps", { timeout: 30000 }, async t => {
   const { origin } = await serve(t);
   const probes = [
     ["GET", "/api/needs-me"],
@@ -153,7 +153,9 @@ test("canonical errors: 401s on listed routes name the mint path with non-empty 
     const body = await res.json();
     assertCanonicalEnvelope(t, body, `${method} ${path}`);
     const text = JSON.stringify(body);
-    assert.ok(text.includes("/api/agent-identities"), `${method} ${path} names the mint path`);
+    assert.equal(body.next[0].tool, "room_check_access");
+    assert.ok(!body.next.some(step => step.method === "POST"), "no automatic credential issuance step");
+    assert.match(text, /saved connection/i);
   }
   // Webhook 401 also names the rak_ API key alternative.
   const wh = await post(origin, "/api/agent-webhooks", {});
@@ -359,12 +361,13 @@ test("MCP: errors carry canonical guidance in error.data with valid JSON-RPC sha
   assert.ok(Array.isArray(ud.next) && ud.next.length > 0, "unknown_tool next[] non-empty");
   assert.match(ud.operationId, /^op_/);
   assert.equal(typeof ud.category, "string");
-  // auth_required names the mint path.
+  // auth_required preserves an existing connection before setup.
   const authed = await mcp(origin, "tools/call", { name: "room_post_message", arguments: {} }, undefined);
   assert.equal(authed.body.error.code, -32001);
   const ad = authed.body.error.data;
   assert.equal(ad.reason, "auth_required");
-  assert.ok(JSON.stringify(ad).includes("/api/agent-identities"), "auth_required names the mint path");
+  assert.equal(ad.next[0].tool, "room_check_access");
+  assert.ok(!ad.next.some(step => step.method === "POST"), "MCP auth does not direct credential creation");
   assert.ok(Array.isArray(ad.next) && ad.next.length > 0, "auth_required next[] non-empty");
   assert.equal(ad.status, "action_required");
   // invalid_arguments keeps its fields and gains the envelope fields.

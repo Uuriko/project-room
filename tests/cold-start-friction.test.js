@@ -41,8 +41,9 @@ test("MCP tools/call names unknown_tool, auth_required, and invalid_arguments", 
   const auth = handleMcpJoinRpc(rpc("tools/call", { name: "room_post_message", arguments: { roomId: "commons", body: "hi" } }));
   assert.equal(auth.error.code, -32001);
   assert.equal(auth.error.data.reason, "auth_required");
-  assert.match(auth.error.message, /mint one at POST \/api\/agent-identities/);
-  assert.equal(auth.error.data.hint, "mint one at POST /api/agent-identities");
+  assert.match(auth.error.message, /saved identity secret/);
+  assert.match(auth.error.data.hint, /saved connection/);
+  assert.match(auth.error.data.hint, /\/llms\.txt/, "new agents still have a setup path");
 
   const extra = handleMcpJoinRpc(rpc("tools/call", { name: "room_join_packet", arguments: { token: "nope" } }));
   assert.equal(extra.error.message, "invalid_arguments");
@@ -146,7 +147,7 @@ test("room create defaults kind, roomId, and displayName and names the bad field
   });
 });
 
-test("a missing reaction active is invalid_arguments and a no-bearer 401 names self-mint", t => {
+test("a missing reaction active is invalid_arguments and a no-bearer 401 preserves saved-connection guidance", t => {
   const { store } = setup(t);
   const key = store.issueAccessKey("commons", "owner");
   assert.throws(() => store.command(key, "commons", {
@@ -167,8 +168,8 @@ test("a missing reaction active is invalid_arguments and a no-bearer 401 names s
     return true;
   });
   const unauth = agentErrorAx({ httpStatus: 401, code: "unauthenticated", message: "No credential" });
-  assert.match(unauth.hint, /self-mint/);
-  assert.ok(unauth.next.some(step => step.path === "/api/agent-identities"));
+  assert.match(unauth.hint, /saved connection/);
+  assert.ok(unauth.next.some(step => step.path === "/api/agent-rooms"));
   const generic = agentErrorAx({ httpStatus: 422, code: "invalid_command", message: "Unexpected field: channel" });
   assert.equal(generic.next.some(step => step.tool === "room_read_work"), false);
 });
@@ -193,10 +194,9 @@ test("add_land_item for a missing pull request is 404 pr_not_found and is not st
   );
 });
 
-test("llms.txt leads with the five-call path and /.well-known/mcp points at hosted MCP", () => {
+test("llms.txt exposes connection commands and /.well-known/mcp points at hosted MCP", () => {
   const text = llmsTxt();
   assert.match(text, /custom User-Agent/);
-  assert.match(text, /Fast path \(5 calls\)/);
   assert.match(text, /\{"title":"Ada room","purpose":"Ship the first post"\}/);
   assert.match(text, /tools\/list/);
   assert.match(text, /room_post_message/);

@@ -61,7 +61,7 @@ export function looksLikeSecretTitle(title) {
 }
 
 export function authPanelTitle(roomId, title) {
-  if (!roomId || !ROOM_ID_PATTERN.test(String(roomId))) return "Welcome.";
+  if (!roomId || !ROOM_ID_PATTERN.test(String(roomId))) return "Welcome to Project Room";
   const label = typeof title === "string" ? title.trim() : "";
   if (label && label.length <= 120 && !looksLikeSecretTitle(label)) return `Open ${label}`;
   return `Open room ${roomId}`;
