@@ -52,6 +52,7 @@ export class ReplyRequests {
       const requests = Object.values(room.state.replyRequests ?? {}).filter(request => directionMatches(request, auth.member.id, direction)
         && (status === "all" || request.status === status)).map(compactRequest);
       const nextReads = requests.map(request => ({ requestMessageId: request.id,
+        http: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` },
         nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } } }));
       // At most 500 retained subjects; no bodies and no mutable paging boundary.
       if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);

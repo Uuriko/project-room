@@ -411,14 +411,29 @@ test("follow-up chains stop at eight prior exchanges and never carry another wor
 // These regressions guard discovery without bypassing scoped context preparation.
 // Existing selected-read tests do not exercise list pointers or either orientation adapter.
 // They use the real store/HTTP/hosted MCP boundaries and require no production seams.
-test("reply discovery points to selected context and cannot bypass unfinished pages", t => {
+test("reply discovery points to selected context and cannot bypass unfinished pages", async t => {
   const f = fixture(t);
   const q = f.open("guest", { messageId: "visible-request", body: "Visible question body" });
   f.post("guest", { messageId: "visible-context", body: "Visible clarification body", replyToId: "visible-request" });
-  const listed = f.store.replyRequests.list(f.keys.agent, "commons");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const read = async (path, method = "GET") => {
+    const response = await fetch(new URL(path, origin), { method, headers: { Authorization: `Bearer ${f.keys.agent}` } });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const listed = await read("/api/rooms/commons/reply-requests");
   assert.equal(JSON.stringify(listed).includes("Visible question body"), false);
   const row = listed.requests[0];
-  assert.deepEqual(listed.nextReads, [{ requestMessageId: "visible-request", nextRead: { tool: "room_read_request", arguments: { requestMessageId: "visible-request" } } }]);
+  assert.equal(listed.nextReads.length, 1);
+  const pointer = listed.nextReads[0];
+  assert.equal(pointer.requestMessageId, row.id);
+  assert.deepEqual(pointer.nextRead, { tool: "room_read_request", arguments: { requestMessageId: "visible-request" } });
+  const complete = await read(pointer.http.path, pointer.http.method);
+  assert.equal(complete.request.id, row.id);
+  assert.deepEqual(complete.page.items.map(item => item.message.body), ["Visible question body", "Visible clarification body"]);
   assert.equal(Object.hasOwn(row, "nextRead"), false, "wire rows retain the legacy exact-key contract");
   assert.equal(Object.hasOwn(row, "answerBasis"), false);
   assert.equal(Object.hasOwn(row, "actions"), false);
@@ -428,11 +443,15 @@ test("reply discovery points to selected context and cannot bypass unfinished pa
   assert.equal(validateReplyRead(legacy, opts).requests[0].id, row.id);
   const forged = structuredClone(listed); forged.nextReads[0].nextRead.arguments.requestMessageId = "another-request";
   assert.throws(() => validateReplyRead(forged, opts), { code: "invalid_response" });
-  const first = f.store.replyRequests.selected(f.keys.agent, "commons", row.id, { limit: 1 });
+  for (const path of ["https://elsewhere.invalid/steal", "/api/rooms/other/reply-context?requestMessageId=visible-request", "/api/rooms/commons/reply-context?requestMessageId=another-request"]) {
+    const bad = structuredClone(listed); bad.nextReads[0].http.path = path;
+    assert.throws(() => validateReplyRead(bad, opts), { code: "invalid_response" });
+  }
+  const first = await read(`${pointer.http.path}&limit=1`, pointer.http.method);
   assert.equal(first.page.hasMore, true);
   assert.equal(first.current.answerBasis, null);
   assert.ok(first.preparation.instructions);
-  const last = f.store.replyRequests.selected(f.keys.agent, "commons", row.id, { limit: 1, cursor: first.page.nextCursor });
+  const last = await read(`${pointer.http.path}&limit=1&cursor=${encodeURIComponent(first.page.nextCursor)}`, pointer.http.method);
   assert.equal(last.page.hasMore, false);
   assert.ok(last.current.answerBasis);
   f.send("agent", f.answer(q, { event: { id: last.current.answerBasis.contextEventId }, sequence: last.current.answerBasis.contextSequence }));
