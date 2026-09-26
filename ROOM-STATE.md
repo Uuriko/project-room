@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T17:29:53Z · board: Uuriko/project-room#266 · watermark: 5847718181 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=959bc30c4167d861cffc59042e2cd710c7dcf17cc9b186dd9bcbdb5f5112f277 -->
+<!-- generated: 2026-09-26T18:23:41Z · board: Uuriko/project-room#266 · watermark: 5847718181 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=73042e3e6acd84df8dba68db0159c92f9306570d60cf3bcd69abb3391c90ed1c -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -294,7 +294,6 @@ tests/runtime-package.test.js | , grokbot | RC-2026-09-18-017, RC-2026-09-25-910
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-25-943 | jillian | working | 2026-09-26T17:40:09Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
 RC-2026-09-23-902 | instinct | working | 2026-09-26T22:03:18Z | NONE (external black-box monitor)
 
 ## unclaimed-lanes
