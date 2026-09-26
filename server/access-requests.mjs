@@ -290,6 +290,27 @@ export class AccessRequests {
       // members but may never confer manage_members — that would make the
       // grant transitive. The owner (or a member already holding
       // manage_members) remains sovereign.
+      const existingLink = this.db.prepare(
+        "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
+      ).get(roomId, row.identity_id);
+      if (existingLink) {
+        // A direct grant already admitted this identity. Recording the
+        // decision must not link them again or change the grant they hold.
+        this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
+          .run(now, auth.member.id, "already a member; request closed without a second grant", requestId);
+        const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+        const held = authority.members[existingLink.memberId]?.permissions ?? [];
+        return Object.freeze({
+          ...updated,
+          memberId: existingLink.memberId,
+          grantedPermissions: Object.freeze([...held]),
+          alreadyMember: true,
+          next: Object.freeze([
+            Object.freeze({ action: "see-new-member", method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/presence`,
+              description: "This identity is already a member. The pending request is closed and their existing permissions are unchanged." }),
+          ]),
+        });
+      }
       if (grants.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
         fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
@@ -302,6 +323,7 @@ export class AccessRequests {
         identityId: row.identity_id,
         displayName: row.display_name,
         permissions: grants,
+        settleAccessRequests: false,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")

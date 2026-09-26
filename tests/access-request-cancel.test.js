@@ -65,3 +65,65 @@ test("requester cancel removes a pending access request from the owner queue", a
     error => error.status === 409
   );
 });
+
+test("direct link closes the identity's pending access request", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-access-settle-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  store.db.exec(accessRequestSchema);
+  const requests = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
+  });
+  const ownerToken = store.issueAccessKey("commons", "owner");
+  const identity = store.identities.create("Already Admitted");
+  requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Already Admitted",
+    requestedPermissions: ["accept_work"],
+    requestId: "ar_direct"
+  });
+  store.identities.link(ownerToken, "commons", {
+    identityId: identity.identityId,
+    permissions: ["accept_work"]
+  });
+  assert.equal(requests.list(ownerToken, "commons").length, 0);
+  const settled = requests.list(ownerToken, "commons", { status: "approved" });
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0].requestId, "ar_direct");
+  assert.equal(settled[0].decisionNote, "closed because this identity was linked directly");
+  store.close();
+  rmSync(directory, { recursive: true, force: true });
+});
+
+test("approving an already-linked identity records the decision without a second grant", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-access-already-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  store.db.exec(accessRequestSchema);
+  const requests = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
+  });
+  const ownerToken = store.issueAccessKey("commons", "owner");
+  const identity = store.identities.create("Granted First");
+  requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Granted First",
+    requestedPermissions: ["manage_members"],
+    requestId: "ar_already"
+  });
+  store.identities.link(ownerToken, "commons", {
+    identityId: identity.identityId,
+    permissions: ["accept_work"],
+    settleAccessRequests: false
+  });
+  const before = store.roomAuthority("commons").members[identity.identityId].permissions;
+  const decided = requests.decide(ownerToken, "commons", "ar_already", { decision: "approve" });
+  assert.equal(decided.status, "approved");
+  assert.equal(decided.alreadyMember, true);
+  assert.equal(decided.decisionNote, "already a member; request closed without a second grant");
+  assert.deepEqual(decided.grantedPermissions, before);
+  assert.deepEqual(store.roomAuthority("commons").members[identity.identityId].permissions, before);
+  assert.equal(requests.list(ownerToken, "commons").length, 0);
+  store.close();
+  rmSync(directory, { recursive: true, force: true });
+});
