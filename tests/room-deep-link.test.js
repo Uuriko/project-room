@@ -55,8 +55,8 @@ test("auth gate names the room title when known, otherwise the id", () => {
   assert.equal(authPanelTitle("grok-muse-potter-20260918"), "Open room grok-muse-potter-20260918");
   assert.equal(authPanelTitle("commons", "Commons"), "Open Commons");
   assert.equal(authPanelTitle("commons", "pri_secret"), "Open room commons");
-  assert.equal(authPanelTitle(null), "Welcome.");
-  assert.equal(authPanelTitle("bad id"), "Welcome.");
+  assert.equal(authPanelTitle(null), "Welcome to Project Room");
+  assert.equal(authPanelTitle("bad id"), "Welcome to Project Room");
   assert.match(KEY_KIND_HINT, /Room key: one room/);
   assert.match(KEY_KIND_HINT, /Account key/);
   assert.equal(looksLikeSecretTitle("Commons"), false);
