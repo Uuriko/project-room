@@ -20,8 +20,7 @@
 // never recorded without its triggering message/reaction. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
-import { extractMentions } from "./mentions.mjs";
-import { resolveMentionTarget } from "./mention-lifecycle.mjs";
+import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
@@ -129,11 +128,8 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
     const body = typeof data.body === "string" ? data.body : "";
     const identityNames = identityNamesFor(store, roomId);
     const recipients = new Map(); // userId -> { type, threadId }
-    let names = [];
-    try { names = extractMentions(body); } catch { names = []; }
-    for (const name of names) {
-      const target = resolveMentionTarget(members, identityNames, name, senderId);
-      if (target && !recipients.has(target)) recipients.set(target, { type: "mention", threadId: "" });
+    for (const target of resolveMentionTargetsInText(members, identityNames, body, senderId)) {
+      recipients.set(target, { type: "mention", threadId: "" });
     }
     let threadRootId = "";
     if (data.replyToId) {

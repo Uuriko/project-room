@@ -192,13 +192,63 @@ test("through MCP, a private mention is answered privately and a third party nev
   assert.deepEqual((await mcp.call("room_read_inbox", {})).result.structuredContent.directMentions, []);
 });
 
-test("a message naming a multi-word agent lands in that agent's inbox", t => {
+test("a unique short @name reaches a multi-word agent inbox and activity without leaking private messages", t => {
   const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "cowork-enroll", memberId: "cowork-agent", displayName: "Claude (Cowork)", access: "chat",
     keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
-  say(f, f.keys.owner, { messageId: "ask-cowork", body: "@Claude (Cowork) which P0 are you taking?" });
+  say(f, f.keys.owner, { messageId: "ask-cowork", body: "@Claude which P0 are you taking?" });
+  f.store.dmConsents.request("commons", "guest", "owner", "test");
+  f.store.dmConsents.decide("commons", "owner", "guest", "approve");
+  say(f, f.keys.guest, { messageId: "private-short-name", body: "@Claude confidential aside", toMemberId: "owner" });
   const inbox = f.store.agentInbox(token, "commons");
   assert.deepEqual(inbox.directMentions.map(m => m.messageId), ["ask-cowork"]);
+  assert.deepEqual(f.store.db.prepare("SELECT message_id FROM activity_events WHERE user_id=?").all("cowork-agent").map(row => row.message_id), ["ask-cowork"]);
   assert.deepEqual(f.store.listMentions(token, "commons").mentions.map(m => m.memberId), ["cowork-agent"]);
+  // Persist a real pre-fix row: old versions recorded third-party DM mentions.
+  const privateEvent = f.store.db.prepare("SELECT id FROM events WHERE body LIKE ?").get('%"messageId":"private-short-name"%');
+  const now = f.store.now();
+  f.store.db.prepare("INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at) VALUES(?,?,?,'delivered',?,?)")
+    .run("commons", privateEvent.id, "cowork-agent", now, now + 60000);
+  assert.deepEqual(f.store.listMentions(token, "commons").mentions.map(m => m.memberId), ["cowork-agent"], "historical private rows stay hidden");
+  assert.throws(() => f.store.acknowledgeMention(token, "commons", privateEvent.id), { code: "mention_not_found" });
+  f.store.dmConsents.request("commons", "guest", "cowork-agent", "test");
+  f.store.dmConsents.decide("commons", "cowork-agent", "guest", "approve");
+  const ownPrivate = say(f, f.keys.guest, { messageId: "private-to-cowork", body: "@Claude private question", toMemberId: "cowork-agent" });
+  assert.ok(f.store.listMentions(token, "commons").mentions.some(row => row.messageEventId === ownPrivate.event.id));
+  assert.equal(f.store.acknowledgeMention(token, "commons", ownPrivate.event.id).state, "acknowledged");
+  assert.deepEqual(f.store.listMentions(f.keys.owner, "commons", { memberId: "cowork-agent" }).mentions.map(row => row.messageEventId),
+    [inbox.directMentions[0].eventId], "owner queries cannot reveal a DM between other parties");
+  // A persisted legacy tail must not consume the visible page's 200-row cap.
+  const legacyBody = f.store.db.prepare("SELECT body FROM events WHERE id=?").get(privateEvent.id).body;
+  const lastSequence = f.store.db.prepare("SELECT MAX(sequence) AS n FROM events WHERE room_id='commons'").get().n;
+  const putEvent = f.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+  const putMention = f.store.db.prepare("INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at) VALUES(?,?,?,'delivered',?,?)");
+  f.store.transaction(() => {
+    for (let i = 1; i <= 200; i++) {
+      const id = `legacy-private-${i}`;
+      putEvent.run("commons", lastSequence + i, id, JSON.stringify({ ...JSON.parse(legacyBody), id }));
+      putMention.run("commons", id, "cowork-agent", now + i, now + 60000);
+    }
+  });
+  assert.deepEqual(f.store.listMentions(f.keys.owner, "commons", { memberId: "cowork-agent" }).mentions.map(row => row.messageEventId),
+    [inbox.directMentions[0].eventId], "invisible legacy rows cannot evict visible mentions from the page");
+});
+
+
+test("short @names refuse ambiguity across all active members while exact names and ids remain usable", async () => {
+  const { resolveMentionTargetsInText: resolve } = await import("../server/mention-lifecycle.mjs");
+  const cowork = { displayName: "Claude (Cowork)", kind: "agent" };
+  const other = { displayName: "Claude Code", kind: "human" };
+  const members = { cowork, other };
+  assert.deepEqual(resolve({ cowork }, {}, "@claude, please check", "owner"), ["cowork"]);
+  assert.deepEqual(resolve(members, {}, "@Claude please check", "owner"), []);
+  assert.deepEqual(resolve(members, {}, "@Claude (Cowork) and @other", "owner"), ["cowork", "other"]);
+  assert.deepEqual(resolve(members, {}, "@Claude", "other"), [], "sender remains an ambiguity candidate");
+  assert.deepEqual(resolve({ cowork, other: { ...other, active: false } }, {}, "@Claude", "owner"), ["cowork"]);
+  assert.deepEqual(resolve({ cowork: { ...cowork, active: false } }, {}, "@Claude", "owner"), []);
+  assert.deepEqual(resolve({ cowork, duplicate: cowork }, {}, "@Claude (Cowork)", "owner"), [], "duplicate full names must not pick insertion order");
+  assert.deepEqual(resolve({ cowork, exact: { displayName: "Claude" } }, {}, "@Claude", "owner"), ["exact"]);
+  assert.deepEqual(resolve({ cowork, exact: { displayName: "Claude" } }, {}, "@Claude (Cowork)", "owner"), ["cowork"]);
+  assert.deepEqual(resolve({ cowork }, {}, "Claude please check; @_Claude; mail@Claude; @Claudette", "owner"), []);
 });

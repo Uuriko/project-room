@@ -660,9 +660,10 @@ const workSessionsNext = (roomId, sessions) => {
 function agentWakeTargets(state, senderMemberId, data) {
   const members = state?.members ?? {};
   const targets = new Map();
-  const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
   const body = typeof data?.body === "string" ? data.body : "";
-  for (const memberId of resolveMentionTargetsInText(agents, {}, body, senderMemberId)) {
+  for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
+    if (members[memberId]?.kind !== "agent") continue;
+    if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
@@ -3699,6 +3700,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
+      if (data.toMemberId && data.toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
   }
@@ -3764,6 +3766,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
+      const messageRow = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?").get(roomId, messageEventId);
+      const messageEvent = messageRow ? JSON.parse(messageRow.body) : null;
+      if (messageEvent?.type !== T.MESSAGE_POSTED || (messageEvent.data?.toMemberId && messageEvent.data.toMemberId !== auth.member.id && messageEvent.actorId !== auth.member.id)) {
+        fail(404, "mention_not_found", "No mention found for this message");
+      }
       const mine = this.db.prepare(
         "SELECT state FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
       ).get(roomId, messageEventId, auth.member.id);
@@ -3801,13 +3808,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
       const rows = this.db.prepare(
-        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state,
-                created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
-         FROM mention_states
-         WHERE room_id=? AND mentioned_member_id=?
-           AND (? IS NULL OR state=?) AND (? IS NULL OR created_at>=?)
-         ORDER BY created_at DESC LIMIT 200`
-      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after));
+        `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
+                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=?
+           AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
+           AND json_extract(e.body,'$.type')='message.posted'
+           AND (COALESCE(json_extract(e.body,'$.data.toMemberId'),'')=''
+             OR ((json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
+               AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
+         ORDER BY m.created_at DESC LIMIT 200`
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
       const members = this.room(roomId).state.members ?? {};
       return {
         roomId, memberId: target,
