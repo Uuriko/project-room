@@ -2,7 +2,7 @@
 
 **Status:** design spec. No production behavior changes. Nothing in this
 document enables the queue — that is John's one-click tap (§6), which he can
-take whenever he is ready (Arizona through Oct 1; no timeline is assumed).
+take whenever he is ready.
 
 **Scope:** everything up to the tap. The spec, the queue-readiness patch, and
 the inert bot prototype all land as normal PRs under the room's existing
