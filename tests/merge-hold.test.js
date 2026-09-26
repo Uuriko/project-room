@@ -49,3 +49,24 @@ test("exempt-pr lets the release PR through and still holds every other PR", () 
   assert.equal(holdBlocks(active, 1105), true);
   assert.equal(holdBlocks(active, null), true);
 });
+
+test("live check does not lose an active hold outside the last two comment pages", () => {
+  const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "merge-hold-pages-"));
+  const preload = join(dir, "github.mjs");
+  const oldHold = hold(1, "2026-09-26T21:00:00Z", "2026-09-26T23:00:00Z");
+  writeFileSync(preload, `globalThis.fetch = async input => {
+    const url = new URL(input);
+    if (url.origin !== 'https://api.github.com') throw new Error('unexpected origin');
+    if (url.pathname === '/repos/Uuriko/project-room/issues/266') return new Response(JSON.stringify({comments:201}));
+    if (url.pathname !== '/repos/Uuriko/project-room/issues/266/comments') throw new Error('unexpected path');
+    const page=Number(url.searchParams.get('page'));
+    if (![1,2,3].includes(page)) throw new Error('unexpected page');
+    const rows=Array.from({length:page===3?1:100},(_,i)=>({id:(page-1)*100+i+1,created_at:'2026-09-26T21:30:00Z',body:'ordinary discussion'}));
+    if(page===1)rows[0]=${JSON.stringify(oldHold)};
+    return new Response(JSON.stringify(rows));
+  };`);
+  let status = 0;
+  try { execFileSync(process.execPath, ["--import", preload, join(root, "scripts/merge-hold.mjs"), "check", "--now", "2026-09-26T22:00:00Z"], { stdio: "pipe", timeout: 5000 }); }
+  catch (error) { status = error.status; }
+  assert.equal(status, 3, "an active hold remains blocking after 200 unrelated comments");
+});

@@ -41,17 +41,20 @@ const entropyOf = value => {
 const redact = value => value.length <= 8 ? "****" : `${value.slice(0, 2)}…${value.slice(-2)}`;
 // Scan text for secrets. allowlist is an array of RegExp matched against the
 // full line to suppress known-safe findings.
-export function scanText(text, { allowlist } = {}) {
+export function scanText(text, { allowlist, safeEntropyTokens } = {}) {
   check(typeof text === "string" && text.length <= 10 * 1024 * 1024, "text must be a string up to 10 MiB");
   check(allowlist === undefined || (Array.isArray(allowlist) && allowlist.every(r => r instanceof RegExp)),
     "allowlist must be an array of RegExp");
   const lines = text.split("\n");
-  return scanLines(lines, { allowlist });
+  return scanLines(lines, { allowlist, safeEntropyTokens });
 }
-export function scanLines(lines, { allowlist } = {}) {
+export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
   check(Array.isArray(lines) && lines.length <= 200000, "lines must be an array of at most 200000");
   check(allowlist === undefined || (Array.isArray(allowlist) && allowlist.every(r => r instanceof RegExp)),
     "allowlist must be an array of RegExp");
+  check(safeEntropyTokens === undefined || (Array.isArray(safeEntropyTokens) && safeEntropyTokens.every(value => typeof value === "string")),
+    "safeEntropyTokens must be an array of exact strings");
+  const safeTokens = new Set(safeEntropyTokens ?? []);
   const allowed = line => (allowlist ?? []).some(regex => regex.test(line));
   const findings = [];
   lines.forEach((line, index) => {
@@ -65,7 +68,7 @@ export function scanLines(lines, { allowlist } = {}) {
       }
     }
     for (const token of line.split(/[\s"'`,;()[\]{}]+/)) {
-      if (token.length >= ENTROPY_MIN_LENGTH && entropyOf(token) >= ENTROPY_THRESHOLD && !findings.some(f => f.line === index + 1)) {
+      if (!safeTokens.has(token) && token.length >= ENTROPY_MIN_LENGTH && entropyOf(token) >= ENTROPY_THRESHOLD && !findings.some(f => f.line === index + 1)) {
         findings.push(Object.freeze({ line: index + 1, rule: "high-entropy", label: "high-entropy string",
           preview: redact(token) }));
       }

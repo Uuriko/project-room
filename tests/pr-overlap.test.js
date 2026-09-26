@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { analyzeOverlap, parsePatch } from "../scripts/pr-overlap.mjs";
+import { analyzeOverlap, parsePatch, toMarkdown } from "../scripts/pr-overlap.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = join(root, "tests", "fixtures", "pr-overlap-2026-09-26.json");
@@ -42,4 +42,12 @@ test("the CLI exits 2 when a duplicate declaration is found, so CI can fail on i
     execFileSync(process.execPath, [join(root, "scripts", "pr-overlap.mjs"), "--input", fixture, "--format", "json"], { stdio: "pipe" });
   } catch (error) { status = error.status; }
   assert.equal(status, 2);
+});
+
+
+test("missing patches are reported as incomplete evidence rather than no overlap", () => {
+  const report = analyzeOverlap([{ number: 1, files: [{ filename: "server/large.mjs" }] }]);
+  assert.deepEqual(report.incompletePatches, [{ pr: 1, file: "server/large.mjs" }]);
+  assert.match(toMarkdown(report), /incomplete/i);
+  assert.ok(!toMarkdown(report).includes("No overlap found."));
 });

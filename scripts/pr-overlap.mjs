@@ -68,10 +68,12 @@ export function analyzeOverlap(pulls, { ignore = DEFAULT_IGNORE } = {}) {
   const ignored = ignore.map(globToRegExp);
   const skip = filename => ignored.some(pattern => pattern.test(filename));
   const byFile = new Map();
+  const incompletePatches = [];
   for (const pr of pulls) {
     if (!Number.isInteger(pr?.number) || !Array.isArray(pr.files)) throw new TypeError("each pull needs a number and files");
     for (const file of pr.files) {
       if (typeof file?.filename !== "string" || skip(file.filename)) continue;
+      if (typeof file.patch !== "string" || !file.patch.trim()) incompletePatches.push({ pr: pr.number, file: file.filename });
       const parsed = parsePatch(file.patch);
       if (!byFile.has(file.filename)) byFile.set(file.filename, []);
       byFile.get(file.filename).push({ pr: pr.number, ...parsed });
@@ -106,7 +108,7 @@ export function analyzeOverlap(pulls, { ignore = DEFAULT_IGNORE } = {}) {
     }
   }
   overlappingHunks.sort((a, b) => a.file.localeCompare(b.file) || a.prs[0] - b.prs[0] || a.prs[1] - b.prs[1]);
-  return Object.freeze({ pulls: pulls.length, duplicateDeclarations, overlappingHunks, sharedFiles });
+  return Object.freeze({ pulls: pulls.length, duplicateDeclarations, overlappingHunks, sharedFiles, incompletePatches });
 }
 
 export function toMarkdown(report, { titles = new Map() } = {}) {
@@ -127,28 +129,43 @@ export function toMarkdown(report, { titles = new Map() } = {}) {
     for (const s of report.sharedFiles) lines.push(`- \`${s.file}\`: ${s.prs.map(n => `#${n}`).join(", ")}`);
     lines.push("");
   }
-  if (lines.length === 2) lines.push("No overlap found.");
+  if (report.incompletePatches.length) {
+    lines.push("**Incomplete evidence:** patches unavailable for these files; no clean-overlap conclusion is possible:");
+    for (const item of report.incompletePatches) lines.push(`- #${item.pr}: \`${item.file}\``);
+  }
+  if (lines.length === 2) lines.push("No overlap found in the supplied patches; this is not a merge simulation.");
   return lines.join("\n").trimEnd() + "\n";
 }
 
 async function github(path, token) {
   const headers = { accept: "application/vnd.github+json", "user-agent": "project-room-pr-overlap" };
   if (token) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(`https://api.github.com${path}`, { headers });
+  const response = await fetch(`https://api.github.com${path}`, { headers, signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error(`GitHub ${response.status} for ${path}`);
   return response.json();
 }
 
 async function fetchPulls(repo, numbers, token) {
-  const list = numbers ?? (await github(`/repos/${repo}/pulls?state=open&per_page=100`, token)).map(p => p.number);
+  const list = numbers ? [...numbers] : [];
+  if (!numbers) {
+    for (let page = 1; page <= 30; page++) {
+      const batch = await github(`/repos/${repo}/pulls?state=open&per_page=100&page=${page}`, token);
+      if (!Array.isArray(batch)) throw new Error("Malformed pull-request list");
+      list.push(...batch.map(p => p.number));
+      if (batch.length < 100) break;
+      if (page === 30) throw new Error("Open PR list exceeds bounded scan; select --prs explicitly");
+    }
+  }
   const pulls = [];
   for (const number of list) {
     const pr = await github(`/repos/${repo}/pulls/${number}`, token);
     const files = [];
     for (let page = 1; page <= 30; page += 1) {
       const batch = await github(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`, token);
+      if (!Array.isArray(batch)) throw new Error("Malformed PR file list");
       files.push(...batch.map(f => ({ filename: f.filename, patch: f.patch ?? "" })));
       if (batch.length < 100) break;
+      if (page === 30) throw new Error(`PR #${number} file list exceeds bounded scan`);
     }
     pulls.push({ number, title: pr.title, author: pr.user?.login ?? null, files });
   }
@@ -178,7 +195,7 @@ async function main() {
   const report = analyzeOverlap(pulls, { ignore: options.ignore });
   if (options.format === "json") process.stdout.write(JSON.stringify(report, null, 2) + "\n");
   else process.stdout.write(toMarkdown(report, { titles: new Map(pulls.map(p => [p.number, p.title])) }));
-  process.exitCode = report.duplicateDeclarations.length ? 2 : 0;
+  process.exitCode = report.duplicateDeclarations.length ? 2 : report.incompletePatches.length ? 1 : 0;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

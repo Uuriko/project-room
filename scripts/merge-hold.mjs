@@ -5,7 +5,10 @@
 // 22:00 UTC"), so lanes miss them: on 2026-09-26 #1081 and #1103 both merged
 // during announced holds and restarted a ~13 minute release CI cycle each.
 // This script gives a hold a fenced block that tools can read, and a check a
-// lane runs right before `gh pr merge`.
+// lane runs right before `gh pr merge`. Holds are advisory coordination data,
+// not authenticated authority: by/exempt-pr never grant permission or bypass
+// CI or branch protection. scripts/room has no merge verb; callers must run
+// this fresh check themselves and stop on a blocking hold or read failure.
 //
 // Hold block (post on #266):
 //
@@ -31,7 +34,7 @@
 //   node scripts/merge-hold.mjs block --until ISO --by lane --reason "..."
 //     prints a hold block to paste
 //
-// Read-only against GitHub: fetches the last pages of #266 comments with
+// Read-only against GitHub: fetches every current page of #266 comments with
 // unauthenticated REST GETs (GITHUB_TOKEN used when set).
 
 import { readFileSync } from "node:fs";
@@ -96,14 +99,20 @@ export function holdBlocks(hold, pr = null) {
 async function fetchRecentComments(token) {
   const headers = { accept: "application/vnd.github+json", "user-agent": "project-room-merge-hold" };
   if (token) headers.authorization = `Bearer ${token}`;
-  const issue = await (await fetch("https://api.github.com/repos/Uuriko/project-room/issues/266", { headers })).json();
-  const last = Math.max(1, Math.ceil((issue.comments ?? 0) / 100));
+  const issueResponse = await fetch("https://api.github.com/repos/Uuriko/project-room/issues/266", { headers, signal: AbortSignal.timeout(10000) });
+  if (!issueResponse.ok) throw new Error(`GitHub ${issueResponse.status} reading board metadata`);
+  const issue = await issueResponse.json();
+  if (!Number.isSafeInteger(issue.comments) || issue.comments < 0 || issue.comments > 10000) throw new Error("Board comment count unavailable or beyond bounded check");
+  const last = Math.max(1, Math.ceil(issue.comments / 100));
   const comments = [];
-  for (const page of [last - 1, last].filter(p => p >= 1)) {
-    const response = await fetch(`https://api.github.com/repos/Uuriko/project-room/issues/266/comments?per_page=100&page=${page}`, { headers });
+  for (let page = 1; page <= last; page++) {
+    const response = await fetch(`https://api.github.com/repos/Uuriko/project-room/issues/266/comments?per_page=100&page=${page}`, { headers, signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`GitHub ${response.status} reading #266`);
-    comments.push(...await response.json());
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error("Malformed GitHub comments response");
+    comments.push(...rows);
   }
+  if (comments.length < issue.comments) throw new Error("Incomplete board read; retry before merging");
   return comments;
 }
 
