@@ -3434,6 +3434,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
           fail(422, "invalid_arguments", error.message);
         }
+        // The reducer's generic "Invalid title" also covers values longer
+        // than 4096 characters. Recognize that precise size failure here so
+        // clients can shorten the field without treating it as a conflict.
+        const tooLongField = /^Invalid ([A-Za-z][A-Za-z0-9_]*)$/.exec(error.message);
+        if (tooLongField && typeof command.data[tooLongField[1]] === "string"
+          && command.data[tooLongField[1]].length > 4096) {
+          fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
+        }
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
       // Integration map slice 5: the external path is only as strong as
