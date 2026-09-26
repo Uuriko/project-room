@@ -65,6 +65,9 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const stale = agentErrorAx({ httpStatus: 409, code: "command_rejected", message: "Stale Work Item revision: expected 1", workItemId: "test-handoff", roomId: "commons" });
   assertAx(stale, { reason: "stale_revision" });
   assert.ok(stale.next.some(step => step.tool === "room_read_work"));
+  const credentialChanged = agentErrorAx({ httpStatus: 409, code: "identity_credential_changed", message: "Saved credential is stale" });
+  assertAx(credentialChanged, { reason: "identity_credential_changed" });
+  assert.ok(!credentialChanged.next.some(step => step.tool === "room_read_work"), "credential recovery is not a work revision retry");
   const missing = agentErrorAx({ httpStatus: 404, code: "work_not_found", message: "Work item not found in this Room", roomId: "commons" });
   assertAx(missing, { reason: "work_not_found" });
   assert.ok(missing.next.some(step => step.tool === "room_list_work"));
@@ -116,6 +119,19 @@ test("live 401/403/stale-revision/unknown-work/input-refused return next agents 
   assert.equal(unauthBody.error.code, "unauthenticated");
   assert.equal(typeof unauthBody.error.message, "string");
   assertAx(unauthBody, { reason: "unauthenticated" });
+
+  // A saved credential rejected by the live service must not send an agent
+  // into creating a replacement identity. Reading recovery steps changes no state.
+  const beforeIdentities = f.store.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
+  const savedSecret = "pri_" + "z".repeat(43);
+  const savedFailure = await f.request("/api/agent-rooms", { token: savedSecret });
+  assert.equal(savedFailure.status, 401);
+  const recovery = await savedFailure.json();
+  assert.equal(recovery.next[0].tool, "room_check_access");
+  assert.ok(recovery.next.some(step => step.path === "/api/agent-rooms"));
+  assert.match(recovery.hint, /saved connection/i);
+  assert.doesNotMatch(JSON.stringify(recovery), /self-mint|Mint an identity|pri_z/);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n, beforeIdentities);
 
   const forbidden = await f.request("/api/rooms/commons/agent-connections", { token: f.keys.producer });
   assert.equal(forbidden.status, 403);
