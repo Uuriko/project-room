@@ -172,7 +172,9 @@ export class AgentIdentities {
       // identity names are not unique: ordinary exact-name duplicates remain
       // possible, but a visually deceptive spelling of an existing active
       // name cannot be minted. Room-local collisions are checked at link.
-      const canonical = value => value.normalize("NFKC").trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+      // Preserve ordinary case/space variants already supported by the
+      // protocol; NFKC width/style lookalikes remain distinct and are blocked.
+      const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
       const activeNames = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE revoked_at IS NULL").all()
         .filter(row => canonical(row.displayName) !== canonical(name));
       const checked = checkAgentDisplayName(name, { activeNames });
@@ -261,9 +263,16 @@ export class AgentIdentities {
       }
       const memberName = displayName?.trim() || identity.displayName;
       // Compare against active room members inside the writer transaction,
-      // not an earlier snapshot. Preserve same-identity relinks above.
+      // not an earlier snapshot. Exact-name duplicates already exist in the
+      // room protocol, so preserve them; block deceptive alternate spellings
+      // of an active name, and reject mixed-script/invisible names outright.
+      // Same-identity relinks preserve their existing path above.
+      // Preserve ordinary case/space variants already supported by the
+      // protocol; NFKC width/style lookalikes remain distinct and are blocked.
+      const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
       const activeNames = Object.values(this.store.room(roomId).state.members)
-        .filter(member => member.active !== false && member.id !== resolvedMemberId)
+        .filter(member => member.active !== false && member.id !== resolvedMemberId
+          && canonical(member.displayName) !== canonical(memberName))
         .map(member => ({ memberId: member.id, displayName: member.displayName }));
       const checked = checkAgentDisplayName(memberName, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
