@@ -311,11 +311,12 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
         if (req.method === "POST") {
           const fields = await body(req);
           if (!shape(fields, { required: ["to", "objective", "inputs", "authority", "expectedOutput", "acceptanceTest", "termination"],
-            optional: ["provenance"] })) {
-            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?}");
+            optional: ["provenance", "requestId"] })) {
+            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?, requestId?}");
           }
-          const receipt = store.handoffEnvelopes.create(roomId, fields, { from: caller.id });
-          return json(res, 201, receipt);
+          const { requestId, ...envelopeFields } = fields;
+          const receipt = store.handoffEnvelopes.create(roomId, envelopeFields, { from: caller.id, requestId });
+          return json(res, receipt.duplicate ? 200 : 201, receipt);
         }
         if (req.method === "GET") {
           const status = url.searchParams.get("status");

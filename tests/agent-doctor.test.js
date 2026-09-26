@@ -30,15 +30,17 @@ async function doctor(args = [], env = {}) {
   }
 }
 
-async function serve(t) {
+async function serve(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-doctor-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
   const ownerCommons = store.issueAccessKey("commons", "owner");
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ store, ...options });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { origin: `http://127.0.0.1:${server.address().port}`, ownerCommons };
+  const requests = [];
+  server.on("request", req => requests.push({ method: req.method, url: req.url }));
+  return { origin: `http://127.0.0.1:${server.address().port}`, ownerCommons, store, requests };
 }
 
 function check(result, name) {
@@ -88,16 +90,16 @@ test("doctor flags an unreachable origin", async () => {
   assert.equal(check(result, "origin").detail, "unreachable");
 });
 
-test("doctor with only an origin points at identity-create", async t => {
+test("doctor with only an origin looks for a saved connection first", async t => {
   const { origin } = await serve(t);
   const result = await doctor([], { ROOM_AGENT_ORIGIN: origin });
   assert.equal(result.status, 1);
   assert.equal(check(result, "origin").ok, true);
   assert.equal(check(result, "credential").detail, "missing");
-  assert.match(result.json.repair, /identity-create/);
+  assert.match(result.json.repair, /saved connection/);
 });
 
-test("doctor reports healthy for a fully plugged-in saved connection", async t => {
+test("doctor reports HTTP access health without claiming native host or execution verification", async t => {
   const { origin, ownerCommons } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Doctor Bot");
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
@@ -112,6 +114,9 @@ test("doctor reports healthy for a fully plugged-in saved connection", async t =
   const result = await doctor([], { ROOM_AGENT_CONFIG: dir });
   assert.equal(result.status, 0, JSON.stringify(result.json ?? result.stderr));
   assert.equal(result.json.healthy, true);
+  assert.equal(result.json.scope, "service_origin_and_room_access");
+  assert.equal(result.json.nativeHost, "unchecked");
+  assert.equal(result.json.execution, "unchecked");
   assert.ok(result.json.checks.every(entry => entry.ok));
   const access = check(result, "access");
   assert.match(access.detail, new RegExp(`agent identity ${identityId}`));
@@ -120,7 +125,7 @@ test("doctor reports healthy for a fully plugged-in saved connection", async t =
   assert.equal(result.json.repair, undefined);
 });
 
-test("doctor tells an unlinked identity exactly what the owner must run", async t => {
+test("doctor does not invent a membership diagnosis from an ambiguous identity 401", async t => {
   const { origin } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Unlinked Bot");
   const result = await doctor([], {
@@ -129,9 +134,9 @@ test("doctor tells an unlinked identity exactly what the owner must run", async 
   assert.equal(result.status, 1);
   assert.equal(check(result, "origin").ok, true);
   assert.equal(check(result, "credential").ok, true);
-  assert.equal(check(result, "access").detail, "identity_not_linked");
-  assert.match(result.json.repair, /identity-link/);
-  assert.match(result.json.repair, /bootstrap-agent-room/);
+  assert.equal(check(result, "access").detail, "credential_or_membership_rejected");
+  assert.match(result.json.repair, /cannot distinguish/);
+  assert.doesNotMatch(result.json.repair, /bootstrap-agent-room|identity-create/);
   assert.ok(result.json.repair.includes(identityId));
   assert.ok(!JSON.stringify(result.json).includes(secret), "doctor must never print the secret");
 });
@@ -151,7 +156,7 @@ test("doctor appends the failure-signature table after the repair step", async (
   assert.equal(result.status, 1);
   assert.equal(result.json.healthy, false);
   // The table never replaces the primary repair step: repair comes first.
-  assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "repair", "signatures"]);
+  assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "scope", "nativeHost", "execution", "repair", "signatures"]);
   assert.equal(result.json.signatures.length, 7);
   for (const entry of result.json.signatures) {
     assert.ok(typeof entry.symptom === "string" && entry.symptom.length > 0);
@@ -191,7 +196,7 @@ test("signature table covers the no-room-to-join silent failure", async () => {
   assert.equal(result.status, 1);
   const noRoom = result.json.signatures.find(entry => entry.symptom.includes("no room to join"));
   assert.ok(noRoom, "expected a no-room-to-join signature");
-  assert.match(noRoom.fix, /bootstrap-agent-room/);
+  assert.doesNotMatch(noRoom.fix, /bootstrap-agent-room|identity-create/);
   assert.match(noRoom.fix, /room-create/);
 });
 
@@ -259,4 +264,29 @@ test("doctor never echoes the credential in output, healthy or not (RC-2026-09-1
   assert.equal(good.status, 0, JSON.stringify(good.json ?? good.stderr));
   assert.ok(!`${good.text ?? ""}`.includes(secret),
     "healthy doctor output must never contain the credential");
+});
+
+// Doctor's public JSON must preserve actual transport distinctions. The old
+// token-prefix heuristic mislabeled invalid secrets and proxy denials as missing
+// membership. Real HTTP tests exercise CLI parsing, client error mapping and the
+// real server, while request journals prove doctor stays read-only. No test seam.
+test("doctor distinguishes an invalid identity 401 from a proxy 403 without creating identities", async t => {
+  for (const denied of [false, true]) {
+    const { origin, store, requests } = await serve(t, denied ? {
+      resolveClientAddress: req => {
+        if (req.headers.authorization) throw new Error("Untrusted proxy");
+        return "127.0.0.1";
+      }
+    } : {});
+    const identityCount = () => store.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
+    const before = identityCount();
+    const result = await doctor([], { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
+      ROOM_AGENT_MEMBER: "ai_existing", ROOM_AGENT_TOKEN: `pri_${"s".repeat(43)}` });
+    assert.equal(result.status, 1);
+    assert.equal(check(result, "origin").ok, true);
+    assert.equal(check(result, "access").detail, denied ? "proxy_denied" : "credential_or_membership_rejected");
+    assert.doesNotMatch(result.json.repair, /identity-create|bootstrap-agent-room|No membership/);
+    assert.equal(identityCount(), before, "diagnostics never create an identity");
+    assert.deepEqual(requests.map(r => r.method), ["GET", "GET"]);
+  }
 });

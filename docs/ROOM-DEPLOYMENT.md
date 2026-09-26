@@ -39,3 +39,17 @@ Before a release, run the cross-worker identity/invite test in
 After deployment, prove an identity created through one entry can create/read a
 room through the other, and an invite issued by the app can be redeemed through
 the entry. Confirm live bindings, version and authentication configuration.
+
+## Production CPU budget
+
+Keep `env.production.limits.cpu_ms` at `30000`. The production Durable Object
+shares this per-invocation budget. A one-second (`1000`) budget caused repeated
+CPU-limit resets and whole-room HTTP500/1101 failures on September25,2026.
+A settings-only change to30seconds restored both entry points without changing
+the bundle, bindings, or stored room data. The public entry Worker can retain
+its separate one-second forwarding budget. Verify the effective production
+setting after every release; do not overwrite it with the top-level limit.
+
+A503 from `/api/health/jobs` with empty `jobs` means its Durable Object RPC
+failed, not necessarily that storage failed. Inspect a bounded Worker tail
+for the actual exception before selecting a recovery action.

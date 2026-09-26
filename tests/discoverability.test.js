@@ -265,6 +265,31 @@ test("GET /openapi.json validates as OpenAPI 3.1 and matches the route table", {
   assert.deepEqual(aliased.paths, doc.paths);
 });
 
+test("openapi: operationIds are unique across every documented operation", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const doc = await (await get(origin, "/openapi.json")).json();
+  // OpenAPI 3.1 requires operationId to be unique across all operations in
+  // the document; duplicates break codegen/SDK tooling that keys on it.
+  const METHODS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
+  const firstSeen = new Map();
+  for (const [path, item] of Object.entries(doc.paths)) {
+    for (const [method, op] of Object.entries(item)) {
+      if (!METHODS.has(method)) continue;
+      const id = op?.operationId;
+      assert.equal(typeof id, "string", `${method.toUpperCase()} ${path} has an operationId`);
+      const first = firstSeen.get(id);
+      assert.ok(!first,
+        `duplicate operationId "${id}": first on ${first}, again on ${method.toUpperCase()} ${path}`);
+      firstSeen.set(id, `${method.toUpperCase()} ${path}`);
+    }
+  }
+  // Every method of every inventoried route contributed exactly one distinct
+  // operation: a route with a shared per-route id fails the count here.
+  let expected = 0;
+  for (const entry of DISCOVERABILITY_ROUTES) expected += entry.methods.length;
+  assert.equal(firstSeen.size, expected, "every inventoried operation has a distinct operationId");
+});
+
 // ---------------------------------------------------------------------------
 // 4. Governance.
 // ---------------------------------------------------------------------------
