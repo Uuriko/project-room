@@ -110,9 +110,12 @@ export const guestInviteSchema = `
 // wakeQueue.verifyPauseSchema pattern. Purely additive side tables (no
 // events, no projection impact).
 //
-// Tradeoff, stated plainly: guest_selfserve_idem holds the issued token in
-// plaintext so an identical retry can return the original credential. The
-// room SQLite store is operator-local; at most one record lives per
+// Security: guest_selfserve_idem holds the token HASH, never the plaintext
+// credential. An identical retry returns status/member/expiresAt with
+// replayed:true, but the Bearer <redacted> is only ever returned in the
+// first (non-replay) response — the client must persist it. This prevents
+// a captured signed request from being replayed to recover the live token.
+// The room SQLite store is operator-local; at most one record lives per
 // (room, key) — a new requestId supersedes (and deletes) the old record,
 // and evicted seats take their records with them.
 export const guestSelfServeSchema = `
@@ -128,7 +131,7 @@ export const guestSelfServeSchema = `
     room_id TEXT NOT NULL,
     key_hash TEXT NOT NULL CHECK(length(key_hash)=64),
     request_id TEXT NOT NULL,
-    token TEXT NOT NULL,
+    token_hash TEXT NOT NULL CHECK(length(token_hash)=64),
     member_id TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
     renewed INTEGER NOT NULL CHECK(renewed IN (0,1)),
@@ -367,7 +370,7 @@ export class GuestInvites {
 
   idemRecord(roomId, keyHash, requestId) {
     return this.db.prepare(
-      "SELECT token, member_id, expires_at, renewed FROM guest_selfserve_idem WHERE room_id=? AND key_hash=? AND request_id=?"
+      "SELECT token_hash, member_id, expires_at, renewed FROM guest_selfserve_idem WHERE room_id=? AND key_hash=? AND request_id=?"
     ).get(roomId, keyHash, requestId);
   }
 
@@ -662,15 +665,16 @@ export class GuestInvites {
     // Per-key abuse gate, after the signature is known good.
     return this.store.transaction(() => {
       // True request-ID idempotency: an identical retry (same room, same
-      // card key, same requestId) returns the originally issued credential —
-      // no rotation, no quota consumed. The lookup runs after signature
-      // verification, so only the key holder can replay; the per-key rate
-      // gate below never sees a replay.
+      // card key, same requestId) returns the issuance metadata with
+      // replayed:true, but NEVER the Bearer <redacted> again — the client
+      // must persist the token from the first response. The lookup runs
+      // after signature verification. The per-key rate gate below never
+      // sees a replay.
       const prior = this.idemRecord(roomId, keyHash, requestId);
       if (prior) {
         const live = this.db.prepare(
           "SELECT 1 FROM credentials WHERE hash=? AND room_id=? AND member_id=? AND kind='access' AND revoked=0 AND expires_at>?"
-        ).get(hash(prior.token), roomId, prior.member_id, now);
+        ).get(prior.token_hash, roomId, prior.member_id, now);
         const replayMember = live && this.store.room(roomId).state.members[prior.member_id];
         // The seat must still be a live guest agent seat: if the owner has
         // repurposed the member (non-agent kind, non-guest id), the stale
@@ -680,7 +684,9 @@ export class GuestInvites {
           && replayMember.kind === "agent" && isGuestAgentMemberId(replayMember.id)) {
           this.touchSelfServeSeat(roomId, prior.member_id, keyHash, now);
           return {
-            token: prior.token,
+            // No token: the Bearer <redacted> was returned once, in the
+            // original response. A replayed signed request must not
+            // disclose it (Burs-IA review).
             member: { id: replayMember.id, kind: replayMember.kind, permissions: [...replayMember.permissions], displayName: replayMember.displayName, expiresAt: prior.expires_at },
             room: { id: roomId },
             tier: "observer",
@@ -778,12 +784,14 @@ export class GuestInvites {
       // (identityId = key:<fingerprint>).
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, memberId, expiresAt);
-      // Record this (room, key, requestId) -> token so an identical retry
-      // returns this exact credential. Older records for the key are
-      // superseded by this rotation and are dropped.
+      // Record this (room, key, requestId) -> token hash so an identical
+      // retry is recognized as a replay. The plaintext token is never
+      // stored — only the hash, which is enough to verify the credential
+      // is still live. Older records for the key are superseded by this
+      // rotation and are dropped.
       this.db.prepare("DELETE FROM guest_selfserve_idem WHERE room_id=? AND key_hash=?").run(roomId, keyHash);
-      this.db.prepare("INSERT INTO guest_selfserve_idem(room_id, key_hash, request_id, token, member_id, expires_at, renewed, created_at) VALUES(?,?,?,?,?,?,?,?)")
-        .run(roomId, keyHash, requestId, token, memberId, expiresAt, isNewMember ? 0 : 1, now);
+      this.db.prepare("INSERT INTO guest_selfserve_idem(room_id, key_hash, request_id, token_hash, member_id, expires_at, renewed, created_at) VALUES(?,?,?,?,?,?,?,?)")
+        .run(roomId, keyHash, requestId, hash(token), memberId, expiresAt, isNewMember ? 0 : 1, now);
       // Seat bookkeeping for the LRU accumulation cap (upsert: seats created
       // before this table existed gain their row on next use).
       this.touchSelfServeSeat(roomId, memberId, keyHash, now);

@@ -221,7 +221,7 @@ test("a request without a card is 422", async t => {
   assert.equal(res.status, 422);
 });
 
-test("an identical requestId replays the original credential without rotation or quota burn", async t => {
+test("an identical requestId replays without disclosing the credential", async t => {
   const { request, store } = await serve(t);
   store.guestInvites.selfServeKeyLimiter = createRateLimiter({ capacity: 2, refillPerSecond: 2 / 86400 });
   const requestId = randomUUID();
@@ -229,11 +229,15 @@ test("an identical requestId replays the original credential without rotation or
   const first = await postJoin(request, card);
   assert.equal(first.status, 201);
   const firstBody = await first.json();
-  // Identical retry: the exact same signed card bytes.
+  assert.ok(firstBody.token, "first response carries the Bearer <redacted>");
+  // Identical retry: the exact same signed card bytes. The replay must NOT
+  // return the credential — a captured request body must not be sufficient
+  // to recover the live token (Burs-IA review). The client persists the
+  // token from the first response.
   const replay = await postJoin(request, card);
   assert.equal(replay.status, 200);
   const replayBody = await replay.json();
-  assert.equal(replayBody.token, firstBody.token, "same credential, no rotation");
+  assert.equal(replayBody.token, undefined, "replay never discloses the Bearer <redacted>");
   assert.equal(replayBody.replayed, true);
   assert.equal(replayBody.renewed, false);
   assert.equal(replayBody.member.id, firstBody.member.id);
@@ -250,6 +254,23 @@ test("an identical requestId replays the original credential without rotation or
   assert.notEqual((await renewed.json()).token, firstBody.token, "new requestId rotates");
   const { card: card3 } = signedCard(ROOM, { keyPair, requestId: randomUUID() });
   assert.equal((await postJoin(request, card3)).status, 429);
+});
+
+test("a captured signed request cannot recover the Bearer <redacted> via replay", async t => {
+  // Regression test for the Burs-IA finding: verifying the Ed25519
+  // signature proves the card was signed by the key holder, but does NOT
+  // prove the replaying caller holds the private key. A second caller
+  // submitting the exact captured bytes must not recover the token.
+  const { request } = await serve(t);
+  const requestId = randomUUID();
+  const { card } = signedCard(ROOM, { requestId });
+  const firstBody = await (await postJoin(request, card)).json();
+  assert.ok(firstBody.token, "first caller receives the credential");
+  // "Second caller" submits the identical captured bytes.
+  const replayBody = await (await postJoin(request, card)).json();
+  assert.equal(replayBody.replayed, true);
+  assert.equal(replayBody.token, undefined, "captured bytes do not disclose the live token");
+  assert.equal(replayBody.member.id, firstBody.member.id, "replay still identifies the seat");
 });
 
 test("a superseded requestId does not resurrect a rotated credential", async t => {

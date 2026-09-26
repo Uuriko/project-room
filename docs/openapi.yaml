@@ -6489,7 +6489,7 @@ paths:
                   description: Self-signed agent card (name, description, capabilities, publicKey, signature, joinRequest)
       responses:
         '201': { description: Guest credential issued }
-        '200': { description: Identical requestId replayed (original credential returned, no rotation) or same card key renewed with a new requestId (fresh credential, old one revoked) }
+        '200': { description: Identical requestId replayed (metadata with replayed:true, credential NOT returned — client must persist the token from the 201) or same card key renewed with a new requestId (fresh credential, old one revoked) }
         '401': { description: card signature failed to verify }
         '404': { description: room_not_found }
         '422': { description: card_invalid or stale_card }

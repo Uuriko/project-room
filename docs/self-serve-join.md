@@ -31,18 +31,20 @@ draft below:
    consistent with that module. The design doc's flow and contract table
    below are updated to the accepted route.
 2. **True request-ID idempotency — implemented.** An identical retry (same
-   room, same card key, same `requestId`) returns the originally issued
-   credential with no rotation and no key-quota consumed (200
-   `replayed: true`). Only a NEW `requestId` triggers renewal/rotation
-   (200 `renewed: true`, old credential revoked). Mechanics: the
-   `(room, key, requestId) → token` record lives in
-   `guest_selfserve_idem`; the lookup runs after signature verification
-   (only the key holder can replay) and before the per-key rate gate. A
-   superseded record (token rotated, revoked, or expired since) is dropped
-   and the request is treated as fresh — a dead credential is never
-   resurrected. Tradeoff, stated plainly: the record holds the issued
-   token in plaintext so the retry can return it; the room SQLite store
-   is operator-local, at most one record lives per (room, key) — a new
+   room, same card key, same `requestId`) returns the issuance metadata
+   with no rotation and no key-quota consumed (200 `replayed: true`), but
+   NEVER the Bearer <redacted> again — the credential is returned only in
+   the first (201) response, and the client must persist it. Only a NEW
+   `requestId` triggers renewal/rotation (200 `renewed: true`, old
+   credential revoked). Mechanics: the `(room, key, requestId) → token
+   hash` record lives in `guest_selfserve_idem`; the lookup runs after
+   signature verification and before the per-key rate gate. A superseded
+   record (token rotated, revoked, or expired since) is dropped and the
+   request is treated as fresh — a dead credential is never resurrected.
+   Security, stated plainly: the record holds only the token hash, never
+   the plaintext credential, so a captured signed request cannot be
+   replayed to recover the live token; the room SQLite store is
+   operator-local, at most one record lives per (room, key) — a new
    `requestId` supersedes and deletes the old record, and evicted seats
    take their records with them.
 3. **Guest accumulation cap — 500 self-serve seats per room, LRU
@@ -116,9 +118,10 @@ outside agent                          room server
      |                                      | journal: guest.joined
      |                                      | notify owner (one-click disconnect)
 
-An identical retry (same `requestId`) returns the originally issued
-credential with no rotation (`replayed: true`); only a new `requestId`
-renews with rotation.
+An identical retry (same `requestId`) returns the issuance metadata with
+no rotation (`replayed: true`) but never the credential again — the
+Bearer <redacted> is returned only in the first response; only a new
+`requestId` renews with rotation.
 ```
 
 ### Request contract
@@ -187,8 +190,9 @@ silent-ish: the guest keeps read+chat, no error broadcast.
 ## Abuse controls
 
 - Rate limits: 5 requests/hour per IP, 3/day per card key. Counts are kept in
-  the room DB, not in memory (survives restarts). Idempotent replays (same
-  `requestId`) skip the per-key gate — a retry never burns quota.
+  process-local memory (reset on process restart; not shared across replicas
+  in a multi-instance deployment). Idempotent replays (same `requestId`)
+  skip the per-key gate — a retry never burns quota.
 - Max 10 live guest members per room (v0's cap, unchanged).
 - Max 500 self-serve guest seats per room, with LRU eviction of the
   least-recently-active seat when exceeded (deactivated, credentials
