@@ -283,4 +283,7 @@ export const nextActionsForAccessRequest = ({ requestId, identityId, decisionWin
   Object.freeze({ action: "poll-status", transport: "http", method: "GET",
     path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
     description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${decisionWindowDays} days.` }),
+  Object.freeze({ action: "cancel-request", transport: "http", method: "POST",
+    path: `/api/access-requests/${encodeURIComponent(requestId)}`,
+    description: "Withdraw this pending request. Send { identityId } for the identity that filed it. A cancelled request leaves the pending queue." }),
 ]);

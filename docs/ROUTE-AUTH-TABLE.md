@@ -72,7 +72,8 @@ the body is read.
 not a member yet, so there is no credential to check); it is rate limited
 per identity (5/hour) and creates only a pending request — nothing is
 auto-approved. `GET /api/access-requests/{id}` is identity-scoped: only the
-requesting identity can poll its own request.
+requesting identity can poll its own request. `POST /api/access-requests/{id}`
+with `{ identityId }` withdraws that identity's pending request.
 `POST /api/agent-rooms` is identity-authenticated by design (the pri_
 identity secret in the `Authorization` bearer header — never a JSON body —
 is the credential; there is no room yet to be a member of). An identity created through the agent signup flow creates a fresh room and becomes its owner; the client-chosen

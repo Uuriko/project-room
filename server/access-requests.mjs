@@ -60,7 +60,7 @@ export const accessRequestSchema = `
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
 `;
 
-const STATUSES = ["pending", "approved", "denied", "expired"];
+const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
 const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
@@ -328,6 +328,24 @@ export class AccessRequests {
             description: "Confirm the new member in the room's member list, with their granted permissions." }),
         ]),
       });
+    });
+  }
+
+  // The requester withdraws a still-pending request. A different identity gets
+  // the same 404 as status(), so this is not an enumeration or admin path.
+  // A repeated cancel returns the cancelled row so a lost response can retry.
+  cancel(requestId, identityId) {
+    if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
+      if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
+      const live = this.maybeExpire(row);
+      if (live.status === "cancelled") return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+      if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
+      const now = this.store.now();
+      this.db.prepare("UPDATE access_requests SET status='cancelled', decided_at=?, decision_note=? WHERE request_id=?")
+        .run(now, "withdrawn by requester", requestId);
+      return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
     });
   }
 

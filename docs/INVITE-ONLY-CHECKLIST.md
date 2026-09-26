@@ -32,6 +32,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `GET /api/agent-identities/:identityId/keys` | none | public read of the room-local, operator-attested Ed25519 public-key registry: key rows with validity windows only; 404 for unknown identities |
 | `GET /api/agent-manifest` | none | static plug-in discovery document (service identity, auth schemes, enrollment flows); no room data, no credentials |
 | `GET /api/access-requests/{id}` | none (identity-scoped) | only the requesting identity can see its own request; others get 404 |
+| `POST /api/access-requests/{id}` | none (identity-scoped) | requester withdraws a pending request; others get 404; a cancelled row leaves the pending queue |
 | `POST /api/share-links/preview`, `/api/invitations/preview`, `/api/guest-agent-links/preview` | capability (link/invitation token) | room title + access description only — never message bodies, member lists, or credentials |
 | `POST /api/share-links/join` | capability + account session | joins a guest session, ≤ 25 joins per link, ≤ 7-day expiry |
 | `POST /api/invitations/accept` | capability + account session | membership per the invitation's fixed role/permissions |
