@@ -27,6 +27,15 @@ export function configuredHost(config) {
       mkdirSync(lock, { mode: 0o700 });
     } catch { throw new Error("Checkout has an active or unresolved host, or its lock is unavailable; reconcile before running"); }
     try {
+      // Verify against the checkout root before launching any untrusted host.
+      // A subdirectory otherwise hides tracked changes elsewhere during checks.
+      if (settings.verification) {
+        const probe = await hostSubprocess({ command: settings.verification.gitCommand,
+          args: ["rev-parse", "--show-toplevel"], timeoutMs: 10000 },
+          { cwd: settings.cwd, env: {}, signal, maxBytes: 4096 });
+        if (probe.exitCode !== 0 || realpathSync(new TextDecoder().decode(probe.stdout).trim()) !== realpathSync(settings.cwd))
+          throw new Error("Verification must run at the repository root");
+      }
       // The lock uses the operator home; the host sees only an isolated /tmp HOME.
       const env = Object.fromEntries(["PATH", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
       // No operator credentials are forwarded into the isolated process.
