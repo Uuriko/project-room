@@ -225,3 +225,18 @@ export function setAgentAutonomyTier(store, token, roomId, memberId, request, ex
     return { ...autonomyTierReport(store.db, roomId, store.room(roomId).state, memberId, nowMs), evaluatedThrough: store.room(roomId).sequence };
   });
 }
+
+// Direct enforcement for store APIs that bypass store.command() — admin-class
+// routes a non-owner agent can hold through permission grants (agent-invites
+// create, access-requests decide, share-links create) also write without the
+// command hook seeing them. Same policy as enforceAutonomyTiers: agents at
+// t1_readonly may not mint invites, decide access, or create share links;
+// humans and the owner are exempt.
+export function enforceAutonomyTierForAction({ db, roomId, state, actor, action, fail = refuse }) {
+  if (!db || typeof roomId !== "string" || !action) return;
+  if (!actor || typeof actor.id !== "string" || actor.kind !== "agent") return;
+  if (state?.room && actor.id === state.room.ownerId) return;
+  const tier = getTier(db, roomId, actor.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+  if (tier === "t1_readonly")
+    fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${action}`);
+}
