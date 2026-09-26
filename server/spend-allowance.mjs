@@ -97,6 +97,14 @@ export function readSpendAllowance(store, token, roomId, expectedSessionBinding 
 // refusal). Body: { allowanceCents, periodDays?, requestId? } or
 // { allowanceCents: null } to remove the allowance.
 export function setSpendAllowance(store, token, roomId, request, expectedSessionBinding = null) {
+  // Authenticate and authorize before parsing the request shape: a non-owner
+  // learns nothing about accepted fields from a malformed write. Agent room
+  // owners carry the same owner capability as human room owners.
+  store.readTransaction(() => {
+    const auth = store.authenticate(token, roomId, expectedSessionBinding);
+    const room = store.room(roomId);
+    if (auth.member.id !== room.state.room.ownerId) refuse(403, "owner_required", "Only the room owner can set the spend allowance");
+  });
   if (!request || Array.isArray(request) || typeof request !== "object") refuse(422, "invalid_spend_allowance", "Supply allowanceCents and an optional periodDays");
   const keys = Object.keys(request);
   if (!keys.includes("allowanceCents") || keys.some(key => !["allowanceCents", "periodDays", "requestId"].includes(key))) {
@@ -113,11 +121,6 @@ export function setSpendAllowance(store, token, roomId, request, expectedSession
   }
   if (clearing && request.periodDays != null) refuse(422, "invalid_spend_allowance", "Removing the allowance takes no periodDays");
   if (request.requestId !== undefined && !validId(request.requestId)) refuse(422, "invalid_spend_allowance", "requestId must be a valid identifier");
-  store.readTransaction(() => {
-    const auth = store.authenticate(token, roomId, expectedSessionBinding);
-    const room = store.room(roomId);
-    if (auth.member.kind !== "human" || auth.member.id !== room.state.room.ownerId) refuse(403, "owner_required", "Only the room owner can set the spend allowance");
-  });
   return store.command(token, roomId, { id: request.requestId ?? randomUUID(), type: T.ROOM_SPEND_ALLOWANCE_SET,
     data: { allowanceCents: clearing ? null : allowanceCents, periodDays } }, expectedSessionBinding);
 }
