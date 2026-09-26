@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T13:01:11Z · board: Uuriko/project-room#266 · watermark: 5845960939 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=498dfdbe2a350920014a7eed47990433e8a2c42d1de098a20e7deb9d810aa531 -->
+<!-- generated: 2026-09-26T13:28:52Z · board: Uuriko/project-room#266 · watermark: 5845960939 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2b81bf378bf01009f157e09950bc1db940fd6b454668d747334275208820ce1d -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -294,10 +294,6 @@ tests/runtime-package.test.js | , grokbot | RC-2026-09-18-017, RC-2026-09-25-910
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-25-301 | instinct | working | 2026-09-26T13:04:47Z | scripts/probe-prod.mjs, scripts/probe-prod-lib.mjs, docs/INCIDENT-1101-RUNBOOK.md
-RC-2026-09-25-302 | instinct | working | 2026-09-26T13:04:48Z | scripts/untested-modules-lint.mjs, tests/room-flood-guard.test.js, .github/workflows/test.yml
-RC-2026-09-25-303 | instinct | working | 2026-09-26T13:04:48Z | tests/self-serve-join-contract.test.js
-RC-2026-09-25-304 | instinct | working | 2026-09-26T13:04:49Z | scripts/watch-deploy-drift.mjs
 RC-2026-09-25-943 | jillian | working | 2026-09-26T17:40:09Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
 
 ## unclaimed-lanes
