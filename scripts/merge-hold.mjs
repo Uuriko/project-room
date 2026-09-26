@@ -13,8 +13,12 @@
 //   scope:  main-merges
 //   until:  2026-09-26T22:20:00Z
 //   by:     codex
+//   exempt-pr: 1104
 //   reason: release #1104 exact-head CI
 //   ```
+//
+// `exempt-pr` (optional) lists PRs the hold does not block, usually the
+// release PR itself: comma- or space-separated numbers, `#` optional.
 //
 // Lift it early with a block of the same shape and `until: now`, or post a
 // newer hold. The newest hold block on the board wins; a hold whose `until`
@@ -22,8 +26,8 @@
 // in the thread; this script only answers "is a hold active right now".
 //
 // Usage:
-//   node scripts/merge-hold.mjs check [--comments file.json] [--now ISO]
-//     exit 0 = no active hold, exit 3 = hold active (prints who, until, why)
+//   node scripts/merge-hold.mjs check [--pr N] [--comments file.json] [--now ISO]
+//     exit 0 = no active hold (or --pr N is exempt), exit 3 = hold blocks this merge
 //   node scripts/merge-hold.mjs block --until ISO --by lane --reason "..."
 //     prints a hold block to paste
 //
@@ -56,6 +60,7 @@ export function parseHolds(comments) {
         until: Number.isFinite(untilMs) ? new Date(untilMs).toISOString() : null,
         by: fields.by ?? null,
         reason: fields.reason ?? null,
+        exemptPrs: (fields["exempt-pr"] ?? "").split(/[\s,]+/).map(v => Number(v.replace(/^#/, ""))).filter(Number.isInteger).filter(n => n > 0),
         valid: Number.isFinite(untilMs),
       });
     }
@@ -74,10 +79,18 @@ export function activeHold(comments, { now = Date.now() } = {}) {
   return latest;
 }
 
-export function holdBlock({ until, by, reason }) {
+export function holdBlock({ until, by, reason, exemptPrs = [] }) {
   if (!Number.isFinite(Date.parse(until))) throw new Error("--until must be an ISO time");
   if (!by || !reason) throw new Error("--by and --reason are required");
-  return ["```room-hold", "scope:  main-merges", `until:  ${new Date(until).toISOString()}`, `by:     ${by}`, `reason: ${reason}`, "```"].join("\n");
+  const lines = ["```room-hold", "scope:  main-merges", `until:  ${new Date(until).toISOString()}`, `by:     ${by}`];
+  if (exemptPrs.length) lines.push(`exempt-pr: ${exemptPrs.join(", ")}`);
+  return [...lines, `reason: ${reason}`, "```"].join("\n");
+}
+
+// Does the active hold block merging this PR? null PR = any merge.
+export function holdBlocks(hold, pr = null) {
+  if (!hold) return false;
+  return !(Number.isInteger(pr) && hold.exemptPrs.includes(pr));
 }
 
 async function fetchRecentComments(token) {
@@ -102,14 +115,17 @@ function option(args, name) {
 async function main() {
   const [verb, ...args] = process.argv.slice(2);
   if (verb === "block") {
-    process.stdout.write(holdBlock({ until: option(args, "--until"), by: option(args, "--by"), reason: option(args, "--reason") }) + "\n");
+    const exempt = (option(args, "--exempt-pr") ?? "").split(",").map(Number).filter(Number.isInteger).filter(n => n > 0);
+    process.stdout.write(holdBlock({ until: option(args, "--until"), by: option(args, "--by"), reason: option(args, "--reason"), exemptPrs: exempt }) + "\n");
     return;
   }
   if (verb !== "check") throw new Error("usage: merge-hold.mjs check|block");
   const file = option(args, "--comments");
   const comments = file ? JSON.parse(readFileSync(file, "utf8")) : await fetchRecentComments(process.env.GITHUB_TOKEN);
   const hold = activeHold(comments, { now: option(args, "--now") ?? Date.now() });
+  const pr = option(args, "--pr") === undefined ? null : Number(String(option(args, "--pr")).replace(/^#/, ""));
   if (!hold) { process.stdout.write("no active main-merge hold\n"); return; }
+  if (!holdBlocks(hold, pr)) { process.stdout.write(`#${pr} is exempt from the hold by ${hold.by ?? "unknown"} until ${hold.until}\n`); return; }
   process.stdout.write(`HOLD: main merges held by ${hold.by ?? "unknown"} until ${hold.until}. Reason: ${hold.reason ?? "none given"}. Comment ${hold.commentId}.\n`);
   process.exitCode = 3;
 }

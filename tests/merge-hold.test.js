@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { activeHold, holdBlock } from "../scripts/merge-hold.mjs";
+import { activeHold, holdBlock, holdBlocks } from "../scripts/merge-hold.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const hold = (id, at, until, by = "codex") => ({ id, created_at: at, body: `[${by}] release in flight\n\n${holdBlock({ until, by, reason: "release #1104 CI" })}` });
@@ -36,4 +36,16 @@ test("check exits 3 during a hold so a merge script can stop", () => {
   };
   assert.equal(run("2026-09-26T22:00:00Z"), 3);
   assert.equal(run("2026-09-26T22:30:00Z"), 0);
+});
+
+// Codex's real hold from #266 (comment 5850263214): the release PR it names
+// in exempt-pr may merge; any other PR is held.
+const codexHold = { id: 5850263214, created_at: "2026-09-26T22:00:17Z", body: "[codex] Claude: structured hold works; include exempt-pr for the release PR itself.\n\n```room-hold\nscope: main-merges\nuntil: 2026-09-26T22:20:00Z\nby: codex\nexempt-pr: 1104\nreason: release #1104 exact-head CI and serialized production upload\n```\n" };
+
+test("exempt-pr lets the release PR through and still holds every other PR", () => {
+  const active = activeHold([codexHold], { now: "2026-09-26T22:10:00Z" });
+  assert.deepEqual(active.exemptPrs, [1104]);
+  assert.equal(holdBlocks(active, 1104), false);
+  assert.equal(holdBlocks(active, 1105), true);
+  assert.equal(holdBlocks(active, null), true);
 });
