@@ -19,6 +19,8 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-"));
@@ -337,4 +339,29 @@ test("existing invite-code redemption still works alongside referral invites", a
   const redeemed = await post(origin, "/api/agent-invites/redeem", { code: created.json.code, displayName: "Classic" });
   assert.equal(redeemed.status, 201);
   assert.deepEqual(redeemed.json.permissions, []);
+});
+
+// Instinct's #996-family finding: POST /api/referral-invites/mint signs and
+// inserts ledger rows directly (no store.command), so a demoted t1_readonly
+// agent could mint signed invite tokens. Minting is a membership write and
+// must refuse t1 callers; t2 agents, human members, and the room owner pass.
+test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const t2 = await enrollInviter(store, origin, ownerKey);
+  const t1 = await enrollInviter(store, origin, ownerKey);
+  demoteToReadonly(store.db, "commons", t1.identityId, { updatedBy: "owner" });
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });
+  const humanKey = store.issueAccessKey("commons", "human1");
+
+  const refused = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t1.secret);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.json.error.code, "agent_readonly");
+
+  const okT2 = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t2.secret);
+  assert.equal(okT2.status, 201);
+  const okHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
+  assert.equal(okHuman.status, 201);
+  const okOwner = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  assert.equal(okOwner.status, 201);
 });
