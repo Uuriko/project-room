@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -66,7 +66,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   await login(action === "verify" ? "human-reviewer" : "owner");
   const card = page.locator(`[data-work-record-id="${workId}"]`), dialog = page.locator("#action-dialog"), form = page.locator("#action-form"), save = form.locator("button[type=submit]");
   const input = name => page.locator(`#action-fields [name='${name}']`);
-  const open = async (selected = action) => { await card.locator(`[data-action='${selected}']`).click(); await dialog.waitFor({ state: "visible" }); };
+  const open = async (selected = action) => { await clickWorkAction(card, selected); await dialog.waitFor({ state: "visible" }); };
   const fill = async () => {
     const values = action === "complete" ? { producerId: "owner", summary: "Synthetic result with café and 🪷", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review the exact result",
         // Slice 5: the complete form requires signed evidence JSON; native validation blocks submission without it.

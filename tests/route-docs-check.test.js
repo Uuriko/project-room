@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { routeDocsDrift, routeSources, templateKey } from "../scripts/route-docs-check.mjs";
+import { routeDocsDrift, routeSources, templateKey, workerRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 // Re-audit 2026-09-14, M4: docs/openapi.yaml describes every /api route
 // template server/http.mjs serves. The npm run check gate runs the same
@@ -12,8 +12,8 @@ import { routeDocsDrift, routeSources, templateKey } from "../scripts/route-docs
 // agent plug-in surface (server/agent-plugin-routes.mjs) used to be fed to
 // the gate but not to these tests, failing 4/5 while the gate stayed green.
 const sources = routeSources(fileURLToPath(new URL("..", import.meta.url)));
-const { http, pluginRoutes, nextActionsRoutes, openapi } = sources;
-const shared = { http, pluginRoutes, nextActionsRoutes, openapi };
+const { http, pluginRoutes, nextActionsRoutes, worker, openapi } = sources;
+const shared = { http, pluginRoutes, nextActionsRoutes, worker, openapi };
 
 test("parameter spellings compare equal", () => {
   assert.equal(templateKey("/api/rooms/{roomId}/messages/{messageId}/thread"), "/api/rooms/{}/messages/{}/thread");
@@ -26,6 +26,27 @@ test("the served route templates and the documented paths agree", () => {
   assert.deepEqual(result.failures, []);
   assert.ok(result.served >= 60, `served ${result.served}`);
   assert.equal(result.documented, result.served);
+});
+
+// RC-2026-09-26-002: the Worker-served surface (cloudflare/room.mjs) is a
+// first-class route source. Routes the Worker answers before or instead of
+// the Durable Object were invisible to the gate until now.
+test("worker-served routes are extracted, trailing-slash siblings folded", () => {
+  const templates = workerRouteTemplates(worker);
+  assert.ok(templates.includes("/api/health/jobs"), "the Worker cron heartbeat route is in the inventory");
+  assert.ok(!templates.some(template => template.endsWith("/")), "trailing-slash variants fold into the base route");
+});
+
+test("a Worker-served route missing from the spec fails, naming the template", () => {
+  const withRoute = worker.replace("url.pathname === '/api/health/jobs/'",
+    "url.pathname === '/api/health/jobs/' || url.pathname === '/api/worker-only-undocumented'");
+  const { failures } = routeDocsDrift({ ...shared, worker: withRoute });
+  assert.deepEqual(failures, ["served but not documented in docs/openapi.yaml: /api/worker-only-undocumented"]);
+});
+
+test("the gate refuses a blind inventory when the worker source is omitted", () => {
+  const { worker: _omitted, ...withoutWorker } = shared;
+  assert.throws(() => routeDocsDrift(withoutWorker), /needs cloudflare\/room\.mjs/);
 });
 
 test("a served route missing from the spec fails, naming the template", () => {

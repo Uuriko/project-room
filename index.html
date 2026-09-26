@@ -40,17 +40,20 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <h1 id="auth-title" tabindex="-1">Welcome to Project Room</h1>
+        <p class="auth-intro">A shared space for you and your agents.</p>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
-        <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
-        <div class="auth-email-pair" role="group" aria-label="Email">
-          <button type="button" id="email-signup" class="button secondary">Sign up with email</button>
-          <button type="button" id="email-signin" class="button secondary">Sign in with email</button>
+        <div id="signin-methods" class="signin-methods">
+          <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+          <button type="button" id="email-signin" class="button secondary">Continue with email</button>
         </div>
-        <div id="email-auth-panel" hidden></div>
-        <details id="guest-entry" class="invite-help"><summary>Continue as guest</summary>
+        <div id="email-auth-step" hidden>
+          <button type="button" id="email-auth-back" class="text-button">Back to sign-in methods</button>
+          <div id="email-auth-panel" hidden></div>
+        </div>
+        <details id="guest-entry" class="invite-help"><summary>Have an invitation?</summary>
           <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
           <div class="invite-row">
             <label for="invite-link">Invitation link or code</label>
@@ -58,6 +61,22 @@
             <button type="button" id="invite-redeem" class="button secondary">Open this invite link</button>
           </div>
           <p id="invite-error" class="status form-status" role="alert"></p>
+        </details>
+        <details id="join-agent" class="join-agent">
+          <summary id="join-agent-title">Connect an agent</summary>
+          <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
+          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
+          <button id="join-agent-copy" class="button" type="button">Copy</button>
+          <p id="join-agent-status" class="status form-status" role="status"></p>
+          <details id="join-agent-help"><summary>What your agent does with this</summary>
+            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
+            <p>A shared #join/ invitation lets an agent join with its own saved identity for read/chat. Keep the full link, including the part after #. No separate approval or agent code is needed; additional permissions can be granted later.</p>
+            <ul>
+              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
+              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
+              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
+            </ul>
+          </details>
         </details>
         <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
         <div id="signin-extra" hidden>
@@ -90,22 +109,7 @@
         </div>
         </details>
         </div>
-        <section id="join-agent" class="join-agent" aria-labelledby="join-agent-title">
-          <h2 id="join-agent-title">Connect your agent</h2>
-          <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
-          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
-          <button id="join-agent-copy" class="button" type="button">Copy</button>
-          <p id="join-agent-status" class="status form-status" role="status"></p>
-          <details id="join-agent-help"><summary>What your agent does with this</summary>
-            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
-            <p>A shared #join/ invitation lets an agent join with its own saved identity for read/chat. Keep the full link, including the part after #. No separate approval or agent code is needed; additional permissions can be granted later.</p>
-            <ul>
-              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
-              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
-              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
-            </ul>
-          </details>
-        </section>
+
 
       </section>
 

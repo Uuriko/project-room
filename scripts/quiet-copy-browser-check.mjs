@@ -32,7 +32,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     // Auth first paint is Welcome + Google + More options. Keys, invite,
     // GitHub/email/magic/passkey/recovery, and session restore stay collapsed.
-    assert.equal(await page.locator("#auth-title").textContent(), "Welcome.");
+    assert.equal(await page.locator("#auth-title").textContent(), "Welcome to Project Room");
     assert.equal(await page.locator("#google-signin").isVisible(), true);
     assert.equal(await page.locator("#signin-more").textContent(), "More options");
     assert.equal(await page.locator("#signin-more").isVisible(), true);
