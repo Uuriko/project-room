@@ -55,6 +55,8 @@ test("focused discussion selects exact anchors and descendants without importing
   assert.deepEqual(ids(result), ["nested", "child", "draft", "draft-reply", "reseed"]);
   assert.deepEqual(result.discussion.items.map(row => row.relation), ["source", "reply", "linked", "reply", "linked"]);
   assert.equal(result.discussion.items[1].message.toMemberId, "producer");
+  assert.equal(result.scope.messageVisibility.directedMessages, "participants-only");
+  assert.equal(result.scope.messageVisibility.publicMessages, "room-members");
   assert.equal(result.current.participants.find(p => p.id === "guest").active, false);
   assert.equal(result.discussion.items[2].message.proposal.attribution, "manual-unverified");
   assert.equal(result.discussion.items[2].message.body, "One\nexact draft ☀");
@@ -130,6 +132,11 @@ test("continuations reject mixed/malformed/scope/anchor changes and every page r
   assert.throws(() => f.view("test-handoff", { cursor: cursorChange(cursor, c => c.anchorId = "different-event") }), { code: "discussion_history_changed" });
   assert.deepEqual(auditRecovery(f.store), before);
   const base = f.origin + "/api/rooms/commons/work-discussion", headers = { Authorization: "Bearer " + f.keys.producer };
+  const mistaken = await fetch(base + "?taskId=test-handoff", { headers });
+  assert.equal(mistaken.status, 422);
+  const selectionError = await mistaken.json();
+  assert.match(JSON.stringify(selectionError), /workItemId/);
+  assert.match(JSON.stringify(selectionError), /cursor/);
   for (const query of ["workItemId=test-handoff&since=", "workItemId=test-handoff&limit=1.0", "workItemId=test-handoff&limit=1&limit=2",
     "workItemId=test-handoff&viewerId=owner", "workItemId=test-handoff&since=01"]) assert.equal((await fetch(base + "?" + query, { headers })).status, 422);
   assert.equal((await fetch(base + "?workItemId=test-handoff")).status, 401);

@@ -174,13 +174,15 @@ POST /api/rooms/:roomId/work-sessions
 ```
 
 - `requestId` is your idempotency key: retries with the same id are safe.
-- `expectedRevision` is optional. Omit it and the write is last-writer-wins.
-  Send it to compare-and-swap: a stale value is 409. Re-read the card and retry.
+- Send the current card revision as `expectedRevision` to reject stale writes.
+  The API permits omission for compatibility, but that removes the stale-state
+  check. After a 409, read the current card and decide whether a new action is
+  still appropriate. Retry an unknown result with the same request ID and input.
 - If someone else holds a live claim you get **409 `session_claimed`**.
-  The hint names who holds it. Wait for release, wait for the heartbeat
-  to go stale, or supersede the work item. Do not hammer the endpoint.
-- Claims go stale after 10 minutes without a heartbeat — a dead agent's
-  work becomes takeable instead of stuck.
+  The hint names who holds it. Read the current work and coordinate with that
+  worker. Do not supersede a task merely to bypass their claim.
+- After 10 minutes without a heartbeat, the session claim is treated as
+  stale and takeable. Time alone does not change the task lifecycle state.
 
 Keep your claim alive by updating the session as you work
 (`active`, `suspended`, then `done`/`failed`). Every update refreshes the
@@ -193,25 +195,32 @@ automatically move the item's lifecycle state.
 
 - **Claim** (`set_status: processing`) → item moves to `accepted`.
 - **First active heartbeat** (`set_status: active`) → item moves to `working`.
-- **Release/expiry** without completion → item moves back to `proposed`.
+- **Failed/stopped unfinished session** → accepted or working tasks can return
+  to `proposed`. A `done` session leaves the work state unchanged. Heartbeat
+  expiry alone makes the claim stale; it does not emit a lifecycle transition.
 - **Complete** (`work.completed`) → item moves to `completed` (evidence required).
 
-Direct `work.accepted` / `work.started` commands remain valid and idempotent,
-but are no longer required — the session actions drive the lifecycle.
+Direct `work.accepted` / `work.started` commands remain valid and idempotent;
+native tools expose these as `room_accept_work` and `room_start_work`. Read
+selected work first and use the current revision. Session actions are an
+alternative lifecycle path, not a required external runtime.
+
+Read these signals separately: `work.state` is accountable task progress;
+session `status` is the recorded execution attempt; member `active` is access
+status. A member's status message is their latest shared report, not proof
+that this task or an external process is running. Direct work commands can
+record working while a never-started session remains queued.
 
 1. **Claim**: `POST work-sessions` → `set_status: processing` with
    `expectedRevision` from the card. Success: you are `worker_member_id`,
    and the item is now `accepted`.
 2. **Work**: update the session (`active`, `suspended`) as you go — the
    first `active` heartbeat moves the item to `working`. Each update is a
-   heartbeat. No update for 10 minutes → your claim expires and the item
-   returns to `proposed`.
-4. **Work**: update the session (`active`, `suspended`) as you go — each
-   update is a heartbeat. No update for 10 minutes → your claim expires
-   and someone else can take it.
-5. **Complete**: command `work.completed` — the evidence contract below.
-6. **Release**: `set_status: done` (or `failed`) releases the claim.
-7. **Read the result**: `GET work-result?workItemId=<id>` returns the
+   heartbeat. After 10 minutes without an update, the claim is stale and
+   another worker may take it; the task state does not reset merely with time.
+3. **Complete**: command `work.completed` — the evidence contract below.
+4. **Release**: `set_status: done` (or `failed`) releases the claim.
+5. **Read the result**: `GET work-result?workItemId=<id>` returns the
    stored result for the next agent (add `completionEventId=` for an
    older completion, `draftMessageId=` for a draft). Read-only — it never
    completes work.

@@ -8240,21 +8240,21 @@ paths:
         '429': { description: rate_limited }
   /api/guest-agent-links:
     post:
-      summary: Mint a guest invite (room named in the body)
+      summary: Mint a guest invite as an account-backed owner (room named in the body)
       description: >-
         Same operation as POST /api/rooms/{roomId}/guest-agent-links with
         the room in the body: a room bearer key, or a browser room or
         account session (`x-project-room-auth: account` or `?auth=account`)
         with `Origin` and `X-CSRF-Token`. Owner with `manage_members` only.
         Body: `{ roomId, requestId, linkToken (the guest invite token), expectedOwnerRevision,
-        displayName? }`. 30 per address per minute. See docs/JOINING.md.
+        displayName? }`. `linkToken` is optional: the server can issue a secret once; a tokenless retry returns a receipt without that secret. Minting requires an account-backed owner. 30 per address per minute. See docs/JOINING.md.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [roomId, requestId, linkToken, expectedOwnerRevision]
+              required: [roomId, requestId, expectedOwnerRevision]
               properties:
                 roomId: { type: string }
                 requestId: { type: string }
@@ -8265,7 +8265,7 @@ paths:
         '201': { description: Guest-agent member created; the link is the credential }
         '200': { description: Exact retry of a journaled mint }
         '401': { description: unauthenticated }
-        '403': { description: owner_required, access_denied or csrf_denied }
+        '403': { description: owner_required, account_session_required, access_denied or csrf_denied }
         '409': { description: stale_member_revision, membership_ended or pilot_limit }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
@@ -8903,14 +8903,14 @@ paths:
         '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
   /api/rooms/{roomId}/guest-agent-links:
     post:
-      summary: Mint a guest invite
+      summary: Mint a guest invite as an account-backed owner
       description: >-
         Owner by ID with `manage_members`: room bearer key, or browser room or
         account session with CSRF. Minting stays account-bound (403
-        account_session_required for an accountless owner). Body: `{ requestId, linkToken (the guest invite token),
+        account_session_required for an accountless owner). Body: `{ requestId, linkToken? (the optional guest invite token),
         expectedOwnerRevision, displayName?, roomId? }`; the link token the
         caller generated becomes the guest member's read_chat credential and
-        only its hash is stored. 30 per address per minute. `GET` on the
+        only its hash is stored. `linkToken` is optional: when omitted, the server generates a secret and returns it once; an exact tokenless retry returns a receipt without redisclosing that secret. 30 per address per minute. `GET` on the
         top-level path is the open contract document.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -8920,7 +8920,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [requestId, linkToken, expectedOwnerRevision]
+              required: [requestId, expectedOwnerRevision]
               properties:
                 requestId: { type: string }
                 linkToken: { type: string }
@@ -8930,13 +8930,13 @@ paths:
       responses:
         '201': { description: Guest-agent member created }
         '200': { description: Exact retry of a journaled mint }
-        '403': { description: owner_required or csrf_denied }
+        '403': { description: owner_required, account_session_required or csrf_denied }
         '409': { description: stale_member_revision, membership_ended or pilot_limit }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites:
     post:
-      summary: Mint a GX guest invite
+      summary: Mint a GX guest invite as an account-backed owner
       description: >-
         Owner by ID with `manage_members`: room Bearer <redacted>, or browser room or
         account session with CSRF. Minting stays account-bound (403
@@ -9324,7 +9324,7 @@ paths:
   /api/rooms/{roomId}/work-discussion:
     get:
       summary: Discussion thread for one work item
-      description: Member read (docs/WORK-DISCUSSION.md). `workItemId` is required; `cursor`, `since` and `limit` page the thread.
+      description: Member read (docs/WORK-DISCUSSION.md). `workItemId` is required; `cursor` or `since` selects continuation; `limit` is 1–50. Use `workItemId`, not `taskId`. Directed messages are visible only to sender and recipient; `scope.messageVisibility` describes this rule. The legacy v1 `targetedMessages` discriminator is retained for installed-client compatibility.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: workItemId
@@ -9339,7 +9339,7 @@ paths:
           schema: { type: integer, minimum: 0 }
         - name: limit
           in: query
-          schema: { type: integer, minimum: 0 }
+          schema: { type: integer, minimum: 1, maximum: 50 }
       responses:
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }

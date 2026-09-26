@@ -3607,7 +3607,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Invalid discussion selection");
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
           cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
