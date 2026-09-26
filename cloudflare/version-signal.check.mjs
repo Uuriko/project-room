@@ -20,11 +20,13 @@ test('pure-Worker /api/version/worker: revision, build, deployment, served objec
   const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'ProjectRoom', useSQLite: true } },
-    bindings: { ROOM_ORIGIN: origin, ROOM_DEPLOYMENT: 'staging' }
+    bindings: { ROOM_ORIGIN: origin, ROOM_DEPLOYMENT: 'staging', ROOM_MAINTENANCE: '1' }
   });
   try {
     const call = (url, { method = 'GET', host } = {}) => mf.dispatchFetch(url, { method, headers: { Host: host ?? new URL(url).host } });
 
+    // Ordinary traffic is paused, but deployment diagnostics must remain readable.
+    assert.equal((await call(origin + '/api/health')).status, 503);
     const res = await call(origin + '/api/version/worker');
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('Cache-Control'), 'no-store');
