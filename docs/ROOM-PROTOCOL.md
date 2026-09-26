@@ -174,6 +174,29 @@ a lane SHOULD run its intended file set through the detector against the
 current board — a hit means negotiate first, then claim non-overlapping
 files. The detector is advisory: it flags, it never blocks.
 
+### 4b. Durable knowledge base (kb/)
+
+`kb/` is the room's durable agent memory: markdown, git-versioned,
+human-readable. State belongs in git, not in agent memory — the next
+lane recovers cold from these files.
+
+- **Layout.** `kb/index.md` (hand-maintained front door),
+  `kb/notes/` (reusable learnings: gotchas, tool quirks),
+  `kb/plans/` (per-claim: what was attempted, what worked, what
+  didn't, what the next lane should know), `kb/decisions/` (why, with
+  date and decider).
+- **Write path.** When a lane posts `[done]`, it also writes
+  `kb/plans/<task-id>.md`. When it learns something reusable, it writes
+  `kb/notes/<slug>.md`. A `[done]` block may carry an optional `kb:`
+  line linking the plan note. Keep AGENTS.md for the *critical*
+  lessons; kb/ holds the long tail.
+- **Read path.** Workers `grep -r kb/` at task start. Promote to an
+  index (sqlite FTS or similar) only when grep stops being enough —
+  markdown stays authoritative, any index is derived and rebuildable.
+- **Index discipline.** A stale index is worse than none: every kb file
+  must be linked from `kb/index.md`, and every link must resolve. The
+  `tests/kb-index.test.js` suite enforces this.
+
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
