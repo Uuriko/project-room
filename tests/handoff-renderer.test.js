@@ -123,6 +123,27 @@ test("the lifecycle trail shows each state transition with actor and note", () =
   assert.match(html, /<span class="handoff-badge handoff-badge-done"[^>]*>Completed<\/span>/);
 });
 
+test("automatic handoff history explains expiry and names the escalation recipient", () => {
+  for (const status of ["expired", "escalated"]) {
+    const html = handoffEnvelopeHtml(receipt({ status, history: [
+      { status: "proposed", at: iso(NOW), by: "agent-a" },
+      { status, at: iso(NOW + 24 * HOUR), by: "system", reason: "termination.expiresAt reached",
+        ...(status === "escalated" ? { escalatedTo: "review-agent" } : {}) },
+    ] }));
+    const trail = html.slice(html.indexOf('aria-label="Envelope lifecycle"'), html.indexOf("</ol>"));
+    assert.match(trail, /Handoff deadline reached/);
+    if (status === "escalated") assert.match(trail, /to review-agent/);
+    else assert.doesNotMatch(trail, /to review-agent/);
+  }
+  const html = handoffEnvelopeHtml(receipt({ history: [
+    { status: "escalated", at: iso(NOW), reason: "<reason>", escalatedTo: "<recipient>", note: "<note>" },
+  ] }));
+  assert.match(html, /&lt;reason&gt;/);
+  assert.match(html, /&lt;recipient&gt;/);
+  assert.match(html, /&lt;note&gt;/);
+  assert.doesNotMatch(html, /<(reason|recipient|note)>/);
+});
+
 test("completed envelopes mark the checks the recipient asserted passed", () => {
   const html = handoffEnvelopeHtml(receipt({ status: "completed",
     history: [{ status: "proposed", at: iso(NOW), by: "agent-a" },

@@ -9,6 +9,10 @@
 // 4xx/429 on a listed route carries the canonical envelope with a non-empty next[].
 //
 // Route entries: { path, methods, auth, summary, operationId }.
+// Multi-method routes MUST use the optional `operationIds` extra to give each
+// method its own honest id (OpenAPI requires unique operationIds across all
+// operations): { operationIds: { GET: "...", POST: "..." } }. The shared
+// `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | room-member | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -35,22 +39,28 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
-  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom"),
+  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
+    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
   // Hosted MCP (JSON-RPC over POST).
-  route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp"),
-  route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp"),
+  route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
+    { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),
+  route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp",
+    { operationIds: { GET: "getRoomMcpJoinDoc", POST: "postRoomMcp" } }),
   // Webhooks family.
-  route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks"),
-  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById"),
+  route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
+    { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
+  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById",
+    { operationIds: { GET: "getAgentWebhook", DELETE: "deleteAgentWebhook" } }),
   route("/api/agent-webhooks/{subscriptionId}/deliveries", ["GET"], "agent-credential", "Delivery journal for one subscription.", "agentWebhookDeliveries"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
-  route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause"),
+  route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
+    { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and
@@ -108,7 +118,10 @@ export function buildOpenApiJson({ origin }) {
     const item = {};
     for (const method of entry.methods) {
       const op = {
-        operationId: entry.operationId,
+        // Per-method id where the table declares one, else the route-level
+        // fallback. operationIds MUST be unique across the whole document
+        // (tests/discoverability.test.js pins this).
+        operationId: entry.operationIds?.[method] ?? entry.operationId,
         summary: entry.summary,
         description: AUTH_DESCRIPTION[entry.auth] ?? "",
         responses: operationResponses(entry, method),

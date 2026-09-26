@@ -260,7 +260,9 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(missing.body?.error?.code, "not_found");
   for (const path of [
     "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
-    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem"
+    "/api/share-links/join-agent", "/api/access-requests",
+    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem",
+    "/room/api/share-links/join-agent", "/room/api/access-requests"
   ]) {
     const got = await fetch(`${origin}${path}`);
     assert.equal(got.status, 405, path);

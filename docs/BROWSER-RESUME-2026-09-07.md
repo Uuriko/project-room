@@ -31,7 +31,7 @@ New screenshots under `test-results/acceptance-2026-09-07/`:
 - `09-owner-reply-preserved.png`
 - `10-actionable-timeout.png`
 
-![Actionable timeout — image was local-only and was never committed to the repo (2026-09-14 note)](../test-results/acceptance-2026-09-07/10-actionable-timeout.png)
+Actionable-timeout screenshot was local-only and was never committed to the repo (2026-09-14 note).
 
 The initial five screenshots and original fixture instructions remain in [the earlier checkpoint](BROWSER-CHECKPOINT-2026-09-07.md). Saved screenshots contain only synthetic test content. No production data, keys or invitation tokens were added to this report.
 

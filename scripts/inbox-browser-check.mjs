@@ -18,6 +18,19 @@ import { prepareGraphReplyUpdate } from "../server/graph-reply-draft.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
 
+// The attention lane syncs the read horizon (debounced, best-effort) while the
+// room view is up, and every sync bumps read_horizons.updated_at. That write is
+// intended behavior, not an implicit change from the reply flows under test, so
+// the before/after recovery comparisons scope it out; the horizon contract
+// itself is owned by tests/activity.test.js. The audit's integrity verification
+// and every other table's digest still run on each call.
+function recoveryWithoutHorizon(store) {
+  const audit = auditRecovery(store);
+  delete audit.dataSha256;
+  audit.tables = audit.tables.filter(entry => entry.table !== "read_horizons");
+  return audit;
+}
+
 function seedEmail(f) {
   const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
   const apply = request => f.store.email.apply(f.slot.token, request, f.session.sessionBinding);
@@ -127,7 +140,7 @@ for (const mobile of [false, true]) test(`reply comparison ${mobile ? "mobile" :
   f.recorded.observe({ message: { cc: [{ name: "Reviewer", address: "reviewer@example.test" }], subject: "A shared first step" },
     body: { format: "text", content: "The mailbox version.\nSomeone suggested meeting on Friday." } });
   const local = "My unsaved alternative.\nLet’s pick one small thing to build together.\n\n<em>Keep this as text.</em>";
-  await p.locator("#inbox-draft").fill(local); const before = auditRecovery(f.store);
+  await p.locator("#inbox-draft").fill(local); const before = recoveryWithoutHorizon(f.store);
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-local-body").filter({ hasText: "My unsaved alternative" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-local-body").textContent(), local);
   assert.match(await p.locator("#inbox-reply-local-state").textContent(), /unsaved/);
@@ -143,7 +156,7 @@ for (const mobile of [false, true]) test(`reply comparison ${mobile ? "mobile" :
   assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
   await f.capture("comparison-original-" + (mobile ? "mobile" : "desktop"));
   await p.locator("#inbox-reply-close").click();
-  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(recoveryWithoutHorizon(f.store), before);
   assert.equal(await p.locator("#inbox-draft").evaluate(node => node === document.activeElement), true);
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-local-body").filter({ hasText: "My unsaved alternative" }).waitFor();
@@ -181,7 +194,7 @@ test("reply comparison clears already visible original and unsaved text when ano
 });
 
 test("reply comparison handles empty and long mobile drafts without changing saved text", { timeout: 35000 }, async t => {
-  const f = await reviewFixture(t, true), p = f.page, before = auditRecovery(f.store);
+  const f = await reviewFixture(t, true), p = f.page, before = recoveryWithoutHorizon(f.store);
   for (const local of ["", "A long unbroken word: " + "界🪷".repeat(800)]) {
     await p.locator("#inbox-draft").fill(local); await p.locator("#inbox-reply-open").click();
     await p.locator("#inbox-reply-local").waitFor();
@@ -190,7 +203,7 @@ test("reply comparison handles empty and long mobile drafts without changing sav
     assert.equal(await p.locator("#inbox-reply-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await p.locator("#inbox-reply-close").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), local);
   }
-  assert.deepEqual(auditRecovery(f.store), before);
+  assert.deepEqual(recoveryWithoutHorizon(f.store), before);
 });
 
 test("reply comparison shows pending update uncertainty without enabling review or repeating the update", { timeout: 35000 }, async t => {
@@ -204,17 +217,17 @@ test("reply comparison shows pending update uncertainty without enabling review 
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update not started" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false); await p.locator("#inbox-reply-close").click();
   apply({ action: "reply.update.dispatch", requestId: "comparison-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
-  const before = auditRecovery(f.store);
+  const before = recoveryWithoutHorizon(f.store);
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update unconfirmed" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false); await f.capture("comparison-unknown");
   await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update unconfirmed" }).waitFor();
-  assert.deepEqual(auditRecovery(f.store), before);
+  assert.deepEqual(recoveryWithoutHorizon(f.store), before);
 });
 
 for (const mobile of [false, true]) test(`reply acknowledgment ${mobile ? "mobile" : "desktop"}: recovery does not imply content review or sending`, { timeout: 35000 }, async t => {
   const f = await updateFixture(t, mobile), p = f.page;
-  const before = auditRecovery(f.store);
+  const before = recoveryWithoutHorizon(f.store);
   await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-mailbox-label").textContent(), "Last checked draft");
@@ -223,7 +236,7 @@ for (const mobile of [false, true]) test(`reply acknowledgment ${mobile ? "mobil
   await f.capture("acknowledged-" + (mobile ? "mobile" : "desktop"));
   await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
-  assert.deepEqual(auditRecovery(f.store), before);
+  assert.deepEqual(recoveryWithoutHorizon(f.store), before);
 });
 
 for (const mobile of [false, true]) test(`updated reply review ${mobile ? "mobile" : "desktop"}: inspect, review, reload and unchanged private writing`, { timeout: 35000 }, async t => {
@@ -277,7 +290,7 @@ for (const mobile of [false, true]) test(`updated reply newer-read refresh ${mob
   const captured = await p.locator("#inbox-reply-body").textContent();
   const child = f.store.inbox.replyUpdates(token, f.sourceId, binding).updates[0];
   f.recorded.observe({ body: { format: "text", content: "Tuesday instead. Keep my local draft separate." } });
-  const before = auditRecovery(f.store);
+  const before = recoveryWithoutHorizon(f.store);
   await p.evaluate(() => document.getElementById("inbox-refresh").click());
   await p.locator("#inbox-reply-status").filter({ hasText: "Sample update acknowledged · review pending" }).waitFor();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Reply changed or unavailable" }).waitFor();
@@ -291,7 +304,7 @@ for (const mobile of [false, true]) test(`updated reply newer-read refresh ${mob
   assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-local-body").textContent(), captured);
   await f.capture("update-latest-read-" + (mobile ? "mobile" : "desktop"));
-  assert.equal(writes, 0); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(writes, 0); assert.deepEqual(recoveryWithoutHorizon(f.store), before);
   assert.deepEqual(f.store.inbox.replyUpdates(token, f.sourceId, binding).updates[0], child);
   await p.locator("#inbox-reply-close").click();
   f.inspect({ body: "Tuesday instead. Keep my local draft separate." });
@@ -313,7 +326,7 @@ test("reviewed update becomes visibly out of date, and an unavailable read never
   assert.equal(await p.locator("#inbox-reply-body").textContent(), "A separate mailbox change.");
   assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
   await f.capture("update-review-outdated"); await p.locator("#inbox-reply-close").click();
-  f.recorded.observe(null); const before = auditRecovery(f.store);
+  f.recorded.observe(null); const before = recoveryWithoutHorizon(f.store);
   await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Draft unavailable · not sent" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-body").textContent(), "");
@@ -322,7 +335,7 @@ test("reviewed update becomes visibly out of date, and an unavailable read never
   await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Draft unavailable · not sent" }).waitFor();
   assert.equal(await p.locator("#inbox-reply-body").textContent(), "");
-  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(recoveryWithoutHorizon(f.store), before);
 });
 
 test("reply comparison refresh revokes a captured review without changing the parent version", { timeout: 35000 }, async t => {
@@ -335,7 +348,7 @@ test("reply comparison refresh revokes a captured review without changing the pa
     attemptId: parent.id, expectedRevision: parent.revision, requestId: "background-update" });
   f.store.inbox.reply(token, { action: "reply.update.reserve", requestId: proposal.requestId, sourceId: f.sourceId,
     attemptId: parent.id, expectedRevision: parent.revision, updateVersion: proposal.updateVersion }, binding);
-  const before = auditRecovery(f.store);
+  const before = recoveryWithoutHorizon(f.store);
   // Exercise the real refresh listener while the sheet retains its old preview.
   await p.evaluate(() => document.getElementById("inbox-refresh").click());
   await p.locator("#inbox-reply-status").filter({ hasText: "Sample update not started" }).waitFor();
@@ -345,7 +358,7 @@ test("reply comparison refresh revokes a captured review without changing the pa
   await p.evaluate(() => document.getElementById("inbox-reply-confirm").dispatchEvent(new MouseEvent("click")));
   await p.locator("#inbox-reply-close").click();
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update not started" }).waitFor();
-  assert.equal(writes, 0); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(writes, 0); assert.deepEqual(recoveryWithoutHorizon(f.store), before);
   assert.equal(f.store.inbox.replyAttempts(token, f.sourceId, binding).attempts[0].revision, parent.revision);
 });
 

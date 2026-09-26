@@ -216,3 +216,29 @@ test("?since= returns only items opened after the cursor; labels surface for cur
   const bad = await get("/api/opportunities.json?since=not-a-time");
   assert.equal(bad.status, 422);
 });
+
+
+test('listed room projection is read once for help and bounty in the same feed', async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  store.roomDirectory.set(ROOM, 'owner', true);
+  propose(store, ownerKey, ROOM, 'w-cached');
+  openHelp(store, ownerKey, ROOM, 'w-cached', new Date(fixture.now() + 3600e3).toISOString());
+  seedBounty(store, { bountyId: 'b-cached', roomId: ROOM, state: 'funded', deadlineMs: fixture.now() + 3600e3 });
+  const originalPrepare = store.db.prepare.bind(store.db);
+  let reads = 0;
+  store.db.prepare = (...args) => {
+    if (args[0].includes('SELECT projection FROM rooms WHERE id=?')) reads++;
+    return originalPrepare(...args);
+  };
+  try {
+    const response = await get('/api/opportunities.json');
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.opportunities.map(row => row.kind).sort(), ['bounty', 'help-wanted']);
+    assert.equal(reads, 1, 'each listed room projection should be read and parsed once');
+  } finally {
+    store.db.prepare = originalPrepare;
+  }
+});
