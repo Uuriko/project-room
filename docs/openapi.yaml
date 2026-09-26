@@ -4653,6 +4653,19 @@ paths:
       security: []
       responses:
         '200': { description: "{ status: ok, mode }" }
+  /api/health/jobs:
+    get:
+      summary: Cron job heartbeat
+      description: >-
+        Open (also HEAD). Answered by the Worker: per-job lastSuccessAt /
+        lastError for the cron jobs, read through one Durable Object RPC.
+        200 `{ status, jobs }` when every job is fresh; 503 when a job is
+        stale, failing, or the read is unavailable, so a plain status check
+        catches dead crons. Operational metadata only, no room data.
+      security: []
+      responses:
+        '200': { description: "{ status, jobs } - all jobs fresh" }
+        '503': { description: "a job is stale or failing, or the heartbeat read failed" }
   /api/version:
     get:
       summary: Deployed revision
