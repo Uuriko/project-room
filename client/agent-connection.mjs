@@ -99,7 +99,8 @@ const messages = Object.freeze({
   config_save_failed: "Connection was not confirmed saved. Inspect the new private directory before retrying.",
   invite_already_used: "This invite was already used — ask the room owner for a fresh one.",
   member_required: "Set the expected ROOM_AGENT_MEMBER before checking or saving agent access.",
-  access_ended: "Access was not accepted. Ask the operator for the correct active agent key.",
+  access_ended: "Access was not accepted. Keep the saved connection; check the service address and existing access with its owner.",
+  identity_credential_changed: "The saved credential changed or was revoked. Obtain the current credential from its owner; do not create a replacement identity.",
   identity_mismatch: "Access does not match the configured room and agent. No identity was adopted.",
   expiry_unconfirmed: "Expiry could not be confirmed. Check the local clock and key expiry.",
   invalid_response: "Room returned an unsupported or incomplete response. No success was confirmed.",
@@ -116,13 +117,14 @@ export function connectionDiagnostic(error) {
   if (error instanceof ConnectionError && Object.hasOwn(messages, error.code)) code = error.code;
   else if (error instanceof RoomClientError) {
     code = error.status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code) ? "invalid_config"
+      : error.code === "identity_credential_changed" && error.status === 409 ? "identity_credential_changed"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
       : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
   const httpStatus = error instanceof RoomClientError ? error.status : 0;
-  const mapped = code === "access_ended" ? "unauthenticated" : code === "rate_limited" ? "rate_limited"
+  const mapped = code === "access_ended" ? (httpStatus === 403 ? "access_denied" : "unauthenticated") : code === "rate_limited" ? "rate_limited"
     : code === "member_required" ? "member_required" : code;
   const ax = agentErrorAx({ httpStatus, code: mapped, message: "" });
   return { type: "agent_connection_error", code, message: messages[code],
