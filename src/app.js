@@ -3009,6 +3009,9 @@ $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSes
 // instructions. Existing links open the disclosure directly.
 function revealAgentSigninLink() {
   if (location.hash !== "#join-agent") return;
+  if (!signinUI.closeEmail()) return;
+  showSigninMethods();
+  setSigninExtra(true);
   const details = $("#join-agent");
   if (details) details.open = true;
 }

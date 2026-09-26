@@ -40,8 +40,7 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" tabindex="-1">Welcome to Project Room</h1>
-        <p class="auth-intro">A shared space for you and your agents.</p>
+        <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
@@ -50,9 +49,11 @@
           <button type="button" id="email-signin" class="button secondary">Continue with email</button>
         </div>
         <div id="email-auth-step" hidden>
-          <button type="button" id="email-auth-back" class="text-button">Back to sign-in methods</button>
+          <button type="button" id="email-auth-back" class="text-button" aria-label="Back to sign-in methods" title="Back to sign-in methods"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14"/></svg></button>
           <div id="email-auth-panel" hidden></div>
         </div>
+        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
+        <div id="signin-extra" hidden>
         <details id="guest-entry" class="invite-help"><summary>Have an invitation?</summary>
           <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
           <div class="invite-row">
@@ -78,8 +79,6 @@
             </ul>
           </details>
         </details>
-        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
-        <div id="signin-extra" hidden>
         <div id="auth-signin-ui"></div>
         <div id="agent-signin-ui"></div>
         <details id="key-signin" class="signin-support"><summary>Use a room or account key</summary>
