@@ -4,6 +4,7 @@
 // a room tool is called with no identity bearer.
 
 import { randomBytes } from "node:crypto";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const operationId = () => `op_${randomBytes(6).toString("base64url")}`;
 
@@ -36,8 +37,8 @@ export function mcpTransportError(code, message, { reason, hint, next, category,
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
-export const MCP_AUTH_HINT = "mint one at POST /api/agent-identities";
-export const MCP_AUTH_MESSAGE = "Room tools need Authorization: Bearer <identity secret>; mint one at POST /api/agent-identities";
+export const MCP_AUTH_HINT = "Use your saved connection and identity secret. If none exists, read /llms.txt for initial setup.";
+export const MCP_AUTH_MESSAGE = "Room tools need Authorization: Bearer with your saved identity secret";
 
 export function closestToolName(name, names) {
   const target = typeof name === "string" ? name : "";
@@ -155,10 +156,7 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
             reason: "auth_required",
             category: "access",
             hint: hint || MCP_AUTH_HINT,
-            next: [
-              Object.freeze({ path: "/api/agent-identities", method: "POST" }),
-              Object.freeze({ tool: "room_check_access" }),
-            ],
+            next: agentErrorAx({ httpStatus: 401 }).next,
           }),
         },
       }

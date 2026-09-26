@@ -207,15 +207,11 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   let hint = null;
   let next = null;
   if (httpStatus === 401) {
-    if (scope.auth === "identity-secret") {
-      hint = "Send your identity secret as Authorization: Bearer <identity secret>. Mint one first — no credential needed.";
-      next = [MINT_NEXT, { tool: "room_check_access" }];
+    if (["identity-secret", "room-member"].includes(scope.auth)) {
+      return base;
     } else if (scope.auth === "agent-credential") {
-      hint = "Send Authorization: Bearer <identity secret> (mint at POST /api/agent-identities) or a rak_ API key with the webhooks:manage scope.";
-      next = [MINT_NEXT, { path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
-    } else if (scope.auth === "room-member") {
-      hint = "Send a room credential as Authorization: Bearer <room key or room-linked identity secret>. Mint an identity at POST /api/agent-identities, then join or create a room.";
-      next = [MINT_NEXT, { tool: "room_check_access" }];
+      hint = "Keep your saved connection. Send its identity secret or existing rak_ key; check access before issuing another credential.";
+      next = base.next;
     } else if (scope.auth === "invite-code") {
       hint = "Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.";
       next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
