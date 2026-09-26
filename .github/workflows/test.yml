@@ -53,17 +53,6 @@ jobs:
       - run: npm ci
       - name: Install Linux host isolation for automatic-run unit tests
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      # Probe CI runner compatibility without running any untrusted host. Remove
-      # this diagnostic after identifying the setup-node loader failure.
-      - name: Diagnose read-only Node bind in automatic host sandbox
-        run: |
-          node --input-type=module - <<'PROBE'
-          import { isolatedHostCommand } from './client/host-subprocess.mjs';
-          import { spawnSync } from 'node:child_process';
-          const spec = isolatedHostCommand({ command: process.execPath, args: ['--version'] }, process.cwd());
-          const result = spawnSync(spec.command, spec.args, { cwd: process.cwd(), env: {}, encoding: 'utf8' });
-          console.log('sandbox exit:', result.status, 'signal:', result.signal, 'stderr:', result.stderr.slice(0, 400));
-          PROBE
       - run: npm test
   browser:
     runs-on: ubuntu-latest
