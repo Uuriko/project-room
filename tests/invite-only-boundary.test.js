@@ -16,11 +16,15 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { openRoutes, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
+import { openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
-const DECLARED_OPEN = openRoutes(read("../docs/openapi.yaml"));
+// x-worker-only routes are answered by the Cloudflare Worker, never the Node
+// server this test probes; the method-accuracy probe skips them the same way.
+const DECLARED_OPEN = openapiOperations(read("../docs/openapi.yaml"))
+  .filter(op => Array.isArray(op.security) && op.security.length === 0 && !op.workerOnly)
+  .map(({ method, path }) => ({ method, path }));
 const SERVED_CANDIDATES = [
   ...routeCandidates(read("../server/http.mjs")),
   // The agent plug-in surface is mounted through a single delegation in
