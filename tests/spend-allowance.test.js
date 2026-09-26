@@ -224,6 +224,9 @@ test("agent room owner can set the existing room-wide allowance and non-owner ma
   assert.equal(before, undefined);
   const peerIdentity = f.store.identities.create("Allowance peer");
   f.store.identities.link(agentKey, agentRoomId, { identityId: peerIdentity.identityId, permissions: [] });
+  // A #761 membership-administration grant is deliberately not spend authority.
+  f.store.delegation.grant(agentKey, agentRoomId, { identityId: peerIdentity.identityId });
+  assert.equal(f.store.delegation.hasGrant(agentRoomId, peerIdentity.identityId), true);
   for (const body of [{}, { allowanceCents: 5000, unexpected: 1 }]) {
     const outsider = await f.request(`/api/rooms/${agentRoomId}/spend-allowance`, { method: "POST", token: peerIdentity.secret, data: body });
     assert.equal(outsider.status, 403, "a room member who is not owner never reaches body validation");
