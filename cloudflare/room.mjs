@@ -24,6 +24,7 @@ import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
 import { scheduledRetentionTick } from '../server/retention-run.mjs';
 import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 
 // The DO transport may erase the original error type. Report availability,
 // without exposing backend details or claiming that a mutation rolled back.
@@ -226,6 +227,22 @@ export default {
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
     if (url.origin !== roomOrigin(env).origin) return new Response('Unexpected host', { status: 403 });
+    // Storage/DO-independent version signal: answered entirely from module
+    // scope and env, never touching the Durable Object, so deploy
+    // verification stays available when the DO is down (2026-09-25 outage:
+    // /api/version 1101'd with everything else, hiding what was deployed).
+    // The durable-object id is derived with idFromName - it names the object
+    // this Worker WOULD route to, which is what a door-split check compares;
+    // it says nothing about room health. Placed before the maintenance gate
+    // and the visitor-address guard so plain monitors always get an answer.
+    if ((url.pathname === '/api/version/worker' || url.pathname === '/api/version/worker/') && (request.method === 'GET' || request.method === 'HEAD')) {
+      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? { deployment: env.ROOM_DEPLOYMENT } : {};
+      const body = JSON.stringify({
+        status: 'ok', servedBy: 'worker', sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deployment,
+        durableObject: { name: 'invite-only-pilot', id: env.ROOM.idFromName('invite-only-pilot').toString() }
+      });
+      return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+    }
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return maintenanceResponse(request);
     // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
     // job is stale or failing, so a plain status check catches dead crons.
