@@ -190,3 +190,37 @@ test('bare lease value is rejected with a concrete correction', () => {
   assert.equal(state.log[0].ok, false);
   assert.match(state.log[0].errors.join(' '), /did you mean lease=6h\?/);
 });
+
+test('a spaced lane tag is a visible warning, never a registered claim', () => {
+  const comments = [
+    C(501, '2026-09-25T18:00:00Z', '[Grok Bot][claim] RC-2026-09-25-501 Exact files: `scripts/room`'),
+    C(502, '2026-09-25T18:01:00Z', '[claim][Grok Bot] RC-2026-09-25-502 Exact files: `scripts/a.mjs`'),
+  ];
+  const events = parse(comments);
+  assert.deepEqual(events.map(event => event.kind), ['lane-tag-unparseable', 'lane-tag-unparseable']);
+  const state = stateOf(comments, '2026-09-25T18:02:00Z');
+  assert.equal(state.tasks.length, 0);
+  assert.equal(state.log.filter(event => event.kind === 'lane-tag-unparseable' && !event.ok).length, 2);
+  assert.match(state.log[0].errors[0], /lane tag contains spaces/);
+});
+
+
+test('ordinary display-name prose is not mistaken for a malformed claim', () => {
+  const [event] = parse([C(503, '2026-09-25T18:03:00Z', '[Grok Bot] discussing a possible claim')]);
+  assert.equal(event.kind, 'prose');
+});
+
+test('bare lease value is rejected with a concrete correction', () => {
+  const comments = [C(600, '2026-09-25T18:00:00Z', `[quill-s2][claim]\n\`\`\`room-claim
+ task-id: RC-2026-09-25-600
+ lane: quill-s2
+ files: scripts/room
+ lease: 6h
+ state: working
+ reason: test bad lease
+\`\`\``)];
+  const state = stateOf(comments, '2026-09-25T18:02:00Z');
+  assert.equal(state.tasks.length, 0);
+  assert.equal(state.log[0].ok, false);
+  assert.match(state.log[0].errors.join(' '), /did you mean lease=6h\?/);
+});

@@ -200,6 +200,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
+  // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
+  // request-ID idempotency records. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to them, and the module
+  // verifies its own schema on open.
+  "guest_selfserve",
+  "guest_selfserve_idem",
   // activity_events + read_horizons + saved_messages
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
@@ -277,7 +284,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // (convergent).
   "referral_invite_keys",
   "referral_invites",
-  "referral_chain_members"
+  "referral_chain_members",
+  // telegram_live_status (durable Telegram live-delivery/send facts, task 10)
+  // is purely additive and intentionally NOT fenced: same rationale — older
+  // writers have no code path to it, and the class verifies its own schema.
+  "telegram_live_status"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

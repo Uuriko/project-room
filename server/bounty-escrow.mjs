@@ -2107,7 +2107,7 @@ export class BountyEscrow {
       this._saveBounty(bounty);
       // 4. The immutable settlement record: failed, worker 0, escrow to poster.
       const { settlement } = this._recordSettlement(bounty, { kind: "failed", workerMillis: 0,
-        refundMillis: bounty.amountMillis, reason: `verification rejected by ${lane}: ${reason}`, actor: act });
+        refundMillis: bounty.amountMillis, reason, actor: act });
       return { bounty: this._getBounty(roomId, bountyId), settlement, alreadySettled: false, flake,
         receipt: { kind: "reject", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId],
           at, actor: act, event: rejectEvent, ...this._signed(movement) } };
