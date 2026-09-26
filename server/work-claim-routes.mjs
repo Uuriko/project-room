@@ -17,8 +17,8 @@
 // policies requires a recorded attestation from the named reviewer —
 // naming a reviewer who never attested is rejected (QA-Sec 2026-09-19).
 //
-// Persistence is the later slice: items live in a per-process, per-room
-// in-memory registry (createWorkClaimRegistry). Lease expiry is evaluated
+// Production uses the store-owned SQLite registry. The in-memory registry
+// remains a pure-test fixture only. Lease expiry is evaluated
 // on every request, so reads never show stale claims and expired claims
 // auto-release with a stamped history entry even if nobody calls /sweep.
 // Per-room lease/policy defaults are configured through the registry
@@ -193,7 +193,22 @@ const cursorDecode = (reject, value) => {
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
-export async function handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry = defaultRegistry }) {
+// Consume the body before opening SQLite's synchronous transaction. The read,
+// state transition and write then share one transaction; send the response only
+// after commit, so a storage refusal cannot be reported as a successful claim.
+export async function handleWorkClaims(options) {
+  const { req, res, helpers, reauthorize } = options;
+  const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
+  const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  const run = () => handleWorkClaimsCore({ ...options, registry,
+    auth: reauthorize ? reauthorize() : options.auth,
+    helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
+  });
+  const result = registry.transaction ? registry.transaction(run) : run();
+  return helpers.json(res, result.status, result.value);
+}
+
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry }) {
   const { json, reject, body } = helpers;
   const nowMs = Date.now();
   const sweptIds = sweepRoom(registry, roomId, nowMs);
@@ -247,7 +262,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     });
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     return json(res, 200, { roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString() });
   }
@@ -280,7 +295,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, { roomId, query: q, duplicates });
   }
   if (workClaimRoute === "create" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?}");
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -293,7 +308,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, load(claimIdOf(reject, workClaimId)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files"] })) invalidInput(reject, "{note?, leaseHours?, files?}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
@@ -304,7 +319,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
     const item = load(claimIdOf(reject, workClaimId));
@@ -377,7 +392,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     // QA-Sec 2026-09-19: the attestation endpoint. Any room member records
     // their own review of an active claim; the attestation is bound to the
     // caller's authenticated member id — it can never name someone else.
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
@@ -385,7 +400,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
@@ -394,7 +409,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
@@ -407,7 +422,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     // citing their own public progress message, posted in this room after
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { required: ["progressMessageId"], optional: ["note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);

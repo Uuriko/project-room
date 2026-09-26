@@ -1,12 +1,8 @@
 // Durable work-claim registry.
 //
-// server/work-claim-routes.mjs keeps claims in createWorkClaimRegistry(), a
-// module-level Map. On the live Worker that Map lives inside the ProjectRoom
-// Durable Object, so every deploy or eviction drops every claim, lease and
-// review attestation. This module is the same registry interface backed by
-// the room SQLite database, so the routes and next-actions need no change:
-// pass `createDurableWorkClaimRegistry(store.db)` wherever the default
-// registry is used today, and exec `workClaimSchema` with the other schemas.
+// Production RoomStore owns this registry; HTTP and next-actions share it.
+// Claims, leases and review attestations survive Worker eviction and deployment.
+// The Map registry remains a fixture for isolated state-machine tests.
 //
 // Items are stored whole as JSON. The work-claims state machine validates
 // every item it reads (workOf), so a row is never trusted without passing
@@ -35,14 +31,20 @@ const parse = text => {
   return value;
 };
 
-export function createDurableWorkClaimRegistry(db, { now = () => Date.now() } = {}) {
+export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn() } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
-  const selectOne = db.prepare("SELECT item_json FROM work_claims WHERE room_id=? AND claim_id=?");
-  const selectRoom = db.prepare("SELECT item_json FROM work_claims WHERE room_id=? ORDER BY rowid ASC");
-  const upsert = db.prepare(`INSERT INTO work_claims (room_id, claim_id, item_json, updated_at) VALUES (?, ?, ?, ?)
+  // Prepare lazily: RoomStore constructs services before its atomic schema migration.
+  const statement = sql => ({
+    get: (...args) => db.prepare(sql).get(...args),
+    all: (...args) => db.prepare(sql).all(...args),
+    run: (...args) => db.prepare(sql).run(...args),
+  });
+  const selectOne = statement("SELECT item_json FROM work_claims WHERE room_id=? AND claim_id=?");
+  const selectRoom = statement("SELECT item_json FROM work_claims WHERE room_id=? ORDER BY rowid ASC");
+  const upsert = statement(`INSERT INTO work_claims (room_id, claim_id, item_json, updated_at) VALUES (?, ?, ?, ?)
     ON CONFLICT(room_id, claim_id) DO UPDATE SET item_json=excluded.item_json, updated_at=excluded.updated_at`);
-  const selectConfig = db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?");
-  const upsertConfig = db.prepare(`INSERT INTO work_claim_config (room_id, config_json, updated_at) VALUES (?, ?, ?)
+  const selectConfig = statement("SELECT config_json FROM work_claim_config WHERE room_id=?");
+  const upsertConfig = statement(`INSERT INTO work_claim_config (room_id, config_json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`);
 
   const rawConfig = roomId => {
@@ -51,6 +53,15 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now() } = 
   };
 
   return {
+    transaction,
+    verifySchema({ allowAbsent = false } = {}) {
+      const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+      const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+      const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
+      if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
+      if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
+      return true;
+    },
     get(roomId, id) {
       const row = selectOne.get(roomId, id);
       return row ? parse(row.item_json) : null;
@@ -61,7 +72,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now() } = 
       return item;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => parse(row.item_json)); },
-    has(roomId, id) { return selectOne.get(roomId, id) !== undefined; },
+    has(roomId, id) { return selectOne.get(roomId, id) != null; },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");

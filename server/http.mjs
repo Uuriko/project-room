@@ -3304,7 +3304,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
-          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
+          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // room-scoped bounty lifecycle and derived-balance credit routes share

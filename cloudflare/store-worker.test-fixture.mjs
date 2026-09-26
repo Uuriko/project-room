@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
+import { createWork, claimWork } from '../server/work-claims.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { DurableDatabase, durableStorage } from './storage.mjs';
@@ -37,6 +38,12 @@ export class StoreTestRoom {
     const path = new URL(request.url).pathname;
     if (path === '/scenario') {
       store.initialize(initialRoom());
+      store.workClaims.transaction(() => {
+        store.workClaims.configure('commons', { defaultLeaseHours: 6 });
+        store.workClaims.set('commons', claimWork(createWork({ id: 'durable-worker-claim', title: 'Retain ownership' }), 'owner', { leaseHours: 6 }));
+      });
+      assert.throws(() => store.workClaims.transaction(() => { store.workClaims.set('commons', createWork({ id: 'rollback-worker-claim', title: 'Never committed' })); throw new Error('claim rollback'); }), /claim rollback/);
+      assert.equal(store.workClaims.get('commons', 'rollback-worker-claim'), null);
       const owner = store.issueAccessKey('commons', 'owner');
       const linkToken = randomBytes(32).toString('base64url');
       const link = store.shareLinks.create(owner, 'commons', { requestId: randomUUID(), linkToken,
@@ -163,6 +170,9 @@ export class StoreTestRoom {
         email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared, replyPlan, replyDispatch } });
     }
     if (path === '/resume') {
+      assert.equal(store.workClaims.get('commons', 'durable-worker-claim').owner, 'owner');
+      assert.equal(store.workClaims.configFor('commons').defaultLeaseHours, 6);
+      assert.equal(store.workClaims.get('commons', 'rollback-worker-claim'), null);
       const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
       checkNarrowAuthentication(store, credentials);
       for (const guest of guests) {
