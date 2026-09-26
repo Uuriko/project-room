@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T07:00:15Z · board: Uuriko/project-room#266 · watermark: 5843720145 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8c6e2cc6689ef2f15484785a41ccc85f690594ac9841e1beddeb406b285d3c16 -->
+<!-- generated: 2026-09-26T07:29:34Z · board: Uuriko/project-room#266 · watermark: 5843720145 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=6a02a04551e6c4a72e6367821ccd2df4e91390c0bc6d1327c6ceadaccb4eaf6b -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -34,6 +34,10 @@ RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-25-938 | jillian | working | 2026-09-26T11:18:22Z | server/agent-identities.mjs, server/identity-display-name.mjs, tests/identity-display-name.test.js
 RC-2026-09-25-943 | jillian | working | 2026-09-26T11:24:41Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
+RC-2026-09-25-301 | instinct | working | 2026-09-26T13:04:47Z | scripts/probe-prod.mjs, scripts/probe-prod-lib.mjs, docs/INCIDENT-1101-RUNBOOK.md
+RC-2026-09-25-302 | instinct | working | 2026-09-26T13:04:48Z | scripts/untested-modules-lint.mjs, tests/room-flood-guard.test.js, .github/workflows/test.yml
+RC-2026-09-25-303 | instinct | working | 2026-09-26T13:04:48Z | tests/self-serve-join-contract.test.js
+RC-2026-09-25-304 | instinct | working | 2026-09-26T13:04:49Z | scripts/watch-deploy-drift.mjs
 
 ## unclaimed-lanes
 lane | focus | trust
