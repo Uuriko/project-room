@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { request as httpRequest } from "node:http";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { ChannelWebhookInbox, channelSyncLimits, syncTelegramConnection } from "../server/channel-import.mjs";
@@ -118,4 +119,26 @@ test("the webhook takes a 64 KB Telegram update while sibling routes keep the 16
   assert.ok(Buffer.byteLength(JSON.stringify(justOver)) > 16384 && Buffer.byteLength(JSON.stringify(justOver)) < 17000);
   response = await sync(justOver);
   assert.equal(response.status, 413, "the sibling cap is byte-exact at 16 KB, not the webhook's");
+});
+
+test("declared oversize returns 413 before a stalled client sends or ends its body", async t => {
+  const f = fixture(t), { origin } = await f.serve();
+  const headers = { Cookie: "account_session=" + f.auth.token, "X-Session-Binding": f.auth.sessionBinding,
+    Origin: origin, "Content-Type": "application/json", "X-CSRF-Token": f.auth.csrf, "Content-Length": "17000" };
+  // Do not call end(): the peer advertises a body just above the 16 KB cap
+  // but sends zero bytes. The response must arrive while the upload is open.
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(origin + "/api/inbox/connections/" + f.connections[0].id + "/sync", {
+      method: "POST", headers
+    }, res => {
+      const code = res.statusCode;
+      res.resume();
+      res.on("end", () => { clearTimeout(timer); req.destroy(); resolve(code); });
+    });
+    const timer = setTimeout(() => { req.destroy(); reject(new Error("stalled declared-oversize upload did not receive a prompt response")); }, 1500);
+    req.on("error", error => { clearTimeout(timer); reject(error); });
+    req.flushHeaders();
+  });
+  assert.equal(status, 413);
+  assert.equal(f.pending(0), 0);
 });
