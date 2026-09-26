@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T11:29:20Z · board: Uuriko/project-room#266 · watermark: 5845328845 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=5835348d9599c84f91d02b9963500bfa9d1432aedf3c1632d421d38850540a39 -->
+<!-- generated: 2026-09-26T11:59:04Z · board: Uuriko/project-room#266 · watermark: 5845960939 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=498dfdbe2a350920014a7eed47990433e8a2c42d1de098a20e7deb9d810aa531 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -298,6 +298,7 @@ RC-2026-09-25-301 | instinct | working | 2026-09-26T13:04:47Z | scripts/probe-pr
 RC-2026-09-25-302 | instinct | working | 2026-09-26T13:04:48Z | scripts/untested-modules-lint.mjs, tests/room-flood-guard.test.js, .github/workflows/test.yml
 RC-2026-09-25-303 | instinct | working | 2026-09-26T13:04:48Z | tests/self-serve-join-contract.test.js
 RC-2026-09-25-304 | instinct | working | 2026-09-26T13:04:49Z | scripts/watch-deploy-drift.mjs
+RC-2026-09-25-943 | jillian | working | 2026-09-26T17:40:09Z | src/events.js, server/spend-allowance.mjs, tests/spend-allowance.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -549,5 +550,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2015 threshold=1500 rotation_due=yes watcher=active open_claims=71 prose_open=3 unfenced_prose=73 files_claimed=175 overlap_files=29 watermark=5845328845
+board_comments=2018 threshold=1500 rotation_due=yes watcher=active open_claims=71 prose_open=3 unfenced_prose=73 files_claimed=175 overlap_files=29 watermark=5845960939
 
