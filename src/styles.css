@@ -455,7 +455,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #signin-more:hover { color: var(--text); }
 #signin-extra { margin-top: .5rem; }
 #guest-entry { margin-top: .75rem; }
-#guest-entry > summary { padding: .75rem; text-align: center; border: 1px solid var(--line); border-radius: .5rem; color: var(--text); }
+#guest-entry > summary { padding: .7rem 0; min-height: 44px; color: var(--muted); }
 #guest-entry[open] > summary { margin-bottom: .75rem; }
 #guest-entry .invite-row { display: grid; }
 .auth-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .5rem; margin-top: .5rem; }
@@ -475,7 +475,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .app-shell:has(#auth-panel:not([hidden])) #identity-label,
 .app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
-.auth-panel h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.12; }
+.auth-panel h1 { font-size: clamp(1.7rem, 4vw, 1.9rem); line-height: 1.2; text-wrap: balance; }
 .auth-panel p, dialog p { line-height: 1.6; }
 #invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
@@ -1109,8 +1109,6 @@ summary { overflow-wrap: anywhere; }
 .auth-divider { display: flex; align-items: center; gap: .6rem; margin: .9rem 0; color: var(--muted); font-size: .72rem; }
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 #google-signin { display: block; text-align: center; text-decoration: none; margin-bottom: .2rem; font-size: 1.05rem; padding: .95rem 1.15rem; }
-.auth-email-pair { display: grid; gap: .5rem; margin-top: .75rem; }
-.auth-email-pair .button { width: 100%; }
 #email-auth-panel { margin-top: .75rem; }
 #email-auth-panel form { display: grid; gap: .75rem; }
 .invite-row { display: flex; gap: .5rem; margin-top: .5rem; }
@@ -1125,8 +1123,7 @@ summary { overflow-wrap: anywhere; }
    the bottom of them. The prompt shows in full - a reader who cannot see what
    they are about to paste into their agent has no reason to trust it, and the
    clipboard fallback needs visible text to select. */
-.join-agent { margin: 1.25rem 0 0; padding: 1.1rem 0 0; border-top: 1px solid var(--line); }
-.join-agent h2 { margin: 0 0 .2rem; font-size: 1.05rem; }
+.join-agent { margin: .25rem 0 0; }
 .join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
 .join-agent details { margin-top: .75rem; }
 .join-agent ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
@@ -1455,3 +1452,16 @@ summary { overflow-wrap: anywhere; }
 .land-checks-red { background: #f85149; }
 .land-checks-pending { background: #d29922; }
 .land-badge { font-size: .68rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem; }
+
+/* Welcome starts with two methods; the selected email form replaces them. */
+.auth-panel .auth-intro { margin: -.75rem 0 1.5rem; color: var(--muted); }
+.signin-methods { display: grid; gap: .75rem; }
+.signin-methods .button { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; line-height: 1.4; padding: .75rem 1rem; margin: 0; }
+.signin-methods #google-signin { font-size: 1rem; padding: .75rem 1rem; margin: 0; }
+#email-auth-step > .text-button { margin-bottom: .75rem; }
+#auth-panel > .invite-help { margin-top: 1.25rem; }
+#auth-panel > #signin-more { margin-top: 1rem; }
+.join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
+.join-agent[open] > summary { margin-bottom: .75rem; }
+
+.auth-panel .auth-email-title { margin: 0; font-size: 1.15rem; }
