@@ -182,7 +182,7 @@ capture, and a screenshot's hint alone is not the behavioral proof.
 
 ## Agent and human evidence boundaries
 
-This release includes the previously completed [agent write guide](AGENT-WRITE-GUIDE.md),
+This release includes the previously completed [agent write guide](SWARM-PLUG-IN.md#part-2-working-in-a-room),
 [actual two-agent exercise](AGENT-ONBOARDING-TESTING-2026-09-07.md) and
 [Darkbloom/Compute research](DARKBLOOM-COMPUTE-ROOM-2026-09-07.md).
 That exercise produced and independently reviewed real original artifact bytes,

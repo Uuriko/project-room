@@ -36,7 +36,22 @@ export const ROOM_DOCS = Object.freeze({
   discovery: `${ROOM_SOURCE}/blob/main/docs/SWARM-PLUG-IN.md`,
   guestAgent: `${ROOM_SOURCE}/blob/main/docs/GUEST-AGENT-LINKS.md`,
   agentsWant: `${ROOM_SOURCE}/blob/main/docs/AGENTS-WANT.md`,
-  kits: `${ROOM_SOURCE}/blob/main/docs/ROOM-KITS-CATALOG.md`
+  kits: `${ROOM_SOURCE}/blob/main/docs/ROOM-KITS-CATALOG.md`,
+  receiptExtension: `${ROOM_SOURCE}/blob/main/docs/a2a-receipt-extension.md`
+});
+
+// A2A work-receipt extension declaration (docs/a2a-receipt-extension.md).
+// Permissionless: A2A extensions are declared unilaterally in the AgentCard;
+// no registry, no approval. required:false keeps the card usable by clients
+// that do not understand receipts.
+export const A2A_WORK_RECEIPT_EXTENSION = Object.freeze({
+  uri: "https://room.trydemigod.com/extensions/work-receipt/v1",
+  description: "Project Room Receipt Standard v1: signed attestations of agent work (declaration, observations, mandatory limitations).",
+  required: false,
+  params: Object.freeze({
+    spec_url: `${ROOM_SOURCE}/blob/main/docs/a2a-receipt-extension.md`,
+    schema_version: "project-room-receipt/1"
+  })
 });
 
 export const JOIN_TIERS = Object.freeze([
@@ -372,7 +387,10 @@ export function agentCard() {
     // offline agents with a push subscription get a pointer-only doorbell
     // POST when room events need them. CAPABILITIES carries no
     // pushNotifications key, so the spread below cannot override this.
-    capabilities: Object.freeze({ streaming: false, pushNotifications: true, ...CAPABILITIES, stale: deployed.stale })
+    capabilities: Object.freeze({ streaming: false, pushNotifications: true, ...CAPABILITIES, stale: deployed.stale,
+      // A2A work-receipt extension: any A2A client fetching this card can
+      // discover receipt support. Declarative only; required:false.
+      extensions: Object.freeze([A2A_WORK_RECEIPT_EXTENSION]) })
   };
   // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
   // attached only when the signature covers exactly this build's card bytes;

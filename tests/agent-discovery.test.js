@@ -507,6 +507,20 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
   assert.equal(card.protocolVersion, DISCOVERY_PROTOCOL_VERSION);
 });
 
+test("A2A agent card declares the work-receipt extension (docs/a2a-receipt-extension.md)", () => {
+  // Interop contract: any A2A client fetching /.well-known/agent-card.json
+  // must be able to discover receipt support. Guarded here because the
+  // declaration is a single line in the capabilities literal — a careless
+  // rebase could drop it and clients would silently lose discovery.
+  const card = agentCard();
+  assert.ok(Array.isArray(card.capabilities.extensions), "capabilities.extensions");
+  const ext = card.capabilities.extensions.find(e => e.uri === "https://room.trydemigod.com/extensions/work-receipt/v1");
+  assert.ok(ext, "work-receipt extension declared");
+  assert.equal(ext.required, false, "extension is declarative, never a gate");
+  assert.equal(ext.params.schema_version, "project-room-receipt/1");
+  assert.match(ext.params.spec_url, /a2a-receipt-extension\.md$/);
+});
+
 // ============================================================================
 // B029-2 [quill-s2]: pure A2A agent discovery planner (../src/agent-discovery.mjs)
 //

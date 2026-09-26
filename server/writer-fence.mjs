@@ -58,6 +58,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
   "inbox_handoffs",
+  // private_next_action_dismissals + private_next_action_suppressions
+  // (RC-2026-09-25-911, ranked next-actions) are purely additive and
+  // intentionally NOT fenced: same rationale as private_attention_prefs —
+  // older writers have no code path to them, and the rows are always scoped
+  // to an existing (room_id, member_id).
+  "private_next_action_dismissals",
+  "private_next_action_suppressions",
   // inbox_handoff_rooms records which room a collab-route handoff was made in,
   // so an agent acting under the owner's account is held to that room. Purely
   // additive beside inbox_handoffs, with no path from any older writer.
@@ -270,7 +277,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // (convergent).
   "referral_invite_keys",
   "referral_invites",
-  "referral_chain_members"
+  "referral_chain_members",
+  // telegram_live_status (durable Telegram live-delivery/send facts, task 10)
+  // is purely additive and intentionally NOT fenced: same rationale — older
+  // writers have no code path to it, and the class verifies its own schema.
+  "telegram_live_status"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

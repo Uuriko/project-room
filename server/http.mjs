@@ -54,6 +54,7 @@ import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
+import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listPins, setPin } from "./pins.mjs";
@@ -155,7 +156,7 @@ export function touchLruEntry(map, key, makeValue, capacity) {
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
-  telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
+  telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
@@ -405,6 +406,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
   // so every RoomStore carries it; http.mjs only owns the service instance.
   const agentPlugin = createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin });
+  // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
+  // open path (server/store.mjs), so every RoomStore carries it; http.mjs
+  // only owns the service instance.
+  const nextActionsRoutes = createNextActionsRoutes({ store, json, reject, body, rate, roomCredentials, expectedBinding, accountBinding });
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
@@ -1203,7 +1208,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         const scopeItems = validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time — list and kill your sessions with the <code>/api/oauth/sessions</code> endpoints, or revoke a single token at <code>POST /oauth/revoke</code>.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
@@ -1291,6 +1296,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`oauth-token-exchange:${remoteAddress}`, 60);
         const data = await body(req);
         const grantType = data.grant_type;
+        // F-02 session metadata: the IP and User-Agent seen at issuance,
+        // stored read-only on the token records so GET /api/oauth/sessions
+        // can show the user which sessions are theirs.
+        const sessionMeta = {
+          ip: typeof remoteAddress === "string" ? remoteAddress : null,
+          userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : null,
+        };
         try {
           let tokens;
           if (grantType === "authorization_code") {
@@ -1299,11 +1311,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               clientId: data.client_id,
               redirectUri: data.redirect_uri,
               codeVerifier: data.code_verifier,
+              session: sessionMeta,
             });
           } else if (grantType === "refresh_token") {
             tokens = oauthProvider.refresh({
               refreshToken: data.refresh_token,
               clientId: data.client_id,
+              session: sessionMeta,
             });
           } else {
             return json(res, 400, { error: "unsupported_grant_type" });
@@ -1321,11 +1335,52 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
       }
       // POST /oauth/revoke — revoke an access or refresh token (RFC 7009).
+      // F-02: revoking a refresh token kills its whole token family, so
+      // every access token derived from the grant dies immediately (this
+      // is what the consent screen promises). Revoking an access token
+      // stays surgical — only that token dies.
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
         rate(`oauth-revoke:${remoteAddress}`, 60);
         const data = await body(req);
         oauthProvider.revoke(data.token);
         return json(res, 200, {});
+      }
+      // GET /api/oauth/sessions — list the signed-in account's active OAuth
+      // sessions (F-02). One entry per live token family: client, issued-at,
+      // scopes, and the IP/User-Agent seen at issuance. Account session
+      // cookie + session binding; a caller only ever sees their own families.
+      if (url.pathname === "/api/oauth/sessions" && req.method === "GET") {
+        rate(`oauth-sessions-list:${remoteAddress}`, 60);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        return json(res, 200, { sessions: oauthProvider.listSessions({ userId: auth.account.id }) });
+      }
+      // POST /api/oauth/sessions/revoke-all — kill every OAuth session for
+      // the signed-in account (F-02): all refresh families and access tokens
+      // die immediately, across all clients. The consent promise made real.
+      if (url.pathname === "/api/oauth/sessions/revoke-all" && req.method === "POST") {
+        rate(`oauth-sessions-revoke-all:${remoteAddress}`, 30);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        protectWrite(req, auth, false);
+        const revoked = oauthProvider.revokeAllForUser({ userId: auth.account.id });
+        return json(res, 200, { revoked });
+      }
+      // DELETE /api/oauth/sessions/:id — kill one session (token family)
+      // owned by the signed-in account (F-02). Unknown ids and other users'
+      // families both answer 404, so a caller can't probe for them.
+      const oauthSessionKill = /^\/api\/oauth\/sessions\/([^/]{1,128})$/.exec(url.pathname);
+      if (oauthSessionKill && req.method === "DELETE") {
+        rate(`oauth-session-kill:${remoteAddress}`, 60);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        protectWrite(req, auth, false);
+        const revoked = oauthProvider.revokeSession({ userId: auth.account.id, familyId: oauthSessionKill[1] });
+        if (revoked === 0) reject(404, "session_not_found", "No such active session");
+        return json(res, 200, { revoked });
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
@@ -2054,7 +2109,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // account instead of the sign-in find-or-provision order.
       const requireAccountSession = () => {
         const slotToken = cookie(req, accountCookieName);
-        if (!slotToken) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage your account");
         let session;
         try {
           session = store.authenticateAccountSession(slotToken);
@@ -2062,7 +2117,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (error.status !== 401) throw error;
           reject(401, "invalid_session", "That session is no longer valid; sign in again");
         }
-        if (!session.account) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        if (!session.account) reject(401, "account_session_required", "Sign in to manage your account");
         return { ...session, slotToken };
       };
       const providerConfigured = probe => {
@@ -2353,6 +2408,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           nextActions: nextActionsForInviteRedeem(result.roomId),
         });
       }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/share-links/join-agent" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
       if (url.pathname === "/api/share-links/join" && req.method === "POST") {
         checkOrigin(req, true);
         const token = cookie(req, accountCookieName), slot = store.accountSessionSlot(token);
@@ -2516,6 +2576,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
+      if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
       // Public agent-invite join page: GET /join and GET /join/:code
       // (plus the /room/join twins on the www door). Unauthenticated and
       // stateless by design, like POST /join: the page previews the invite
@@ -2770,6 +2831,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             decisionWindowDays: REQUEST_TTL_MS / 86400000,
           }),
         });
+      }
+      // POST-only route: a wrong method is 405 (Allow: POST), not a 404
+      // unknown-route, so a mistaken GET reads as a method error.
+      if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity
       // creates a room and becomes its owner. The pri_ secret travels in

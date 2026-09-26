@@ -146,7 +146,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   };
 
   // Step 3: exchange an authorization code for tokens. Verifies PKCE.
-  const exchangeCode = ({ code, clientId, redirectUri, codeVerifier }) => {
+  const exchangeCode = ({ code, clientId, redirectUri, codeVerifier, session }) => {
     check(typeof code === "string" && code.length > 0, "code is required");
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     check(typeof redirectUri === "string" && redirectUri.length > 0, "redirect_uri is required");
@@ -165,27 +165,42 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(a.length === b.length && timingSafeEqual(a, b), "PKCE verification failed");
     record.used = true;
 
-    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes] });
+    return issueTokenPair({ clientId: record.clientId, userId: record.userId, scopes: [...record.scopes], session });
+  };
+
+  // Session metadata attached at issuance (F-02): the IP and User-Agent
+  // seen when the grant was created or refreshed, surfaced read-only by
+  // listSessions so the user can recognize their own sessions. Coerced,
+  // never thrown on — a missing or malformed meta degrades to nulls.
+  const normalizeSessionMeta = session => {
+    if (session == null) return { ip: null, userAgent: null };
+    check(typeof session === "object", "session must be an object if given");
+    const str = (value, max) =>
+      typeof value === "string" && value.length > 0 ? value.slice(0, max) : null;
+    return { ip: str(session.ip, 64), userAgent: str(session.userAgent, 256) };
   };
 
   // Every access+refresh pair minted from one grant shares a familyId.
   // Rotation carries the familyId forward; reuse of a rotated refresh token
   // (record.rotatedBy set) then revokes the whole family (F-01).
-  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}` }) => {
+  const issueTokenPair = ({ clientId, userId, scopes, familyId = `oarf_${newSecret(16)}`, session } = {}) => {
     const validScopes = validateScopes(scopes);
     const accessToken = `oat_${newSecret()}`;
     const refreshToken = `oar_${newSecret()}`;
     const at = now();
+    const meta = normalizeSessionMeta(session);
     accessStore.set(sha256(accessToken), {
       tokenHash: sha256(accessToken),
       clientId, userId, scopes: validScopes, familyId,
       createdAt: at, expiresAt: at + ACCESS_TOKEN_TTL_MS, revoked: false,
+      ip: meta.ip, userAgent: meta.userAgent,
     });
     refreshStore.set(sha256(refreshToken), {
       tokenHash: sha256(refreshToken),
       clientId, userId, scopes: validScopes, familyId,
       createdAt: at, expiresAt: at + REFRESH_TOKEN_TTL_MS, revoked: false,
       rotatedBy: null, // hash of the refresh token that superseded this one
+      ip: meta.ip, userAgent: meta.userAgent,
     });
     return Object.freeze({
       accessToken, refreshToken,
@@ -213,7 +228,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   // (OAuth Security BCP §4.12 / RFC 6749 §6): the whole token family is
   // revoked and the caller gets a distinct invalid_grant so the legitimate
   // user sees a theft signal instead of a silent "revoked".
-  const refresh = ({ refreshToken, clientId }) => {
+  const refresh = ({ refreshToken, clientId, session }) => {
     check(typeof refreshToken === "string" && refreshToken.length > 0, "refresh_token is required");
     check(typeof clientId === "string" && clientId.length > 0, "client_id is required");
     const record = refreshStore.get(sha256(refreshToken));
@@ -236,7 +251,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     record.revoked = true; // rotation: old refresh token is single-use
     const next = issueTokenPair({
       clientId: record.clientId, userId: record.userId,
-      scopes: [...record.scopes], familyId: record.familyId,
+      scopes: [...record.scopes], familyId: record.familyId, session,
     });
     record.rotatedBy = sha256(next.refreshToken);
     return next;
@@ -254,29 +269,91 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     });
   };
 
-  // RFC 7009 revocation: revoke an access or refresh token.
+  // RFC 7009 revocation: revoke an access or refresh token. Revoking a
+  // refresh token kills its whole token family (F-02): every access token
+  // derived from the grant dies immediately instead of lingering to its
+  // 1-hour TTL, which is what the consent screen promises ("revoke access
+  // at any time"). Revoking an access token stays surgical — only that
+  // token dies. Rotation never calls this (it flips the single record's
+  // flag directly), so a routine refresh does not nuke the family.
   const revoke = token => {
     check(typeof token === "string" && token.length > 0, "token must be a non-empty string");
     const digest = sha256(token);
     const at = accessStore.get(digest);
     if (at) { at.revoked = true; return true; }
     const rt = refreshStore.get(digest);
-    if (rt) { rt.revoked = true; return true; }
+    if (rt) { revokeTokenFamily(rt.familyId); return true; }
     return false; // RFC 7009: invalid tokens still return success
   };
 
-  // Revoke all tokens for a user+client pair (disconnect).
-  const revokeAllForUser = ({ userId, clientId }) => {
+  // Revoke all tokens for a user (disconnect). clientId narrows to one
+  // client; omit it to kill every session the user holds (F-02).
+  const revokeAllForUser = ({ userId, clientId } = {}) => {
     check(typeof userId === "string" && userId.length > 0, "userId is required");
-    check(typeof clientId === "string" && clientId.length > 0, "clientId is required");
+    check(clientId === undefined || (typeof clientId === "string" && clientId.length > 0),
+      "clientId must be a non-empty string if given");
     let count = 0;
     for (const record of accessStore.values()) {
-      if (record.userId === userId && record.clientId === clientId && !record.revoked) {
+      if (record.userId === userId && (clientId === undefined || record.clientId === clientId) && !record.revoked) {
         record.revoked = true; count++;
       }
     }
     for (const record of refreshStore.values()) {
-      if (record.userId === userId && record.clientId === clientId && !record.revoked) {
+      if (record.userId === userId && (clientId === undefined || record.clientId === clientId) && !record.revoked) {
+        record.revoked = true; count++;
+      }
+    }
+    return count;
+  };
+
+  // F-02 session inventory: the user's live token families. A family only
+  // appears while it still holds a non-revoked, non-expired token; fully
+  // revoked or expired families drop out on their own. The IP/User-Agent
+  // shown is the newest record's — issuance-time metadata, read-only.
+  const listSessions = ({ userId } = {}) => {
+    check(typeof userId === "string" && userId.length > 0, "userId is required");
+    const families = new Map();
+    const fold = (record, kind) => {
+      if (record.userId !== userId || record.revoked || isExpired(record, now)) return;
+      let agg = families.get(record.familyId);
+      if (!agg) {
+        agg = { id: record.familyId, clientId: record.clientId, issuedAt: record.createdAt,
+          scopes: [], ip: null, userAgent: null, newestAt: -1, accessTokens: 0, refreshTokens: 0 };
+        families.set(record.familyId, agg);
+      }
+      if (record.createdAt < agg.issuedAt) agg.issuedAt = record.createdAt;
+      if (record.createdAt >= agg.newestAt) {
+        agg.newestAt = record.createdAt;
+        agg.ip = record.ip ?? null;
+        agg.userAgent = record.userAgent ?? null;
+      }
+      for (const scope of record.scopes) if (!agg.scopes.includes(scope)) agg.scopes.push(scope);
+      if (kind === "access") agg.accessTokens++; else agg.refreshTokens++;
+    };
+    for (const record of accessStore.values()) fold(record, "access");
+    for (const record of refreshStore.values()) fold(record, "refresh");
+    return [...families.values()]
+      .map(({ newestAt, ...rest }) => Object.freeze({ ...rest, scopes: Object.freeze(rest.scopes) }))
+      .sort((a, b) => b.issuedAt - a.issuedAt);
+  };
+
+  // F-02 single-session kill: revoke the whole family, but only when it
+  // belongs to the caller. Returns the number of tokens newly revoked; 0
+  // when the family is unknown, fully revoked, or belongs to someone else —
+  // the HTTP layer answers 404 without distinguishing those cases, so a
+  // caller can't probe for other users' sessions.
+  const revokeSession = ({ userId, familyId } = {}) => {
+    check(typeof userId === "string" && userId.length > 0, "userId is required");
+    check(typeof familyId === "string" && familyId.length > 0 && familyId.length <= 128,
+      "familyId must be a non-empty string up to 128 chars");
+    let count = 0;
+    for (const record of accessStore.values()) {
+      if (record.familyId === familyId && record.userId === userId && !record.revoked) {
+        record.revoked = true; count++;
+      }
+    }
+    for (const record of refreshStore.values()) {
+      if (record.familyId === familyId && record.userId === userId && !record.revoked) {
         record.revoked = true; count++;
       }
     }
@@ -304,6 +381,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     verifyAccessToken,
     revoke,
     revokeAllForUser,
+    listSessions,
+    revokeSession,
     grants,
     OAUTH_SCOPES,
   });

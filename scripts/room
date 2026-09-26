@@ -183,9 +183,9 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             first: refuses (exit 2) if the task-id is already used, or any of
             the files are claimed live by a different lane. Refusal is posted
             as RECLAIM with stamp <!-- room:duplicate-refusal:<task-id>:<ts> -->.
-  heartbeat --task-id ID --lane LANE [--note "..."]
+  heartbeat --task-id ID --lane LANE [--note "..."] [--dry-run]
             Post [lane]STATUS: restating the claim block with state: working.
-  release   --task-id ID --lane LANE --reason "..."
+  release   --task-id ID --lane LANE --reason "..." [--dry-run]
             Post [lane]STATUS: restating the claim block with state: cancelled.
   query     [--lane LANE] [--status S] [--file F] [--work-for LANE]
             [--state PATH] [--live]
@@ -193,10 +193,10 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             --live rebuilds from the board instead. --work-for answers
             "is there work for me?": submitted-but-unclaimed tasks, leases
             expiring <6h, unclaimed lanes.
-  handoff   --task-id ID --from LANE --to LANE --context "..." [--note "..."]
+  handoff   --task-id ID --from LANE --to LANE --context "..." [--note "..."] [--dry-run]
             Post [lane]HANDOFF: with room-handoff block + restated claim block
             naming the receiving lane. (Transfers on ACK, not on post.)
-  receipt   --task-id ID --lane LANE --merged SHA|none --note "..."
+  receipt   --task-id ID --lane LANE --merged SHA|none --note "..." [--dry-run]
             Post [lane]DONE: + room-receipt block (24h receipt SLO).
 
 Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
@@ -213,7 +213,7 @@ Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
             (@-mention, 4h grace); strike-two releases the task back to
             submitted with no lane; illegal transitions get a RECLAIM
             rejection notice.
-  receipts-scan [--post]
+  receipts-scan [--post] [--dry-run]
             Completed tasks / merged PRs older than 24h without a room-receipt
             block. --post posts one prose digest comment (no protocol prefix;
             prose changes nothing).
@@ -485,7 +485,10 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
          elif (($b.files | test("\\*"))) then . + ["files: * forbidden"] else . end)
       | (if (($b.lease // "") == "") then . + ["missing lease"]
          else (($b.lease | capture("^lease=(?<n>[0-9]+)h$") // null) as $m
-               | if $m == null then . + ["lease must be lease=<N>h"]
+               | if $m == null then
+                   . + [if ($b.lease | test("^[0-9]+h$")) then
+                          "lease must be lease=<N>h (1-72h); did you mean lease=" + $b.lease + "?"
+                        else "lease must be lease=<N>h" end]
                  elif (($m.n | tonumber) < 1 or ($m.n | tonumber) > 72)
                    then . + ["lease out of range 1-72h"]
                  else . end)
@@ -1058,6 +1061,7 @@ cmd_heartbeat() {
     --task-id) task="$2"; shift 2 ;;
     --lane)    lane="$2"; shift 2 ;;
     --note)    note="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "heartbeat: unknown flag $1" ;;
   esac; done
   [ -n "$task" ] || die "heartbeat: --task-id required"
@@ -1084,6 +1088,7 @@ cmd_release() {
     --task-id) task="$2"; shift 2 ;;
     --lane)    lane="$2"; shift 2 ;;
     --reason)  reason="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "release: unknown flag $1" ;;
   esac; done
   [ -n "$task" ]   || die "release: --task-id required"
@@ -1110,6 +1115,7 @@ cmd_handoff() {
     --to)       to="$2"; shift 2 ;;
     --context)  context="$2"; shift 2 ;;
     --note)     note="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "handoff: unknown flag $1" ;;
   esac; done
   [ -n "$task" ]    || die "handoff: --task-id required"
@@ -1142,6 +1148,7 @@ cmd_receipt() {
     --lane)    lane="$2"; shift 2 ;;
     --merged)  merged="$2"; shift 2 ;;
     --note)    note="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "receipt: unknown flag $1" ;;
   esac; done
   [ -n "$task" ]   || die "receipt: --task-id required"
@@ -1511,6 +1518,7 @@ cmd_receipts_scan() {
   local post=0
   while [ $# -gt 0 ]; do case "$1" in
     --post) post=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "receipts-scan: unknown flag $1" ;;
   esac; done
   local st now cutoff trows prows lock_dir=""

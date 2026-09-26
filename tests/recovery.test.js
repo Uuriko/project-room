@@ -74,6 +74,19 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
     (delivery_id,idempotency_key,subscription_id,agent_id,event_id,event_type,room_id,payload_json,signature,state,attempts,next_attempt_at,last_error,created_at,updated_at)
     VALUES('recovery-delivery','recovery-delivery-key','recovery-subscription','recovery-agent',NULL,'wake.ping','commons','{"kind":"wake.ping"}','sha256=recovery','pending',0,?,NULL,?,?)`)
     .run(f.now() + 1000, f.now(), f.now());
+  // Seed one dismissal and one suppression so the capture comparison covers
+  // private_next_action_dismissals and private_next_action_suppressions
+  // (ranked next-actions private state RC-2026-09-25-911). Written directly:
+  // the store API needs an authenticated token and the fixture's keys are
+  // already committed to other seeding paths.
+  f.store.db.prepare(`INSERT INTO private_next_action_dismissals
+    (room_id,member_id,action_id,dismissed_at,expires_at,reason)
+    VALUES('commons','recovery-agent','na:recovery-dismissed',?,?,?)`)
+    .run(f.now(), f.now() + 14 * 24 * 3600 * 1000, "seeded so the capture covers private_next_action_dismissals");
+  f.store.db.prepare(`INSERT INTO private_next_action_suppressions
+    (room_id,member_id,kind,reason,updated_at)
+    VALUES('commons','recovery-agent','poll-closing','seeded so the capture covers private_next_action_suppressions',?)`)
+    .run(f.now());
   // Seed one pending OAuth state so the capture covers oauth_pending_states
   // (RC-2026-09-19: PKCE state moved into SQLite so a Worker isolate can be
   // evicted between the provider redirect and the callback). It is short-lived
@@ -133,8 +146,8 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
      rejected_at, reject_reason, redeemed_at, redeemed_member_id, redeemed_identity_id)
     VALUES('recovery-referral-jti','commons','recovery-chain','owner',0,6,?,?, 'redeemed',NULL,NULL,?, 'referred-agent-recovery', ?)`)
     .run(f.now(), f.now() + 7 * 86400000, f.now(), identityId);
-  f.store.db.prepare(`INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth)
-    VALUES('commons','referred-agent-recovery','recovery-chain',0)`).run();
+  f.store.db.prepare(`INSERT INTO referral_chain_members (room_id, member_id, chain_id, depth, max_depth)
+    VALUES('commons','referred-agent-recovery','recovery-chain',0,6)`).run();
   // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
   // agent_directory_cards and agent_webhook_subs.
   f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
@@ -322,9 +335,15 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
      mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', 'lq_recovery', 'acme/widgets', 7, 'owner', 'owner', 'Recovery PR', ?, 'unknown', 0, 'pending', 1, ?, ?)`)
     .run("a".repeat(40), f.now(), f.now());
+  // telegram_live_status (durable Telegram live-delivery/send facts, task 10).
+  // Synthetic data only: the recovery account received 3 updates and its last
+  // send succeeded, so the capture covers the new table.
+  f.store.db.prepare(`INSERT INTO telegram_live_status(account_id,connection_id,last_update_received_at,received_updates,last_send_at,last_send_outcome,last_send_code,updated_at)
+    VALUES('recovery-account','recovery-connection',?,3,?,'ok','200',?)`)
+    .run(f.now(), f.now(), f.now());
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 121,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 124,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025); +2: private_next_action_dismissals, private_next_action_suppressions (ranked next-actions private state RC-2026-09-25-911); +1: telegram_live_status (durable Telegram live-delivery/send facts, task #10)
 
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
