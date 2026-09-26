@@ -2,13 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { DmConsents, dmConsentSchema } from "../server/dm-consents.mjs";
-import { setTier } from "../server/autonomy-tiers.mjs";
+import { AUTONOMY_TIERS_SCHEMA, setTier } from "../server/autonomy-tiers.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
 function makeStore(states) {
   const db = new DatabaseSync(":memory:");
   db.exec(dmConsentSchema);
+  // The real RoomStore boot path creates the autonomy-tier table (the
+  // request path now reads it — issue #995), so the stub carries it too.
+  db.exec(AUTONOMY_TIERS_SCHEMA);
   return {
     db,
     transaction(fn) {

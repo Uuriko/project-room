@@ -29,6 +29,7 @@
 // RoomStore (db handle, transactions, room state) and exports its schema
 // for store.mjs to apply. Local ServiceError avoids the store.mjs import
 // cycle (Workers-bundle-safe).
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -125,8 +126,17 @@ export class DmConsents {
 
     return this.store.transaction(() => {
       const state = this._roomState(roomId);
-      this._requireActiveMember(state, requesterId, "requester_not_found");
+      const requester = this._requireActiveMember(state, requesterId, "requester_not_found");
       this._requireActiveMember(state, targetId, "target_not_found");
+      // Issue #995: a DM request is new outbound contact, and this write
+      // bypasses store.command(), so the command-hook tier gate never sees
+      // it. A t1_readonly agent may not initiate; the protective actions
+      // below (decide/block/revoke/unblock) stay open because they only
+      // protect the caller.
+      enforceAutonomyTierForAction({
+        db: this.db, roomId, state, actor: { id: requesterId, kind: requester.kind },
+        action: "dm_consent_request", fail,
+      });
       const existing = this._get(roomId, requesterId, targetId);
       if (existing) {
         if (existing.status === "blocked") fail(403, "dm_blocked", "This member is not accepting DM requests from you");

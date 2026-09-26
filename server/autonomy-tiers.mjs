@@ -225,3 +225,17 @@ export function setAgentAutonomyTier(store, token, roomId, memberId, request, ex
     return { ...autonomyTierReport(store.db, roomId, store.room(roomId).state, memberId, nowMs), evaluatedThrough: store.room(roomId).sequence };
   });
 }
+
+// Direct enforcement for store APIs that bypass store.command() — DM consent
+// routes (dm-consents.mjs) write rows without emitting a command, so the
+// command hook never sees them. Same policy as enforceAutonomyTiers: agents
+// at t1_readonly may not initiate contact; they keep protective actions
+// (decide/block/revoke/unblock) on requests addressed to them.
+export function enforceAutonomyTierForAction({ db, roomId, state, actor, action, fail = refuse }) {
+  if (!db || typeof roomId !== "string" || !action) return;
+  if (!actor || typeof actor.id !== "string" || actor.kind !== "agent") return;
+  if (state?.room && actor.id === state.room.ownerId) return;
+  const tier = getTier(db, roomId, actor.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+  if (tier === "t1_readonly")
+    fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${action}`);
+}
