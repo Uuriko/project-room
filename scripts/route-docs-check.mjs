@@ -26,6 +26,7 @@ export function routeSources(root) {
     http: read("server/http.mjs"),
     pluginRoutes: read("server/agent-plugin-routes.mjs"),
     nextActionsRoutes: read("server/next-actions-routes.mjs"),
+    worker: read("cloudflare/room.mjs"),
     openapi: read("docs/openapi.yaml"),
   };
 }
@@ -68,7 +69,21 @@ export function nextActionsRouteTemplates(source) {
   return [...routes].sort();
 }
 
-export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, openapi }) {
+// Worker-served routes live in cloudflare/room.mjs as exact pathname
+// literals (url.pathname === '/api/health/jobs'): answers the Worker gives
+// before or instead of forwarding to the Durable Object. A trailing-slash
+// sibling of a route is the same route. The Worker surface is small and
+// stable, so every literal found here must be documented like any other.
+export function workerRouteTemplates(source) {
+  const routes = new Set();
+  for (const match of source.matchAll(/url\.pathname === '(\/api\/[^']+)'/g)) {
+    const path = match[1].replace(/\/+$/, "");
+    if (path) routes.add(path);
+  }
+  return [...routes].sort();
+}
+
+export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi }) {
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
@@ -92,6 +107,16 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, openapi 
       if (!served.has(key)) served.set(key, template);
     }
   }
+  // RC-2026-09-26-002: the Worker surface (cloudflare/room.mjs) is the
+  // fourth route source - routes answered before or instead of the Durable
+  // Object were invisible to this gate (/api/health/jobs until now).
+  if (typeof worker !== "string") throw new Error("routeDocsDrift needs cloudflare/room.mjs; routes are served from four files");
+  {
+    for (const template of workerRouteTemplates(worker)) {
+      const key = templateKey(template);
+      if (!served.has(key)) served.set(key, template);
+    }
+  }
   const operations = openapiOperations(openapi);
   const documented = new Map();
   // /api templates are the gate. Hosted MCP (/mcp, /room/mcp) is documented
@@ -100,7 +125,7 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, openapi 
     if (!path.startsWith("/api/")) continue;
     if (!documented.has(templateKey(path))) documented.set(templateKey(path), path);
   }
-  if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands")) throw new Error("server route extraction sanity failed");
+  if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands") || !served.has("/api/health/jobs")) throw new Error("server route extraction sanity failed");
   if (documented.size < 20 || !documented.has("/api/rooms/{}/commands")) throw new Error("docs/openapi.yaml parse sanity failed");
   const failures = [];
   for (const [key, template] of served) if (!documented.has(key)) failures.push(`served but not documented in docs/openapi.yaml: ${template}`);

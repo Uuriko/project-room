@@ -65,7 +65,7 @@ test("guest-agent tokens are a different shape from human share tokens", () => {
   assert.equal(contract.maxJoins, GUEST_AGENT_MAX_JOINS);
 });
 
-test("unauthenticated mint is 401 with next pointing at owner Add agent", async t => {
+test("unauthenticated mint remains 401 and preserves saved identity recovery", async t => {
   const { request } = await serve(t);
   const contract = await request("/api/guest-agent-links");
   assert.equal(contract.status, 200);
@@ -76,9 +76,10 @@ test("unauthenticated mint is 401 with next pointing at owner Add agent", async 
   const body = await mint.json();
   assert.equal(body.error.code, "unauthenticated");
   assert.equal(body.reason, "unauthenticated");
-  assert.match(body.hint, /Add agent/i);
+  assert.match(body.hint, /saved connection/i);
   assert.ok(validAgentNext(body.next));
-  assert.ok(body.next.some(step => /Add agent|mint/i.test(step.command || "")));
+  assert.equal(body.next[0].tool, "room_check_access");
+  assert.ok(!body.next.some(step => step.method === "POST"), "a rejected mint does not direct automatic credential issuance");
 });
 
 test("owner mint issues an ephemeral agent member and ga1. credential", async t => {
