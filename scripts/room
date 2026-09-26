@@ -1887,15 +1887,30 @@ cmd_jev_shadow() {
 }
 
 cmd_metrics() {
-  local since=""
+  local since="" since_epoch=""
   while [ $# -gt 0 ]; do case "$1" in
     --since) need_val "metrics" "$1" "$#" "${2:-}"; since="$2"; shift 2 ;;
     *) die "metrics: unknown flag $1" ;;
   esac; done
+  if [ -n "$since" ]; then
+    if [[ "$since" =~ ^(.*)([+-])([0-9]{2}):?([0-9]{2})$ ]]; then
+      local base="${BASH_REMATCH[1]}Z" sign="${BASH_REMATCH[2]}" hh="${BASH_REMATCH[3]}" mm="${BASH_REMATCH[4]}"
+      local base_epoch
+      base_epoch="$(iso_epoch "$base" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+      local off=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+      if [ "$sign" = "+" ]; then
+        since_epoch=$(( base_epoch - off ))
+      else
+        since_epoch=$(( base_epoch + off ))
+      fi
+    else
+      since_epoch="$(iso_epoch "$since" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+    fi
+  fi
   local comments n wm st lo hi days cpd
   comments="$(fetch_comments)"
-  if [ -n "$since" ]; then
-    comments="$(printf '%s' "$comments" | jq --arg s "$since" '[.[] | select(.created_at >= $s)]')"
+  if [ -n "$since_epoch" ]; then
+    comments="$(printf '%s' "$comments" | jq --argjson s "$since_epoch" '[.[] | select((.created_at | fromdateiso8601) >= $s)]')"
   fi
   n="$(printf '%s' "$comments" | jq 'length')"
   wm="$(printf '%s' "$comments" | jq 'map(.id) | max // 0')"
