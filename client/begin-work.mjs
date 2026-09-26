@@ -149,25 +149,29 @@ export function operationKey(memberId, requestId) {
   return createHash("sha256").update(`${memberId}:${requestId}`).digest("hex");
 }
 
-export function acceptReceipt(event, requestId, item) {
+function beginReceipt(event, requestId, item) {
   if (!event || !item || !requestId) return null;
-  if (event.type !== "work.accepted" || event.data?.workItemId !== item.id) return null;
+  if (!["work.accepted", "claim.acquired"].includes(event.type) || event.data?.workItemId !== item.id) return null;
   if (event.actorId !== item.accountableMemberId) return null;
   if (event.idempotencyKey !== operationKey(item.accountableMemberId, requestId)) return null;
   return {
-    action: "room_accept_work", requestId, eventId: event.id, type: event.type,
+    action: event.type === "work.accepted" ? "room_accept_work" : "room_acquire_claim",
+    requestId, eventId: event.id, type: event.type,
+    ...(event.type === "claim.acquired" ? { scope: {
+      repository: event.data.repository, ref: event.data.ref, paths: event.data.paths, expiresAt: event.data.expiresAt
+    }, acquiredAt: event.at } : {}),
     workItemId: event.data.workItemId, actorId: event.actorId,
     expectedRevision: event.data.expectedRevision ?? null
   };
 }
 
 // Pages are { events, next, hasMore }. A missing receipt is null, not a guessed revision.
-export async function findAcceptReceipt(pages, requestId, item) {
+export async function findBeginReceipt(pages, requestId, item) {
   let after = 0;
   for (let page = 0; page < 100; page += 1) {
     const result = await pages(after);
     for (const row of result?.events || []) {
-      const found = acceptReceipt(row.event || row, requestId, item);
+      const found = beginReceipt(row.event || row, requestId, item);
       if (found) return found;
     }
     if (!result?.hasMore) return null;
@@ -193,7 +197,7 @@ function preservedResume(pending, stage) {
 // Reads current work between stages. An unknown response keeps the same
 // request id. working is Room work state, not an external host start.
 // invocation pins an unknown stage. A different id is not executed unless the
-// exact claim or the recorded accept receipt already landed. A later revision
+// exact claim or its recorded operation receipt already landed. A later revision
 // is not proof of that accept. A response that never returned the stage id
 // cannot be recovered unless the caller already held that id.
 export async function beginSelectedWork({ connected, read, execute, scope = null, now = Date.now(), invocation = null, receipts = null } = {}) {
@@ -218,13 +222,18 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
     const plan = planBegin(context.work, context.viewer, { scope, now });
     if (!plan.stage) return readResult(context, plan, confirmed);
     if (pending && plan.stage.requestId !== pending.requestId) {
-      const claim = claimLanded(context.work, scope, pending);
+      let claim = claimLanded(context.work, scope, pending);
       let accept = null;
       if (!claim && plan.stage.action !== "room_accept_work") {
         try {
           const found = receipts ? await receipts(pending.requestId, context.work) : null;
-          accept = found && found.requestId === pending.requestId && found.type === "work.accepted"
-            && found.workItemId === context.work.id ? found : null;
+          const matches = found && found.requestId === pending.requestId
+            && found.workItemId === context.work.id && found.actorId === context.work.accountableMemberId;
+          accept = matches && found.type === "work.accepted" ? found : null;
+          claim = Boolean(matches && found.type === "claim.acquired"
+            && activeClaim(context.work, now) && context.work.claim.holderId === found.actorId
+            && context.work.claim.acquiredAt === found.acquiredAt
+            && sameExactScope(found.scope, scope) && sameExactScope(context.work.claim, scope));
         } catch {
           return stoppedResult(context, {
             confirmed, stopped: "unknown", resume: preservedResume(pending, plan.stage),

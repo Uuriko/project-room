@@ -1,5 +1,5 @@
 import { prepareWork } from "./work-preparation.mjs";
-import { beginSelectedWork, findAcceptReceipt, validBeginArguments } from "./begin-work.mjs";
+import { beginSelectedWork, findBeginReceipt, validBeginArguments } from "./begin-work.mjs";
 import { validId } from "../src/events.js";
 import { createHash } from "node:crypto";
 import { confirmsWorkReturn } from "../src/workflow.js";
@@ -105,7 +105,7 @@ async function beginOnClient(client, identity, args, signal) {
     scope: { workItemId: args.workItemId, repository: args.repository, ref: args.ref, paths: args.paths, expiresAt: args.expiresAt },
     invocation: args.invocationRequestId ? { requestId: args.invocationRequestId } : null,
     read: () => client.workContext(args.workItemId, { signal }),
-    receipts: (requestId, item) => findAcceptReceipt(after => client.changes(after, 100, { signal }), requestId, item),
+    receipts: (requestId, item) => findBeginReceipt(after => client.changes(after, 100, { signal }), requestId, item),
     execute: async stage => {
       try {
         return await submitWorkAction(client, identity, stage.action, stage.args, { signal });

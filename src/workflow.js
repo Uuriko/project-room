@@ -209,7 +209,7 @@ export function presentedWorkActions(item, member, now = Date.now()) {
   const match = actionId ? available.find(([action]) => action === actionId) : null;
   if (!match) return { primary: null, more: available, nextAction: next.action, nextLabel: next.label };
   return {
-    primary: { action: match[0], label: next.label },
+    primary: { action: match[0], label: match[0] === "verify" ? match[1] : next.label },
     more: available.filter(([action]) => action !== match[0]),
     nextAction: next.action,
     nextLabel: next.label
