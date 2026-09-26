@@ -2823,6 +2823,11 @@ paths:
                   items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
                   maxItems: 10
                   description: Free-form labels recorded on the item (useful at receipt creation)
+                files:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 64
+                  description: Repo-relative paths this work will touch. Used to warn other claimants about overlaps.
       responses:
         '201':
           description: The created unclaimed item
@@ -2954,13 +2959,36 @@ paths:
               properties:
                 note: { type: string }
                 leaseHours: { type: [number, 'null'], minimum: 0, maximum: 720 }
+                files:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 64
+                  description: Repo-relative paths this claim will touch. Replaces the item's files when given.
       responses:
         '200':
-          description: The claimed item
+          description: |
+            The claimed item, plus `fileWarnings`: other active claims that
+            declare any of the same files. A warning never blocks the claim.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkClaim'
+                allOf:
+                  - $ref: '#/components/schemas/WorkClaim'
+                  - type: object
+                    properties:
+                      fileWarnings:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            file: { type: string }
+                            heldBy:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id: { type: string }
+                                  owner: { type: [string, 'null'] }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
         '409': { description: work_claim_conflict }
@@ -10203,6 +10231,10 @@ components:
         deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
         reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }
         reviewedBy: { type: [string, 'null'] }
+        files:
+          type: array
+          items: { type: string }
+          description: Repo-relative paths the work declares it will touch (normalized, sorted)
         attestations:
           type: array
           items:

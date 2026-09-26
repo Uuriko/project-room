@@ -38,6 +38,7 @@ import {
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
+import { findClaimCollisions } from "./claim-collisions.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -65,6 +66,18 @@ export function createWorkClaimRegistry() {
     configFor(roomId) { return roomWorkClaimConfig({ workClaims: room(roomId).config }); },
     rawConfig(roomId) { return { ...room(roomId).config }; },
   };
+}
+
+// Active claims in this room that declare files the given claim also
+// declares. Returns [{ file, heldBy: [{ id, owner }] }] sorted by file.
+const WARN_STATES = ["claimed", "in_progress", "blocked"];
+export function fileWarningsFor(items, claimed) {
+  if (!Array.isArray(claimed.files) || claimed.files.length === 0) return [];
+  const active = items.filter(item => WARN_STATES.includes(item.state) && Array.isArray(item.files) && item.files.length > 0);
+  const owners = new Map(active.map(item => [item.id, item.owner]));
+  return findClaimCollisions(active.map(item => ({ id: item.id, lane: item.owner ?? undefined, status: item.state, files: item.files })))
+    .filter(collision => collision.claims.includes(claimed.id))
+    .map(collision => ({ file: collision.file, heldBy: collision.claims.filter(id => id !== claimed.id).map(id => ({ id, owner: owners.get(id) ?? null })) }));
 }
 
 const defaultRegistry = createWorkClaimRegistry();
@@ -268,11 +281,11 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const data = await body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?}");
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?}");
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags }, { now: nowMs }));
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs }));
     registry.set(roomId, item);
     return json(res, 201, item);
   }
@@ -281,12 +294,14 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = await body(req);
-    if (!shape(data, { optional: ["note", "leaseHours"] })) invalidInput(reject, "{note?, leaseHours?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files"] })) invalidInput(reject, "{note?, leaseHours?, files?}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
-    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: data.leaseHours ?? undefined, room: roomLike, now: nowMs }));
+    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: data.leaseHours ?? undefined, files: data.files, room: roomLike, now: nowMs }));
     registry.set(roomId, claimed);
-    return json(res, 200, claimed);
+    // Warn, never block: tell the claimant which declared files other
+    // active claims already hold, so the lanes talk before both edit them.
+    return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = await body(req);
