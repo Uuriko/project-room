@@ -37,6 +37,7 @@ import {
   renewWork, roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -180,6 +181,9 @@ const cursorDecode = (reject, value) => {
 
 export async function handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry = defaultRegistry }) {
   const { json, reject, body } = helpers;
+  if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
+    db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+    actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   const nowMs = Date.now();
   const sweptIds = sweepRoom(registry, roomId, nowMs);
   const caller = auth.member.id;

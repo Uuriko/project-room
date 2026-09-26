@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
@@ -174,6 +175,41 @@ test("watch is sticky and idempotent; idempotency keys replay safely", async t =
   assert.deepEqual(await fund2.json(), await fund1.json(), "replay returns the stored receipt");
 });
 
+test("an idempotency key does not return another member's body", async t => {
+  const { origin, keys } = await startServer(t);
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody(), keys.owner);
+  assert.equal(createRes.status, 201);
+  const bountyId = (await createRes.json()).bounty.bountyId;
+  const idem = `cross-member-${Date.now()}`;
+  const fund1 = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner, { "idempotency-key": idem });
+  assert.equal(fund1.status, 200);
+  const ownerBody = await fund1.json();
+  const crossed = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.guest, { "idempotency-key": idem });
+  const crossedText = await crossed.text();
+  assert.equal(crossed.status, 422);
+  assert.equal(crossedText.includes(ownerBody.bounty.bountyId), false);
+  const crossedJson = JSON.parse(crossedText);
+  assert.equal(crossedJson.error.code, "invalid_state");
+  assert.equal(crossedJson.bounty, undefined);
+  const replay = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner, { "idempotency-key": idem });
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), ownerBody);
+});
+
+test("a read-only agent cannot post a bounty beside the command path", async t => {
+  const { origin, keys, fixture } = await startServer(t);
+  setTier(fixture.store.db, ROOM, "producer", "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
+  const denied = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ title: "Readonly side write" }), keys.producer);
+  const deniedBody = await denied.json();
+  assert.equal(denied.status, 403);
+  assert.equal(deniedBody.error.code, "agent_readonly");
+  assert.equal(deniedBody.bounty, undefined);
+  const listed = await get(origin, `/api/rooms/${ROOM}/bounties`, keys.producer);
+  assert.equal(listed.status, 200);
+  const created = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ title: "Owner still posts" }), keys.owner);
+  assert.equal(created.status, 201);
+});
+
 test("error mapping: unknown bounty, invalid input, unauthenticated", async t => {
   const { origin, keys } = await startServer(t);
 
@@ -258,4 +294,79 @@ test("rubric route: post with rubric, re-pin pre-funding, frozen after fund", as
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
   const frozen = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/rubric`, { rubric }, keys.owner);
   assert.equal(frozen.status, 422);
+});
+
+test("credit history still returns 100 funded movements when SQL rejects more than 100 binds", async t => {
+  const { origin, keys, fixture } = await startServer(t);
+  const escrow = new BountyEscrow(fixture.store);
+  const deadline = new Date(Date.now() + 86400000).toISOString();
+  for (let i = 0; i < 100; i++) {
+    const { bounty } = escrow.postBounty(ROOM, {
+      poster: "owner", title: `Bind lot ${i}`, criteria: "one funded movement", amount: 0.001, deadline,
+    });
+    escrow.fundBounty(ROOM, bounty.bountyId, { funder: "owner" });
+  }
+  const db = fixture.store.db;
+  const prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const historyRes = await get(origin, `/api/rooms/${ROOM}/credits/history/owner`, keys.owner);
+  assert.equal(historyRes.status, 200);
+  const receipts = (await historyRes.json()).receipts;
+  const locks = receipts.filter(receipt => receipt.kind === "escrow-lock");
+  assert.equal(locks.length, 100);
+  assert.equal(new Set(locks.map(receipt => receipt.receiptId)).size, 100);
+  assert.ok(locks.every(receipt => receipt.before && receipt.after && receipt.hash));
+});
+
+test("claim still journals 101 decayed flakes when SQL rejects more than 100 binds", async t => {
+  const { origin, keys, fixture } = await startServer(t);
+  const escrow = new BountyEscrow(fixture.store);
+  const deadline = new Date(Date.now() + 86400000).toISOString();
+  const { bounty } = escrow.postBounty(ROOM, {
+    poster: "owner", title: "Decay bind", criteria: "claim after a long unjournaled decay", amount: 1, deadline,
+  });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: "owner" });
+  const insert = fixture.store.db.prepare(
+    "INSERT INTO bounty_flakes (flake_id, room_id, lane, bounty_id, struck_at_ms, reason, rung, decayed_journaled, cooldown_end_journaled) VALUES (?,?,?,?,?,?,?,?,?)"
+  );
+  for (let i = 0; i < 101; i++) insert.run(`flk_bind_${i}`, ROOM, "producer", bounty.bountyId, 1, "timeout-no-submit", 1, 0, 0);
+  const db = fixture.store.db;
+  const prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const claimRes = await post(origin, `/api/rooms/${ROOM}/bounties/${bounty.bountyId}/claim`, {}, keys.producer);
+  assert.equal(claimRes.status, 200);
+  assert.equal((await claimRes.json()).bounty.state, "claimed");
+  const decayed = db.prepare("SELECT data FROM bounty_events WHERE room_id=? AND type='flake.decayed'").all(ROOM)
+    .map(row => JSON.parse(row.data));
+  assert.equal(decayed.length, 1);
+  assert.equal(decayed[0].strikesDecayed, 101);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM bounty_flakes WHERE room_id=? AND lane=? AND decayed_journaled=0").get(ROOM, "producer").n, 0);
 });

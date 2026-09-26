@@ -1,3 +1,4 @@
+import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
 import { GmailActions } from './gmail-actions.mjs';
 import { GmailMailbox } from './gmail-mailbox.mjs';
@@ -26,7 +27,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
-import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForInviteRedeem } from "./discoverability.mjs";
+import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
@@ -2931,7 +2932,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
-        return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
+        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId);
+        // The poll read is the requester's only window on the decision. Return
+        // the status with the continuation for that status, so an approved
+        // requester learns where the room read lives (mirrors the filing
+        // response teaching the poll path).
+        return json(res, 200, {
+          ...record,
+          next: nextActionsForAccessRequestStatus({
+            requestId: record.requestId, identityId, roomId: record.roomId,
+            status: record.status, decisionWindowDays: REQUEST_TTL_MS / 86400000
+          })
+        });
       }
       if (accessStatusMatch && req.method === "POST") {
         rate(`access-request-cancel:${remoteAddress}`, 20);
@@ -3046,7 +3058,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3373,6 +3385,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           snapshot.state = nextState;
         }
         return json(res, 200, snapshot);
+      }
+      if (route === "outside-agents") {
+        const network = new OutsideAgents(store);
+        if (req.method === "GET") {
+          if ([...url.searchParams.keys()].some(key => key !== "auth")) reject(422, "invalid_outside_agent", "This read takes no query filters");
+          return json(res, 200, network.list(selected.token, roomId, fence));
+        }
+        if (req.method === "POST") {
+          const data = await body(req);
+          const allowed = { introduce: ["externalRef", "displayName", "origin", "reach", "note"], knows: ["fromRef", "toRef"], link: ["externalRef", "memberId"] };
+          if (!data || Array.isArray(data) || !Object.hasOwn(allowed, data.action) || Object.keys(data).some(key => key !== "action" && !allowed[data.action].includes(key)))
+            reject(422, "invalid_outside_agent", "Choose introduce, knows or link with public fields only");
+          const { action, ...input } = data;
+          const method = action === "introduce" ? "record" : action;
+          return json(res, 200, network[method](selected.token, roomId, input, fence));
+        }
+        reject(405, "method_not_allowed", "Use GET or POST");
       }
       if (route === "request-runs") {
         if (req.method === "GET") return json(res, 200, store.requestRuns.list(selected.token, roomId, fence));

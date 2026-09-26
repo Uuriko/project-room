@@ -19,6 +19,7 @@
 // caller — an agent can never clear its own draft, enforced both here (403)
 // and by the queue itself (approval_not_human).
 import { ServiceError } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 const STATUS_BY_CODE = new Map(Object.entries({
   assign_invalid: 422, assign_conflict: 409, assign_forbidden: 403, assign_not_assigned: 404,
@@ -65,6 +66,9 @@ const callerOf = auth => ({
 
 export async function handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute, collabId, helpers }) {
   const { json, reject, body } = helpers;
+  if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
+    db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+    actor: auth.member, action: `${req.method} inbox-collab ${collabRoute}`, fail: reject });
   const collab = store.collab;
   const caller = callerOf(auth);
   const asHuman = () => {

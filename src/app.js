@@ -833,7 +833,8 @@ const name = displayName; // Ordinary summaries use the same duplicate-aware att
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
-const initials = text => esc(text.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase());
+// First letter or digit of each word, so "Maya (tester)" is "MT", not "M(".
+const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }

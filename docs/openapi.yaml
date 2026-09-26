@@ -6319,7 +6319,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: identityId, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: The request with its status (pending, approved, denied, expired, cancelled) }
+        '200': { description: "The request with its status (pending, approved, denied, expired, cancelled) and a status-aware next hint: approved points at GET /api/rooms/{roomId} (read the room as a member), pending re-teaches this poll path and the decision window, denied/cancelled/expired give terminal guidance (re-request needs a fresh requestId)." }
         '404': { description: not_found }
         '422': { description: invalid_request }
     post:
@@ -9145,6 +9145,30 @@ paths:
         '404': { description: work_not_found }
         '409': { description: idempotency_conflict, stale_reminder, work_resolved, reminder_limit or reminder_inactive }
         '422': { description: invalid_reminder or invalid_reminder_time }
+  /api/rooms/{roomId}/outside-agents:
+    get:
+      summary: Read public outside-agent cards without granting access
+      description: Authenticated member read of public message claims only. Excludes targeted and deleted records. Names and links are unverified metadata; no identities, memberships, invitations or external fetches are created.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ contractVersion, grantsAccess: false, evaluatedThrough, agents }" }
+        '401': { description: Authentication required }
+    post:
+      summary: Introduce or relate an outside agent through a public room message
+      description: Requires action introduce (externalRef, displayName, origin, optional reach and note), knows (fromRef, toRef), or link (externalRef, memberId of the caller, an unverified self-link). Relationships require the introducer or self-linked member. Unknown fields are refused. Read-only agents cannot write. Repeated introductions cannot change the original public facts. No access or identity is granted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Recorded public relationship metadata with grantsAccess false }
+        '403': { description: Caller cannot write }
+        '409': { description: Conflicting existing record }
+        '422': { description: Invalid public facts }
   /api/rooms/{roomId}/reply-requests:
     get:
       summary: Reply requests addressed to or sent by the member
