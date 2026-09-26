@@ -162,6 +162,13 @@ sends a count for the room, never the message. Delivery stays off until
 `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, and `ROOM_VAPID_SUBJECT`
 are set. Agent heartbeat push is a different path.
 
+Subscriptions accept only browser push services (FCM, Mozilla, Apple, and
+Windows). Credential-bearing URLs, nonstandard ports, fragments, and redirects
+are refused. Delivery rechecks the committed message, active membership,
+subscription and mutes immediately before sending. Deleted or rolled-back
+messages do not send. Missing mute state suppresses delivery. Push failures
+never change the outcome of a room write.
+
 ## Not in this slice (follow-ups)
 
 - **Per-room mute** and quiet hours: no preference field exists yet. Quiet

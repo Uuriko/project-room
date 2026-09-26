@@ -12,6 +12,7 @@ import { auditRecovery } from '../server/recovery.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
+import { generateVapidKeys } from '../server/web-push.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -35,6 +36,31 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/human-push') {
+      store.initialize(initialRoom('push-worker'));
+      const owner = store.issueAccessKey('push-worker', 'owner');
+      const post = (id, body) => store.command(owner, 'push-worker', { id, type: T.MESSAGE_POSTED, data: { messageId: id, body } });
+      store.command(owner, 'push-worker', { id: 'add-reader', type: T.MEMBER_ADDED,
+        data: { memberId: 'reader', displayName: 'Reader', kind: 'human', permissions: [] } });
+      const reader = store.issueAccessKey('push-worker', 'reader');
+      const calls = [];
+      store.humanPush.configure({ fetchImpl: async (url, init) => { calls.push({ url, init }); return new Response(null, { status: 201 }); } });
+      post('push-off', '@Reader off'); await store.humanPush.flush();
+      assert.equal(calls.length, 0);
+      const keys = await generateVapidKeys();
+      store.humanPush.configure({ vapid: { ...keys, subject: 'mailto:fixture@example.test' } });
+      store.humanPush.save(reader, 'push-worker', { endpoint: 'https://fcm.googleapis.com/fcm/send/fixture',
+        keys: { p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' } });
+      post('push-on', '@Reader private fixture text'); await store.humanPush.flush();
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].init.redirect, 'error');
+      assert.ok(calls[0].init.body.byteLength > 86);
+      assert.equal(new TextDecoder().decode(calls[0].init.body).includes('private fixture text'), false);
+      assert.throws(() => store.transaction(() => { post('push-rollback', '@Reader rollback'); throw new Error('rollback'); }), /rollback/);
+      await store.humanPush.flush(); assert.equal(calls.length, 1);
+      assert.equal(store.humanPush.inflight.size, 0);
+      return Response.json({ defaultOff: true, encrypted: true, rollbackSuppressed: true });
+    }
     if (path === '/scenario') {
       store.initialize(initialRoom());
       const owner = store.issueAccessKey('commons', 'owner');

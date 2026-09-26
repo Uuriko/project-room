@@ -3513,7 +3513,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
           body: command.data.body, toMemberId: command.data.toMemberId,
-          messageId: command.data.messageId || incoming.id, sequence
+          messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
         });
       }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {

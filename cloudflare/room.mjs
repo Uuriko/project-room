@@ -119,7 +119,11 @@ export class ProjectRoom extends DurableObject {
     });
     this.handler = httpServerHandler(this.server);
   }
-  fetch(request) { return this.paused ? maintenanceResponse(request) : this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+  async fetch(request) {
+    if (this.paused) return maintenanceResponse(request);
+    try { return await this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+    finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+  }
 
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };

@@ -14,6 +14,7 @@ self.addEventListener("push", event => {
 self.addEventListener("notificationclick", event => {
   event.notification.close();
   const roomId = event.notification.data?.roomId;
-  const target = roomId ? `/?room=${encodeURIComponent(roomId)}` : "/";
-  event.waitUntil(self.clients.openWindow(target));
+  const target = new URL(self.registration.scope);
+  if (roomId) target.searchParams.set("room", roomId);
+  event.waitUntil(self.clients.openWindow(target.href));
 });

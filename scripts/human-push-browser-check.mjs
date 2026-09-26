@@ -53,7 +53,7 @@ for (const mobile of [false, true]) {
         Notification.requestPermission = async () => { permission = "granted"; return "granted"; };
         window.Notification = Notification;
         const subscription = {
-          endpoint: "https://push.example.test/browser",
+          endpoint: "https://fcm.googleapis.com/fcm/send/browser",
           expirationTime: null,
           keys: { p256dh: ${JSON.stringify(RECEIVER_PUBLIC)}, auth: ${JSON.stringify(AUTH_SECRET)} },
           toJSON() { return { endpoint: this.endpoint, expirationTime: this.expirationTime, keys: this.keys }; }
@@ -98,7 +98,7 @@ for (const mobile of [false, true]) {
     assert.equal(sent.quietHours, undefined);
     assert.equal(sent.level, undefined);
     const row = f.store.db.prepare("SELECT endpoint, member_id FROM human_push_subscriptions").get();
-    assert.equal(row.endpoint, "https://push.example.test/browser");
+    assert.equal(row.endpoint, "https://fcm.googleapis.com/fcm/send/browser");
     assert.equal(row.member_id, "owner");
     assert.deepEqual(errors, []);
     mkdirSync("test-results", { recursive: true });

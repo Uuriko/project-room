@@ -15,6 +15,18 @@ class ServiceError extends Error {
 }
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
+// Browser-issued delivery services only. A subscriber must never turn a
+// mention into an arbitrary HTTPS request from the server's network.
+function checkEndpoint(endpoint) {
+  let url;
+  try { url = new URL(endpoint); } catch { fail(422, "invalid_push_endpoint", "Use a browser-issued push endpoint"); }
+  const host = url.hostname;
+  const allowed = host === "fcm.googleapis.com" || host === "updates.push.services.mozilla.com"
+    || host === "web.push.apple.com" || /^[a-z0-9-]+\.notify\.windows\.com$/.test(host);
+  if (url.protocol !== "https:" || !allowed || url.username || url.password || url.port || url.hash)
+    fail(422, "invalid_push_endpoint", "Use a browser-issued push endpoint");
+}
+
 export const humanPushSchema = `
   CREATE TABLE IF NOT EXISTS human_push_subscriptions (
     endpoint TEXT NOT NULL,
@@ -41,7 +53,8 @@ export function humanPushRecipients({ members, senderMemberId, body, toMemberId 
   }
   const dmId = typeof toMemberId === "string" ? toMemberId : "";
   if (dmId) return roster[dmId] ? [{ memberId: dmId, kind: "dm" }] : [];
-  return resolveMentionTargetsInText(roster, {}, typeof body === "string" ? body : "", senderMemberId)
+  return resolveMentionTargetsInText(members, {}, typeof body === "string" ? body : "", senderMemberId)
+    .filter(memberId => Object.hasOwn(roster, memberId))
     .map(memberId => ({ memberId, kind: "mention" }));
 }
 
@@ -65,7 +78,7 @@ export class HumanPush {
     this.db = store.db;
     this.vapid = null;
     this.fetchImpl = null;
-    this.inflight = [];
+    this.inflight = new Set();
   }
 
   configure({ vapid = undefined, fetchImpl = undefined } = {}) {
@@ -123,6 +136,7 @@ export class HumanPush {
     if (!this.vapid) fail(404, "push_not_configured", "Push is not configured on this server");
     const auth = this._auth(token, roomId, binding);
     const memberId = this._human(auth);
+    checkEndpoint(data.endpoint);
     let normalised;
     try { normalised = normaliseSubscription(data, { now: this.store.now(), memberId }); }
     catch (error) {
@@ -184,13 +198,13 @@ export class HumanPush {
     if (isMutedBy(state, memberId, senderMemberId)) return true;
     const root = threadRootOf(state?.messages, messageId);
     try { return this.store.threadMutes.mutedThreadIds(roomId, memberId).has(root); }
-    catch { return false; }
+    catch { return true; } // Missing mute evidence must not disclose activity.
   }
 
   // Fire-and-forget. Called from the message.posted transaction after the
   // event is stored. A push failure never fails the post. With no VAPID
   // keys this returns before it looks anyone up.
-  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, messageId, sequence }) {
+  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, messageId, sequence, eventId }) {
     try {
       if (!this.vapid) return;
       for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId })) {
@@ -203,13 +217,32 @@ export class HumanPush {
           sequence,
           notifications: [{ kind: recipient.kind }]
         });
-        const pending = deliverToSubscriptions({
+        // Start only after synchronous transaction completion. A failed outer
+        // transaction may remove this event even after command() returned.
+        const stillVisible = endpoint => {
+          const stored = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, sequence);
+          if (stored?.id !== eventId) return false;
+          const current = this.store.room(roomId).state;
+          const member = current.members?.[recipient.memberId];
+          const message = current.messages?.find(row => row.id === messageId);
+          return member?.kind === "human" && member.active !== false
+            && message && !message.deletedAt
+            && (!message.toMemberId || message.toMemberId === recipient.memberId)
+            && !this._suppressed(roomId, current, recipient.memberId, senderMemberId, messageId)
+            && this._rows(roomId, recipient.memberId).some(row => row.endpoint === endpoint);
+        };
+        const pending = Promise.resolve().then(() => deliverToSubscriptions({
           subscriptions,
           payload,
           vapid: this.vapid,
-          ...(this.fetchImpl ? { fetchImpl: this.fetchImpl } : {})
-        }).then(result => this._retire(result.retire)).catch(() => {});
-        this.inflight.push(pending);
+          fetchImpl: (url, init) => {
+            checkEndpoint(url);
+            if (!stillVisible(url)) throw new Error("Push no longer authorized");
+            return (this.fetchImpl ?? globalThis.fetch)(url, { ...init, redirect: "error" });
+          }
+        })).then(result => this._retire(result.retire)).catch(() => {});
+        this.inflight.add(pending);
+        void pending.finally(() => this.inflight.delete(pending));
       }
     } catch {
       // The push path never fails the post.
@@ -227,7 +260,7 @@ export class HumanPush {
   }
 
   async flush() {
-    const pending = this.inflight.splice(0, this.inflight.length);
+    const pending = [...this.inflight];
     await Promise.all(pending);
   }
 }

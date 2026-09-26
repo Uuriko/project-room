@@ -12,19 +12,23 @@ function urlBase64ToUint8Array(value) {
   return bytes;
 }
 
-async function subscribe(client, publicKey) {
-  const registration = await navigator.serviceWorker.register("/push-sw.js", { type: "module", scope: "/" });
+async function subscribe(client, publicKey, current) {
+  const worker = new URL("../push-sw.js", import.meta.url);
+  const registration = await navigator.serviceWorker.register(worker.href, { type: "module", scope: new URL("./", worker).pathname });
   const existing = await registration.pushManager.getSubscription();
   const subscription = existing ?? await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(publicKey)
   });
   const json = typeof subscription.toJSON === "function" ? subscription.toJSON() : subscription;
-  await client.saveHumanPush({
+  if (!current()) return false;
+  const saved = await client.saveHumanPush({
     endpoint: json.endpoint,
     expirationTime: json.expirationTime ?? null,
     keys: { p256dh: json.keys?.p256dh, auth: json.keys?.auth }
   });
+  if (!saved?.saved) throw new Error("Subscription was not saved for this session");
+  return true;
 }
 
 export function installHumanPush({ client, button, note, eligible }) {
@@ -69,8 +73,8 @@ export function installHumanPush({ client, button, note, eligible }) {
       const permission = globalThis.Notification?.permission;
       if (permission === "denied") { showNote("Notifications are blocked in this browser."); return; }
       if (permission === "granted") {
-        await subscribe(client, config.publicKey);
-        if (ticket !== serial) return;
+        const saved = await subscribe(client, config.publicKey, () => ticket === serial && eligible());
+        if (!saved || ticket !== serial || !eligible()) return;
         showNote("Mentions and DMs are on for this browser.");
         return;
       }
@@ -90,8 +94,8 @@ export function installHumanPush({ client, button, note, eligible }) {
       const permission = await Notification.requestPermission();
       if (ticket !== serial) return;
       if (permission !== "granted") { showNote("Notifications are blocked in this browser."); return; }
-      await subscribe(client, config.publicKey);
-      if (ticket !== serial) return;
+      const saved = await subscribe(client, config.publicKey, () => ticket === serial && eligible());
+      if (!saved || ticket !== serial || !eligible()) return;
       resolvedFor = client.session?.member?.id ?? "";
       showNote("Mentions and DMs are on for this browser.");
     } catch {

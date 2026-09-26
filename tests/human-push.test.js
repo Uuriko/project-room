@@ -88,13 +88,14 @@ async function boot(t, { push, fetchImpl } = {}) {
 
 test("a human mention or DM is pushed, and a reply, work update, agent mention, or self-mention is not", async t => {
   const { store, send, calls, ownerKey, mayaKey, samKey } = await boot(t);
-  store.humanPush.save(mayaKey, "commons", browserSub("https://push.example.test/maya"));
-  store.humanPush.save(samKey, "commons", browserSub("https://push.example.test/sam"));
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
+  store.humanPush.save(samKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/sam"));
 
   const posted = send(ownerKey, T.MESSAGE_POSTED, { messageId: "m-mention", body: `@Maya ${SECRET}` });
   await store.humanPush.flush();
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://push.example.test/maya");
+  assert.equal(calls[0].url, "https://fcm.googleapis.com/fcm/send/maya");
+  assert.equal(calls[0].init.redirect, "error", "a push service cannot redirect the authenticated request");
   const opened = await openPush(calls[0]);
   assert.deepEqual(opened, { v: 1, roomId: "commons", unread: 1, counts: { mention: 1 }, sequence: posted.sequence });
   assert.equal(JSON.stringify(opened).includes(SECRET), false);
@@ -116,7 +117,7 @@ test("a human mention or DM is pushed, and a reply, work update, agent mention, 
   });
   await store.humanPush.flush();
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://push.example.test/maya");
+  assert.equal(calls[0].url, "https://fcm.googleapis.com/fcm/send/maya");
   const dm = await openPush(calls[0]);
   assert.deepEqual(dm.counts, { dm: 1 });
   assert.equal(JSON.stringify(dm).includes(SECRET), false);
@@ -125,7 +126,7 @@ test("a human mention or DM is pushed, and a reply, work update, agent mention, 
 
 test("thread and member mutes suppress a push, and turning the in-app feed off does not", async t => {
   const { store, send, calls, ownerKey, mayaKey, samKey } = await boot(t);
-  store.humanPush.save(mayaKey, "commons", browserSub("https://push.example.test/maya"));
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
   send(mayaKey, T.NOTIFICATION_PREFERENCES_SET, { preferences: { mentions: "none" } });
   send(ownerKey, T.MESSAGE_POSTED, { messageId: "still", body: "@Maya please still ping" });
   await store.humanPush.flush();
@@ -154,7 +155,7 @@ test("with no VAPID keys a mention still posts and nothing is sent", async t => 
   await store.humanPush.flush();
   assert.equal(posted.sequence > 0, true);
   assert.equal(calls.length, 0);
-  assert.throws(() => store.humanPush.save(mayaKey, "commons", browserSub("https://push.example.test/maya")),
+  assert.throws(() => store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya")),
     error => error.code === "push_not_configured");
   const status = await request("/api/rooms/commons/human-push", { token: mayaKey });
   const body = await status.json();
@@ -169,7 +170,7 @@ test("a subscription the push service says is gone is retired", async t => {
   const { store, send, ownerKey, mayaKey } = await boot(t, {
     fetchImpl: async () => reply(410)
   });
-  store.humanPush.save(mayaKey, "commons", browserSub("https://push.example.test/maya"));
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
   send(ownerKey, T.MESSAGE_POSTED, { messageId: "m1", body: "@Maya hello" });
   await store.humanPush.flush();
   const left = store.db.prepare("SELECT COUNT(*) AS n FROM human_push_subscriptions").get().n;
@@ -191,14 +192,14 @@ test("the subscription route is humans only, fixed default, and refuses preferen
   assert.equal(statusBody.quietHours, undefined);
 
   const agent = await request("/api/rooms/commons/human-push", {
-    method: "POST", token: agentKey, data: browserSub("https://push.example.test/agent")
+    method: "POST", token: agentKey, data: browserSub("https://fcm.googleapis.com/fcm/send/agent")
   });
   assert.equal(agent.status, 403);
   assert.equal((await agent.json()).error.code, "human_push_humans_only");
 
   for (const extra of [{ quietHours: { start: "22:00", end: "07:00" } }, { level: "all" }]) {
     const refused = await request("/api/rooms/commons/human-push", {
-      method: "POST", token: mayaKey, data: { ...browserSub("https://push.example.test/maya"), ...extra }
+      method: "POST", token: mayaKey, data: { ...browserSub("https://fcm.googleapis.com/fcm/send/maya"), ...extra }
     });
     assert.equal(refused.status, 422);
     assert.equal((await refused.json()).error.code, "invalid_human_push");
@@ -206,36 +207,72 @@ test("the subscription route is humans only, fixed default, and refuses preferen
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM human_push_subscriptions").get().n, 0);
 
   const saved = await request("/api/rooms/commons/human-push", {
-    method: "POST", token: mayaKey, data: browserSub("https://push.example.test/maya")
+    method: "POST", token: mayaKey, data: browserSub("https://fcm.googleapis.com/fcm/send/maya")
   });
   const savedBody = await saved.json();
   assert.equal(saved.status, 200);
   assert.equal(savedBody.saved, true);
   assert.equal(JSON.stringify(savedBody).includes(AUTH_SECRET), false);
   const again = await request("/api/rooms/commons/human-push", {
-    method: "POST", token: mayaKey, data: browserSub("https://push.example.test/maya")
+    method: "POST", token: mayaKey, data: browserSub("https://fcm.googleapis.com/fcm/send/maya")
   });
   assert.equal(again.status, 200);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM human_push_subscriptions").get().n, 1);
 
   for (let i = 1; i < 8; i += 1) {
     const more = await request("/api/rooms/commons/human-push", {
-      method: "POST", token: mayaKey, data: browserSub(`https://push.example.test/maya-${i}`)
+      method: "POST", token: mayaKey, data: browserSub(`https://fcm.googleapis.com/fcm/send/maya-${i}`)
     });
     assert.equal(more.status, 200);
   }
   const limited = await request("/api/rooms/commons/human-push", {
-    method: "POST", token: mayaKey, data: browserSub("https://push.example.test/maya-extra")
+    method: "POST", token: mayaKey, data: browserSub("https://fcm.googleapis.com/fcm/send/maya-extra")
   });
   assert.equal(limited.status, 409);
   assert.equal((await limited.json()).error.code, "human_push_device_limit");
 
   const removed = await request("/api/rooms/commons/human-push", {
-    method: "DELETE", token: mayaKey, data: { endpoint: "https://push.example.test/maya" }
+    method: "DELETE", token: mayaKey, data: { endpoint: "https://fcm.googleapis.com/fcm/send/maya" }
   });
   assert.equal(removed.status, 200);
   assert.equal((await removed.json()).removed, true);
   assert.equal(store.db.prepare(
     "SELECT COUNT(*) AS n FROM human_push_subscriptions WHERE endpoint=?"
-  ).get("https://push.example.test/maya").n, 0);
+  ).get("https://fcm.googleapis.com/fcm/send/maya").n, 0);
+});
+
+test("push endpoints cannot target arbitrary services or carry URL credentials", async t => {
+  const { store, mayaKey } = await boot(t);
+  for (const endpoint of ["https://127.0.0.1/push", "https://[::1]/push", "https://private.internal/push", "https://fcm.googleapis.com.attacker.test/push", "https://user:secret@fcm.googleapis.com/fcm/send/x", "https://fcm.googleapis.com:444/push", "https://fcm.googleapis.com/push#fragment"]) {
+    assert.throws(() => store.humanPush.save(mayaKey, "commons", browserSub(endpoint)), error => error.status === 422, endpoint);
+  }
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM human_push_subscriptions").get().n, 0);
+});
+
+test("a rolled-back post never sends and short-name ambiguity includes agents", async t => {
+  const { store, send, calls, ownerKey, mayaKey } = await boot(t);
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
+  assert.throws(() => store.transaction(() => {
+    send(ownerKey, T.MESSAGE_POSTED, { messageId: "rollback-push", body: "@Maya rolled back" });
+    throw new Error("rollback fixture");
+  }), /rollback fixture/);
+  await store.humanPush.flush();
+  assert.equal(calls.length, 0, "no delivery of a rolled-back message");
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "deleted-push", body: "@Maya queued for deletion" });
+  send(ownerKey, T.MESSAGE_DELETED, { messageId: "deleted-push", expectedMessageRevision: 0 });
+  await store.humanPush.flush();
+  assert.equal(calls.length, 0, "deletion before network send suppresses queued delivery");
+  send(ownerKey, T.MEMBER_ADDED, { memberId: "alex-agent", displayName: "Alex Agent", kind: "agent", permissions: [] });
+  send(ownerKey, T.MEMBER_ADDED, { memberId: "alex-human", displayName: "Alex Human", kind: "human", permissions: [] });
+  const alexKey = store.issueAccessKey("commons", "alex-human");
+  store.humanPush.save(alexKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/alex"));
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "ambiguous-push", body: "@Alex ambiguous" });
+  await store.humanPush.flush();
+  assert.equal(calls.length, 0, "human filtering must not resolve an ambiguous name");
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "revoked-push", body: "@Maya queued" });
+  send(ownerKey, T.MEMBER_ACCESS_CHANGED, { memberId: "maya", active: false, permissions: [],
+    expectedMemberRevision: store.room("commons").state.members.maya.revision });
+  await store.humanPush.flush();
+  assert.equal(calls.length, 0, "revocation before network send suppresses queued delivery");
+  assert.equal(store.humanPush.inflight.size, 0, "settled delivery promises are released");
 });
