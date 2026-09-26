@@ -114,6 +114,10 @@ test("transport failures, cancellation, malformed JSON and rate limits have fixe
   const cancelled = new RoomAgentClient({ ...config, fetchImpl: async (_, options) => { options.signal.throwIfAborted(); } });
   await assert.rejects(cancelled.checkConnection({ signal: controller.signal }), error => error.name === "AbortError");
   assert.equal(connectionDiagnostic(new RoomClientError(429, "limited", privateText, 300001)).retryAfterMs, undefined);
+  const changed = connectionDiagnostic(new RoomClientError(409, "identity_credential_changed", privateText));
+  assert.equal(changed.code, "identity_credential_changed");
+  assert.equal(changed.reason, "identity_credential_changed");
+  assert.equal(connectionDiagnostic(new RoomClientError(403, "access_denied", privateText)).reason, "access_denied");
   for (const code of ["host_denied", "origin_denied", "proxy_denied"]) assert.equal(connectionDiagnostic(new RoomClientError(403, code, privateText)).code, "invalid_config");
 });
 

@@ -167,6 +167,19 @@ export function enforceAutonomyTiers({ db, roomId, state, command, actor, nowMs 
     fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type}`);
 }
 
+// Direct enforcement for store APIs that bypass store.command() — room file
+// staging (room-attachment-bytes.mjs) writes rows without emitting a command,
+// so the command hook above never sees them. Same policy: agents at
+// t1_readonly may not mutate room state; humans and the owner are exempt.
+export function enforceAutonomyTierForAction({ db, roomId, state, actor, action, fail = refuse }) {
+  if (!db || typeof roomId !== "string" || !action) return;
+  if (!actor || typeof actor.id !== "string" || actor.kind !== "agent") return; // humans are never tier-restricted
+  if (state?.room && actor.id === state.room.ownerId) return; // ownership implies full authority
+  const tier = getTier(db, roomId, actor.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+  if (tier === "t1_readonly")
+    fail(403, "agent_readonly", `${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${action}`);
+}
+
 // Read model for the operator API: the tier row (null when neither the
 // enrollment hook nor the operator has ever written one) and the effective
 // tier.

@@ -16,11 +16,15 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { openRoutes, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
+import { openRoutes, openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
-const DECLARED_OPEN = openRoutes(read("../docs/openapi.yaml"));
+const openapi = read("../docs/openapi.yaml");
+const DECLARED_OPEN = openRoutes(openapi);
+const WORKER_OPEN = openapiOperations(openapi).filter(route => route.workerOnly
+  && Array.isArray(route.security) && route.security.length === 0);
+const workerKeys = new Set(WORKER_OPEN.map(route => routeKey(route.method, route.path)));
 const SERVED_CANDIDATES = [
   ...routeCandidates(read("../server/http.mjs")),
   // The agent plug-in surface is mounted through a single delegation in
@@ -168,9 +172,17 @@ const guarded = res => res.status === 401 || (res.status === 422 && code(res) ==
 const unserved = res => (res.status === 404 && code(res) === "not_found") || res.status === 405;
 const concrete = template => template.replace(/^\/api\/rooms\/\{[^}]*\}/, "/api/rooms/commons").replace(/\{[^}]*\}/g, "telegram-fixture");
 
-test("unauthenticated endpoint inventory equals the openapi security: [] set", async t => {
+test("Worker-only anonymous routes have dedicated runtime boundary coverage", () => {
+  // These operations are exercised against Worker.fetch in job-heartbeat.test.js
+  // and real workerd in cloudflare/version-signal.check.mjs. A newly marked
+  // Worker operation must acquire runtime coverage before joining this partition.
+  assert.deepEqual([...workerKeys].sort(), ["GET /api/health/jobs", "GET /api/version/worker"]);
+});
+
+test("Node unauthenticated endpoint inventory equals its openapi security: [] set", async t => {
   const { origin } = await serve(t);
-  const declared = new Map(DECLARED_OPEN.map(route => [routeKey(route.method, route.path), route]));
+  const declared = new Map(DECLARED_OPEN.filter(route => !workerKeys.has(routeKey(route.method, route.path)))
+    .map(route => [routeKey(route.method, route.path), route]));
   const served = new Map();
   for (const template of SERVED_CANDIDATES) {
     for (const method of ["GET", "POST", "DELETE"]) {

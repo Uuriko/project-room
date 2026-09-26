@@ -38,6 +38,7 @@ import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSi
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
@@ -236,6 +237,9 @@ export class ReferralInvites {
     // The inviter must still be an active member: outstanding tokens die
     // with a removed inviter, the same posture as one-time invite codes.
     const room = this.store.room(roomId);
+    // Minting referral invites is a membership write: the read-only
+    // autonomy tier applies even for active agent members (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: room.state, actor: auth.member, action: "referral_invite_mint", fail });
     refuseArchivedWrite(room.state);
     if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
 

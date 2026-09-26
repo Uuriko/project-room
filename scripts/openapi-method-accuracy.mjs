@@ -20,8 +20,7 @@
 // 405 and the double-404 speak to the contract itself. Probes are anonymous
 // with empty/shape-empty bodies so nothing persistent is created (and the
 // scratch store is deleted either way).
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
@@ -71,8 +70,23 @@ async function raw(origin, path, { method }) {
   return { status: res.status, code: json?.error?.code ?? null };
 }
 
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+// Where the scratch RoomStore lives. The probe's SQLite store never lands on
+// the shared system tmpdir by accident: on fleet VMs that tmpdir is a small
+// tmpfs other agents reap mid-run, and a reaped scratch DB mid-probe would
+// surface as SQLITE errors and report false drift (or crash the run). The
+// probe defaults to the repo-local .tmp (the same convention the test suite
+// runs under); an explicitly set TMPDIR is always honored.
+export function scratchParent() {
+  if (process.env.TMPDIR) return process.env.TMPDIR;
+  const dir = join(ROOT, ".tmp");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export async function serveScratch() {
-  const directory = mkdtempSync(join(tmpdir(), "project-room-method-accuracy-"));
+  const directory = mkdtempSync(join(scratchParent(), "project-room-method-accuracy-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
   const server = createRoomServer({ store });
@@ -87,7 +101,7 @@ export async function serveScratch() {
 }
 
 export async function probeMethodAccuracy({ openapi }) {
-  const operations = openapiOperations(openapi);
+  const operations = openapiOperations(openapi).filter(op => !op.workerOnly);
   if (operations.length < 50) throw new Error("openapi parse sanity failed");
   const { origin, close } = await serveScratch();
   const results = [];

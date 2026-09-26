@@ -18,8 +18,6 @@ const GRANDFATHERED = [
   "ip-blocklist.mjs",
   "mcp-arg-errors.mjs",
   "mcp-discovery.mjs",
-  "mcp-full-profile.mjs",
-  "mcp-hosted-tools.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
   "sla-breach-journal.mjs",

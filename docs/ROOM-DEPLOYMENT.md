@@ -53,3 +53,19 @@ setting after every release; do not overwrite it with the top-level limit.
 A503 from `/api/health/jobs` with empty `jobs` means its Durable Object RPC
 failed, not necessarily that storage failed. Inspect a bounded Worker tail
 for the actual exception before selecting a recovery action.
+
+## Emergency deploy helper
+
+`scripts/deploy-live.py` is the checked-in copy of the live deploy helper
+(committed 2026-09-26 after the 2026-09-25 outage repair). It deploys the
+Worker directly through the Cloudflare API, mirroring
+`cloudflare/wrangler.jsonc` at the deployed commit, and authenticates via the
+`custom.cloudflare` surrogate credential — it never carries raw API keys.
+
+Durable repair: the script's script-upload metadata pins the bindings
+`ROOM_DEPLOYMENT=production`, `ROOM_GMAIL_ENABLED=0`,
+`ROOM_GMAIL_PILOT_ONLY=1` (plus `ROOM_ORIGIN` and `ROOM_SERVICE_MODE`), the
+`cpu_ms: 30000` production CPU budget, and `assets.config.run_worker_first`.
+Every use of the helper re-applies these bindings; they are not optional
+flags. Usage: `deploy-live.py <script_name> <account_id> <public_dir> <bundle_path>` —
+see the script's docstring for the exact signature.
