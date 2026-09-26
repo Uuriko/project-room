@@ -8,6 +8,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
+import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
@@ -3467,10 +3468,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const projection = JSON.stringify(state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-      if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
-      this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+      // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
+      // event-log persist. getTracer() is read per command (never at module
+      // scope) so tests can reset the singleton; when telemetry is off the
+      // tracer returns null spans and this block pays nothing. Only the room,
+      // event, and message ids are recorded — never command data.
+      const logSpan = getTracer().startSpan(SPAN_NAMES.LOG, { attributes: {
+        [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id, [ATTR.EVENT_TYPE]: incoming.type } });
+      try {
+        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+        if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
+        this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
+        this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        logSpan.setAttribute(ATTR.OUTCOME, "ok");
+        logSpan.setStatusOk();
+      } catch (error) {
+        logSpan.recordException(error);
+        throw error;
+      } finally {
+        logSpan.end();
+      }
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
       if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
@@ -3540,10 +3557,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // drain kicks fire-and-forget right after the request path returns
       // (the Cloudflare cron sweep stays the restart-safe backstop).
       // Never throws — fan-out must not fail the command that triggered it.
+      // R1 delivery-path tracing (RC-2026-09-26-966): delivery.fanout spans
+      // the signed-webhook fan-out. The span itself never throws into the
+      // command path either.
+      const fanoutSpan = getTracer().startSpan(SPAN_NAMES.FANOUT, { attributes: {
+        [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id } });
       try {
-        if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
-      } catch (error) {
-        console.error("webhook fan-out failed:", error?.message ?? error);
+        try {
+          if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+        } catch (error) {
+          console.error("webhook fan-out failed:", error?.message ?? error);
+        }
+        fanoutSpan.setAttribute(ATTR.OUTCOME, "ok");
+        fanoutSpan.setStatusOk();
+      } finally {
+        fanoutSpan.end();
       }
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
