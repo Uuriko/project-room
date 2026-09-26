@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs",
+    "test": "node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs version-signal.check.mjs",
     "test:browser": "node --test browser.check.mjs release-pause-browser.check.mjs",
     "build": "node build-assets.mjs"
   },

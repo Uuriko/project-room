@@ -4673,6 +4673,21 @@ paths:
       security: []
       responses:
         '200': { description: "{ status, mode, sourceRevision, buildId }" }
+  /api/version/worker:
+    get:
+      summary: Worker-only deployment signal
+      description: >-
+        Open (also HEAD). Answered by the Worker from module scope and env -
+        never touches the Durable Object - so deploy verification stays
+        available during a DO outage. `{ status, servedBy: worker,
+        sourceRevision, buildId, deployment?, durableObject: { name, id } }`.
+        The object id is derived with idFromName: it identifies the object
+        this Worker would route to (two doors reporting different ids are
+        serving different objects); it says nothing about room health.
+        Answers before the maintenance gate. No room data, no credentials.
+      security: []
+      responses:
+        '200': { description: "{ status, servedBy, sourceRevision, buildId, deployment?, durableObject: { name, id } }" }
   /api/ready:
     get:
       summary: Readiness
