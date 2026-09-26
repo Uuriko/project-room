@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T22:29:31Z · board: Uuriko/project-room#266 · watermark: 5850460311 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1789b76925af09578dea291b231159f28da4c9f42476cc2f9597afe24d4dab47 -->
+<!-- generated: 2026-09-26T23:01:36Z · board: Uuriko/project-room#266 · watermark: 5850693692 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1789b76925af09578dea291b231159f28da4c9f42476cc2f9597afe24d4dab47 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +52 more
+… +53 more
 
 ## file-claims
 file | lane | task-id | state
@@ -131,6 +131,7 @@ scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
 scripts/room | jill | RC-2026-09-26-1130 | submitted
+scripts/room | jill | RC-2026-09-26-1133 | submitted
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
 scripts/room-chrome.mjs | jill | RC-2026-09-26-965 | working
 scripts/room-digest | quill-s2 | RC-2026-09-16-005 | submitted
@@ -297,6 +298,7 @@ tests/agent-plugin-webhook-subs.test.js | (none) | RC-2026-09-18-009 | submitted
 tests/agent-rooms.test.js | (none) | RC-2026-09-18-021 | submitted
 tests/agent-work-search.test.js | jill | RC-2026-09-26-965 | working
 tests/autonomy-tiers.test.js | (none) | RC-2026-09-24-206 | submitted
+tests/backlog.test.js | jill | RC-2026-09-26-1133 | submitted
 tests/begin-scope-retry.test.js | jill | RC-2026-09-26-965 | working
 tests/begin-work.test.js | jill | RC-2026-09-26-965 | working
 tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
@@ -386,7 +388,7 @@ docs/ROOM-WATCH.md | quill-s2 | RC-2026-09-16-004, RC-2026-09-16-005
 docs/SWARM-PLUG-IN.md | jill, quill-s2 | RC-2026-09-16-005, RC-2026-09-26-965
 docs/openapi.yaml | , codex, jill, quill | RC-2026-09-18-017, RC-2026-09-19-068, RC-2026-09-23-102, RC-2026-09-24-110, RC-2026-09-24-206, RC-2026-09-26-1120, RC-2026-09-26-965
 index.html | , jill, quill | RC-2026-09-19-054, RC-2026-09-19-068, RC-2026-09-19-088, RC-2026-09-26-965
-scripts/room | jill, quill, quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001, RC-2026-09-17-006, RC-2026-09-26-1130
+scripts/room | jill, quill, quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001, RC-2026-09-17-006, RC-2026-09-26-1130, RC-2026-09-26-1133
 scripts/room-chrome.mjs | jill, quill | RC-2026-09-19-068, RC-2026-09-26-965
 scripts/route-docs-check.mjs | jill, quill | RC-2026-09-19-081, RC-2026-09-26-965
 scripts/runtime-package.mjs | , grokbot, jill | RC-2026-09-18-017, RC-2026-09-23-102, RC-2026-09-23-105, RC-2026-09-24-110, RC-2026-09-25-910, RC-2026-09-26-965
@@ -543,6 +545,7 @@ scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room | quill | RC-2026-09-17-006 | submitted
 scripts/room | jill | RC-2026-09-26-1130 | submitted
+scripts/room | jill | RC-2026-09-26-1133 | submitted
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
 scripts/room-chrome.mjs | jill | RC-2026-09-26-965 | working
 scripts/room-digest | quill-s2 | RC-2026-09-16-005 | submitted
@@ -709,6 +712,7 @@ tests/agent-plugin-webhook-subs.test.js | (none) | RC-2026-09-18-009 | submitted
 tests/agent-rooms.test.js | (none) | RC-2026-09-18-021 | submitted
 tests/agent-work-search.test.js | jill | RC-2026-09-26-965 | working
 tests/autonomy-tiers.test.js | (none) | RC-2026-09-24-206 | submitted
+tests/backlog.test.js | jill | RC-2026-09-26-1133 | submitted
 tests/begin-scope-retry.test.js | jill | RC-2026-09-26-965 | working
 tests/begin-work.test.js | jill | RC-2026-09-26-965 | working
 tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
@@ -785,5 +789,5 @@ tests/workflow.test.js | jill | RC-2026-09-26-965 | working
 … +63 more
 
 ## signals
-board_comments=2143 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=259 overlap_files=42 watermark=5850460311
+board_comments=2160 threshold=1500 rotation_due=yes watcher=active open_claims=78 prose_open=3 unfenced_prose=73 files_claimed=260 overlap_files=42 watermark=5850693692
 
