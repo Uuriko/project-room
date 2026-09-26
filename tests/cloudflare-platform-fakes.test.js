@@ -124,7 +124,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     console.warn = original;
     console.error = originalError;
   }
-  assert.deepEqual(names, ["invite-only-pilot"]);
+  assert.deepEqual(names, ["invite-only-pilot-v2"]);
   assert.deepEqual(invoked, [
     "syncGmailMailboxes",
     "drainChannelBacklog",

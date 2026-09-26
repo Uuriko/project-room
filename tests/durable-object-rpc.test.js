@@ -170,7 +170,7 @@ test("RPC stub calls target a class that extends DurableObject", () => {
     "refreshLandQueue",
     "syncGmailMailboxes"
   ]);
-  assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
+  assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot-v2'\)\.fetch\(/);
   assert.match(workerSource, /import\s*\{[^}]*\bDurableObject\b[^}]*\}\s*from\s*['"]cloudflare:workers['"]/);
 
   const classes = bindingClasses(wrangler);
@@ -240,6 +240,6 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
     ROOM: { getByName(value) { name = value; return stub; } }
   }, { waitUntil(promise) { pending.push(promise); } });
   await Promise.all(pending);
-  assert.equal(name, "invite-only-pilot");
+  assert.equal(name, "invite-only-pilot-v2");
   assert.deepEqual(invoked.sort(), expected);
 });
