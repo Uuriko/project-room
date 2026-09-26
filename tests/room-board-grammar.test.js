@@ -143,3 +143,19 @@ test("[lane][done] without a fenced room-done block parses as done, not a crash"
   assert.equal(byId[302].receipt.pr, "980");
   assert.equal(byId[302].receipt.merged, "144f7dffc737d0865041c2db8c7310e9329bb9d6");
 });
+
+
+test('unmarked CLAIM prose is logged without registering a claim', () => {
+  const input = JSON.stringify([
+    { id: 201, created_at: '2026-09-25T18:00:00Z', body: 'CLAIM: RC-2026-09-23-001 take scripts/room' },
+    { id: 202, created_at: '2026-09-25T18:01:00Z', body: 'I might work on the parser.' },
+  ]);
+  const events = run(['_parse'], input);
+  assert.deepEqual(events.map(event => event.kind), ['prose', 'prose']);
+  const state = run(['_state', '--now', '2026-09-25T18:02:00Z'], JSON.stringify(events));
+  assert.equal(state.tasks.length, 0);
+  assert.deepEqual(state.log.map(entry => [entry.id, entry.kind, entry.ok]), [
+    [201, 'prose', false], [202, 'prose', false],
+  ]);
+  assert.match(state.log[0].errors[0], /no recognized structured prefix/);
+});

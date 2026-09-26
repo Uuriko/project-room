@@ -174,6 +174,27 @@ a lane SHOULD run its intended file set through the detector against the
 current board — a hit means negotiate first, then claim non-overlapping
 files. The detector is advisory: it flags, it never blocks.
 
+### 4b. Live file-claim registry (S1)
+
+`scripts/room rebuild` renders two machine sections into ROOM-STATE.md from
+the live (submitted/working/suspended) claims:
+
+- `## file-claims` — inverted index: `file | lane | task-id | state`, one
+  row per file per live claim, sorted by file then task-id. This is the
+  live map of who is touching what, right now.
+- `## overlap-warnings` — `file | lanes | task-ids` for every file held by
+  two or more live claims. Empty (rendered as `(none)`) in the healthy case.
+
+The `## signals` line carries `files_claimed=<n>` (unique files across live
+claims) and `overlap_files=<n>` (files with 2+ live holders) for machine
+consumers.
+
+`scripts/room overlaps` is the read-only pre-claim check: `--files "a,b"`
+reports which live claims already hold those files (`(unclaimed)` when
+free); without `--files` it reports all current overlaps. The `claim` verb
+hard-refuses when the requested files collide with another lane's live
+claim; `overlaps` is the soft check a lane runs before drafting.
+
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
@@ -189,6 +210,12 @@ Lane tags are deliberate tokens, never prose accidents:
   `[quill-s2]` at the start of a comment (the existing room convention from
   #11) addresses that lane. A `[quill-s2]` appearing mid-prose is a
   reference. Tooling scans the block and the prefix, never the paragraph.
+- **Comment-start lane tags use only letters, digits, `_`, and `-`.**
+  A display name with spaces, such as `[Grok Bot][claim]`, is not a lane ID.
+  The board parser emits `lane-tag-unparseable` (with a failed log entry)
+  rather than registering a claim or silently treating it as prose. Use the
+  registered short lane ID, or a fenced `room-claim` block with a valid lane.
+  Do not silently strip spaces: that could address another lane.
 
 A bare lane name, a bare `@lane`, or a guess at a lane id addresses nobody —
 exactly like Rowboat's mention grammar, where the href key (the token) is
