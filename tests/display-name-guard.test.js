@@ -77,6 +77,10 @@ test('integration: identity mint and room link enforce names at the write bounda
     }), { status: 422, code: 'invalid_identity' });
   }
   assert.equal(count(), linkedBefore, 'failed links do not leave a membership');
+  const duplicate = store.identities.create('Another');
+  assert.equal(store.identities.link(ownerKey, 'commons', {
+    identityId: duplicate.identityId, displayName: 'Relay', permissions: []
+  }).identityId, duplicate.identityId, 'existing exact-name duplicates remain allowed');
   const linked = store.identities.link(ownerKey, 'commons', {
     identityId: second.identityId, displayName: 'Helpful Agent', permissions: []
   });
