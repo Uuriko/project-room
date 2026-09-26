@@ -77,7 +77,14 @@ EDGE CASES:
 
 ## CI status
 
-(pending — PR opened, hosted CI driving to green)
+**Hosted CI fully green** (PR #1087, mergeState CLEAN): test ×5, schema-gate,
+contract, lint, unit, browser, cloudflare — all SUCCESS. (Cursor Approval
+Agent: NEUTRAL, advisory only.)
+
+Local full suite (`TMPDIR=<worktree>/.tmp node --test`): 5222 passing, 0
+failing at last check, still running to completion — zero failures observed.
+New tests: 7/7 pass post-fix; 5/7 fail on origin/main's script (fail-pre);
+existing strike-hardening + board-grammar: 15/15 pass.
 
 ## Explicit ask for John
 
