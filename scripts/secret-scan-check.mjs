@@ -79,6 +79,11 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
+  // Rotation scripts (2026-09-26, PR #1107): verified false positives —
+  // long workspace paths and API path templates, not credentials.
+  /\$HOME\/workspace\//, // local workspace scratch paths ($HOME/workspace/...), e.g. watermark/scratch locations
+  /repos\/\$REPO\/issues\/\$OLD_ISSUE\/comments/, // rotation-cutover.sh: GitHub REST API path template with shell-variable interpolation
+  /fallback\/[a-z0-9_-]+-\d{8}T\d{6}Z\.md/, // rotation-rehearse.sh: hermetic fixture lane-note filenames (UTC timestamps)
 ];
 
 // Directories scanned: source code where a real secret could hide.
