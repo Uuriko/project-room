@@ -8,6 +8,19 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
+test('human push uses real Worker crypto and committed Durable Object state with a synthetic delivery service', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } } });
+  try {
+    const response = await mf.dispatchFetch('http://localhost/human-push');
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), { defaultOff: true, encrypted: true, rollbackSuppressed: true });
+  } finally { await mf.dispose(); }
+});
+
 test('shared RoomStore: guests, retries, messages, journal rollback, cancellation and restart on Workers', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });

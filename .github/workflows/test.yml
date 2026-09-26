@@ -54,6 +54,10 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+      - name: Install Linux host isolation for automatic-run unit tests
+        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - name: Verify automatic host namespace support without operator input
+        run: node scripts/host-isolation-preflight.mjs
       - run: npm test
   browser:
     runs-on: ubuntu-latest
