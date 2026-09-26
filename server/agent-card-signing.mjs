@@ -35,7 +35,10 @@ class SigningError extends Error {
 
 // Card body fields covered by the signature. Everything else on the card
 // object (publicKey, signature, server-added metadata) is envelope.
-const CARD_BODY_FIELDS = ["name", "description", "url", "capabilities", "skills", "version"];
+// joinRequest (RC-2026-09-25-912) binds a self-serve guest request to its
+// room + idempotency key; cards signed before it existed verify unchanged
+// because absent fields are skipped.
+const CARD_BODY_FIELDS = ["name", "description", "url", "capabilities", "skills", "version", "joinRequest"];
 
 const fail = (code, message) => { throw new SigningError(code, message); };
 

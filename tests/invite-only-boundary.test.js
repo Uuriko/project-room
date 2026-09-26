@@ -59,6 +59,10 @@ const PROBES = {
   "GET /api/guest-invites": [undefined, 200],
   // GX guest-invite preview: public-safe; unknown code is 410 (not an oracle).
   "POST /api/guest-invites/preview": [{ inviteCode: "GX-00000000000000000000000000000000" }, 410],
+  // Self-serve guest entry (RC-2026-09-25-912): open by design; the signed
+  // agent card in the body is the entire credential. A body without a card
+  // is 422 card_invalid (never an oracle about rooms or keys).
+  "POST /api/guest-invites/request": [{}, 422],
   // Agent public-key registry (integration map slice 9): public key rows are
   // public; an unknown identity id is a bare 404 without revealing anything.
   "GET /api/agent-identities/{}/keys": [undefined, 404],
