@@ -92,8 +92,10 @@ function sweepRoom(registry, roomId, nowMs) {
   const entry = registry.list(roomId);
   const swept = releaseExpired(entry, nowMs);
   const released = [];
+  // releaseExpired returns a normalized copy of every item, expired or not,
+  // so compare states: only a claim that actually lapsed counts as swept.
   swept.forEach((item, index) => {
-    if (item !== entry[index]) { registry.set(roomId, item); released.push(item.id); }
+    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") { registry.set(roomId, item); released.push(item.id); }
   });
   return released;
 }
