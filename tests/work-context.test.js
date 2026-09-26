@@ -70,6 +70,31 @@ test("selected context is one authenticated read with current actor/gates and ex
   } finally { reopened.close(); }
 });
 
+test("HTTP selected source preserves targeted-message privacy for body, access preview and participants", async t => {
+  const f = await fixture(t);
+  f.send("guest", T.MESSAGE_POSTED, { messageId: "private-source", toMemberId: "reviewer", body: "PRIVATE-SOURCE-SENTINEL" });
+  f.send("owner", T.WORK_PROPOSED, { workItemId: "private-source-work", title: "Read a source", definitionOfDone: "Review permitted context",
+    accountableMemberId: "producer", mode: "read", sourceMessageId: "private-source" });
+  for (const actor of ["producer", "owner", "guest", "reviewer"]) {
+    const allowed = actor === "guest" || actor === "reviewer";
+    const snapshot = await f.client(actor).snapshot();
+    assert.equal(snapshot.state.messages.some(message => message.id === "private-source"), allowed);
+    for (const includeSource of [true, false]) {
+      const view = await f.client(actor).workContext("private-source-work", { includeSource });
+      assert.equal(view.context.source.status, !includeSource ? "not_requested" : allowed ? "included" : "unavailable");
+      assert.equal(view.context.source.message?.body ?? null, allowed && includeSource ? "PRIVATE-SOURCE-SENTINEL" : null);
+      assert.equal(view.accessSummary.conversation.sourceAvailability, allowed ? "available" : "unavailable");
+      assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, allowed ? ["private-source"] : []);
+      assert.equal(JSON.stringify(view).includes("PRIVATE-SOURCE-SENTINEL"), allowed && includeSource);
+      if (!allowed) {
+        assert.equal(view.context.participants.some(member => member.id === "guest"), false, "private source author is not added to participants");
+        assert.equal(view.accessSummary.participantIds.includes("guest"), false);
+      }
+      verifyAccessSummary(view, { roomId: "commons", workItemId: "private-source-work" });
+    }
+  }
+});
+
 test("projection uses one explicit clock and exact source IDs without guessing or hidden histories", async t => {
   const f = await fixture(t), snapshot = f.store.snapshot(f.keys.owner, "commons");
   const state = structuredClone(snapshot.state), item = state.workItems["test-handoff"];
