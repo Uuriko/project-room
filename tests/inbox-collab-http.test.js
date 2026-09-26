@@ -451,6 +451,121 @@ test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async 
   assert.deepEqual(swept.swept, { expired: [], escalated: [] });
 });
 
+test("envelopes: create retries survive lost responses, lifecycle changes and restart without duplicates", async t => {
+  const f = setup(t); await f.serve();
+  let now = Date.now(); f.store.now = () => now;
+  const base = "/api/rooms/commons/collab/envelopes", deadline = now + 60000;
+  const fields = {
+    requestId: "handoff-retry-1", to: agentIdOf(f), objective: "Review the patch",
+    inputs: [{ kind: "note", ref: "Patch context" }],
+    authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] }, expiresAt: new Date(deadline).toISOString() },
+    expectedOutput: { kind: "report", description: "Review findings" },
+    acceptanceTest: { checks: [{ kind: "manual_review", reviewer: agentIdOf(f) }] },
+    termination: { expiresAt: new Date(deadline).toISOString(), onExpiry: "release" }
+  };
+  // Discard the committed creation response: the caller cannot know its ID.
+  const lost = await post(f, base, f.humanKey, fields);
+  assert.equal(lost.status, 201); await lost.body.cancel();
+  const retry = await post(f, base, f.humanKey, fields);
+  assert.equal(retry.status, 200);
+  const receipt = await retry.json();
+  assert.equal(receipt.duplicate, true);
+  const { envelopeId } = receipt;
+  assert.equal((await (await get(f, base, f.humanKey)).json()).envelopes.length, 1);
+  assert.equal((await post(f, `${base}/${envelopeId}/transition`, f.agent.secret, { status: "accepted" })).status, 200);
+  await f.reopen(); f.store.now = () => now;
+  now = deadline + 1;
+  const resumed = await (await post(f, base, f.humanKey, fields)).json();
+  assert.equal(resumed.duplicate, true);
+  assert.equal(resumed.envelopeId, envelopeId);
+  assert.equal(resumed.status, "accepted");
+  assert.equal(resumed.createdAt, receipt.createdAt);
+  assert.equal(resumed.history.length, 2);
+  await post(f, `${base}/sweep`, f.humanKey, {});
+  const expired = await (await post(f, base, f.humanKey, fields)).json();
+  assert.equal(expired.status, "expired");
+  assert.equal(expired.duplicate, true);
+  const conflict = await post(f, base, f.humanKey, { ...fields, objective: "Different patch" });
+  assert.equal(conflict.status, 409);
+  assert.equal(await codeOf(conflict), "envelope_request_conflict");
+  assert.deepEqual((await (await get(f, base, f.humanKey)).json()).envelopes[0],
+    Object.fromEntries(Object.entries(expired).filter(([key]) => key !== "duplicate")));
+
+  now = deadline - 1;
+  const concurrentFields = { ...fields, requestId: "concurrent-create" };
+  const responses = await Promise.all(Array.from({ length: 4 }, () => post(f, base, f.humanKey, concurrentFields)));
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 200, 200, 201]);
+  const receipts = await Promise.all(responses.map(response => response.json()));
+  assert.equal(new Set(receipts.map(row => row.envelopeId)).size, 1);
+  assert.equal(receipts.filter(row => row.duplicate === false).length, 1);
+  // JSON property order is immaterial; normalized optional defaults are stable.
+  const reordered = Object.fromEntries(Object.entries({ ...concurrentFields, provenance: { chain: [] } }).reverse());
+  assert.equal((await post(f, base, f.humanKey, reordered)).status, 200);
+  const otherActor = await post(f, base, f.agent2.secret, concurrentFields);
+  assert.equal(otherActor.status, 201);
+  assert.notEqual((await otherActor.json()).envelopeId, receipts[0].envelopeId);
+  f.store.initialize(initialRoom("other-room"));
+  const otherKey = f.store.issueAccessKey("other-room", "owner");
+  const otherRoom = await post(f, "/api/rooms/other-room/collab/envelopes", otherKey, concurrentFields);
+  assert.equal(otherRoom.status, 201);
+  assert.notEqual((await otherRoom.json()).envelopeId, receipts[0].envelopeId);
+  const { requestId: _requestId, ...legacy } = fields;
+  const legacyReceipts = [];
+  for (let i = 0; i < 2; i++) {
+    const response = await post(f, base, f.humanKey, legacy);
+    assert.equal(response.status, 201); legacyReceipts.push(await response.json());
+  }
+  assert.notEqual(legacyReceipts[0].envelopeId, legacyReceipts[1].envelopeId);
+  assert.equal(Object.hasOwn(legacyReceipts[0], "duplicate"), false);
+  for (const requestId of [null, "", 7, "bad id", "a".repeat(129)]) {
+    assert.equal((await post(f, base, f.humanKey, { ...fields, requestId })).status, 422);
+  }
+});
+
+// HTTP is the primary regression boundary: configured deadlines must be
+// enforced without relying on a separately invoked maintenance sweep.
+test("envelopes: configured expiry blocks late acceptance/completion but allows cleanup", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab/envelopes", initial = Date.now();
+  let now = initial; f.store.now = () => now;
+  const deadline = initial + 60000, later = deadline + 60000;
+  for (const humanRecipient of [false, true]) {
+    const sender = humanRecipient ? f.agent.secret : f.humanKey;
+    const recipient = humanRecipient ? f.humanKey : f.agent.secret;
+    for (const expires of ["authority", "termination"]) {
+      for (const status of ["accepted", "completed"]) {
+        for (const offset of [-1, 0, 1]) {
+          now = initial;
+          const created = await post(f, base, sender, {
+            to: humanRecipient ? "owner" : agentIdOf(f), objective: "Review this handoff",
+            inputs: [{ kind: "note", ref: "Current work context" }],
+            authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] },
+              expiresAt: new Date(expires === "authority" ? deadline : later).toISOString() },
+            expectedOutput: { kind: "report", description: "A reviewed result" },
+            acceptanceTest: { checks: [{ kind: "manual_review", reviewer: humanRecipient ? "owner" : agentIdOf(f) }] },
+            termination: { expiresAt: new Date(expires === "termination" ? deadline : later).toISOString(), onExpiry: "release" }
+          });
+          assert.equal(created.status, 201);
+          const { envelopeId } = await created.json();
+          const transition = (value, token = recipient) => post(f, `${base}/${envelopeId}/transition`, token, value);
+          if (status === "completed") assert.equal((await transition({ status: "accepted" })).status, 200);
+          const before = f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId);
+          now = deadline + offset;
+          const response = await transition({ status, ...(status === "completed" ? { checksPassed: ["manual_review"] } : {}) });
+          const label = `${humanRecipient ? "human" : "agent"} ${status} at ${expires} deadline ${offset}`;
+          assert.equal(response.status, offset < 0 ? 200 : 409, label);
+          if (offset < 0) { assert.equal((await response.json()).envelope.status, status); continue; }
+          assert.equal(await codeOf(response), "envelope_expired", label);
+          assert.deepEqual(f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId), before,
+            "late transition leaves the journal unchanged for explicit cleanup");
+          const cleanup = status === "accepted" ? "cancelled" : "escalated";
+          assert.equal((await transition({ status: cleanup }, sender)).status, 200, "sender can still clean up expired work");
+        }
+      }
+    }
+  }
+});
+
 test("restart persistence: every journal replays from SQLite", async t => {
   const f = setup(t); await f.serve();
   const base = "/api/rooms/commons/collab";
