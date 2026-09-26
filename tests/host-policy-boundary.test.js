@@ -33,6 +33,17 @@ test("sandbox refuses executables outside the checkout and system paths", () => 
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
+test("hosted runner Node is exposed as a single read-only binary, not a tool-cache directory", t => {
+  if (!process.execPath.startsWith("/opt/hostedtoolcache/node/")) return t.skip("requires setup-node runner");
+  const checkout = mkdtempSync(join(tmpdir(), "room-host-runner-"));
+  try {
+    const command = isolatedHostCommand({ command: process.execPath, args: ["--version"] }, checkout);
+    const bind = command.args.indexOf("--ro-bind", command.args.indexOf("--bind") + 1);
+    assert.deepEqual(command.args.slice(bind, bind + 3), ["--ro-bind", process.execPath, process.execPath]);
+    assert.equal(command.args.includes("--ro-bind-try"), false);
+  } finally { rmSync(checkout, { recursive: true, force: true }); }
+});
+
 test("configured environment is refused before a host starts", () => {
   const parent = mkdtempSync(join(tmpdir(), "room-host-env-"));
   try { assert.throws(() => isolatedHostCommand({ command: process.execPath, args: [], env: { API_TOKEN: "private" } }, parent), /configured environment/); }

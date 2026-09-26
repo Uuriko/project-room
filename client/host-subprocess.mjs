@@ -18,7 +18,9 @@ export function isolatedHostCommand(config, cwd) {
     throw new Error("Automatic host policy refuses configured environment variables; use a brokered, reviewed tool path");
   if (root === "/" || root === "/usr" || root.startsWith("/usr/") || !root.startsWith("/home/") && !root.startsWith("/tmp/"))
     throw new Error("Host checkout must be a private workspace under /home or /tmp");
-  if (!executable.startsWith("/usr/") && !executable.startsWith(root + sep))
+  const runnerNode = executable.startsWith("/opt/hostedtoolcache/node/")
+    && /\/bin\/node$/.test(executable);
+  if (!executable.startsWith("/usr/") && !executable.startsWith(root + sep) && !runnerNode)
     throw new Error("Host executable must be system-provided or inside the checkout");
   // Parent mount points are empty directories. Only the checkout is writable.
   const parents = [];
@@ -29,6 +31,14 @@ export function isolatedHostCommand(config, cwd) {
     "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
     "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
     ...parents.flatMap(parent => ["--dir", parent]), "--bind", root, root,
+    // GitHub setup-node stores its executable in hostedtoolcache. Expose only
+    // that one read-only binary, never the rest of the runner tool cache.
+    ...(runnerNode ? ["--dir", "/opt", "--dir", "/opt/hostedtoolcache",
+      "--dir", "/opt/hostedtoolcache/node",
+      ...executable.slice("/opt/hostedtoolcache/node/".length).split("/").slice(0, -1)
+        .reduce((state, part) => { state.path += "/" + part; state.args.push("--dir", state.path); return state; },
+          { path: "/opt/hostedtoolcache/node", args: [] }).args,
+      "--ro-bind", executable, executable] : []),
     "--chdir", root, "--", executable, ...config.args];
   return { command: BWRAP, args };
 }
