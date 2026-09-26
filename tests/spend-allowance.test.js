@@ -202,3 +202,56 @@ test("route: members read it, only the owner sets it, and the body is strict", a
   const viaCommands = await f.request("/api/rooms/commons/commands", { method: "POST", token: f.keys.guest, data: { id: randomUUID(), type: T.ROOM_SPEND_ALLOWANCE_SET, data: { allowanceCents: 1, periodDays: 1 } } });
   assert.equal(viaCommands.status, 422); assert.equal(viaCommands.json.error.code, "command_rejected");
 });
+
+test("agent room owner can set the existing room-wide allowance and non-owner malformed writes reveal no schema", async t => {
+  const f = await serve(t);
+  const path = "/api/rooms/commons/spend-allowance";
+  // A non-owner sees the same refusal even when the body has invalid fields.
+  for (const body of [{}, { unknown: "field" }, { allowanceCents: "not cents" }, { allowanceCents: 5000, extra: true }]) {
+    const res = await f.request(path, { method: "POST", token: f.keys.agent, data: body });
+    assert.equal(res.status, 403, JSON.stringify(body));
+    assert.equal(res.json.error.code, "owner_required");
+  }
+  // Create an agent-owned room with the same event shape as self-serve
+  // creation. Keep the owner ID stable through write and replay.
+  const agentRoomId = "agent-allowance-test";
+  const events = initialRoom(agentRoomId, "ai_allowance_owner");
+  events[1].data.kind = "agent";
+  events[1].data.identityId = "ai_allowance_owner";
+  f.store.initialize(events);
+  const agentKey = f.store.issueAccessKey(agentRoomId, "ai_allowance_owner");
+  const before = f.store.room(agentRoomId).state.room.spendAllowance;
+  assert.equal(before, undefined);
+  const peerIdentity = f.store.identities.create("Allowance peer");
+  f.store.identities.link(agentKey, agentRoomId, { identityId: peerIdentity.identityId, permissions: [] });
+  for (const body of [{}, { allowanceCents: 5000, unexpected: 1 }]) {
+    const outsider = await f.request(`/api/rooms/${agentRoomId}/spend-allowance`, { method: "POST", token: peerIdentity.secret, data: body });
+    assert.equal(outsider.status, 403, "a room member who is not owner never reaches body validation");
+    assert.equal(outsider.json.error.code, "owner_required");
+  }
+  const set = await f.request(`/api/rooms/${agentRoomId}/spend-allowance`, { method: "POST", token: agentKey, data: { allowanceCents: 5000, periodDays: 30 } });
+  assert.equal(set.status, 201, JSON.stringify(set.json));
+  const saved = f.store.room(agentRoomId).state.room.spendAllowance;
+  assert.equal(saved.allowanceCents, 5000);
+  assert.equal(saved.periodDays, 30);
+  const replayed = replay(f.store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all(agentRoomId).map(row => JSON.parse(row.body)));
+  assert.deepEqual(replayed.room.spendAllowance, saved);
+  const report = spendAllowanceReport(f.store.room(agentRoomId).state, f.clock.now);
+  assert.equal(report.headroomCents, 5000);
+  assert.equal(report.committedCents, 0);
+  const retry = await f.request(`/api/rooms/${agentRoomId}/spend-allowance`, { method: "POST", token: agentKey,
+    data: { allowanceCents: 5000, periodDays: 30, requestId: "agent-owner-retry" } });
+  assert.equal(retry.status, 201);
+  const duplicate = await f.request(`/api/rooms/${agentRoomId}/spend-allowance`, { method: "POST", token: agentKey,
+    data: { allowanceCents: 5000, periodDays: 30, requestId: "agent-owner-retry" } });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.json.duplicate, true);
+  const final = spendAllowanceReport(f.store.room(agentRoomId).state, f.clock.now);
+  assert.deepEqual([final.allowance.allowanceCents, final.headroomCents, final.committedCents], [5000, 5000, 0]);
+  const original = f.state().room.spendAllowance;
+  f.send("owner", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 });
+  const humanReport = f.report();
+  assert.deepEqual([humanReport.allowance.allowanceCents, humanReport.headroomCents, humanReport.committedCents],
+    [final.allowance.allowanceCents, final.headroomCents, final.committedCents]);
+  assert.equal(original, undefined, "the existing human room was not mutated until its owner acted");
+});

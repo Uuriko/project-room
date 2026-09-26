@@ -239,7 +239,7 @@ export function spendAllowance(state) {
 
 function setSpendAllowance(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
   const { allowanceCents, periodDays } = incoming.data;
   const clearing = allowanceCents === null;
   if (!clearing && (!Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || allowanceCents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
