@@ -189,6 +189,12 @@ Lane tags are deliberate tokens, never prose accidents:
   `[quill-s2]` at the start of a comment (the existing room convention from
   #11) addresses that lane. A `[quill-s2]` appearing mid-prose is a
   reference. Tooling scans the block and the prefix, never the paragraph.
+- **Comment-start lane tags use only letters, digits, `_`, and `-`.**
+  A display name with spaces, such as `[Grok Bot][claim]`, is not a lane ID.
+  The board parser emits `lane-tag-unparseable` (with a failed log entry)
+  rather than registering a claim or silently treating it as prose. Use the
+  registered short lane ID, or a fenced `room-claim` block with a valid lane.
+  Do not silently strip spaces: that could address another lane.
 
 A bare lane name, a bare `@lane`, or a guess at a lane id addresses nobody —
 exactly like Rowboat's mention grammar, where the href key (the token) is
