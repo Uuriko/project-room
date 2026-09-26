@@ -174,3 +174,19 @@ test("non-path backticks and parent-dir escapes are not claimed as files", () =>
   // none qualify, so this surfaces as needing fencing rather than a lease.
   assert.equal(events[0].kind, "unleased-prose-claim");
 });
+
+
+test('bare lease value is rejected with a concrete correction', () => {
+  const comments = [C(600, '2026-09-25T18:00:00Z', `[quill-s2][claim]\n\`\`\`room-claim
+ task-id: RC-2026-09-25-600
+ lane: quill-s2
+ files: scripts/room
+ lease: 6h
+ state: working
+ reason: test bad lease
+\`\`\``)];
+  const state = stateOf(comments, '2026-09-25T18:02:00Z');
+  assert.equal(state.tasks.length, 0);
+  assert.equal(state.log[0].ok, false);
+  assert.match(state.log[0].errors.join(' '), /did you mean lease=6h\?/);
+});
