@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-26T23:29:16Z · board: Uuriko/project-room#266 · watermark: 5850910630 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8b5c99c58b1e1db861ddd6216791bc3bf966257fac77f8cd49132777ca2ff46e -->
+<!-- generated: 2026-09-26T23:59:05Z · board: Uuriko/project-room#266 · watermark: 5851031700 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8b5c99c58b1e1db861ddd6216791bc3bf966257fac77f8cd49132777ca2ff46e -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -429,6 +429,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-26-1113 | none | 5851016106
+BOARD-1 | none | 5850934864
 RC-2026-09-26-1115 | cfec84d105f65159bf6a551fb990e5e1876a63dc | 5850811061
 RC-2026-09-26-1115 | PR #1108 open — head 5adf2436 fully green (test/contract/lint/browser/cloudflare), merge pending | 5850802780
 RC-2026-09-26-1110 | ca1a174cb76c446062178aa5e339e5a4393ad418 | 5850416896
@@ -437,8 +439,6 @@ RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850318678
 RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850296794
 RC-2026-09-26-1117 | 304fffc7b8b2c39ace4cf2fe5e1a3264f966462e | 5850295901
 RC-2026-09-25-304 | fb2ef7aa7811b7beab62f1fdd39203748ac17851 | 5850220126
-RC-2026-09-25-303 | 70baf7d1dced374cd3d4083a0027036294890058 | 5850219368
-RC-2026-09-26-966 | 008d95758e54803d31319fb567512b4ae749e35e | 5850118285
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -783,5 +783,5 @@ tests/workflow.test.js | jill | RC-2026-09-26-965 | working
 … +63 more
 
 ## signals
-board_comments=2170 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=258 overlap_files=42 watermark=5850910630
+board_comments=2184 threshold=1500 rotation_due=yes watcher=active open_claims=77 prose_open=3 unfenced_prose=73 files_claimed=258 overlap_files=42 watermark=5851031700
 
