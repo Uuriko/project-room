@@ -124,17 +124,23 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const origin = `http://127.0.0.1:${server.address().port}`, responses = [], before = auditRecovery(store).dataSha256;
+  const origin = `http://127.0.0.1:${server.address().port}`, responses = [], routes = [], before = auditRecovery(store).dataSha256;
   const client = new RoomAgentClient({ origin, roomId: 'commons', memberId: 'producer', token: f.keys.producer,
-    fetchImpl: async (...args) => { const response = await fetch(...args); responses.push(await response.clone().json()); return response; } });
+    fetchImpl: async (...args) => { routes.push(new URL(args[0]).pathname.split('/').at(-1));
+      const response = await fetch(...args); responses.push(await response.clone().json()); return response; } });
   const result = await client.orient({ query: 'agenda', focus: 'needs_me' });
   assert.equal(result.work[0].id, 'test-handoff'); assert.equal(result.selection.shown, 1);
-  assert.equal(responses.length, 2); assert.equal(responses[1].snapshotView, undefined); assert.ok(Array.isArray(responses[1].state.messages));
+  assert.deepEqual(routes, ['session', 'commons', 'session', 'reply-requests']);
+  assert.equal(responses.length, 4); assert.equal(responses[1].snapshotView, undefined); assert.ok(Array.isArray(responses[1].state.messages));
+  assert.deepEqual(result.replyRequests, []);
+  assert.equal(result.replyRequestsEvaluatedThrough, responses[3].evaluatedThrough);
   const selected = await client.workContext('test-handoff');
   assert.equal(selected.collaboration, undefined, 'Actual retained fallback does not advertise new help guidance');
   assert.equal(selected.work.accountableMemberId, 'producer');
-  assert.equal(responses.length, 4, 'Selected read retains identity preflight without a compatibility retry');
+  assert.equal(responses.length, 6, 'Selected read retains identity preflight without a compatibility retry');
+  assert.deepEqual(routes.slice(4), ['session', 'work-context']);
   await assert.rejects(client.orient({ focus: 'help_wanted' }), { code: 'help_context_unavailable' });
-  assert.equal(responses.length, 6, 'Unsupported discovery does not retry with weaker reads');
+  assert.equal(responses.length, 8, 'Unsupported discovery does not retry with weaker reads');
+  assert.deepEqual(routes.slice(6), ['session', 'commons']);
   assert.equal(auditRecovery(store).dataSha256, before);
 });

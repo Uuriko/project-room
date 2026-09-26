@@ -109,23 +109,34 @@ export async function profileDiscovery({ workCount, messageCount, samples = 3, m
       const names = Object.keys(methods), order = [...names.slice(sample % names.length), ...names.slice(0, sample % names.length)];
       for (const name of order) {
         requests.length = 0; const result = await methods[name]();
-        assert.equal(requests.length, 2); assert.equal(requests[0].route, 'session');
-        assert.equal(requests[1].route, name === 'selected' ? 'work-context' : 'commons');
+        const routes = name === 'focused' || name === 'search'
+          ? ['session', 'commons', 'session', 'reply-requests']
+          : ['session', name === 'selected' ? 'work-context' : 'commons'];
+        assert.deepEqual(requests.map(request => request.route), routes);
+        // Orientation now reads reply discovery separately. Count both identity
+        // preflights and both operations, including their projection/transfer cost.
+        const identity = requests.filter(request => request.route === 'session');
+        const operations = requests.filter(request => request.route !== 'session');
+        const sum = (group, field) => group.reduce((total, request) => total + request[field], 0);
         if (name === 'selected') assert.equal(result.work.id, 'test-handoff');
         else { assert.equal(result.work.length, name === 'full' ? workCount : 1);
           assert.ok(result.work.some(work => work.id === 'test-handoff')); }
-        measured[name].push({ requests: requests.length, identityChecks: 1,
+        measured[name].push({ requests: requests.length, identityChecks: identity.length,
           fullRoomReads: requests.reduce((sum, request) => sum + request.fullRoomReads, 0),
           authorityReads: requests.reduce((sum, request) => sum + request.authorityReads, 0),
-          identityAuthorityReads: requests[0].authorityReads, operationAuthorityReads: requests[1].authorityReads,
-          identityFullRoomReads: requests[0].fullRoomReads, operationFullRoomReads: requests[1].fullRoomReads,
+          identityAuthorityReads: sum(identity, 'authorityReads'), operationAuthorityReads: sum(operations, 'authorityReads'),
+          identityFullRoomReads: sum(identity, 'fullRoomReads'), operationFullRoomReads: sum(operations, 'fullRoomReads'),
           decodedBodyBytes: requests.reduce((sum, request) => sum + request.decodedBodyBytes, 0),
           resultJsonBytes: Buffer.byteLength(JSON.stringify(result)) });
       }
     }
     assert.equal(auditRecovery(f.store).dataSha256, before);
+    for (const rows of Object.values(measured)) {
+      assert.ok(rows.every(row => row.requests === rows[0].requests && row.identityChecks === rows[0].identityChecks),
+        'request and identity counts remain stable across repeated immutable reads');
+    }
     const metrics = Object.fromEntries(Object.entries(measured).map(([name, rows]) => [name, {
-      samples: rows.length, requestsPerRead: 2, identityChecksPerRead: 1,
+      samples: rows.length, requestsPerRead: rows[0].requests, identityChecksPerRead: rows[0].identityChecks,
       ...Object.fromEntries(['fullRoomReads', 'identityFullRoomReads', 'operationFullRoomReads', 'authorityReads', 'identityAuthorityReads', 'operationAuthorityReads'].map(field => [field,
         { min: Math.min(...rows.map(row => row[field])), max: Math.max(...rows.map(row => row[field])) }])),
       fullProjectionInputBytes: { min: Math.min(...rows.map(row => row.fullRoomReads)) * projectionJsonBytes,
