@@ -38,3 +38,11 @@ The root agent inspected the deployed inbox and the current source. The audit co
 ## Validation record
 
 Implementation, independent review, exact commits, tests, and release state will be recorded after execution. This document is a plan, not evidence of deployment.
+
+### Evidence and refined scope
+
+The inbox implementation passed its pre-fix failure and 67 focused checks through actual HTTP, hosted MCP, and local stdio. Independent review approved. The measured default JSON-RPC catalog is 16,149 bytes, leaving 235 bytes under the existing 16 KiB bound. The inbox remains a local/full-profile tool; compact-profile users discover the list directly.
+
+Review of the newly merged membership journal (#1127) found a separate release blocker: journal append uses `run().lastInsertRowid`, which Node SQLite supplies but the production DurableDatabase adapter does not. An actual workerd grant then revoke fails with an unfinished journal hash; 56 Node checks passing did not catch it. Before deployment, replace that assumption with SQLite's returned sequence and verify grant/revoke/regrant and reopening against the real Worker adapter. This is a required compatibility repair for the current base, not a new membership feature.
+
+The composer follow-up preserves Grok's narrow limit-alignment checkpoint, then removes silent truncation. Preserve the full over-limit draft; display an accessible inline error only above the server's 65,536 UTF-16-unit limit; reject sending until shortened. Keep existing aggregate storage bounds and session/recipient checks. The private Inbox limit stays unchanged. The actual browser test must cover overflow paste and restoration, boundary counting, and recovery, rather than merely assert an HTML attribute.
