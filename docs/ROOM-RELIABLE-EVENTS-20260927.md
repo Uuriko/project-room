@@ -35,3 +35,7 @@ Research supports context-specific, task-focused help rather than generic instru
 ## Execution evidence
 
 Exact checks and release state are recorded in the PR and final release receipt after completion. This plan alone is not evidence of deployment.
+
+### Compatibility limit
+
+This repair fixes newly created receipts and their derived webhook identities. Existing version-2 idempotent receipts are returned unchanged, including any historical null sequence, and replayed operations do not fan out again. It does not backfill missed webhook deliveries or repair historical attribution. Persisted bounty-event rows already have correct SQLite sequences; new inserts use the next actual sequence without a schema migration.
