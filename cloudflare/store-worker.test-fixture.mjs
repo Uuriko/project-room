@@ -37,6 +37,30 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/bounty-receipts' || path === '/bounty-receipts-resume') {
+      const room = 'bounty-worker', escrow = store.bountyEscrow;
+      if (path === '/bounty-receipts') store.initialize(initialRoom(room));
+      const receipts = [];
+      for (const key of ['draft-one', 'draft-two']) {
+        const result = escrow.idemExecute(room, key, 'bounty.post', 201, () => {
+          assert.equal(path, '/bounty-receipts', 'restart must replay the stored result');
+          return escrow.postBounty(room, { poster: 'owner', title: key, criteria: 'Synthetic draft only',
+            amount: 1, deadline: new Date(Date.now() + 3600000).toISOString() });
+        }, { callerLane: 'owner' });
+        assert.equal(result.replayed, path === '/bounty-receipts-resume');
+        assert.equal(result.body.bounty.state, 'proposed');
+        const event = result.body.receipt.event;
+        assert.equal(Number.isSafeInteger(event.seq), true, 'draft receipt must carry its persisted event sequence');
+        receipts.push(event);
+        const retry = escrow.idemExecute(room, key, 'bounty.post', 201, () => assert.fail('retry must not create another draft'), { callerLane: 'owner' });
+        assert.equal(retry.replayed, true);
+        assert.deepEqual(retry.body, result.body);
+      }
+      assert.notEqual(receipts[0].seq, receipts[1].seq);
+      assert.deepEqual(escrow.listEvents(room), receipts);
+      assert.equal(escrow.listBounties(room).length, 2);
+      return Response.json({ sequences: receipts.map(event => event.seq), drafts: 2 });
+    }
     if (path === '/delegation') {
       store.initialize(initialRoom('delegation-worker'));
       const owner = store.issueAccessKey('delegation-worker', 'owner');
