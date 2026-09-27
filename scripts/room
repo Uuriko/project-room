@@ -390,7 +390,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
 
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
-      | (.id) as $id | (.created_at) as $at
+      | (.id) as $id | (.created_at) as $at | (.updated_at // .created_at) as $updated
       | ($body | split("\n")[0] | normalize_header) as $first
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
@@ -492,7 +492,12 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
             ref:$rrf["task-id"],
             receipt:$rrf}
          else {kind:"prose"} end) as $ev
-      | {id:$id, at:$at, lane:$lp.lane, prefix:$pf.p} + $ev
+      | {id:$id, at:$at, lane:$lp.lane, prefix:$pf.p,
+         # 2026-09-27 (deep audit): an in-place edit of a strike stamp
+         # comment defeats the F1/F2 set-once hardening — the rebuild
+         # re-reads the edited body every tick. Stamps must be posted
+         # fresh; edited comments never carry them.
+         edited:(($updated // $at) != $at)} + $ev
     ;
     [.[] | parse_comment] | sort_by(.at, .id)
   '
@@ -654,7 +659,15 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
               elif ($from == "working")
                    or (($e.via == "prose-terminal") and ($from == "submitted")) then
                 .tasks[$tid] |= (.state = "completed" | .last_at = $at
-                  | if $e.receipt then
+                  # 2026-09-27 (deep audit): only append a receipt that
+                  # carries attestation (a merge SHA or PR number). A bare
+                  # [done] with no receipt block builds an all-null object
+                  # that is truthy in jq — appending it silently evades
+                  # the 24h receipt SLO. Bare dones keep missing_receipt
+                  # and get their SLO reminder like every SHA-less close.
+                  | if ($e.receipt
+                        and ((($e.receipt.merged // null) != null)
+                             or (($e.receipt.pr // null) != null))) then
                       .receipts += [{merged:($e.receipt.merged // null),
                                     attribution:($e.receipt.attribution // null),
                                     pr:($e.receipt.pr // null),
@@ -738,13 +751,29 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                   # The stamp is clamped to not-after the comment timestamp
                   # itself: a future-dated stamp is inherently forged.
                   # An unparseable stamp is refused, never recorded.
-                  if ((.tasks[$tid].strike_one_at // null) != null) then
+                  # 2026-09-27 (deep audit): a strike stamp in an EDITED
+                  # comment is ignored — editing the original strike
+                  # comment stamp text otherwise defeats the set-once
+                  # hardening exactly like a replay. Stamps must be fresh.
+                  # A strike stamped BEFORE the lease expires is premature
+                  # and ignored: the enforcer only posts strike-one after
+                  # expiry, so a pre-expiry stamp is forged (or raced a
+                  # heartbeat that renewed the lease). 300s is the
+                  # protocol clock-skew tolerance.
+                  if ($e.edited // false) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:"strike-one in an edited comment: ignored; stamps must be posted fresh"}]
+                  elif ((.tasks[$tid].strike_one_at // null) != null) then
                     .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                               ignored:("strike-one replay ignored: strike already recorded at "
                                        + (.tasks[$tid].strike_one_at | tostring))}]
                   elif (epoch($m.ts // "") | . == 0) then
                     .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:false,
                               errors:["strike-one refused: unparseable stamp " + ($m.ts // "(none)")]}]
+                  elif (lease_exp(.tasks[$tid])
+                        and (epoch($m.ts // $at) < lease_exp(.tasks[$tid]) - 300)) then
+                    .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                              ignored:"strike-one before lease expiry: ignored (premature stamp)"}]
                   else
                     (($m.ts // $at) as $stamp
                      | (if (epoch($stamp) > epoch($at)) then $at else $stamp end) as $clamped
@@ -760,17 +789,33 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                   # and no heartbeat after the nudge. A lone forged
                   # strike-two, an early one, or one racing the heartbeat
                   # of a live agent is logged and ignored.
+                  # 2026-09-27 (deep audit): a strike-two stamp in an
+                  # EDITED comment is ignored (same F1/F2 edit attack as
+                  # strike-one). A voluntary release after the strike-one
+                  # grants a bounded 24h release-confirmation grace —
+                  # mirroring sweep — after which strike-two may proceed.
+                  # The grace boundary is <= 14400: sweep only posts past
+                  # 14400s, so the reducer must never honor a stamp at
+                  # exactly +14400s.
                   (.tasks[$tid]) as $t
-                  | if (($t.strike_one_at // null) == null) then
+                  | if ($e.edited // false) then
+                      .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                ignored:"strike-two in an edited comment: ignored; stamps must be posted fresh"}]
+                    elif (($t.strike_one_at // null) == null) then
                       .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                                 ignored:"strike-two without a prior strike-one: ignored"}]
-                    elif (epoch($at) - epoch($t.strike_one_at) < 14400) then
+                    elif (epoch($at) - epoch($t.strike_one_at) <= 14400) then
                       .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                                 ignored:"strike-two before the 4h strike grace elapsed: ignored"}]
                     elif ((($t.heartbeat_at // null) != null)
                           and (epoch($t.heartbeat_at) > epoch($t.strike_one_at))) then
                       .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
                                 ignored:"strike-two after a post-nudge heartbeat: ignored"}]
+                    elif ((($t.voluntary_release_at // null) != null)
+                          and (epoch($t.voluntary_release_at) > epoch($t.strike_one_at))
+                          and (epoch($at) - epoch($t.voluntary_release_at) <= 86400)) then
+                      .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
+                                ignored:"strike-two inside the 24h voluntary-release grace: ignored"}]
                     else
                       .tasks[$tid] |= (.state = "submitted" | .lane = null | .released_at = $at
                                        | .strike_one_at = null | .last_at = $at | .pending_handoff = null)
@@ -1585,23 +1630,44 @@ closed_prs_json() {
   printf '%s' "$_CLOSED_PRS_CACHE"
 }
 
+# 2026-09-27 (deep audit): a board receipt counts only when it is anchored
+# to a REAL merged PR — the receipt's merged SHA is a prefix of a real
+# merged PR's merge_commit_sha, or its PR number matches a real merged PR.
+# Unvalidated prose receipts (a fabricated SHA in a ```room-receipt fence,
+# postable by anyone in a prose comment) no longer suppress strike-one
+# (deliverable_landed) or hide missing receipts (scan_task_rows).
+# Residual, noted honestly: a forger copying a REAL merged SHA still
+# suppresses — full unforgeability needs task<->PR linkage.
+# $1 = state JSON, $2 = closed-PRs JSON -> validated task-ids, one per line
+validated_receipt_tasks() {
+  local st="$1" prs="$2"
+  printf '%s' "$st" | jq -r --argjson prs "$prs" '
+    ([$prs[] | select(.merged_at != null)
+      | {sha: (.merge_commit_sha // ""), num: (.number | tostring)}]) as $merged
+    | [.prose_receipts[]
+       | (.merged // "") as $m | (.pr // null) as $p | .task as $t
+       | select(
+           ($m != "" and $m != "none"
+            and ([$merged[] | select((.sha // "") | startswith($m))] | length > 0))
+           or ($p != null
+               and ([$merged[] | select(.num == ($p | tostring))] | length > 0)))]
+    | unique | .[]'
+}
+
 deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable already landed
   # 2026-09-26 (RC-2026-09-26-969): RC-2026-09-25-301..304 got strike-one
   # nudges while PRs #1072-#1075 were already merged — the claims needed
   # DONE closeout, not a nudge. Either board-visible signal suppresses the
   # strike-one:
-  #   1. a receipt on the board naming the task with a merge SHA or PR, or
+  #   1. a VALIDATED receipt on the board naming the task (anchored to a
+  #      real merged PR — see validated_receipt_tasks), or
   #   2. a merged PR whose title/body names the task-id.
-  local task_id="$1" st="$2"
-  if printf '%s' "$st" | jq -e --arg t "$task_id" '
-       [.prose_receipts[]
-        | select(.task == $t)
-        | select(((.merged // "none") != "none" and (.merged // "") != "")
-                 or ((.pr // null) != null))]
-       | length > 0' >/dev/null; then
+  local task_id="$1" st="$2" prs
+  prs="$(closed_prs_json)"
+  if validated_receipt_tasks "$st" "$prs" | grep -qx "$task_id"; then
     return 0
   fi
-  if closed_prs_json | jq -e --arg t "$task_id" '
+  if printf '%s' "$prs" | jq -e --arg t "$task_id" '
        [.[] | select(.merged_at != null)
         | ((.title // "") + "\n" + (.body // ""))
         | select(test("(^|\n)[ \t]*" + $t + "[ \t]*:"))]
@@ -1645,15 +1711,23 @@ sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
         # after the strike-one counts as a heartbeat (RC-2026-09-25-7401:
         # strike-one, then a prose STATUS release 14 min later, then a
         # bogus strike-two because the parser never saw the release).
+        # 2026-09-27 (deep audit): the release grace is BOUNDED to 24h.
+        # Without the bound, one prose comment grants permanent
+        # strike-two immunity and the claim squats files forever
+        # (zombie). Mirrored in the reducer's F3 guard — the two must
+        # agree or sweep's legitimate post-grace strike-two gets ignored.
         rel="$(jq -r '.voluntary_release_at // empty' <<<"$t")"
+        rel_ok=0
         if [ -n "$rel" ]; then
           rel_e="$(iso_epoch "$rel")"
-          [ "$rel_e" -gt "$strike_e" ] && hb_ok=1
+          if [ "$rel_e" -gt "$strike_e" ] && [ $((now - rel_e)) -le 86400 ]; then
+            hb_ok=1; rel_ok=1
+          fi
         fi
         if [ $((now - strike_e)) -gt 14400 ] && [ "$hb_ok" = 0 ]; then
           sweep_strike_two "$task_id" "$lane" "$t"; actions=$((actions + 1))
-        elif [ $((now - strike_e)) -gt 14400 ] && [ "$rel_e" -gt "$strike_e" ]; then
-          printf 'room: strike-two suppressed for %s: voluntary release %s after strike-one (no strike)\n' "$task_id" "$rel"
+        elif [ $((now - strike_e)) -gt 14400 ] && [ "$rel_ok" = 1 ]; then
+          printf 'room: strike-two suppressed for %s: voluntary release %s after strike-one (24h grace, no strike)\n' "$task_id" "$rel"
         fi
       fi
     fi
@@ -1718,13 +1792,17 @@ digest_items_unchanged() { # $1 = digest body -> 0 when the newest board digest 
 
 # 2026-09-26 (RC-2026-09-26-969): task rows for receipts-scan, with the
 # digest-closeout dedup. $1 = state JSON, $2 = comments JSON, $3 = cutoff epoch.
-scan_task_rows() {
-  local st="$1" comments="$2" cutoff="$3"
+scan_task_rows() { # $1 = state JSON, $2 = comments JSON, $3 = cutoff epoch, $4 = closed-PRs JSON
+  local st="$1" comments="$2" cutoff="$3" prs="${4:-[]}"
   # Latest posted digest; a lane closeout posted after it (closing response
   # referencing the digest, a receipt fence, or explicit closing language)
   # means the claim was already handled — re-flagging is noise
   # (RC-2026-09-23-903/953: digest 5824967872, closing response 5825166515).
-  local digest_id closed
+  # 2026-09-27 (deep audit): $receipted uses VALIDATED receipts only —
+  # a forged prose receipt (fabricated SHA) no longer hides a missing
+  # receipt flag. See validated_receipt_tasks.
+  local digest_id closed receipted
+  receipted="$(validated_receipt_tasks "$st" "$prs")"
   digest_id="$(printf '%s' "$comments" | jq -r '[.[] | select((.body // "") | startswith("[room-watch] missing receipts"))] | last | .id // 0')"
   closed="$(printf '%s' "$comments" | jq -r --argjson d "$digest_id" '
     [.[]
@@ -1736,15 +1814,12 @@ scan_task_rows() {
               or ($b | test("```room-receipt")))
      | $tids[]]
     | unique | join("\n")')"
-  printf '%s' "$st" | jq -r --argjson cut "$cutoff" --arg closed "$closed" '
-    (($closed | split("\n") | map(select(length > 0))) as $closed_ids
-     # A parsed receipt (fenced room-receipt block, even in a prose
-     # comment) naming the task with a merge SHA or PR covers it.
-     | ([.prose_receipts[]
-          | select(((.merged // "none") != "none" and (.merged // "") != "")
-                   or ((.pr // null) != null))
-          | .task] | unique) as $receipted
-     | [.tasks[]
+  printf '%s' "$st" | jq -r --argjson cut "$cutoff" --arg closed "$closed" --arg receipted "$receipted" '
+    ($closed | split("\n") | map(select(length > 0))) as $closed_ids
+    # Only VALIDATED receipts (anchored to a real merged PR) cover a
+    # task — a forged prose receipt no longer hides the flag.
+    | ($receipted | split("\n") | map(select(length > 0))) as $receipted
+    | ([.tasks[]
         | select(.state == "completed" and (.receipts | length) == 0)
         | select(((.last_at | fromdate) // 0) < $cut)
         | select((.task_id as $t | (($closed_ids | index($t)) | not)))
@@ -1801,7 +1876,7 @@ cmd_receipts_scan() {
   local prs rcpt_shas
   prs="$(closed_prs_json)"
   rcpt_shas="$(scan_receipted_shas "$st")"
-  trows="$(scan_task_rows "$st" "$comments" "$cutoff")"
+  trows="$(scan_task_rows "$st" "$comments" "$cutoff" "$prs")"
   prows="$(scan_pr_rows "$prs" "$rcpt_shas" "$cutoff")"
   printf 'room: missing receipts (24h SLO)\n'
   local out=""
@@ -2172,7 +2247,7 @@ cmd__receipts_plan() {
   wm="$(printf '%s' "$comments" | jq '[.[].id] | max // 0')"
   st="$(printf '%s' "$comments" | parse_events | reduce_state "$now" "$n" "$wm")"
   cutoff=$((now - 86400))
-  trows="$(scan_task_rows "$st" "$comments" "$cutoff")"
+  trows="$(scan_task_rows "$st" "$comments" "$cutoff" "$prs")"
   rcpt_shas="$(scan_receipted_shas "$st")"
   prows="$(scan_pr_rows "$prs" "$rcpt_shas" "$cutoff")"
   printf 'room: missing receipts (24h SLO)\n'
