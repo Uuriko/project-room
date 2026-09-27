@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   ROOM_ROSTER, rosterById, rosterSelection, rosterNameTaken,
-  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary, connectionStanding,
+  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary, connectionSeat, connectionStanding,
   setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
   claudeMcpAddCommand, reconnectCopy
 } from "../src/room-roster.js";
@@ -32,6 +32,20 @@ test("roster is exactly Instinct, Muse, Grok Build and Grok Bot with safe routes
     assert.equal(row.today.includes("gWi-"), false);
     assert.doesNotMatch(JSON.stringify(row), /ROOM_AGENT_TOKEN|owner-key/);
   }
+});
+
+test("an inherited connection member id is not a seat", () => {
+  const members = { owner: { id: "owner", active: true, permissions: ["manage_members"] } };
+  assert.equal(connectionSeat(members, "owner").id, "owner");
+  const seat = connectionSeat(members, "toString");
+  assert.equal(seat, undefined);
+  const standing = connectionStanding({
+    connectionStatus: "key_issued",
+    memberFound: seat != null,
+    permissions: seat ? seat.permissions ?? [] : null,
+    pending: false
+  });
+  assert.equal(standing.compact, "Member record missing");
 });
 
 test("MCP snippets require absolute private paths and never mention tokens", () => {

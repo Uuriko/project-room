@@ -254,6 +254,11 @@ const UNAVAILABLE = Object.freeze({
   access_changed: "Access changed. Recheck required",
 });
 
+export function connectionSeat(members, memberId) {
+  // A truthy map lookup treats toString as a seat and says that agent can read and post.
+  return members && Object.hasOwn(members, memberId) ? members[memberId] : undefined;
+}
+
 // Credential availability stays separate from optional work grants. A chat
 // seat can read and post without verify or write_external. Those grants are
 // owner-selected limits, not a requirement that every agent receive them.
