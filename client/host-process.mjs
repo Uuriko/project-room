@@ -1,3 +1,4 @@
+import { createHostEnvelope, validateHostPolicy } from "./host-context-policy.mjs";
 import { hostReplyBody, recordObservedChecks } from "./host-result.mjs";
 import { hostSubprocess, validHostCommand } from "./host-subprocess.mjs";
 import { observeHostChecks, validateHostVerification } from "./host-verification.mjs";
@@ -12,13 +13,13 @@ export function configuredHost(config) {
       || Object.entries(config.env).some(([key, value]) => typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))))
     throw new Error("Host configuration requires absolute command/cwd, argument array and timeoutMs (100–3600000)");
   validateHostVerification(config.verification);
+  validateHostPolicy(config.policy, config.cwd);
   if (config.env && Object.keys(config.env).length) throw new Error("Automatic host cannot receive configured environment variables");
   const settings = structuredClone(config);
   return async ({ signal, ...input }) => {
     if (signal?.aborted) throw new Error("Host cancelled");
-    let payload;
-    try { payload = JSON.stringify(input); }
-    catch { throw new Error("Host input must be JSON serializable"); }
+    const payload = JSON.stringify(createHostEnvelope(input));
+    validateHostPolicy(settings.policy, settings.cwd);
     let lock;
     try {
       const directory = join(homedir(), ".project-room", "host-locks");
