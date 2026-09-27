@@ -356,3 +356,10 @@ test("rollback transitions must match the grant's final state before import", t 
   store.db.prepare("UPDATE membership_delegation_pending SET next_active=1").run();
   assert.throws(() => store.delegationJournal.reconcileRollback(), /operator reconciliation/);
 });
+
+
+test("missing rollback capture trigger refuses journal verification", t => {
+  const { store } = setup(t);
+  store.db.exec("DROP TRIGGER membership_delegation_pending_update");
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+});

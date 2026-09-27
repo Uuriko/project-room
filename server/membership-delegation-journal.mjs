@@ -100,6 +100,12 @@ export class MembershipDelegationJournal {
     const columns = this.db.prepare("PRAGMA table_info(membership_delegation_journal)").all().map(row => row.name);
     if (columns.join(",") !== "sequence,room_id,identity_id,action,actor_id,recorded_at,prior_active,next_active,prior_hash,hash"
       || !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='membership_delegation_journal_room'").get()) invalid();
+    const pendingColumns = this.db.prepare("PRAGMA table_info(membership_delegation_pending)").all().map(row => row.name);
+    if (pendingColumns.join(",") !== "sequence,room_id,identity_id,prior_active,next_active,recorded_at") invalid();
+    for (const name of ["membership_delegation_pending_insert", "membership_delegation_pending_update",
+      "membership_delegation_pending_delete"]) {
+      if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name)) invalid();
+    }
     const state = new Map(), chain = new Map();
     const rows = this.db.prepare("SELECT * FROM membership_delegation_journal ORDER BY sequence").all();
     let lastSequence = 0;
