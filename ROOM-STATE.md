@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T17:33:13Z · board: Uuriko/project-room#266 · watermark: 5857496279 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
+<!-- generated: 2026-09-27T18:01:56Z · board: Uuriko/project-room#266 · watermark: 5858290174 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-19-071 | quill | submitted | 2026-09-20T03:07:10Z | src/invite-contex
 RC-2026-09-19-072 | quill | submitted | 2026-09-20T03:07:21Z | src/app.js, tests/handoff-renderer.test.js
 RC-2026-09-19-073 | quill | submitted | 2026-09-20T03:18:56Z | server/account-login-methods.mjs, tests/magic-invalidation.test.js
 RC-2026-09-19-075 | quill | submitted | 2026-09-20T03:19:19Z | server/google-oauth.mjs, tests/google-oauth-email.test.js
-… +32 more
+… +33 more
 
 ## file-claims
 file | lane | task-id | state
@@ -42,8 +42,11 @@ cloudflare/wrangler.jsonc | jill | RC-2026-09-23-105 | working
 connectors/muse.md | quill | RC-2026-09-19-079 | submitted
 dasha-lobby-worker.mjs | swarm-sync | RC-2026 | submitted
 deploy/agent-card-key.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-key.mjs | jill | RC-2026-09-27-2715 | submitted
 deploy/agent-card-signed.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-signed.mjs | jill | RC-2026-09-27-2715 | submitted
 deploy/agent-discovery.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-27-2715 | submitted
 docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only) | (none) | RC-2026-09-18-006 | submitted
 docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
@@ -82,10 +85,12 @@ scripts/rotation-rehearse.sh | jill | RC-2026-09-26-1113 | submitted
 scripts/route-docs-check.mjs | quill | RC-2026-09-19-081 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-23-105 | working
 scripts/sign-agent-card.mjs | jill | RC-2026-09-23-105 | working
+scripts/sign-agent-card.mjs | jill | RC-2026-09-27-2715 | submitted
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
 server/account-login-methods.mjs | quill | RC-2026-09-19-073 | submitted
 server/agent-api-keys.mjs | (none) | RC-2026-09-18-009 | submitted
+server/agent-card-signing.mjs | jill | RC-2026-09-27-2715 | submitted
 server/agent-connections.mjs | (none) | RC-2026-09-24-201 | submitted
 server/agent-directory.mjs | (none) | RC-2026-09-18-009 | submitted
 server/agent-identities.mjs | (none) | RC-2026-09-18-018 | submitted
@@ -145,7 +150,9 @@ src/reply-requests.js | quill | RC-2026-09-19-068 | working
 src/share-links.js | (none) | RC-2026-09-19-054 | submitted
 tests/access-requests.test.js | (none) | RC-2026-09-18-022 | submitted
 tests/agent-autonomy-client.test.js | quill | RC-2026-09-18-033 | submitted
+tests/agent-card-signing.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105 | working
+tests/agent-card-wellknown.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/agent-connections-atomic.test.js | (none) | RC-2026-09-24-201 | submitted
 tests/agent-discovery.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-identities.test.js | (none) | RC-2026-09-18-018 | submitted
@@ -191,6 +198,7 @@ tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/share-link-ui.test.js | (none) | RC-2026-09-19-054 | submitted
+tests/sign-agent-card-build.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/signin-error-visibility.test.js | quill | RC-2026-09-19-077 | submitted
 tests/sms-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/sms-messenger-outbound.test.js | quill | RC-2026-09-18-008 | submitted
@@ -199,10 +207,14 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 
 ## overlap-warnings
 file | lanes | task-ids
+deploy/agent-card-key.mjs | jill | RC-2026-09-23-105, RC-2026-09-27-2715
+deploy/agent-card-signed.mjs | jill | RC-2026-09-23-105, RC-2026-09-27-2715
+deploy/agent-discovery.mjs | jill | RC-2026-09-23-105, RC-2026-09-27-2715
 docs/ROOM-WATCH.md | quill-s2 | RC-2026-09-16-004, RC-2026-09-16-005
 index.html | , quill | RC-2026-09-19-054, RC-2026-09-19-068
 scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131, RC-2026-09-27-1153
 scripts/room | quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001
+scripts/sign-agent-card.mjs | jill | RC-2026-09-23-105, RC-2026-09-27-2715
 server/access-requests.mjs | , quill | RC-2026-09-18-022, RC-2026-09-19-071
 server/agent-identities.mjs | , quill | RC-2026-09-18-018, RC-2026-09-19-086
 server/agent-plugin-manifest.mjs |  | RC-2026-09-18-009, RC-2026-09-18-019
@@ -211,6 +223,7 @@ server/dispute-arbiters.mjs |  | RC-2026-09-18-001, RC-2026-09-18-002
 server/google-oauth.mjs | quill | RC-2026-09-19-075, RC-2026-09-19-076
 server/referral-invites.mjs | instinct | RC-2026-09-27-004, RC-2026-09-27-005
 src/app.js | quill | RC-2026-09-19-068, RC-2026-09-19-072, RC-2026-09-19-080, RC-2026-09-19-083, RC-2026-09-19-085
+tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105, RC-2026-09-27-2715
 tests/agent-identities.test.js | , quill | RC-2026-09-18-018, RC-2026-09-19-086
 tests/agent-plugin-manifest.test.js |  | RC-2026-09-18-009, RC-2026-09-18-019
 tests/bounty-disputes.test.js |  | RC-2026-09-17-026, RC-2026-09-18-003
@@ -253,8 +266,11 @@ cloudflare/wrangler.jsonc | jill | RC-2026-09-23-105 | working
 connectors/muse.md | quill | RC-2026-09-19-079 | submitted
 dasha-lobby-worker.mjs | swarm-sync | RC-2026 | submitted
 deploy/agent-card-key.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-key.mjs | jill | RC-2026-09-27-2715 | submitted
 deploy/agent-card-signed.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-signed.mjs | jill | RC-2026-09-27-2715 | submitted
 deploy/agent-discovery.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-27-2715 | submitted
 docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only) | (none) | RC-2026-09-18-006 | submitted
 docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
@@ -293,10 +309,12 @@ scripts/rotation-rehearse.sh | jill | RC-2026-09-26-1113 | submitted
 scripts/route-docs-check.mjs | quill | RC-2026-09-19-081 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-23-105 | working
 scripts/sign-agent-card.mjs | jill | RC-2026-09-23-105 | working
+scripts/sign-agent-card.mjs | jill | RC-2026-09-27-2715 | submitted
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
 server/account-login-methods.mjs | quill | RC-2026-09-19-073 | submitted
 server/agent-api-keys.mjs | (none) | RC-2026-09-18-009 | submitted
+server/agent-card-signing.mjs | jill | RC-2026-09-27-2715 | submitted
 server/agent-connections.mjs | (none) | RC-2026-09-24-201 | submitted
 server/agent-directory.mjs | (none) | RC-2026-09-18-009 | submitted
 server/agent-identities.mjs | (none) | RC-2026-09-18-018 | submitted
@@ -356,7 +374,9 @@ src/reply-requests.js | quill | RC-2026-09-19-068 | working
 src/share-links.js | (none) | RC-2026-09-19-054 | submitted
 tests/access-requests.test.js | (none) | RC-2026-09-18-022 | submitted
 tests/agent-autonomy-client.test.js | quill | RC-2026-09-18-033 | submitted
+tests/agent-card-signing.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105 | working
+tests/agent-card-wellknown.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/agent-connections-atomic.test.js | (none) | RC-2026-09-24-201 | submitted
 tests/agent-discovery.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-identities.test.js | (none) | RC-2026-09-18-018 | submitted
@@ -402,6 +422,7 @@ tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
 tests/share-link-ui.test.js | (none) | RC-2026-09-19-054 | submitted
+tests/sign-agent-card-build.test.js | jill | RC-2026-09-27-2715 | submitted
 tests/signin-error-visibility.test.js | quill | RC-2026-09-19-077 | submitted
 tests/sms-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/sms-messenger-outbound.test.js | quill | RC-2026-09-18-008 | submitted
@@ -410,5 +431,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2396 threshold=1500 rotation_due=yes watcher=active open_claims=57 prose_open=4 unfenced_prose=73 files_claimed=143 overlap_files=18 watermark=5857496279
+board_comments=2398 threshold=1500 rotation_due=yes watcher=active open_claims=58 prose_open=4 unfenced_prose=73 files_claimed=146 overlap_files=23 watermark=5858290174
 
