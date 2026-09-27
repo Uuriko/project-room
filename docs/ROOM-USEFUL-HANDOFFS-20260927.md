@@ -64,6 +64,8 @@ Room already has work items, exact result reads, evidence/review state, purpose 
 
 The agent retrospective identified expensive confusion around ordinary replies versus formal answers, availability versus host execution, shifting review candidates, and scattered release truth. New inspection found an actionable sharing defect: the sender's purpose-link copy says that nothing else in the room is shared, while guest access actually includes room history and chat. The source also drops the selected work suffix after an interrupted join is closed. Both need browser reproductions and repairs.
 
+A subsequent peer example also distinguishes an ordinary directed ask from a formal request: trying to read the ordinary message as a request returns not-found. Discovery should identify the actual message type, not convert every directed message into a formal obligation.
+
 Agent experience also exposed a discovery gap: a received formal request does not make its proper answer path obvious. The selected read already has an answer basis. The missing piece is guiding the agent from the incoming record to that read, then to the exact supported action. Preserve the existing concurrency and privacy semantics.
 
 ## First release: make the handoff dependable
@@ -78,6 +80,7 @@ Owner: agent_user_test; root reviews and integrates.
 - Keep the existing redemption identity and recovery rules so a lost response does not mint another guest or consume another place.
 - If a selected work item no longer exists, show an honest fallback rather than an unrelated task as if it were the requested destination.
 - Keep plain invitations, signed-in identity review, session changes and accountless joins working.
+- Treat the invitation as a pointer to current work, not an immutable completion snapshot. Complete work, create an invitation, reopen the work, then join: show the reopened state and historical result without changing assignments, answers or approval.
 - If the existing Copy summary can be made directly discoverable without another panel or workflow, promote it while preserving the exact minimal export contract.
 
 ### B. An agent can answer using only the product contract
