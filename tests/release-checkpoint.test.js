@@ -18,12 +18,14 @@ function observations() {
   const metadata = { headRefOid: HEAD, baseRefOid: BASE, baseRefName: "main", state: "OPEN", mergeStateStatus: "CLEAN" };
   return { checkedAt: AT, repository: "Uuriko/project-room", prNumber: 42,
     before: snapshot({ ...metadata }), checks: snapshot({ headRefOid: HEAD, statusCheckRollup: [{ ...passed }] }), after: snapshot({ ...metadata }),
-    doors: [{ origin: "https://room.example", checkedAt: AT, httpStatus: 200, value: { sourceRevision: HEAD, buildId: "build-1" } }] };
+    mainBefore: snapshot({ object: { sha: BASE } }), mainAfter: snapshot({ object: { sha: BASE } }),
+    comparisons: [{ base: HEAD, head: BASE, value: { status: "ahead", base_commit: { sha: HEAD }, merge_base_commit: { sha: HEAD } } }],
+    doors: [{ origin: "https://room.example", checkedAt: AT, httpStatus: 200, value: { status: "ok", sourceRevision: HEAD, buildId: "build-1" } }] };
 }
 
 test("checkpoint separates observed checks, reported revision, and unperformed authenticated proof", () => {
   const input = observations(); input.expectedRevision = OTHER;
-  input.doors.push({ origin: "https://entry.example/room", checkedAt: AT, httpStatus: 200, value: { sourceRevision: OTHER, buildId: "build-2", secret: "must-not-be-output" } });
+  input.doors.push({ origin: "https://entry.example/room", checkedAt: AT, httpStatus: 200, value: { status: "ok", sourceRevision: OTHER, buildId: "build-2", secret: "must-not-be-output" } });
   const report = summarizeCheckpoint(input);
   assert.equal(report.pullRequest.checks.state, "passed");
   assert.equal(report.pullRequest.checks.requiredChecksEvaluated, false);
@@ -76,7 +78,7 @@ test("empty, pending, failed, skipped-only and unrecognized check results never 
 test("HTTP success without a full source revision remains unmatched; transport failures retain their status", () => {
   const input = observations(); input.expectedRevision = HEAD;
   input.doors = [
-    { origin: "https://one.example", checkedAt: AT, httpStatus: 200, value: { sourceRevision: "short", buildId: "opaque" } },
+    { origin: "https://one.example", checkedAt: AT, httpStatus: 200, value: { status: "ok", sourceRevision: "short", buildId: "opaque" } },
     { origin: "https://two.example", checkedAt: AT, httpStatus: 500, error: "http_error" },
     { origin: "https://three.example", checkedAt: AT, error: "request_timeout" },
     { origin: "https://four.example", checkedAt: AT, httpStatus: 200, error: "invalid_json" }
@@ -84,7 +86,7 @@ test("HTTP success without a full source revision remains unmatched; transport f
   const doors = summarizeCheckpoint(input).doors;
   assert.deepEqual(doors.map(row => row.revisionMatch), ["unknown", "unknown", "unknown", "unknown"]);
   assert.deepEqual(doors.map(row => row.reachable), [true, false, false, true]);
-  assert.deepEqual(doors.map(row => row.error), [null, "http_error", "request_timeout", "invalid_json"]);
+  assert.deepEqual(doors.map(row => row.error), ["invalid_version_response", "http_error", "request_timeout", "invalid_json"]);
   input.expectedRevision = null;
   assert.equal(summarizeCheckpoint(input).doors[0].revisionMatch, "not_requested");
 });
@@ -119,7 +121,16 @@ test("CLI re-reads the head after collecting checks and writes only explicitly r
   const input = observations(); input.after.value.headRefOid = OTHER;
   const fixtures = [input.before.value, input.checks.value, input.after.value];
   const counter = join(directory, "count");
-  writeFileSync(join(bin, "gh"), `#!${process.execPath}\nimport * as fs from 'node:fs'; const file=${JSON.stringify(counter)}; const n=fs.existsSync(file)?Number(fs.readFileSync(file,'utf8')):0; const rows=${JSON.stringify(fixtures)}; if(n>=rows.length)process.exit(3); fs.writeFileSync(file,String(n+1)); process.stdout.write(JSON.stringify(rows[n]));\n`, { mode: 0o700 });
+  writeFileSync(join(bin, "gh"), `#!${process.execPath}\nimport * as fs from 'node:fs';
+const args=process.argv.slice(2); const file=${JSON.stringify(counter)};
+if(args[0]==='pr') {
+ const n=fs.existsSync(file)?Number(fs.readFileSync(file,'utf8')):0; const rows=${JSON.stringify(fixtures)};
+ if(n>=rows.length)process.exit(3); fs.writeFileSync(file,String(n+1)); process.stdout.write(JSON.stringify(rows[n]));
+} else if(args[0]==='api' && args[1]==='repos/Uuriko/project-room/git/ref/heads/main') {
+ process.stdout.write(JSON.stringify({object:{sha:${JSON.stringify(BASE)}}}));
+} else if(args[0]==='api' && args[1]===${JSON.stringify(`repos/Uuriko/project-room/compare/${OTHER}...${BASE}?per_page=1`)}) {
+ process.stdout.write(JSON.stringify({status:'behind',base_commit:{sha:${JSON.stringify(OTHER)}},merge_base_commit:{sha:${JSON.stringify(BASE)}}}));
+} else process.exit(3);\n`, { mode: 0o700 });
   const output = join(directory, "output");
   // A real refused local TLS connection exercises error collection without
   // external service traffic or a fetch double.
@@ -132,4 +143,77 @@ test("CLI re-reads the head after collecting checks and writes only explicitly r
   assert.equal(report.doors[0].error, "request_failed");
   assert.equal(readFileSync(counter, "utf8"), "3");
   assert.match(readFileSync(join(output, "release-checkpoint.md"), "utf8"), /head_changed/);
+});
+
+
+test("main containment requires stable observations and pinned comparison metadata", () => {
+  const input = observations();
+  assert.equal(summarizeCheckpoint(input).currentMain.candidateContainment, "contains");
+  for (const change of [
+    row => { row.mainAfter.value.object.sha = OTHER; },
+    row => { row.mainBefore = { error: "github_unavailable" }; },
+    row => { row.comparisons[0].error = "github_timeout"; },
+    row => { row.comparisons[0].head = OTHER; },
+    row => { row.comparisons[0].value.base_commit.sha = OTHER; },
+    row => { row.comparisons[0].value.merge_base_commit.sha = OTHER; },
+    row => { row.after.value.headRefOid = OTHER; }
+  ]) {
+    const changed = structuredClone(input); change(changed);
+    assert.equal(summarizeCheckpoint(changed).currentMain.candidateContainment, "unknown");
+  }
+  for (const status of ["behind", "diverged"]) {
+    const changed = structuredClone(input);
+    changed.comparisons[0].value.status = status;
+    changed.comparisons[0].value.merge_base_commit.sha = OTHER;
+    assert.equal(summarizeCheckpoint(changed).currentMain.candidateContainment, "does_not_contain");
+  }
+});
+
+test("merged PR uses its actual merge commit and never labels GitHub merge as deployment", () => {
+  const input = observations();
+  for (const row of [input.before, input.after]) { row.value.state = "MERGED"; row.value.mergeCommit = { oid: OTHER }; }
+  input.comparisons = [
+    { base: OTHER, head: BASE, value: { status: "ahead", base_commit: { sha: OTHER }, merge_base_commit: { sha: OTHER } } },
+    { base: OTHER, head: HEAD, value: { status: "behind", base_commit: { sha: OTHER }, merge_base_commit: { sha: HEAD } } }
+  ];
+  const report = summarizeCheckpoint(input);
+  assert.equal(report.candidate.kind, "merge_commit");
+  assert.equal(report.currentMain.candidateContainment, "contains");
+  assert.equal(report.doors[0].candidateContainment, "does_not_contain");
+  assert.match(checkpointMarkdown(report), /deployment is not verified/);
+  input.mainAfter.value.object.sha = OTHER;
+  assert.equal(summarizeCheckpoint(input).doors[0].candidateContainment, "unknown");
+  delete input.after.value.mergeCommit;
+  assert.equal(summarizeCheckpoint(input).candidate.revision, null);
+});
+
+test("false-positive public status never establishes revision or containment", () => {
+  for (const status of [undefined, "unavailable", "error"]) {
+    const input = observations(); input.expectedRevision = HEAD;
+    input.doors[0].value.status = status;
+    const door = summarizeCheckpoint(input).doors[0];
+    assert.equal(door.error, "invalid_version_response");
+    assert.equal(door.sourceRevision, null);
+    assert.equal(door.revisionMatch, "unknown");
+    assert.equal(door.candidateContainment, "unknown");
+  }
+});
+
+test("shared application revisions do not conceal a different Worker or establish object equality", () => {
+  const input = observations(); input.expectedRevision = HEAD;
+  input.doors.push({ ...structuredClone(input.doors[0]), origin: 'https://entry.example/room' });
+  input.workers = [
+    { ...structuredClone(input.doors[0]), value: { status: 'ok', servedBy: 'worker', sourceRevision: OTHER, durableObject: { name: 'room-one', id: 'object-one' } } },
+    { ...structuredClone(input.doors[1]), value: { status: 'ok', servedBy: 'worker', sourceRevision: HEAD, durableObject: { name: 'room-two', id: 'object-two' } } }
+  ];
+  input.comparisons.push({ base: HEAD, head: HEAD, value: { status: 'identical', base_commit: { sha: HEAD }, merge_base_commit: { sha: HEAD } } });
+  const report = summarizeCheckpoint(input);
+  assert.deepEqual(report.doors.map(row => row.revisionMatch), ['match', 'match']);
+  assert.deepEqual(report.workers.map(row => row.revisionMatch), ['mismatch', 'match']);
+  assert.deepEqual(report.workers.map(row => row.candidateContainment), ['unknown', 'contains']);
+  assert.equal(report.workers[0].reportedDurableObject.id, 'object-one');
+  assert.equal(report.workers[1].reportedDurableObject.id, 'object-two');
+  assert.match(checkpointMarkdown(report), /Worker\/Durable Object equality/);
+  delete input.workers[0].value.servedBy;
+  assert.equal(summarizeCheckpoint(input).workers[0].error, 'invalid_version_response');
 });
