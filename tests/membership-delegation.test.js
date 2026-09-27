@@ -248,3 +248,57 @@ test("the owner remains sovereign: may approve and link with manage_members", t 
   });
   assert.equal(linked.roomId, "commons");
 });
+
+test("audit journal chains grants, revocations, regrants and owner effective revocation", t => {
+  const { store, delegation, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revoke(ownerToken, "commons", { identityId });
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revokeEffective(ownerToken, "commons", { identityId });
+  const rows = store.db.prepare("SELECT * FROM membership_delegation_journal ORDER BY sequence").all();
+  assert.deepEqual(rows.map(row => row.action), ["grant", "revoke", "grant", "revoke_effective"]);
+  assert.deepEqual(rows.map(row => [row.prior_active, row.next_active]), [[0, 1], [1, 0], [0, 1], [1, 0]]);
+  assert.equal(rows[1].prior_hash, rows[0].hash);
+  assert.equal(store.delegationJournal.verify().entries, 4);
+});
+
+test("a failed or unauthorized decision never adds a journal row", t => {
+  const { store, delegation, ownerToken, agent, other } = setup(t);
+  const identityId = agent.identityId;
+  assert.throws(() => delegation.grant(other.secret, "commons", { identityId }), { status: 403 });
+  assert.equal(store.delegationJournal.verify().entries, 0);
+  delegation.grant(ownerToken, "commons", { identityId });
+  assert.throws(() => delegation.grant(ownerToken, "commons", { identityId }), { status: 409 });
+  assert.equal(store.delegationJournal.verify().entries, 1);
+});
+
+test("journal verification refuses tamper, missing prefix, or table mismatch", t => {
+  const { store, delegation, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revoke(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 2);
+  store.db.prepare("UPDATE membership_delegation_journal SET actor_id='wrong' WHERE sequence=2").run();
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+  store.db.prepare("UPDATE membership_delegation_journal SET actor_id='owner' WHERE sequence=2").run();
+  store.db.prepare("DELETE FROM membership_delegation_journal WHERE sequence=1").run();
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+});
+
+test("legacy grant imports as unattributed baseline, not an invented owner decision", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.db.prepare(`INSERT INTO membership_delegation_grants
+    (room_id,identity_id,granted_by,granted_at,revoked_at,added_invite_member)
+    VALUES('commons',?,'owner',?,NULL,0)`).run(identityId, store.now());
+  store.db.exec("DELETE FROM membership_delegation_journal");
+  store.delegationJournal.baseline();
+  const row = store.db.prepare("SELECT * FROM membership_delegation_journal").get();
+  assert.equal(row.action, "baseline_active");
+  assert.equal(row.actor_id, "legacy_unattributed");
+  assert.equal(store.delegationJournal.verify().entries, 1);
+  // A future owner revoke is a real decision and does not rewrite history.
+  store.delegation.revoke(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 2);
+});

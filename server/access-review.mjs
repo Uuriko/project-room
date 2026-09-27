@@ -54,6 +54,16 @@ export function assembleAccessReview(store, roomId) {
   const delegationRows = db.prepare(`SELECT identity_id AS identityId, granted_by AS grantedBy, granted_at AS grantedAt
     FROM membership_delegation_grants WHERE room_id=? AND revoked_at IS NULL ORDER BY granted_at ASC, identity_id ASC`).all(roomId);
   const delegationByIdentity = new Map(delegationRows.map(row => [row.identityId, row]));
+  // Owner-only report: recent decisions, with a sequence pointer for each
+  // active grant. A legacy baseline is a snapshot, not invented provenance.
+  const journalCount = db.prepare("SELECT count(*) AS n FROM membership_delegation_journal WHERE room_id=?").get(roomId).n;
+  const delegationDecisions = db.prepare(`SELECT sequence,identity_id,action,actor_id,recorded_at
+    FROM membership_delegation_journal WHERE room_id=? ORDER BY sequence DESC LIMIT 100`).all(roomId)
+    .map(row => ({ sequence: row.sequence, identityId: row.identity_id, action: row.action,
+      actorId: row.actor_id, recordedAt: iso(row.recorded_at) }));
+  const latestDecision = new Map(db.prepare(`SELECT identity_id,max(sequence) AS sequence
+    FROM membership_delegation_journal WHERE room_id=? GROUP BY identity_id`).all(roomId)
+    .map(row => [row.identity_id, row.sequence]));
   const authorityOf = member => {
     const paths = [];
     if (member.id === state.room.ownerId) paths.push("owner");
@@ -120,15 +130,17 @@ export function assembleAccessReview(store, roomId) {
     const identity = agentIdentities.find(item => item.identityId === row.identityId);
     return {
       identityId: row.identityId, memberId: identity?.memberId ?? null, grantedBy: row.grantedBy, grantedAt: iso(row.grantedAt),
-      authorityPaths: identity?.authorityPaths ?? ["membership_delegation"], dualGrantHazard: identity?.dualGrantHazard === true
+      authorityPaths: identity?.authorityPaths ?? ["membership_delegation"], dualGrantHazard: identity?.dualGrantHazard === true,
+      auditSequence: latestDecision.get(row.identityId) ?? null
     };
   });
   const roomLastActivityAt = [...lastActivity.values()].filter(Boolean).sort().at(-1) ?? null;
   return { format: ACCESS_REVIEW_FORMAT, roomId, roomTitle: state.room.title, ownerId: state.room.ownerId, generatedAt: iso(now),
     lastActivityAt: roomLastActivityAt, counts: { members: members.length, guests: guests.length, shareLinks: shareLinks.length,
       pendingInvites: pendingInvites.length, agentIdentities: agentIdentities.length, agentConnections: agentConnections.length,
-      membershipDelegations: membershipDelegations.length },
-    members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections, membershipDelegations };
+      membershipDelegations: membershipDelegations.length, delegationDecisions: journalCount },
+    members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections, membershipDelegations,
+    delegationDecisions, delegationDecisionsTruncated: journalCount > delegationDecisions.length };
 }
 
 // Plain-text rendering shared by the CLI; one block per room.
@@ -145,6 +157,8 @@ export function renderAccessReview(report) {
   for (const i of report.pendingInvites) lines.push(`  ${i.inviteId}  ${i.displayName ?? "(unnamed)"}  ${i.status}  grants: ${grants(i.permissions)}  issued by ${i.inviterMemberId}  created ${i.createdAt}  expires ${i.expiresAt}`);
   lines.push(`Membership delegations (${report.membershipDelegations?.length ?? 0}):`);
   for (const grant of report.membershipDelegations ?? []) lines.push(`  ${grant.identityId}  member ${grant.memberId ?? "unlinked"}  granted by ${grant.grantedBy}  at ${when(grant.grantedAt)}  paths: ${grants(grant.authorityPaths)}${grant.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}`);
+  lines.push(`Membership decision journal (${report.counts.delegationDecisions}; showing ${report.delegationDecisions.length} newest${report.delegationDecisionsTruncated ? ", truncated" : ""}):`);
+  for (const decision of report.delegationDecisions) lines.push(`  #${decision.sequence} ${decision.action} ${decision.identityId} by ${decision.actorId} at ${decision.recordedAt}`);
   lines.push(`Agent identities (${report.agentIdentities.length}):`);
   for (const i of report.agentIdentities) lines.push(`  ${i.identityId}  ${i.displayName}  member ${i.memberId}${i.memberActive ? "" : " (inactive)"}  linked ${i.linkedAt}  last activity: ${when(i.lastActivityAt)}`);
   lines.push(`Agent connections (${report.agentConnections.length}):`);

@@ -1,39 +1,7 @@
-// Owner-granted membership administration for agent identities.
-//
-// Today only a room member holding the manage_members permission (in
-// practice: the room owner, since validatePermissions() in src/events.js
-// forbids non-owner agents from holding manage_members/decide in their
-// member record) can list and decide access requests. That blocks the
-// "owner trusts an agent lane to run membership" shape: Jill could not
-// approve Instinct's access request to muse-room because her scoped
-// key carries work permissions only.
-//
-// This module adds a separate, explicit, owner-granted delegation: the
-// room owner grants an agent identity a membership-administration grant,
-// and revokes it the same way. The grant does NOT put manage_members into
-// the agent's member permissions (that invariant is untouched), so the
-// event-sourced authority projection never sees an agent with
-// manage_members; the grant lives in a store-side table and is consulted
-// at the HTTP/store layer by the access-request list/decide endpoints
-// (and the identity-link path that approve() drives through).
-//
-// Safety properties:
-// - Grant and revoke are OWNER-ONLY (actor must be the room owner). A
-//   grant holder cannot grant to anyone else — there is no self-grant and
-//   no transitive grant. A non-owner human holding manage_members cannot
-//   grant either.
-// - Grants bind to agent identities linked into the room. Unlinking the
-//   identity leaves the row inert (resolveIdentityLink returns null, so
-//   hasGrant no longer matches an active member) and the owner can revoke
-//   explicitly.
-// - The grant adds the agent-safe invite_member permission to the
-//   delegate's member record on the way in (needed for the approve() path,
-//   which issues member.added as the approver) and strips it on revoke.
-//   manage_members/decide never enter an agent's member permissions — the
-//   events.js invariant is untouched.
-// - The module is storage-agnostic and Workers-bundle-safe: like
-//   access-requests.mjs it defines its own ServiceError/memberCan and never
-//   imports store.mjs or src/events.js at the top level.
+// Owner-only membership delegation. Active authority lives in the grant table;
+// an append-only journal records decisions, with legacy baseline rows for
+// pre-journal grants. The member-bit path is separate and revokeEffective
+// clears both paths. Agent delegates cannot confer manage_members.
 
 import { randomUUID } from "node:crypto";
 
@@ -114,6 +82,7 @@ export class MembershipDelegation {
       this.db.prepare(
         "UPDATE membership_delegation_grants SET added_invite_member=? WHERE room_id=? AND identity_id=?")
         .run(addedInvite ? 1 : 0, roomId, identityId);
+      this.store.delegationJournal.append(roomId, identityId, "grant", auth.member.id, now, false, true);
       return Object.freeze({ roomId, identityId, grantedBy: auth.member.id, grantedAt: now });
     });
   }
@@ -131,9 +100,10 @@ export class MembershipDelegation {
       const existing = this.db.prepare(
         "SELECT added_invite_member FROM membership_delegation_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL").get(roomId, identityId);
       if (!existing) fail(404, "not_found", "No active membership-administration grant for this identity");
+      const now = this.store.now();
       this.db.prepare(
         "UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
-        .run(this.store.now(), roomId, identityId);
+        .run(now, roomId, identityId);
       // Strip the invite_member the grant added on the way in, restoring
       // the member's prior permission set. (If the member was unlinked or
       // already carried invite_member, there is nothing to restore.)
@@ -147,6 +117,7 @@ export class MembershipDelegation {
             expectedSessionBinding);
         }
       }
+      this.store.delegationJournal.append(roomId, identityId, "revoke", auth.member.id, now, true, false);
       return Object.freeze({ roomId, identityId, revoked: true });
     });
   }
@@ -215,9 +186,10 @@ export class MembershipDelegation {
       if (member?.id === authority.ownerId) fail(409, "already_administers", "The room owner retains membership administration");
       const hasAdmin = !!member && member.permissions.some(permission => adminBits.includes(permission));
       if (!grant && !hasAdmin) fail(404, "not_found", "No membership-administration authority for this identity");
+      const now = this.store.now();
       if (grant) {
         this.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
-          .run(this.store.now(), roomId, identityId);
+          .run(now, roomId, identityId);
       }
       let strippedAdmin = false;
       if (member && member.active !== false) {
@@ -231,6 +203,7 @@ export class MembershipDelegation {
             expectedSessionBinding);
         }
       }
+      if (grant) this.store.delegationJournal.append(roomId, identityId, "revoke_effective", auth.member.id, now, true, false);
       return Object.freeze({ roomId, identityId, revokedGrant: !!grant, strippedAdmin });
     });
   }
