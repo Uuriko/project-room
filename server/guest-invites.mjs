@@ -620,15 +620,15 @@ export class GuestInvites {
       // An owner may have restricted an existing seat since its prior pass.
       // Every old observer pass must die before a narrower scope is returned.
       if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
-      const token = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
-      this.store.guestAgentLinks.conflict(hash(token));
-      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(token), memberId);
+      const issuedPass = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
+      this.store.guestAgentLinks.conflict(hash(issuedPass));
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(issuedPass), memberId);
       const expiresAt = this.store.now() + row.credential_ttl_ms;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
-        .run(hash(token), roomId, memberId, expiresAt);
+        .run(hash(issuedPass), roomId, memberId, expiresAt);
       const member = this.store.room(roomId).state.members[memberId];
       return {
-        token,
+        token: issuedPass,
         member: { id: member.id, kind: member.kind, permissions: [...member.permissions], displayName: member.displayName, expiresAt },
         room: { id: roomId },
         tier,
@@ -1022,13 +1022,13 @@ export class GuestInvites {
       }
       const tier = this.guestTierOf(member.id);
       if (Object.hasOwn(guestCapabilities, tier) && !guestToken.startsWith("g2.")) fail(403, "guest_scope_denied", "Redeem a new scoped guest invite");
-      const token = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
-      this.store.guestAgentLinks.conflict(hash(token));
-      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(token), member.id);
+      const issuedPass = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
+      this.store.guestAgentLinks.conflict(hash(issuedPass));
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(issuedPass), member.id);
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
-        .run(hash(token), roomId, member.id, row.expires_at);
+        .run(hash(issuedPass), roomId, member.id, row.expires_at);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(guestToken));
-      return { token, member: { id: member.id, expiresAt: row.expires_at }, room: { id: roomId }, expiresAt: row.expires_at };
+      return { token: issuedPass, member: { id: member.id, expiresAt: row.expires_at }, room: { id: roomId }, expiresAt: row.expires_at };
     });
   }
 }

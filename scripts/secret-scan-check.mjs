@@ -59,7 +59,6 @@ export const ALLOWLIST = [
   /process\.env\.[A-Z_]+/, // env var NAMES (not values)
   /^\|.*\|$/, // markdown table rows
   /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
-  /const token = newGuestToken\(/, // guest-invites.mjs: freshly generated runtime bearer, never a committed credential
   /\btokens\.get\(/, // `token = tokens.get(tokenId)` — Map lookup, not a secret
   /BASE32_ALPHABET\s*=/, // TOTP alphabet constant
   /GSM7_BASIC\s*=\s*"/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret
