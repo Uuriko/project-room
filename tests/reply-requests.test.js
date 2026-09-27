@@ -10,6 +10,7 @@ import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
@@ -52,13 +53,27 @@ function fixture(t, extra = []) {
   return { store, keys, send, post, open, answer, cancel, state };
 }
 
-test("ordinary directed messages and ignored historical request fields remain ordinary", t => {
+test("ordinary directed messages and ignored historical request fields remain ordinary", async t => {
   const old = event({ roomId: "commons", actorId: "owner", type: "message.posted", data: {
-    body: "Legacy data", requestKind: "reply", responseToRequestId: "old-subject", expectedRequestRevision: "ignored", contextSequence: 9
+    body: "Legacy data", toMemberId: "historical", requestKind: "reply", responseToRequestId: "old-subject", expectedRequestRevision: "ignored", contextSequence: 9
   } });
-  const f = fixture(t, [old]); f.post("guest", { body: "Agent, a thought?", toMemberId: "agent" });
+  const member = event({ roomId: "commons", actorId: "owner", type: "member.added", data: {
+    memberId: "historical", displayName: "Historical reader", kind: "agent", permissions: []
+  } });
+  const f = fixture(t, [member, old]); f.post("guest", { body: "Agent, a thought?", toMemberId: "agent" });
   assert.equal(Object.hasOwn(f.state(), "replyRequests"), false);
   assert.equal(f.state().messages[0].body, "Legacy data");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const key = f.store.issueAccessKey("commons", "historical");
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "historical", token: key });
+  const hosted = await callHostedStdioTool(f.store, key, "room_read_messages", { roomId: "commons" });
+  for (const result of [await client.roomMessages(), hosted.value]) {
+    const legacy = result.messages.find(message => message.body === "Legacy data");
+    assert.equal(Object.hasOwn(legacy, "nextRead"), false);
+    assert.equal(Object.hasOwn(legacy, "requestKind"), false);
+  }
   auditRecovery(f.store);
 });
 

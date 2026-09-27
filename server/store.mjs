@@ -534,13 +534,19 @@ export function validateCommand(command) {
 // their own read/resolve routes. An empty inbox says what it will carry.
 const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = []) => {
   const steps = [];
+  const requestStep = latest => ({
+    action: "read-request", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(latest.nextRead.arguments.requestMessageId)}`,
+    nextRead: latest.nextRead,
+    description: "Read this formal request and finish every conversation page. Choose a responseActions template to answer or decline; ordinary chat replies do not close the request. A read does not acknowledge or answer anything."
+  });
   if (directMentions.length > 0) {
     const latest = directMentions.find(mention => mention.state !== "timed_out") ?? directMentions[0];
     const timing = latest.state === "timed_out" ? "overdue " : "";
     const outcome = latest.state === "timed_out"
       ? "Replying removes it from your waiting inbox; the timeout remains in history."
       : "Replying to that message marks the mention responded.";
-    steps.push(Object.freeze({
+    steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-mention",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
@@ -551,7 +557,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   }
   if (directMessages.length > 0) {
     const latest = directMessages[0];
-    steps.push(Object.freeze({
+    steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-dm",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
@@ -3210,6 +3216,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             body: parsed.data.body,
             at: parsed.at,
             channel: "room",
+            ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
+              && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
+                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
+              } : {}),
           };
         });
       const assignments = this.collab.listAssignments(roomId)
@@ -3300,6 +3310,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         channel: event.data.channelId ?? "general",
         private: Boolean(event.data.toMemberId),
         ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
+        ...(event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
+          && [event.actorId, event.data.toMemberId].includes(memberId) ? {
+            requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } }
+          } : {}),
       }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen

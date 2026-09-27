@@ -150,6 +150,14 @@ export class ReplyRequests {
         const open = request.status === "open", recipient = auth.member.id === request.recipientId;
         const answerBasis = open && recipient && !hasMore && context.sequence <= horizonSequence
           ? { expectedRequestRevision: request.revision, contextEventId: context.id, contextSequence: context.sequence } : null;
+        // These are incomplete templates, never submitted automatically. Only the
+        // selected recipient's complete, current context can populate fixed inputs.
+        result.responseActions = answerBasis ? ["answered", "declined"].map(responseOutcome => ({
+          tool: "room_respond_to_request",
+          arguments: { responseToRequestId: request.id, ...answerBasis, responseOutcome,
+            toMemberId: request.requesterId, workItemId: request.workItemId },
+          requiredInput: ["requestId", "body"]
+        })) : [];
         // Current preparation shares this authenticated read transaction. It is
         // intentionally distinct from the frozen conversation page and answer basis.
         const instructions = charterContext(state.room);

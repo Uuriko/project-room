@@ -63,7 +63,7 @@ function stampRoom(value, roomId) {
   };
 }
 
-function roomMessages(store, secret, roomId, args) {
+function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
   const page = store.eventsAfter(secret, roomId, after, limit);
@@ -71,6 +71,8 @@ function roomMessages(store, secret, roomId, args) {
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
     body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
     ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+    ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
+      && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
     ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
   }));
   return { roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
@@ -107,7 +109,17 @@ export async function callHostedStdioTool(store, secret, name, args) {
     return recorded(store, secret, roomId, identity, command, receipt => recordedHelpAction(name, command, receipt));
   }
   if (isReplyTool(name)) {
-    if (replyRoute(name)) return { value: replyRead(store, secret, roomId, name, rest), isError: false };
+    if (replyRoute(name)) {
+      const value = replyRead(store, secret, roomId, name, rest);
+      // Hosted tools require roomId; local stdio tools derive it from the connection.
+      if (value.responseActions) value.responseActions = value.responseActions.map(action => ({
+        ...action, arguments: { roomId, ...action.arguments }
+      }));
+      if (value.nextReads) value.nextReads = value.nextReads.map(pointer => ({ ...pointer,
+        nextRead: { ...pointer.nextRead, arguments: { roomId, ...pointer.nextRead.arguments } }
+      }));
+      return { value, isError: false };
+    }
     const command = buildReplyCommand(identity, name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedReplyAction(name, rest, command, receipt));
   }
@@ -167,9 +179,13 @@ export async function callHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_inbox") {
-    return { value: store.agentInbox(secret, roomId, { limit: rest.limit ?? 50 }), isError: false };
+    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50 });
+    const stamp = rows => rows.map(row => row.nextRead ? { ...row,
+      nextRead: { ...row.nextRead, arguments: { roomId, ...row.nextRead.arguments } }
+    } : row);
+    return { value: { ...inbox, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
-  if (name === "room_read_messages") return { value: roomMessages(store, secret, roomId, rest), isError: false };
+  if (name === "room_read_messages") return { value: roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
   if (name !== "room_post_draft") {
     const error = new Error(`Hosted room tool ${name} is listed but has no dispatcher`);
     error.status = 500;

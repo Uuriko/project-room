@@ -11,6 +11,8 @@ import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { buildReplyCommand, validReplyArguments, replyTools, validateReplyRead, replyRefusal } from "../client/reply-actions.mjs";
 import { confirmsAgentCommand } from "../client/work-actions.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
 async function fixture(t) {
@@ -586,4 +588,110 @@ test("stream wakeups retain deadlines, reject malformed cursors and enforce revo
   f.store.command(f.keys.owner, "commons", { id: "end-stream-member", type: "member.access_changed", data: {
     memberId: "producer", expectedMemberRevision: member.revision, permissions: [], active: false } });
   await ended;
+});
+
+
+test("a fresh recipient discovers how to answer from messages and verifies closure without reconstructing fixed arguments", async t => {
+  const f = await fixture(t), q = f.open("guided-answer"), id = q.command.data.messageId;
+  const adapter = await f.mcp();
+  const messages = (await adapter.call("room_read_messages", {})).result.structuredContent;
+  const inbox = (await adapter.call("room_read_inbox", {})).result.structuredContent;
+  const incoming = messages.messages.find(message => message.messageId === id);
+  assert.deepEqual(inbox.directMessages.find(message => message.messageId === id).nextRead, incoming.nextRead);
+  assert.equal(incoming.requestKind, "reply");
+  const step = inbox.next.find(step => step.action === "read-request");
+  assert.equal(step.method, "GET");
+  const rest = await fetch(f.origin + step.path, { headers: { Authorization: `Bearer ${f.keys.producer}` } });
+  assert.equal(rest.status, 200); assert.equal((await rest.json()).request.id, id);
+  assert.equal(inbox.next.some(step => step.action === "reply-dm"), false);
+  const discovered = step.nextRead;
+  assert.equal(discovered.tool, "room_read_request");
+  const context = (await adapter.call(discovered.tool, discovered.arguments)).result.structuredContent;
+  const unbound = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer });
+  const unboundMessage = (await unbound.roomMessages()).messages.find(message => message.messageId === id);
+  assert.equal(Object.hasOwn(unboundMessage, "nextRead"), false, "a client without expected identity must not claim to be a request party");
+  const action = context.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  assert.deepEqual(action.requiredInput, ["requestId", "body"]);
+  const args = { ...action.arguments, requestId: "guided-answer-once", body: "A concrete answer from the discovered action." };
+  const receipt = (await adapter.call(action.tool, args)).result.structuredContent;
+  assert.equal(receipt.status, "recorded");
+  const sequence = f.store.room("commons").sequence;
+  const retried = (await adapter.call(action.tool, args)).result.structuredContent;
+  assert.equal(retried.duplicate, true); assert.equal(retried.eventId, receipt.eventId);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  const final = (await adapter.call(receipt.next.tool, receipt.next.arguments)).result.structuredContent;
+  assert.equal(final.request.status, "answered");
+  assert.equal(final.page.items.at(-1).message.body, args.body);
+  assert.deepEqual(final.responseActions, []);
+  assert.equal((await f.client.replyRequests()).requests.length, 0);
+});
+
+test("HTTP response templates require completed current recipient context and stale templates cannot write", async t => {
+  const f = await fixture(t), q = f.open("guided-fence"), id = q.command.data.messageId;
+  const get = async (path, key = f.keys.producer) => {
+    const response = await fetch(f.origin + path, { headers: { Authorization: `Bearer ${key}` } });
+    assert.equal(response.status, 200); return response.json();
+  };
+  const list = await get("/api/rooms/commons/reply-requests");
+  assert.equal(Object.hasOwn(list, "responseActions"), false);
+  const path = list.nextReads[0].http.path;
+  const initial = await get(path);
+  assert.equal(initial.responseActions.length, 2);
+  assert.deepEqual((await get(path, f.keys.owner)).responseActions, []);
+  await f.client.replyAction("room_reply", { requestId: "guided-clarification", replyToId: id, body: "A new constraint" });
+  const before = f.store.room("commons").sequence;
+  const stale = initial.responseActions[0];
+  await assert.rejects(f.client.replyAction(stale.tool, { ...stale.arguments, requestId: "guided-stale", body: "Old answer" }), { code: "command_rejected" });
+  assert.equal(f.store.room("commons").sequence, before);
+  const first = await get(path + "&limit=1");
+  assert.equal(first.page.hasMore, true); assert.deepEqual(first.responseActions, []);
+  const last = await get(path + "&limit=1&cursor=" + encodeURIComponent(first.page.nextCursor));
+  assert.equal(last.responseActions.length, 2);
+  const valid = { name: "room_read_request", args: { requestMessageId: id, limit: 1, cursor: first.page.nextCursor }, roomId: "commons" };
+  validateReplyRead(last, valid);
+  for (const change of [value => { value.responseActions[0] = null; }, value => { value.responseActions[0].arguments.toMemberId = "reviewer"; },
+    value => { value.responseActions[0].arguments.contextSequence--; },
+    value => { value.responseActions[0].arguments.workItemId = "unrelated"; },
+    value => { value.responseActions[0].arguments.body = "Injected answer"; }]) {
+    const forged = structuredClone(last); change(forged);
+    assert.throws(() => validateReplyRead(forged, valid), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(last); delete legacy.responseActions;
+  validateReplyRead(legacy, valid);
+});
+
+
+test("hosted discovery keeps room identity and distinguishes formal requests from ordinary private chat", async t => {
+  const f = await fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder"), outsider = f.store.identities.create("Observer");
+  const rooms = new AgentRooms(f.store);
+  const created = rooms.create(owner.secret, { roomId: "guided-hosted", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
+  for (const person of [peer, outsider]) f.store.identities.link(owner.secret, created.roomId, { identityId: person.identityId, displayName: person === peer ? "Responder" : "Observer", permissions: [] });
+  for (const [from, to] of [[created.ownerMemberId, peer.identityId], [peer.identityId, created.ownerMemberId]]) {
+    f.store.dmConsents.request(created.roomId, from, to, "Fixture");
+    f.store.dmConsents.decide(created.roomId, to, from, "approve");
+  }
+  for (const [id, formal] of [["formal", true], ["ordinary", false]]) f.store.command(owner.secret, created.roomId, {
+    id, type: "message.posted", data: { messageId: id, body: "Private question", toMemberId: peer.identityId, ...(formal ? { requestKind: "reply" } : {}) }
+  });
+  const mcp = createHostedRoomMcp(f.store, { agentRooms: rooms });
+  const call = async (name, args, secret = peer.secret) => {
+    const response = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, { authorization: `Bearer ${secret}` });
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response)); return response.result.structuredContent;
+  };
+  const messages = await call("room_read_messages", { roomId: created.roomId });
+  const formal = messages.messages.find(message => message.messageId === "formal");
+  const ordinary = messages.messages.find(message => message.messageId === "ordinary");
+  assert.equal(formal.requestKind, "reply");
+  assert.equal(Object.hasOwn(ordinary, "requestKind"), false); assert.equal(Object.hasOwn(ordinary, "nextRead"), false);
+  assert.deepEqual((await call("room_read_messages", { roomId: created.roomId }, outsider.secret)).messages, []);
+  const inbox = await call("room_read_inbox", { roomId: created.roomId });
+  assert.deepEqual(inbox.directMessages.find(message => message.messageId === "formal").nextRead, formal.nextRead);
+  assert.equal(Object.hasOwn(inbox.directMessages.find(message => message.messageId === "ordinary"), "nextRead"), false);
+  const list = await call("room_list_requests", { roomId: created.roomId });
+  assert.deepEqual(list.nextReads[0].nextRead, formal.nextRead);
+  const selected = await call(formal.nextRead.tool, formal.nextRead.arguments);
+  const action = selected.responseActions[0];
+  const receipt = await call(action.tool, { ...action.arguments, requestId: "hosted-answer", body: "A helpful answer" });
+  const closed = await call(receipt.next.tool, receipt.next.arguments);
+  assert.equal(closed.request.status, "answered"); assert.deepEqual(closed.responseActions, []);
 });

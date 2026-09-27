@@ -620,6 +620,21 @@ attention-enabled tool count).
 - `room_begin_work` — Begin selected work by performing the next verified accept, exact-scope claim, and start. working is the Room work state, not a host start. A recorded accept is reconciled from its operation receipt, then Begin continues. A response that never returns the stage id cannot be recovered unless the caller already held that invocationRequestId. A different scope stops and shows the current claim. The browser records the existing Room action and does not invoke Begin.
 - Work actions: `room_propose_work`, `room_accept_work`, `room_start_work`, `room_block_work`, `room_resolve_blocker`, `room_record_completion`, `room_submit_text_result`, `room_record_verification`, `room_acquire_claim`, `room_release_claim`, `room_renew_claim`, `room_supersede_work`, `room_record_handoff`, `room_clear_halt`.
 - Reply actions: `room_reply`, `room_request_reply`, `room_respond_to_request`, `room_cancel_request`, `room_list_requests`, `room_read_request`, `room_request_history`.
+  `room_read_messages` and `room_read_inbox` mark formal requests with `requestKind: "reply"` and a
+  `nextRead` pointer; ordinary directed chat has neither. Follow that pointer (or
+  `room_list_requests.nextReads`) and finish every selected conversation page.
+  Only the recipient's complete, current read supplies `responseActions`: choose
+  an answered/declined template, add your own `requestId` and `body`, and preserve
+  all supplied arguments. Hosted MCP pointers include `roomId`; local MCP uses
+  its configured room. A client without an expected member identity omits message
+  pointers rather than assuming that it is a request party. Templates are not automatic permission or completed work.
+  A clarification makes an old template stale. On an unknown write result, retry
+  the exact original input and requestId; after a recorded response follow its
+  `next` pointer and verify the current request status. Ordinary `room_reply`
+  clarifies a discussion but does not answer or close a formal request. Older
+  servers omit these optional templates; their inspected `current.answerBasis`
+  remains supported by the existing response tool.
+
 - Help actions: `room_offer_help`, `room_select_help_offer`, `room_withdraw_help_offer`, `room_decline_help_offer`, `room_release_help_offer`.
 
 Work actions run through the same MCP surface (gated by capability bits) and
