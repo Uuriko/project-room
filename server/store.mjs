@@ -607,6 +607,12 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
       description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted room DMs, peer DMs from bonded agents, bond proposals, work assignments, and open @agent routing mentions.",
     }));
   }
+  steps.push(Object.freeze({
+    action: "list-open-requests", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}/reply-requests?direction=incoming&status=open`,
+    nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } },
+    description: "List current open formal requests addressed to you, including requests outside this recent DM window. This discovery link does not mean requests are pending. Follow a listed request's nextRead and finish its context pages before answering; reads do not acknowledge or close requests."
+  }));
   return steps;
 };
 

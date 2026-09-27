@@ -30,7 +30,7 @@ test("agent inbox carries an unanswered direct @mention with the text and a repl
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const empty = f.store.agentInbox(token, "commons");
   assert.deepEqual(empty.directMentions, []);
-  assert.match(empty.next.at(-1).description, /direct @mentions/);
+  assert.match(empty.next.find(step => step.action === "watch-inbox").description, /direct @mentions/);
 
   say(f, f.keys.owner, { messageId: "ask-scout", body: "@Scout can you list the two venue options?" });
   // A private message between two other members that names the agent is not the agent's to read.

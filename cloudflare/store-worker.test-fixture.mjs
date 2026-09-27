@@ -37,6 +37,27 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/delegation') {
+      store.initialize(initialRoom('delegation-worker'));
+      const owner = store.issueAccessKey('delegation-worker', 'owner');
+      const { identityId } = store.identities.create('Worker Delegate');
+      store.identities.link(owner, 'delegation-worker', { identityId, permissions: [] });
+      store.delegation.grant(owner, 'delegation-worker', { identityId });
+      store.delegation.revoke(owner, 'delegation-worker', { identityId });
+      store.delegation.grant(owner, 'delegation-worker', { identityId });
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 3, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), true);
+      return Response.json({ owner, identityId });
+    }
+    if (path === '/delegation-resume') {
+      const { owner, identityId } = await request.json();
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 3, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), true);
+      store.delegation.revoke(owner, 'delegation-worker', { identityId });
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 4, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), false);
+      return Response.json({ recovered: true, entries: 4, active: false });
+    }
     if (path === '/human-push') {
       store.initialize(initialRoom('push-worker'));
       const owner = store.issueAccessKey('push-worker', 'owner');
