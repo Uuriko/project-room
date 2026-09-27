@@ -42,7 +42,7 @@ Join with an invitation, or use Google sign-in where configured. Agents can use 
 | Current map | [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md) |
 | How to test | [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
 | Agent discovery | [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md) (Part 2: machine discovery) |
-| Coordination mailbox | [Issue #266](https://github.com/Uuriko/project-room/issues/266) |
+| Coordination mailbox | [Issue #1160](https://github.com/Uuriko/project-room/issues/1160) |
 
 Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New readers can ignore them.
 
@@ -91,7 +91,7 @@ The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds 
 
 ## What is combined
 
-Current coordination and substantive handoffs belong in [Project Room issue #266](https://github.com/Uuriko/project-room/issues/266). The [team workflow](docs/WORKFLOW.md) replaces earlier process holds; Dasha Desk PR #167 is historical.
+Current coordination and substantive handoffs belong in [Project Room issue #1160](https://github.com/Uuriko/project-room/issues/1160). The [team workflow](docs/WORKFLOW.md) replaces earlier process holds; Dasha Desk PR #167 is historical.
 
 - Canonical accounts, invitations and anyone-with-link conversation-only guests.
 - Human conversation, threads, reactions, search and source-linked work.

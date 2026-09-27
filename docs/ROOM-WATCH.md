@@ -11,7 +11,7 @@
 
 # ROOM-WATCH.md
 
-The decay enforcer for the claims board (`Uuriko/project-room` issue #266).
+The decay enforcer for the claims board (`Uuriko/project-room` issue #1160).
 
 ## 1. What the watcher is
 
@@ -37,7 +37,7 @@ by the book.
 Each tick runs the `scripts/room` enforcer verbs in this order:
 
 1. `rebuild --out ROOM-STATE.md --commit-push` — regenerate the machine
-   board from #266 via gh REST, push to the `room-state` automation
+   board from #1160 via gh REST, push to the `room-state` automation
    branch (never main).
 2. `sweep [--dry-run]` — strike-one nudge @-mentioning the holding lane
    (4h grace), then strike-two release back to `submitted`; reject
@@ -54,8 +54,8 @@ write, never reconstruct from prose.
 
 ## 3. Watermark discipline
 
-- Read comment ids from **REST numeric ids on #266 ONLY**:
-  `gh api repos/Uuriko/project-room/issues/266/comments --paginate`.
+- Read comment ids from **REST numeric ids on #1160 ONLY**:
+  `gh api repos/Uuriko/project-room/issues/1160/comments --paginate`.
   Compare `id > watermark`.
 - **Never use `gh issue view --json comments`** for the board — it
   exposes no numeric ids, so watermarks cannot be compared against it.
@@ -127,12 +127,12 @@ count and stand down.
 
 ### 8.1 Trigger
 
-1. `rotation-check` compares the live #266 comment count against the
+1. `rotation-check` compares the live #1160 comment count against the
    1500 threshold and reports `rotation_due=yes` only when the count is
    **strictly above 1500**.
 2. `rotation_due=yes` is a signal, not an order. Before any rotation
    step, re-confirm the count a second time against the live REST API:
-   `gh api repos/Uuriko/project-room/issues/266/comments --paginate`
+   `gh api repos/Uuriko/project-room/issues/1160/comments --paginate`
    (numeric ids only — never `gh issue view --json comments`).
 3. A human (John, or the on-duty worker with his standing direction)
    confirms the decision in the digest or on the board. No confirmation,
@@ -148,9 +148,9 @@ reconstructed prose:
 
 ```text
 [room-watch][rotation-handoff]
-old issue:    #266
+old issue:    #1160
 new issue:    #<N>              (filled once created)
-watermark:    <last processed numeric comment id on #266>
+watermark:    <last processed numeric comment id on #1160>
 open claims:  <task-id> lane=<lane> lease=<state/expiry>   (one line each)
 unclaimed lanes: <comma-separated lanes with no open claim>
 missing receipts: <task-id> merged, receipt not posted    (one line each)
@@ -169,7 +169,7 @@ allowed under §9.
    moved, and no further claims, receipts, or status lines are accepted
    on the old issue.
 3. Open the new issue titled exactly: `Claims board (continued from #N)`
-   — the same lineage convention as `#11 → #266`.
+   — the same lineage convention as `#11 → #266 → #1160`.
 4. Any claim posted to the old issue after rotation is refused by
    protocol and pointed at the new issue (duplicate-claim refusal
    record, §9).
@@ -186,7 +186,7 @@ allowed under §9.
 
 ### 8.5 Post-rotation
 
-1. **Watermark reset.** Append `rotation: #266 -> #N, final watermark
+1. **Watermark reset.** Append `rotation: #1160 -> #N, final watermark
    <id>` to the watermark file, then set the active watermark to the
    new issue's opening comment id. Atomic temp+rename, same as §3.
 2. **First rebuild.** Run `rebuild` against the new issue, push the
