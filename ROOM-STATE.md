@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T10:58:36Z · board: Uuriko/project-room#266 · watermark: 5854962969 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
+<!-- generated: 2026-09-27T11:29:19Z · board: Uuriko/project-room#266 · watermark: 5855391061 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-19-071 | quill | submitted | 2026-09-20T03:07:10Z | src/invite-contex
 RC-2026-09-19-072 | quill | submitted | 2026-09-20T03:07:21Z | src/app.js, tests/handoff-renderer.test.js
 RC-2026-09-19-073 | quill | submitted | 2026-09-20T03:18:56Z | server/account-login-methods.mjs, tests/magic-invalidation.test.js
 RC-2026-09-19-075 | quill | submitted | 2026-09-20T03:19:19Z | server/google-oauth.mjs, tests/google-oauth-email.test.js
-… +30 more
+… +31 more
 
 ## file-claims
 file | lane | task-id | state
@@ -71,6 +71,7 @@ scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131 | submitted
+scripts/ralph-loop.mjs | jill | RC-2026-09-27-1153 | submitted
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
@@ -180,6 +181,7 @@ tests/messenger-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/next-actions.test.js | jill | RC-2026-09-25-911 | submitted
 tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
+tests/ralph-loop.test.js | jill | RC-2026-09-27-1153 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
 tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
 tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
@@ -197,6 +199,7 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 file | lanes | task-ids
 docs/ROOM-WATCH.md | quill-s2 | RC-2026-09-16-004, RC-2026-09-16-005
 index.html | , quill | RC-2026-09-19-054, RC-2026-09-19-068
+scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131, RC-2026-09-27-1153
 scripts/room | quill-s2 | RC-2026-09-16-004, RC-2026-09-17-001
 server/access-requests.mjs | , quill | RC-2026-09-18-022, RC-2026-09-19-071
 server/agent-identities.mjs | , quill | RC-2026-09-18-018, RC-2026-09-19-086
@@ -210,6 +213,7 @@ tests/agent-identities.test.js | , quill | RC-2026-09-18-018, RC-2026-09-19-086
 tests/agent-plugin-manifest.test.js |  | RC-2026-09-18-009, RC-2026-09-18-019
 tests/bounty-disputes.test.js |  | RC-2026-09-17-026, RC-2026-09-18-003
 tests/dispute-arbiters.test.js |  | RC-2026-09-18-001, RC-2026-09-18-002
+tests/ralph-loop.test.js | jill | RC-2026-09-26-1131, RC-2026-09-27-1153
 tests/referral-invites.test.js | instinct | RC-2026-09-27-004, RC-2026-09-27-005
 
 ## expiring-soon (<6h)
@@ -225,6 +229,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-004 | none | 5855388097
+unknown | none | 5855369237
 RC-2026-09-27-1149 | c84f33cf63feb4cf6f0898c04af8b5f6752de7ea | 5854240111
 RC-2026-09-27-1149 | c84f33cf63feb4cf6f0898c04af8b5f6752de7ea | 5854239845
 RC-2026-09-27-1145 | d07fcecdba185a2e9b9597c35500aa2f0d1caf41 | 5854201821
@@ -233,8 +239,6 @@ unknown | none | 5853799499
 unknown | none | 5853766202
 RC-2026-09-27-1151 | none | 5853554562
 unknown | none | 5853437627
-RC-1150 | none | 5853425652
-RC-2026-09-27-1150 | none | 5853358545
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -277,6 +281,7 @@ scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
 scripts/notification-feed-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/pinned-messages-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/ralph-loop.mjs | jill | RC-2026-09-26-1131 | submitted
+scripts/ralph-loop.mjs | jill | RC-2026-09-27-1153 | submitted
 scripts/room | quill-s2 | RC-2026-09-16-004 | submitted
 scripts/room | quill-s2 | RC-2026-09-17-001 | submitted
 scripts/room-chrome.mjs | quill | RC-2026-09-19-068 | working
@@ -386,6 +391,7 @@ tests/messenger-ingest.test.js | quill | RC-2026-09-18-008 | submitted
 tests/next-actions.test.js | jill | RC-2026-09-25-911 | submitted
 tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
+tests/ralph-loop.test.js | jill | RC-2026-09-27-1153 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
 tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
 tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
@@ -401,5 +407,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2375 threshold=1500 rotation_due=yes watcher=active open_claims=55 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=16 watermark=5854962969
+board_comments=2378 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5855391061
 
