@@ -531,5 +531,5 @@ test("reply audit rejects an access change for an inherited member id", () => {
     { sequence: 3, event: { type: "member.access_changed", id: "access-changed", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:02.000Z", data: { memberId: "toString", active: false, expectedMemberRevision: 0, permissions: [] } } }
   ];
   assert.throws(() => auditReplyRequests(state, history), /Reply request history requires operator reconciliation/);
-  assert.equal(Object.hasOwn(Function.prototype.toString, "active"), false);
+  assert.equal(Object.hasOwn(Object.prototype.toString, "active"), false);
 });
