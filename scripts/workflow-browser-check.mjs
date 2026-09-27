@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { clickWorkAction } from "./room-chrome.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
 import test from "node:test";
@@ -50,7 +51,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     let reviewedId;
     for (const [needsReview, needsDecision] of [[false, false], [true, false], [false, true], [true, true]]) {
       const title = `Finding — review ${needsReview}, decision ${needsDecision}`;
-      await page.locator("#new-work-button").click();
+      await openComposerOptions(page); await page.locator("#new-work-button").click();
       await page.locator("#work-options > summary").click();
       assert.equal(await review.isChecked(), true, "every new proposal starts with full checks");
       assert.equal(await decision.isChecked(), true);
@@ -131,7 +132,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     }
 
     // Ineligible assignments stay visible as unavailable and fail local validity.
-    await page.locator("#new-work-button").click();
+    await openComposerOptions(page); await page.locator("#new-work-button").click();
     await page.locator("#assignee-select").selectOption("producer");
     await page.locator("#work-options > summary").click();
     await page.locator("#work-mode-select").selectOption("write");

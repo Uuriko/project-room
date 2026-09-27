@@ -2233,7 +2233,13 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  $("#request-reply").hidden = !state || active;
+  const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
+  const members = state?.members;
+  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
+  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
+  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
+  requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
   const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
@@ -2306,6 +2312,20 @@ async function openRequestMode(kind, id) {
     if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
   }
 }
+const composerOptions = $("#composer-options");
+composerOptions.addEventListener("click", event => {
+  if (!event.target.closest("button")) return;
+  composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+}, true);
+composerOptions.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !composerOptions.open) return;
+  event.preventDefault(); event.stopPropagation(); composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+});
+document.addEventListener("click", event => {
+  if (!composerOptions.contains(event.target)) composerOptions.open = false;
+});
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
 $("#recipe-preview-toggle").addEventListener("click", () => {
   const panel = $("#recipe-preview");
@@ -4568,7 +4588,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#conversation-title");
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }

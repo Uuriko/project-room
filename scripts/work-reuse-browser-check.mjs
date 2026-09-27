@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -113,7 +114,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     assert.equal(await page.locator("#message-list").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     assert.equal(Object.keys(f.snapshot().state.workItems).length, Object.keys(before.state.workItems).length);
     if (name === "mobile") await page.evaluate(() => document.documentElement.style.fontSize = "");
-    await page.locator("#new-work-button").click();
+    await openComposerOptions(page); await page.locator("#new-work-button").click();
     assert.equal(await f.title.inputValue(), ""); assert.equal(await f.done.inputValue(), "");
     assert.equal(await page.locator("#work-reuse-hint").isVisible(), false);
     await page.keyboard.press("Escape");
@@ -263,7 +264,7 @@ for (const outcome of ["success", "failure"]) {
     });
     await f.open(); await f.people(); await f.form.locator('button[type="submit"]').click(); await held;
     f.keys.owner = f.store.issueAccessKey("commons", "owner"); await f.login();
-    await page.locator("#new-work-button").click(); await f.title.fill("Replacement session draft"); await f.done.fill("Current criteria");
+    await openComposerOptions(page); await page.locator("#new-work-button").click(); await f.title.fill("Replacement session draft"); await f.done.fill("Current criteria");
     release(); await page.waitForFunction(() => window.oldWorkRead);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
     assert.equal(await f.title.inputValue(), "Replacement session draft"); assert.equal(await f.done.inputValue(), "Current criteria");
