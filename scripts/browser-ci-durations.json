@@ -1,5 +1,6 @@
 {
-  "sourceRun": "https://github.com/Uuriko/project-room/actions/runs/36286526443",
+  "sourceRepository": "Uuriko/project-room",
+  "sourceRunId": 36286526443,
   "sourceRevision": "d145fdc37d5eb151dba7fa503a99c0fd963a6598",
   "note": "Top-level reporter durations, Ubuntu CI. Generated wrapper filenames normalized to their owning suite. Estimates only; new files use 10000ms.",
   "milliseconds": {
