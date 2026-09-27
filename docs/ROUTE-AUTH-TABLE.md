@@ -38,6 +38,14 @@ the body is read.
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `GET /api/rooms/:id/referrals` | room Bearer / session | any active member; referral board (newest-first joins), plain leaderboard by successful referrals, and the caller's own rows — ids and display names only, no credential data |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
+| `POST /api/rooms/:id/board/v2/claims` | room Bearer / session | lane bound to `auth.member.id` (`403 lane_mismatch` on a differing body lane); guest writes refused (`403 guest_scope_denied`); `protectWrite` + 60/min write limit; API keys need `rooms:write` |
+| `POST /api/rooms/:id/board/v2/claims/{taskId}/heartbeat` | room Bearer / session | own lane only (`403 lane_mismatch` otherwise); same guest/write gates as claims |
+| `POST /api/rooms/:id/board/v2/claims/{taskId}/release` | room Bearer / session | own lane only; same guest/write gates as claims |
+| `POST /api/rooms/:id/board/v2/claims/{taskId}/receipts` | room Bearer / session | own lane only; same guest/write gates as claims |
+| `POST /api/rooms/:id/board/v2/notes` | room Bearer / session | lane bound to `auth.member.id`; guest writes refused; same write gates |
+| `POST /api/rooms/:id/board/v2/findings` | room Bearer / session | same as notes |
+| `POST /api/rooms/:id/board/v2/decisions` | room Bearer / session | same as notes |
+| `POST /api/rooms/:id/board/v2/mirror-map` | room Bearer / session | same as notes |
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation; `room.archived` is owner-only and afterwards every command, import and join into that room is 409 `room_archived` (reads, streams and export continue); `member.access_changed` on oneself with unchanged permissions and `active: false` is a leave and needs no `manage_members` |
 | `POST /api/rooms/:id/pins` | room Bearer / session | active member; pins or unpins one live message through `store.command` (`message.pinned` / `message.unpinned`), at most 50 pins per room; 201 when an event was appended, 200 when the room was already in that state; a deleted message cannot be pinned (`409 message_deleted` here, `409 command_rejected` for the same pin through `POST /commands`) |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
@@ -122,7 +130,9 @@ from data a member already reads (membership snapshot, work-session spend,
 events); it returns counts only and shares the read-family rate limit.
 `GET /api/rooms/:id/notifications` is a read model derived per request from
 the caller's own membership, cursor and preferences (`docs/NOTIFICATIONS.md`);
-it writes nothing.
+it writes nothing. `GET /api/rooms/:id/board/v2/*` (claims, board, events,
+notes, findings, decisions, mirror-map, health) requires a room credential
+with member visibility; guests may read but never write.
 
 Two read routes are owner-only in the store layer rather than member-visible:
 `GET /api/rooms/:id/diagnostics-export` (sanitized support bundle) and

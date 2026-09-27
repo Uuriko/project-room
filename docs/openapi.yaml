@@ -3160,6 +3160,575 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/board/v2/claims:
+    get:
+      summary: List board claims
+      description: >
+        Authenticated members list board claims with optional lane/state/file
+        filters. Responses are paginated on the board watermark.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: lane
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [submitted, working, suspended, cancelled, completed, released]
+        - name: file
+          in: query
+          schema: { type: string }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Claims snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, claims, file_claims, overlaps, decisions]
+                properties:
+                  watermark: { type: integer }
+                  claims: { type: array, items: { $ref: '#/components/schemas/BoardV2Claim' } }
+                  file_claims: { type: array, items: { $ref: '#/components/schemas/BoardV2FileClaims' } }
+                  overlaps: { type: array, items: { $ref: '#/components/schemas/BoardV2FileClaims' } }
+                  decisions: { type: array, items: { $ref: '#/components/schemas/BoardV2Decision' } }
+    post:
+      summary: Submit a board claim
+      description: >
+        Claims files for a task with a lease (lease=<N>h, 1<=N<=72). The claim
+        lane always comes from the authenticated member. A file overlap with a
+        live claim from another lane is rejected with claim_conflict. Optional
+        Idempotency-Key makes the write replay-safe per lane for 24h.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_id, files, lease, reason]
+              additionalProperties: false
+              properties:
+                task_id:
+                  type: string
+                  pattern: '^RC-\d{4}-\d{2}-\d{2}-\d+$'
+                  description: >
+                    Task id, RC-YYYY-MM-DD-NNN. A task-id never gets a second
+                    claimant: reuse is 409 duplicate_task.
+                files:
+                  type: array
+                  items: { type: string }
+                  minItems: 1
+                  maxItems: 100
+                lease:
+                  type: string
+                  pattern: '^lease=[1-9]\d*h$'
+                  description: Lease grammar lease=<N>h with 1<=N<=72.
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        '201':
+          description: Claim submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, claim]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  claim: { $ref: '#/components/schemas/BoardV2Claim' }
+        '409':
+          description: duplicate_task or claim_conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Invalid fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/rooms/{roomId}/board/v2/claims/{taskId}/heartbeat:
+    post:
+      summary: Heartbeat a claim
+      description: >
+        Keeps a live claim held by the authenticated lane; moves a submitted
+        claim to working. Non-live or other-lane claims are rejected.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Heartbeat accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, claim]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  claim: { $ref: '#/components/schemas/BoardV2Claim' }
+        '403':
+          description: lane_mismatch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: unknown_task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/rooms/{roomId}/board/v2/claims/{taskId}/release:
+    post:
+      summary: Release a claim
+      description: Releases a live claim held by the authenticated lane; the claim becomes released.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '200':
+          description: Claim released
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, claim]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  claim: { $ref: '#/components/schemas/BoardV2Claim' }
+  /api/rooms/{roomId}/board/v2/claims/{taskId}/receipts:
+    post:
+      summary: Attach a receipt to a claim
+      description: >
+        Attaches sha/pr evidence to a claim. The receipt does not change the
+        claim state.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha]
+              additionalProperties: false
+              properties:
+                sha:
+                  type: string
+                  pattern: '^[0-9a-fA-F]{7,40}$'
+                pr:
+                  type: integer
+                  minimum: 1
+      responses:
+        '201':
+          description: Receipt attached
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, receipt]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  receipt: { $ref: '#/components/schemas/BoardV2Receipt' }
+  /api/rooms/{roomId}/board/v2/board:
+    get:
+      summary: Read the board snapshot
+      description: Watermark, claims, file-claims index, cross-lane overlaps, live decisions.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: lane
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [submitted, working, suspended, cancelled, completed, released]
+        - name: file
+          in: query
+          schema: { type: string }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Board snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, claims, file_claims, overlaps, decisions]
+                properties:
+                  watermark: { type: integer }
+                  claims: { type: array, items: { $ref: '#/components/schemas/BoardV2Claim' } }
+                  file_claims: { type: array, items: { $ref: '#/components/schemas/BoardV2FileClaims' } }
+                  overlaps: { type: array, items: { $ref: '#/components/schemas/BoardV2FileClaims' } }
+                  decisions: { type: array, items: { $ref: '#/components/schemas/BoardV2Decision' } }
+  /api/rooms/{roomId}/board/v2/events:
+    get:
+      summary: Read the board event log
+      description: >
+        Unified append-only event log (kinds: claim, heartbeat, release,
+        receipt, note, finding, decision). Cursor pagination on seq:
+        pass since_seq as the last seen seq; has_more says whether to ask again.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [claim, heartbeat, release, receipt, note, finding, decision]
+        - name: lane
+          in: query
+          schema: { type: string }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Event page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, events, has_more]
+                properties:
+                  watermark: { type: integer }
+                  events: { type: array, items: { $ref: '#/components/schemas/BoardV2Event' } }
+                  has_more: { type: boolean }
+  /api/rooms/{roomId}/board/v2/notes:
+    get:
+      summary: List board notes
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: lane
+          in: query
+          schema: { type: string }
+        - name: thread
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, milestone, warning]
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, notes]
+                properties:
+                  watermark: { type: integer }
+                  notes: { type: array, items: { $ref: '#/components/schemas/BoardV2Note' } }
+    post:
+      summary: Post a board note
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              additionalProperties: false
+              properties:
+                thread: { type: string, minLength: 1, maxLength: 128 }
+                body: { type: string, minLength: 1, maxLength: 500 }
+                severity:
+                  type: string
+                  enum: [info, milestone, warning]
+      responses:
+        '201':
+          description: Note posted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, note]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  note: { $ref: '#/components/schemas/BoardV2Note' }
+  /api/rooms/{roomId}/board/v2/findings:
+    get:
+      summary: List board findings
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: lane
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Findings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, findings]
+                properties:
+                  watermark: { type: integer }
+                  findings: { type: array, items: { $ref: '#/components/schemas/BoardV2Finding' } }
+    post:
+      summary: Post a board finding
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [severity, title, recommendation]
+              additionalProperties: false
+              properties:
+                claim_ref: { type: string }
+                pr_ref: { type: integer, minimum: 1 }
+                severity:
+                  type: string
+                  enum: [low, medium, high, critical]
+                title: { type: string, minLength: 1, maxLength: 200 }
+                evidence:
+                  type: array
+                  items: { type: string }
+                  maxItems: 20
+                recommendation: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '201':
+          description: Finding posted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, finding]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  finding: { $ref: '#/components/schemas/BoardV2Finding' }
+  /api/rooms/{roomId}/board/v2/decisions:
+    get:
+      summary: List board decisions
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: decider
+          in: query
+          schema: { type: string }
+        - name: scope
+          in: query
+          schema: { type: string }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Decisions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, decisions]
+                properties:
+                  watermark: { type: integer }
+                  decisions: { type: array, items: { $ref: '#/components/schemas/BoardV2Decision' } }
+    post:
+      summary: Record a board decision
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, statement]
+              additionalProperties: false
+              properties:
+                scope: { type: string, minLength: 1, maxLength: 128 }
+                statement: { type: string, minLength: 1, maxLength: 2000 }
+                reversible: { type: boolean }
+                supersedes: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, decision]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  decision: { $ref: '#/components/schemas/BoardV2Decision' }
+  /api/rooms/{roomId}/board/v2/mirror-map:
+    get:
+      summary: Mirror-map entries
+      description: >
+        Without query params lists recorded (seq, issue, comment_id) mappings
+        (since_seq filters). With issue + comment_id resolves one mapping.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: issue
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: comment_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Mirror entry or entries
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/BoardV2MirrorEntry'
+                  - type: object
+                    required: [entries]
+                    properties:
+                      entries: { type: array, items: { $ref: '#/components/schemas/BoardV2MirrorEntry' } }
+        '404':
+          description: mirror_unknown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      summary: Record a mirror mapping
+      description: Maps a board event seq to a GitHub issue comment id for migration.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq, issue, comment_id]
+              additionalProperties: false
+              properties:
+                seq: { type: integer, minimum: 1 }
+                issue: { type: integer, minimum: 1 }
+                comment_id: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Mapping recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, entry]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  entry: { $ref: '#/components/schemas/BoardV2MirrorEntry' }
+  /api/rooms/{roomId}/board/v2/health:
+    get:
+      summary: Board health
+      description: Board sequence and counts of live claims, mirror entries, notes, findings, decisions.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Board health
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [seq, live_claims, mirror_entries, notes, findings, decisions]
+                properties:
+                  seq: { type: integer }
+                  live_claims: { type: integer }
+                  mirror_entries: { type: integer }
+                  notes: { type: integer }
+                  findings: { type: integer }
+                  decisions: { type: integer }
   /api/rooms/{roomId}/receipts:
     get:
       summary: Search completed-work receipts
@@ -10389,6 +10958,115 @@ components:
           items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
           maxItems: 10
           description: sha256 evidence pointers recorded on the done transition
+    BoardV2Claim:
+      description: |
+        A board-v2 claim: a lane's typed write declaring intent to work on
+        files. Leases never auto-release; `expired` is a computed flag.
+        Live states are `submitted`, `working`, `suspended`; terminal states
+        are `cancelled`, `completed`, `released`. Receipts attach sha/pr
+        evidence and never close the claim.
+      type: object
+      properties:
+        task_id: { type: string, pattern: '^RC-\d{4}-\d{2}-\d{2}-\d+$' }
+        lane: { type: string, description: The authenticated member id that owns the claim }
+        files:
+          type: array
+          items: { type: string }
+          minItems: 1
+          maxItems: 100
+        lease: { type: string, pattern: '^lease=[1-9]\d*h$' }
+        lease_h: { type: integer }
+        reason: { type: string }
+        state:
+          type: string
+          enum: [submitted, working, suspended, cancelled, completed, released]
+        claim_at: { type: string, format: date-time }
+        heartbeat_at: { type: [string, 'null'], format: date-time }
+        expires_at: { type: string, format: date-time }
+        expired: { type: boolean }
+        last_seq: { type: integer }
+        receipts: { type: array, items: { $ref: '#/components/schemas/BoardV2Receipt' } }
+    BoardV2Receipt:
+      description: One sha/pr evidence item attached to a claim.
+      type: object
+      required: [seq, at, sha, pr]
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        sha: { type: string, pattern: '^[0-9a-fA-F]{7,40}$' }
+        pr: { type: [integer, 'null'], minimum: 1 }
+    BoardV2FileClaims:
+      description: File-claims index row: one file and its live claims.
+      type: object
+      properties:
+        file: { type: string }
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              task_id: { type: string }
+              lane: { type: string }
+              state: { type: string }
+    BoardV2Event:
+      description: |
+        One board-v2 event: a typed write with a monotonic `seq` consumer
+        watermark. `kind` is one of claim, heartbeat, release, receipt, note,
+        finding, decision. `payload` carries the event payload.
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        kind:
+          type: string
+          enum: [claim, heartbeat, release, receipt, note, finding, decision]
+        task_id: { type: [string, 'null'] }
+        lane: { type: string }
+        payload: { type: object }
+        supersedes: { type: [integer, 'null'] }
+        idempotency_key: { type: [string, 'null'] }
+    BoardV2Note:
+      description: A board-v2 note.
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        lane: { type: string }
+        thread: { type: [string, 'null'] }
+        body: { type: string }
+        severity: { type: [string, 'null'], enum: [info, milestone, warning] }
+    BoardV2Finding:
+      description: A board-v2 finding.
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        lane: { type: string }
+        claim_ref: { type: [string, 'null'] }
+        pr_ref: { type: [integer, 'null'], minimum: 1 }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        title: { type: string }
+        evidence: { type: array, items: { type: string } }
+        recommendation: { type: string }
+    BoardV2Decision:
+      description: A board-v2 decision (superseded ones are dropped from the board view).
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        decider: { type: string }
+        scope: { type: string }
+        statement: { type: string }
+        reversible: { type: [boolean, 'null'] }
+        supersedes: { type: [integer, 'null'] }
+    BoardV2MirrorEntry:
+      description: One board-v2 mirror-map entry: a board event seq mapped to a GitHub issue comment.
+      type: object
+      required: [seq, issue, comment_id]
+      properties:
+        seq: { type: integer }
+        issue: { type: integer, minimum: 1 }
+        comment_id: { type: integer, minimum: 1 }
     Receipt:
       description: |
         A done work-claim item projected for search (GET

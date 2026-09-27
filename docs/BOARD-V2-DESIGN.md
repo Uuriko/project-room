@@ -1,8 +1,11 @@
 # Board v2 — room-native claims board: design
 
-Status: design + prototype (BOARD-1, RC-2026-09-26-1114). Prototype merges
-without production wiring; deployment is a later room decision. Nothing here
-changes production behavior.
+Status: design + prototype (BOARD-1, RC-2026-09-26-1114); SQLite persistence
+(PR #1144); HTTP wiring (RC-2026-09-27-2720, this change). The board is now
+mounted at `/api/rooms/:roomId/board/v2/*` over the durable `board_vtwo_*`
+tables. The integration decision below is superseded for the wiring it
+described as "later": the room-scoping, authorization, and identity
+reconciliation it called for is recorded in the "Wiring decision" section.
 
 ## Integration decision — 26 September 2026
 
@@ -13,6 +16,29 @@ HTTP routes, migration, mirror writer, scheduler, or rotation automation.
 Before any future wiring, reconcile task identity, room scoping, authorization,
 leases, receipts, and migration with that existing claims contract. The proposed
 architecture below is exploratory, not an approved second source of truth.
+
+## Wiring decision — 27 September 2026 (RC-2026-09-27-2720)
+
+The reconciliation the integration decision called for, as wired:
+
+- **Room scoping.** The `board_vtwo_*` tables carry no `room_id` (PR #1144).
+  The board is the deployment's coordination board — one per room database,
+  the machine counterpart of the #266 swarm board — not a per-room partition.
+  The `:roomId` in `/api/rooms/:roomId/board/v2/*` selects the *auth context*
+  (the caller must hold a credential for that room); every room's members see
+  the same board.
+- **Authorization.** All routes ride the standard room funnel: room credential
+  (Bearer or browser session), 600/min read limit, `protectWrite` + 60/min
+  write limit, `rooms:read`/`rooms:write` API-key scopes. Guest members may
+  read but never write (`403 guest_scope_denied`): per the guest policy,
+  guests stay out of claims-board participation (same posture as the
+  work-claims funnel).
+- **Task identity.** Writes bind `lane` to the authenticated member id
+  (`auth.member.id`); a body-supplied `lane` that differs is `403
+  lane_mismatch`. Lanes are `[A-Za-z0-9_-]{1,64}`.
+- **Leases / receipts / mirror.** Unchanged from §§2–4; the mirror writer,
+  scheduler, and rotation automation remain future work — the routes expose
+  the mirror map, they do not rotate issues.
 
 ## 1. The problem
 

@@ -45,6 +45,8 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
+import { handleBoardV2Request } from "./board-v2.mjs"; // RC-2026-09-27-2720: board-v2 route contract (validation + dispatch).
+import { createDurableBoardV2Machine } from "./board-v2-durable.mjs"; // RC-2026-09-27-2720: durable board-v2 state machine.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -3194,15 +3196,36 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
       const creditsEpochMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/epoch\/close$/.exec(url.pathname);
       const creditsMatch = creditsBalancesMatch ?? creditsHistoryMatch ?? creditsTransferMatch ?? creditsEpochMatch;
+      // Board v2 (RC-2026-09-27-2720): the durable claims board mounted under
+      // the room funnel. One anchored regex per concrete route — the
+      // route-docs gate (scripts/open-routes.mjs) expands only ([^/]{1,N})
+      // groups, so a subtree regex would fail the check. The board itself is
+      // deployment-wide (one per room database); :roomId selects the auth
+      // context. Literal segments (heartbeat/release/receipts) sit on their
+      // own templates so they are never mistaken for a task id.
+      const boardV2ClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims$/.exec(url.pathname);
+      const boardV2HeartbeatMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/heartbeat$/.exec(url.pathname);
+      const boardV2ReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/release$/.exec(url.pathname);
+      const boardV2ReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/receipts$/.exec(url.pathname);
+      const boardV2NotesMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/notes$/.exec(url.pathname);
+      const boardV2FindingsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/findings$/.exec(url.pathname);
+      const boardV2DecisionsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/decisions$/.exec(url.pathname);
+      const boardV2BoardMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/board$/.exec(url.pathname);
+      const boardV2EventsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/events$/.exec(url.pathname);
+      const boardV2MirrorMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/mirror-map$/.exec(url.pathname);
+      const boardV2HealthMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/health$/.exec(url.pathname);
+      const boardV2Match = boardV2ClaimsMatch ?? boardV2HeartbeatMatch ?? boardV2ReleaseMatch ?? boardV2ReceiptsMatch
+        ?? boardV2NotesMatch ?? boardV2FindingsMatch ?? boardV2DecisionsMatch ?? boardV2BoardMatch
+        ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !bountyMatch && !creditsMatch
+        && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? bountyMatch ?? creditsMatch
+        ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch)[1]);
@@ -3346,6 +3369,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
             return current;
           }, helpers: { json, reject, body } });
+      }
+      // Board v2 (RC-2026-09-27-2720): the durable claims board. Rides the
+      // room funnel above (credential, session binding, 600/min read limit,
+      // protectWrite + 60/min write limit, rooms:read/rooms:write API-key
+      // scopes). Writes bind lane to the authenticated member id; the board
+      // itself is deployment-wide (one per room database) — :roomId selects
+      // the auth context, not a data partition. Guests may read but never
+      // write: per the guest policy they stay out of claims-board
+      // participation (same posture as the work-claims funnel).
+      if (boardV2Match) {
+        const lane = auth.member.id;
+        if (typeof lane !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(lane)) {
+          reject(401, "unauthenticated", "Member id cannot serve as a board lane");
+        }
+        const boardPath = url.pathname.slice(`/api/rooms/${boardV2Match[1]}/board/v2`.length) || "/";
+        const boardQuery = Object.fromEntries(url.searchParams.entries());
+        const isRead = req.method === "GET" || req.method === "HEAD";
+        if (!isRead && isWebFetchGuest(auth.member)) {
+          reject(403, "guest_scope_denied", "Guest members cannot write to the claims board");
+        }
+        const boardBody = isRead ? null : await body(req);
+        const machine = createDurableBoardV2Machine(store.db);
+        const runBoard = () => handleBoardV2Request(machine, {
+          method: req.method, path: boardPath, query: boardQuery,
+          body: boardBody, lane, headers: req.headers,
+        });
+        // Whole-request transaction: multi-step mutations (event + claim +
+        // idempotency row) and check-then-write sequences stay atomic under
+        // BEGIN IMMEDIATE; reads run query-only.
+        const outcome = isRead ? store.readTransaction(runBoard) : store.transaction(runBoard);
+        return json(res, outcome.status, outcome.body, req.method === "HEAD");
       }
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // room-scoped bounty lifecycle and derived-balance credit routes share
