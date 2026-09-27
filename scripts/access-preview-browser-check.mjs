@@ -8,9 +8,10 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { AccessRequests } from "../server/access-requests.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
-async function setup(t) {
+async function setup(t, { pending = 0, width = 1440 } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -18,15 +19,22 @@ async function setup(t) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }), errors = [];
+  const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: "reduce" }), errors = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
+  const access = new AccessRequests(f.store);
+  const addRequest = index => {
+    const name = `Paging applicant ${String(index).padStart(3, "0")}`;
+    const identity = f.store.identities.create(name);
+    return access.request("commons", { identityId: identity.identityId, displayName: name, requestedPermissions: [], requestId: `paging-${index}` });
+  };
+  for (let index = 1; index <= pending; index++) addRequest(index);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
-  return { ...f, page, errors, send };
+  return { ...f, page, errors, send, access, addRequest };
 }
 
 test("access preview: a work card shows exactly what an agent can read before a run, and opening it starts nothing", { timeout: 60000 }, async t => {
@@ -85,5 +93,88 @@ test("access preview: a work card shows exactly what an agent can read before a 
   mkdirSync("test-results", { recursive: true });
   await refreshed.scrollIntoViewIfNeeded();
   await refreshed.screenshot({ path: "test-results/access-preview-panel.png" });
+  assert.deepEqual(f.errors, []);
+});
+
+
+for (const pending of [26, 60]) test(`owner attention pages ${pending} pending requests without losing the total`, { timeout: 60000 }, async t => {
+  const f = await setup(t, { pending, width: pending === 26 ? 390 : 1440 }), { page } = f;
+  const rows = page.locator("#attention-list > li"), next = page.locator("#attention-next"), previous = page.locator("#attention-previous");
+  await rows.first().waitFor();
+  assert.equal(await page.locator("#attention-count").textContent(), String(pending), "badge reports the full queue, not just its first page");
+  assert.equal(await rows.count(), 25, "the first page is bounded while count remains global");
+  assert.match(await page.locator("#attention-range").textContent(), new RegExp(`Showing 1[–-]25 of ${pending}`));
+  assert.equal(await previous.isDisabled(), true);
+  const first = await rows.locator(".attention-title").allTextContents();
+  const seen = new Set(first);
+  const sequence = f.store.room("commons").sequence;
+  let offset = 0;
+  while (offset + 25 < pending) {
+    await next.click(); offset += 25;
+    await page.waitForFunction(start => document.querySelector("#attention-range").textContent.includes(`Showing ${start}`), offset + 1);
+    for (const title of await rows.locator(".attention-title").allTextContents()) { assert.equal(seen.has(title), false); seen.add(title); }
+    assert.equal(await page.locator("#attention-count").textContent(), String(pending));
+  }
+  assert.equal(seen.size, pending, "every pending applicant is reachable");
+  assert.equal(await next.isDisabled(), true);
+  assert.equal(await previous.evaluate(node => node === document.activeElement), true, "last page moves keyboard focus to enabled Previous");
+  if (pending === 26) {
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    mkdirSync("test-results", { recursive: true });
+    await page.locator("#attention-pages").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "test-results/attention-pages-mobile.png" });
+  }
+  assert.equal(f.store.room("commons").sequence, sequence, "paging commits no room event");
+  while (offset > 0) {
+    await previous.click(); offset -= 25;
+    await page.waitForFunction(start => document.querySelector("#attention-range").textContent.includes(`Showing ${start}`), offset + 1);
+  }
+  assert.deepEqual(await rows.locator(".attention-title").allTextContents(), first);
+  await next.click();
+  await page.waitForFunction(() => document.querySelector("#attention-range").textContent.includes("Showing 26"));
+  await rows.first().getByRole("button", { name: "Deny", exact: true }).click();
+  await page.waitForFunction(total => document.querySelector("#attention-count").textContent === String(total), pending - 1);
+  assert.match(await page.locator("#attention-range").textContent(), new RegExp(`Showing 1[–-]25 of ${pending - 1}`));
+  assert.equal(await previous.isDisabled(), true, "a decision returns to refreshed first page");
+  if (pending === 60) {
+    await next.click();
+    await page.waitForFunction(() => document.querySelector("#attention-range").textContent.includes("Showing 26"));
+    f.addRequest(61);
+    await next.click();
+    await page.getByText("The list changed. Showing the first page.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#attention-range").textContent(), "Showing 1–25 of 60");
+    assert.equal(await rows.count(), 25, "changed queue replaces rather than appends a page");
+    assert.equal(await previous.isDisabled(), true);
+    assert.equal(await next.evaluate(node => node === document.activeElement), true);
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+
+test("late owner attention page cannot return after signing in as a different member", { timeout: 30000 }, async t => {
+  const f = await setup(t, { pending: 26 }), { page } = f;
+  await page.locator("#attention-list > li").first().waitFor();
+  let release, captured;
+  const gate = new Promise(resolve => { release = resolve; });
+  const held = new Promise(resolve => { captured = resolve; });
+  t.after(() => release());
+  await page.route("**/needs-attention?**", async route => {
+    const response = await route.fetch(); captured(); await gate;
+    await route.fulfill({ response });
+  });
+  await page.locator("#attention-next").click(); await held;
+  await page.locator("#session-menu-button").click();
+  await page.locator("#signout-button").click();
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await fillAccessKey(page, f.keys.guest);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  const delivered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/needs-attention") && new URL(response.url()).searchParams.has("cursor"));
+  release(); await delivered;
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.locator("#attention-list > li").count(), 0);
+  assert.equal(await page.locator("#attention-count").textContent(), "");
+  assert.equal(await page.locator("#attention-next").isVisible(), false);
+  assert.equal(await page.getByText(/Paging applicant/).count(), 0, "previous owner's applicants never appear for the guest");
   assert.deepEqual(f.errors, []);
 });
