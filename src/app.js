@@ -659,12 +659,14 @@ function showAccountWorkspace() {
 }
 async function openStartedRoom() {
   const owned = accountClient.session;
+  try { await inboxUI.askSetupName?.(); } catch { /* setup is optional; the room still opens */ }
+  if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
   const roomId = body?.room?.id;
   if (!roomId) { inboxUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); }
+  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
