@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T06:58:22Z · board: Uuriko/project-room#266 · watermark: 5853554562 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=187c1335896e5d6c206aed15a055da46abe2c0960598571f5b974373fa24f75c -->
+<!-- generated: 2026-09-27T07:28:47Z · board: Uuriko/project-room#266 · watermark: 5853799499 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=9fbc87937b2680b44a708fbf20579c30ee79ff0226ecdf1e2e2552f4c382fab8 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -313,11 +313,11 @@ tests/runtime-package.test.js |  | RC-2026-09-18-017, RC-2026-09-25-910
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-27-1144 | jill | working | 2026-09-27T11:47:13Z | server/store.mjs (OTel fanout span outcome only), tests/otel-wiring.test.js
-RC-2026-09-27-1145 | jill | working | 2026-09-27T11:47:15Z | scripts/room, tests/room-overlap-refusal.test.js (new), tests/room-claim-status.test.js (new)
 RC-2026-09-27-1146 | jill | working | 2026-09-27T11:47:16Z | NONE
 RC-2026-09-27-1147 | jill | working | 2026-09-27T11:47:17Z | NONE
 RC-2026-09-27-1148 | jill | working | 2026-09-27T11:47:18Z | NONE
 RC-2026-09-27-1149 | jill | working | 2026-09-27T11:47:19Z | server/job-bot.mjs (new), tests/job-bot.test.js (new), docs/JOB-BOT.md (new)
+RC-2026-09-27-1145 | jill | working | 2026-09-27T13:03:08Z | scripts/room, tests/room-overlap-refusal.test.js (new), tests/room-claim-status.test.js (new)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -327,6 +327,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5853799499
+unknown | none | 5853766202
 RC-2026-09-27-1151 | none | 5853554562
 unknown | none | 5853437627
 RC-1150 | none | 5853425652
@@ -335,8 +337,6 @@ unknown | none | 5853230056
 unknown | none | 5853226958
 SPEC-3 | none | 5853226095
 unknown | none | 5853208695
-unknown | none | 5852888951
-RC-2026-09-27-1142 | f6328e882527d42da774271cfcd76371c31afd86 | 5852607279
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -588,5 +588,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2361 threshold=1500 rotation_due=yes watcher=active open_claims=79 prose_open=3 unfenced_prose=73 files_claimed=188 overlap_files=29 watermark=5853554562
+board_comments=2364 threshold=1500 rotation_due=yes watcher=active open_claims=79 prose_open=3 unfenced_prose=73 files_claimed=188 overlap_files=29 watermark=5853799499
 
