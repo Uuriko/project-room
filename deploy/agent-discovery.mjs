@@ -2,8 +2,8 @@
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
-import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY } from "./agent-card-key.mjs";
-import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-signed.mjs";
+import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
+import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "../server/governance.mjs";
 
@@ -211,6 +211,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/.well-known/governance.json", auth: false, first: "governance policy (generated from enforcing config)" }),
   Object.freeze({ path: "/openapi.json", auth: false, first: "generated OpenAPI 3.1 route inventory" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
+  Object.freeze({ path: AGENT_CARD_JWKS_PATH, auth: false, first: "JWKS: verification key for the A2A v1.0 JWS card signature" }),
   Object.freeze({ path: "/.well-known/ai-catalog.json", auth: false, first: "ARD ai-catalog (compat path)" }),
   Object.freeze({ path: "/.well-known/ard.json", auth: false, first: "ARD ai-catalog (normative path)" }),
   Object.freeze({ path: "/robots.txt", auth: false, first: "AI crawler policy" }),
@@ -232,6 +233,38 @@ export const KEY_ROUTES = Object.freeze([
 // JSON-RPC protocol; the machine surfaces are declared in supportedInterfaces.
 export const DISCOVERY_PROTOCOL_VERSION = "1";
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
+// Key discovery for the A2A v1.0 JWS signature (RC-2026-09-27-2715): verifiers
+// resolve the `kid`/`jku` protected-header parameters at this JWKS URL.
+export const AGENT_CARD_JWKS_URL = `${ROOM_ORIGIN}${AGENT_CARD_JWKS_PATH}`;
+
+// The room's pinned Ed25519 public key as a JWKS document (RFC 7517) for A2A
+// v1.0 JWS key discovery. Pure string transform — no node:crypto, so this
+// stays Worker-safe. The canonical converter is publicKeyToJwk() in
+// server/agent-card-signing.mjs; tests assert the two agree on the pinned key.
+export function agentJwksJson() {
+  const x = AGENT_CARD_PUBLIC_KEY.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return JSON.stringify({
+    keys: [Object.freeze({ kty: "OKP", crv: "Ed25519", x, kid: AGENT_CARD_KEY_ID })],
+  }, null, 2) + "\n";
+}
+
+// Attach the signature envelope to a card object (mutates and returns it).
+// Shared by agentCard() (serve time) and scripts/sign-agent-card.mjs (build
+// time), so the JWS payload the signer computes is byte-identical to what
+// verifiers recompute from the served card. The legacy envelope always
+// attaches under the revision gate; the A2A v1.0 `signatures` array attaches
+// only when a non-empty JWS array is present — unsigned cards carry neither.
+export function attachCardSignatureEnvelope(card, { signature, jwsSignatures, revision }) {
+  card.keyId = AGENT_CARD_KEY_ID;
+  card.signatureAgentId = AGENT_CARD_AGENT_ID;
+  card.publicKey = AGENT_CARD_PUBLIC_KEY;
+  card.cardSignature = signature;
+  card.signedRevision = revision;
+  if (Array.isArray(jwsSignatures) && jwsSignatures.length > 0) {
+    card.signatures = jwsSignatures;
+  }
+  return card;
+}
 // Skill entries using A2A v1.0 field conventions (https://google.github.io/A2A):
 // machine-readable descriptions of what an agent can do with this Room.
 // Superset fields below keep every existing project-room-discovery field intact.
@@ -392,19 +425,27 @@ export function agentCard() {
       // discover receipt support. Declarative only; required:false.
       extensions: Object.freeze([A2A_WORK_RECEIPT_EXTENSION]) })
   };
-  // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
-  // attached only when the signature covers exactly this build's card bytes;
-  // otherwise the card is served unsigned (no signature fields at all).
-  // Verifiers recompute canonicalCardBytes({ agentId: signatureAgentId,
-  // card }) with server/agent-card-signing.mjs and check cardSignature
-  // against publicKey. The signature covers name, description, url,
-  // capabilities, skills, and version — envelope fields are never signed.
+  // Build-time Ed25519 signature (RC-2026-09-23-105) plus the A2A v1.0 JWS
+  // signatures[] array (RC-2026-09-27-2715). Both attach only when the
+  // signature covers exactly this build's card bytes; otherwise the card is
+  // served unsigned (no signature fields at all).
+  // House-envelope verifiers recompute canonicalCardBytes({
+  // agentId: signatureAgentId, card }) with server/agent-card-signing.mjs and
+  // check cardSignature against publicKey. The house signature covers name,
+  // description, url, capabilities, skills, and version — envelope fields are
+  // never signed.
+  // JWS verifiers take the card minus `signatures`, canonicalize per RFC 8785
+  // (jwsPayloadBytes in server/agent-card-signing.mjs), and check each
+  // signatures[] entry against the key from its `kid`/`jku` (the JWKS at
+  // AGENT_CARD_JWKS_URL). The JWS covers the card plus the legacy envelope —
+  // attachCardSignatureEnvelope() is the single place both the build-time
+  // signer and this serve path construct it, so the bytes match.
   if (AGENT_CARD_SIGNATURE && AGENT_CARD_SIGNED_REVISION === deployed.revision) {
-    card.keyId = AGENT_CARD_KEY_ID;
-    card.signatureAgentId = AGENT_CARD_AGENT_ID;
-    card.publicKey = AGENT_CARD_PUBLIC_KEY;
-    card.cardSignature = AGENT_CARD_SIGNATURE;
-    card.signedRevision = AGENT_CARD_SIGNED_REVISION;
+    attachCardSignatureEnvelope(card, {
+      signature: AGENT_CARD_SIGNATURE,
+      jwsSignatures: AGENT_CARD_JWS_SIGNATURES,
+      revision: AGENT_CARD_SIGNED_REVISION,
+    });
   }
   return card;
 }
@@ -1038,6 +1079,10 @@ const CANONICAL = Object.freeze({
     body: governanceJson({ origin: ROOM_ORIGIN, revision: deployedInfo().revision, buildId: deployedInfo().buildId }) }),
   [MCP_SERVER_CARD_PATH]: MCP_SERVER_CARD_DOC,
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  // JWKS key-discovery document for the A2A v1.0 JWS card signature
+  // (RC-2026-09-27-2715). Served always — it advertises the verification key;
+  // an unsigned card simply carries no `signatures` array.
+  [AGENT_CARD_JWKS_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentJwksJson() }),
   // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
   "/.well-known/ard.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
   "/.well-known/ai-catalog.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
@@ -1093,6 +1138,9 @@ const ALIASES = Object.freeze({
   // A2A-standard card path + prefix-preserving twins.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
+  // JWKS key-discovery twins (same bytes as /.well-known/jwks.json).
+  ...Object.fromEntries(["/room/.well-known/jwks.json", "/project-room/.well-known/jwks.json"]
+    .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_JWKS_PATH]))),
   // Root card aliases (same bytes as the machine card) for agents that
   // probe the conventional filenames at the origin.
   ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),
