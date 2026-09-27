@@ -995,6 +995,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
+      // Existing directory rows predate the independent feed visibility bit.
+      // Default them on so upgrading does not silently hide public work.
+      const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
+      if (!directoryColumns.has("opportunities_enabled")) {
+        this.db.exec("ALTER TABLE room_directory_settings ADD COLUMN opportunities_enabled INTEGER NOT NULL DEFAULT 1");
+      }
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
