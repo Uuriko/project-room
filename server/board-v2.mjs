@@ -125,14 +125,36 @@ export class BoardV2 {
     this._notes = []; // append-only note events
     this._findings = []; // append-only finding events
     this._decisions = []; // append-only decision events
+    this._idempotency = new Map(); // idempotency-key -> { status, body }
   }
 
   get seq() { return this._seq; }
 
-  _emit(kind, taskId, lane, payload) {
+  _emit(kind, taskId, lane, payload, opts = {}) {
     this._seq += 1;
     const event = { seq: this._seq, at: iso(this._now()), kind, task_id: taskId, lane, payload };
+    if (opts.supersedes != null) event.supersedes = opts.supersedes;
+    if (opts.idempotencyKey != null) event.idempotency_key = opts.idempotencyKey;
     return event;
+  }
+
+  // Idempotency: store the response for a key, or return the cached response.
+  // Returns { cached: true, response } if the key was seen, else { cached: false }.
+  _checkIdempotency(key) {
+    if (key == null) return { cached: false };
+    const hit = this._idempotency.get(key);
+    if (hit) return { cached: true, response: hit };
+    return { cached: false };
+  }
+
+  _storeIdempotency(key, status, body) {
+    if (key == null) return;
+    // Bound the cache: keep only the most recent 1000 keys.
+    if (this._idempotency.size >= 1000) {
+      const oldest = this._idempotency.keys().next().value;
+      this._idempotency.delete(oldest);
+    }
+    this._idempotency.set(key, { status, body });
   }
 
   _getLive(taskId) {
@@ -441,7 +463,7 @@ function parseTaskPath(path) {
   return m ? { taskId: decodeURIComponent(m[1]), action: m[2] ?? null } : null;
 }
 
-export function handleBoardV2Request(board, { method, path, query = {}, body = null, lane = null }) {
+export function handleBoardV2Request(board, { method, path, query = {}, body = null, lane = null, headers = {} }) {
   const needLane = () => {
     if (typeof lane !== "string" || !LANE_RE.test(lane)) fail(401, "unauthenticated", "lane credential required");
     return lane;
@@ -450,14 +472,32 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (!isObj(body)) fail(422, "invalid_body", "JSON object body required");
     return body;
   };
+  // Idempotency: POSTs should carry Idempotency-Key. If the key was seen,
+  // return the cached response without re-executing (exactly-once).
+  const idempotencyKey = headers["idempotency-key"] || headers["Idempotency-Key"] || null;
+  const checkIdempotent = () => {
+    if (method !== "POST") return null;
+    const hit = board._checkIdempotency(idempotencyKey);
+    if (hit.cached) return hit.response;
+    return null;
+  };
+  const storeIdempotent = (status, responseBody) => {
+    if (method === "POST" && idempotencyKey) {
+      board._storeIdempotency(idempotencyKey, status, responseBody);
+    }
+  };
   try {
     if (path === "/claims" && method === "POST") {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       rejectUnknown(b, CLAIM_BODY_FIELDS, "claim");
       const authed = needLane();
       if (b.lane !== undefined && b.lane !== authed) fail(403, "lane_mismatch", "body lane must equal the authenticated lane");
       const out = board.postClaim({ ...b, lane: authed });
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(resp.status, resp.body);
+      return resp;
     }
     if (path === "/claims" && method === "GET") {
       rejectUnknown(query, ["lane", "state", "file", "since_seq", "limit"], "query");
@@ -467,23 +507,28 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
 
     const tp = parseTaskPath(path);
     if (tp && method === "POST" && tp.action) {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       const authed = needLane();
+      let resp;
       if (tp.action === "heartbeat") {
         rejectUnknown(b, ["note"], "heartbeat");
         const out = board.heartbeat({ task_id: tp.taskId, lane: authed, note: b.note ?? null });
-        return { status: 200, body: { watermark: board.seq, ...out } };
-      }
-      if (tp.action === "release") {
+        resp = { status: 200, body: { watermark: board.seq, ...out } };
+      } else if (tp.action === "release") {
         rejectUnknown(b, ["reason"], "release");
         if (b.reason === undefined) fail(422, "invalid_reason", "reason must be a non-empty string");
         const out = board.release({ task_id: tp.taskId, lane: authed, reason: b.reason });
-        return { status: 200, body: { watermark: board.seq, ...out } };
-      }
-      if (tp.action === "receipts") {
+        resp = { status: 200, body: { watermark: board.seq, ...out } };
+      } else if (tp.action === "receipts") {
         rejectUnknown(b, ["sha", "pr"], "receipt");
         const out = board.postReceipt({ task_id: tp.taskId, lane: authed, sha: b.sha, pr: b.pr ?? null });
-        return { status: 201, body: { watermark: board.seq, ...out } };
+        resp = { status: 201, body: { watermark: board.seq, ...out } };
+      }
+      if (resp) {
+        storeIdempotent(resp.status, resp.body);
+        return resp;
       }
     }
     if (tp && !tp.action) return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
@@ -500,19 +545,27 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
       return { status: 200, body: { watermark: board.seq, entries: board.mirrorSince(query.since_seq ?? 0) } };
     }
     if (path === "/mirror-map" && method === "POST") {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       rejectUnknown(b, ["seq", "issue", "comment_id"], "mirror-map");
       needLane();
       const out = board.recordMirror(b);
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(resp.status, resp.body);
+      return resp;
     }
     if (path === "/notes" && method === "POST") {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       rejectUnknown(b, ["thread", "body", "severity"], "note");
       const authed = needLane();
       if (b.body === undefined) fail(422, "invalid_body", "body must be a non-empty string");
       const out = board.postNote({ lane: authed, thread: b.thread ?? null, body: b.body, severity: b.severity ?? null });
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(resp.status, resp.body);
+      return resp;
     }
     if (path === "/notes" && method === "GET") {
       rejectUnknown(query, ["lane", "thread", "severity", "since_seq", "limit"], "query");
@@ -521,6 +574,8 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (path === "/notes") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
 
     if (path === "/findings" && method === "POST") {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       rejectUnknown(b, ["claim_ref", "pr_ref", "severity", "title", "evidence", "recommendation"], "finding");
       const authed = needLane();
@@ -531,7 +586,9 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
         lane: authed, claim_ref: b.claim_ref ?? null, pr_ref: b.pr_ref ?? null,
         severity: b.severity, title: b.title, evidence: b.evidence ?? [], recommendation: b.recommendation,
       });
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(resp.status, resp.body);
+      return resp;
     }
     if (path === "/findings" && method === "GET") {
       rejectUnknown(query, ["lane", "severity", "since_seq", "limit"], "query");
@@ -540,6 +597,8 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (path === "/findings") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
 
     if (path === "/decisions" && method === "POST") {
+      const cached = checkIdempotent();
+      if (cached) return cached;
       const b = needBody();
       rejectUnknown(b, ["scope", "statement", "reversible", "supersedes"], "decision");
       const authed = needLane();
@@ -549,7 +608,9 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
         decider: authed, scope: b.scope, statement: b.statement,
         reversible: b.reversible ?? null, supersedes: b.supersedes ?? null,
       });
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(resp.status, resp.body);
+      return resp;
     }
     if (path === "/decisions" && method === "GET") {
       rejectUnknown(query, ["decider", "scope", "since_seq", "limit"], "query");

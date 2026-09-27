@@ -15,8 +15,8 @@ const T0 = Date.parse("2026-09-26T21:00:00.000Z");
 function setup() {
   let nowMs = T0;
   const board = new BoardV2({ now: () => nowMs });
-  const req = (method, path, { query = {}, body = null, lane = "jill" } = {}) =>
-    handleBoardV2Request(board, { method, path, query, body, lane });
+  const req = (method, path, { query = {}, body = null, lane = "jill", headers = {} } = {}) =>
+    handleBoardV2Request(board, { method, path, query, body, lane, headers });
   const advance = ms => { nowMs += ms; };
   return { board, req, advance, now: () => nowMs };
 }
@@ -324,4 +324,39 @@ test("decisions: decider authority recorded, superseding supported", () => {
   // Query by decider.
   const byDecider = req("GET", "/decisions", { query: { decider: "john" } });
   assert.equal(byDecider.body.decisions.length, 2);
+});
+
+test("idempotency: same key returns cached response without re-executing", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "test-key-123" };
+  const noteBody = { body: "First note" };
+  // First POST creates the note.
+  const first = req("POST", "/notes", { lane: "jill", body: noteBody, headers });
+  assert.equal(first.status, 201);
+  const firstSeq = first.body.seq;
+  // Second POST with same key returns the cached response (same seq, no new event).
+  const second = req("POST", "/notes", { lane: "jill", body: noteBody, headers });
+  assert.equal(second.status, 201);
+  assert.equal(second.body.seq, firstSeq);
+  // Verify only one note was actually created.
+  const notes = req("GET", "/notes", {});
+  assert.equal(notes.body.notes.length, 1);
+  // Different key creates a new note.
+  const third = req("POST", "/notes", {
+    lane: "jill", body: noteBody, headers: { "Idempotency-Key": "different-key" },
+  });
+  assert.notEqual(third.body.seq, firstSeq);
+});
+
+test("idempotency: works across all mutating routes", () => {
+  const { req } = setup();
+  const key = { "Idempotency-Key": "claim-key-1" };
+  // Claim with idempotency key.
+  const c1 = req("POST", "/claims", { lane: "jill", body: claimBody(), headers: key });
+  assert.equal(c1.status, 201);
+  const c2 = req("POST", "/claims", { lane: "jill", body: claimBody(), headers: key });
+  assert.equal(c2.body.claim.task_id, c1.body.claim.task_id);
+  // Only one claim exists (duplicate task-id would 409 on re-execution).
+  const board = req("GET", "/claims", {});
+  assert.equal(board.body.claims.length, 1);
 });
