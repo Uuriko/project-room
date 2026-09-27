@@ -499,17 +499,6 @@ export class BoardV2 {
     return live;
   }
 
-  // Phase 3.2: Get live decisions (supersede-chain resolved)
-  readLiveDecisions({ decider = null, scope = null, limit = DEFAULT_LIMIT } = {}) {
-    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
-    const live = this._resolveDecisionChains();
-    let decisions = [...live.values()];
-    if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
-    if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
-    decisions.sort((a, b) => a.seq - b.seq);
-    return { watermark: this._seq, decisions: decisions.slice(0, lim) };
-  }
-
   // Phase 3.1: Unified event log with cursor pagination.
   // Returns events in seq order, with has_more indicating if more exist beyond limit.
   readEvents({ kind = null, lane = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
@@ -583,9 +572,16 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (!isObj(body)) fail(422, "invalid_body", "JSON object body required");
     return body;
   };
-  // Idempotency: POSTs should carry Idempotency-Key. If the key was seen,
-  // return the cached response without re-executing (exactly-once).
+  // Idempotency: POSTs MAY carry Idempotency-Key (optional, not mandatory).
+  // If the key was seen, return the cached response without re-executing.
   // Fingerprint = method + path + body (stable JSON). Mismatch => 422.
+  //
+  // Design decision (2026-09-27 audit F1): Idempotency is optional, not required.
+  // Rationale: task_id uniqueness (409 on duplicate) provides idempotency for
+  // claims; heartbeats/releases/receipts are naturally idempotent through
+  // state-machine validation. Mandatory keys would add client complexity
+  // without proportional benefit for the prototype phase. Revisit if
+  // duplicate-mutation incidents occur in production.
   const idempotencyKey = headers["idempotency-key"] || headers["Idempotency-Key"] || null;
   const fingerprint = idempotencyKey
     ? `${method}:${path}:${JSON.stringify(body ?? null)}`
