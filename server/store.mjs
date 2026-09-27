@@ -3164,7 +3164,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const page = rows.slice(0, limit);
       const indexedMessages = new Map(this.room(roomId).state.messages.map(message => [message.id, message]));
       const canSee = message => Boolean(message && message.body !== null && !message.deletedAt
-        && !message.workItemId && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id)));
+        && !message.workItemId && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id))
+        && (!message.replyToId || canSee(indexedMessages.get(message.replyToId))));
       const messages = page.map(({ sequence, body }) => {
         const chatEvent = JSON.parse(body);
         if (chatEvent.type === T.MESSAGE_REACTION_SET) {

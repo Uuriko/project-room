@@ -136,6 +136,8 @@ test("chat projection hides work drafts, other people's DMs, deleted bodies and 
     data: { messageId: "erase-me", expectedMessageRevision: 0, reason: "cleanup" } });
   store.command(owner, "commons", { id: "reaction-private", type: "message.reaction_set",
     data: { messageId: "private", reaction: "👍", active: true } });
+  store.command(owner, "commons", { id: "reaction-private-reply", type: "message.reaction_set",
+    data: { messageId: "reply-to-private", reaction: "👍", active: true } });
   const page = await request("/api/rooms/commons/chat", { token: chat.token });
   assert.equal(page.status, 200);
   assert(page.body.messages.some(m => m.body === "PUBLIC-CANARY"));
