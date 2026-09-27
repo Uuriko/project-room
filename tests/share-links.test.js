@@ -572,3 +572,18 @@ test("closed-link preview only admits a bound active member without creating or 
     data: { memberId: accepted.session.member.id, expectedMemberRevision: accepted.session.member.revision, permissions: [], active: false } });
   assert.throws(() => f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding), { code: 'link_unavailable' });
 });
+
+// A truthy map lookup treats toString as the issuer. view() then crashes in
+// permissions.includes instead of reporting that the link lost authority.
+test("an inherited issuer name reports authority_changed instead of crashing the link view", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-share-inherited-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom());
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const row = {
+    id: "link-inherited", room_id: "commons", issuer_member_id: "toString",
+    issuer_account_id: "acct", issuer_member_revision: 1, issuer_auth_epoch: 1,
+    revoked_at: null, expires_at: store.now() + 3600000, max_joins: 1, created_at: store.now()
+  };
+  assert.equal(store.shareLinks.view(row).status, "authority_changed");
+});
