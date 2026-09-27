@@ -269,3 +269,38 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
   assert.equal(badMcp.body.result.isError, true);
   assert.equal(badMcp.value.code, "invalid_cursor");
 });
+
+
+test("a fresh default-profile client can discover, answer and verify a formal request using only advertised tools", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Requester"), recipient = store.identities.create("Responder");
+  const room = rooms.create(owner.secret, { roomId: "core-requests", title: "Core requests", purpose: "Answer in context", kind: "personal", displayName: "Requester" });
+  store.identities.link(owner.secret, room.roomId, { identityId: recipient.identityId, displayName: "Responder", permissions: [] });
+  store.command(owner.secret, room.roomId, { id: "core-question", type: "message.posted", data: {
+    messageId: "core-question", body: "Which result should we use?", toMemberId: recipient.identityId, requestKind: "reply"
+  } });
+  const catalog = await (await rpc(origin, "tools/list", undefined, recipient.secret)).json();
+  const advertised = new Set(namesOf(catalog));
+  const invoke = async (name, args) => {
+    assert.ok(advertised.has(name), `Fresh client cannot invoke unadvertised tool ${name}`);
+    return call(origin, name, args, recipient.secret);
+  };
+  const needs = await invoke("room_needs_me", {});
+  const pointer = needs.value.items.find(item => item.kind === "direct_ask" && item.id === "core-question").next;
+  const initial = await invoke(pointer.tool, pointer.arguments);
+  const stale = initial.value.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  assert.ok(advertised.has(stale.tool), "the discovered response must also be advertised");
+  await invoke("room_reply", { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." });
+  assert.equal(store.room(room.roomId).state.replyRequests["core-question"].status, "open", "ordinary chat does not answer the formal request");
+  const refused = await invoke(stale.tool, { ...stale.arguments, requestId: "core-stale-answer", body: "Stale answer" });
+  assert.equal(refused.body.result.isError, true);
+  let selected = await invoke(pointer.tool, { ...pointer.arguments, limit: 1 });
+  assert.equal(selected.value.page.hasMore, true); assert.deepEqual(selected.value.responseActions, []);
+  while (selected.value.page.hasMore) selected = await invoke(pointer.tool, { ...pointer.arguments, limit: 1, cursor: selected.value.page.nextCursor });
+  const action = selected.value.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  const sent = await invoke(action.tool, { ...action.arguments, requestId: "core-current-answer", body: "Use the verified result." });
+  assert.equal(sent.value.status, "recorded");
+  const final = await invoke(sent.value.next.tool, sent.value.next.arguments);
+  assert.equal(final.value.request.status, "answered"); assert.deepEqual(final.value.responseActions, []);
+  assert.equal(final.value.page.items.at(-1).message.body, "Use the verified result.");
+});
