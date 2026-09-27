@@ -3625,13 +3625,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const fanoutSpan = getTracer().startSpan(SPAN_NAMES.FANOUT, { attributes: {
         [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id } });
       try {
+        // B1a: a failed fan-out must be recorded as error, not ok.
+        let fanoutFailed = null;
         try {
           if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
         } catch (error) {
           console.error("webhook fan-out failed:", error?.message ?? error);
+          fanoutFailed = error;
         }
-        fanoutSpan.setAttribute(ATTR.OUTCOME, "ok");
-        fanoutSpan.setStatusOk();
+        if (fanoutFailed) {
+          fanoutSpan.recordException(fanoutFailed); // sets ERROR status
+          fanoutSpan.setAttribute(ATTR.OUTCOME, "error");
+        } else {
+          fanoutSpan.setAttribute(ATTR.OUTCOME, "ok");
+          fanoutSpan.setStatusOk();
+        }
       } finally {
         fanoutSpan.end();
       }
