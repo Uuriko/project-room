@@ -39,3 +39,9 @@ Exact checks and release state are recorded in the PR and final release receipt 
 ### Compatibility limit
 
 This repair fixes newly created receipts and their derived webhook identities. Existing version-2 idempotent receipts are returned unchanged, including any historical null sequence, and replayed operations do not fan out again. It does not backfill missed webhook deliveries or repair historical attribution. Persisted bounty-event rows already have correct SQLite sequences; new inserts use the next actual sequence without a schema migration.
+
+### Guest-scope release deferral
+
+While reviewing the release, PR #1128 merged into main. Actual Worker testing showed that scoped guest restrictions survived a restart on the new runtime but were not enforced by the prior runtime when reopening the same persisted database. This release explicitly reverts that merge and retains the previously deployed guest behavior. The scoped-guest feature has not been uploaded by this release. No data-deletion migration or new guest grant is introduced.
+
+Before reintroducing scoped guests, require a fail-closed compatibility fence that prevents an older runtime from accepting the newer restricted credentials, plus actual Worker rollback tests. Forward-only permission tests are insufficient. This deferral is independent of the bounty-event repair and first-use cleanup.
