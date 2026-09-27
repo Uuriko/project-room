@@ -518,3 +518,18 @@ test("hosted needs-me discovers private incoming requests without exposing their
   send({ id: "hosted-cancel", type: "reply_request.cancelled", data: { requestMessageId: "hosted-question", expectedRequestRevision: 0, reason: "Resolved elsewhere" } });
   assert.deepEqual((await list(peer.secret)).replyRequests, []);
 });
+
+test("reply audit rejects an access change for an inherited member id", () => {
+  const state = {
+    room: { id: "commons", ownerId: "owner" },
+    members: { owner: { id: "owner", kind: "human", active: true } },
+    messages: []
+  };
+  const history = [
+    { sequence: 1, event: { type: "room.created", id: "room-created", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:00.000Z", data: { ownerId: "owner", roomId: "commons" } } },
+    { sequence: 2, event: { type: "member.added", id: "member-added", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:01.000Z", data: { memberId: "owner", kind: "human", displayName: "Owner", permissions: [] } } },
+    { sequence: 3, event: { type: "member.access_changed", id: "access-changed", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:02.000Z", data: { memberId: "toString", active: false, expectedMemberRevision: 0, permissions: [] } } }
+  ];
+  assert.throws(() => auditReplyRequests(state, history), /Reply request history requires operator reconciliation/);
+  assert.equal(Object.hasOwn(Function.prototype.toString, "active"), false);
+});
