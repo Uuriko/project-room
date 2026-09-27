@@ -39,6 +39,7 @@ import { ServiceError } from "./store.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
@@ -240,6 +241,12 @@ export class ReferralInvites {
     // Minting referral invites is a membership write: the read-only
     // autonomy tier applies even for active agent members (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: room.state, actor: auth.member, action: "referral_invite_mint", fail });
+    // Guests may read and chat but may not admit new members. Referral mint
+    // bypasses store.command (it authenticates directly), so the RoomStore
+    // guest scope gate never runs here — enforce the same denial explicitly.
+    // Mirrors RC-2026-09-23-100.
+    if (isGuestAgentMemberId(auth.member.id))
+      fail(403, "guest_scope_denied", "Guest members cannot mint referral invites");
     refuseArchivedWrite(room.state);
     if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
 

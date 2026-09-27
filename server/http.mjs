@@ -3977,7 +3977,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "delegation-revoke" && req.method === "POST") {
         const data = await body(req);
         if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
-        return json(res, 200, store.delegation.revoke(selected.token, roomId, data, fence));
+        return json(res, 200, store.delegation.revokeEffective(selected.token, roomId, data, fence));
       }
       if (route === "ownership-transfer" && req.method === "POST") {
         // Agent room ownership, appointment path: the current room owner
