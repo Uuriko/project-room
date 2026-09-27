@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
+import { membershipDelegationJournalSchema } from "../server/membership-delegation-journal.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 // RC-2026-09-18-038: owner-granted membership administration for agent
@@ -20,6 +21,7 @@ function setup(t) {
   store.initialize(initialRoom("commons"));
   store.db.exec(accessRequestSchema);
   store.db.exec(membershipDelegationSchema);
+  assert.match(membershipDelegationJournalSchema, /membership_delegation_journal/);
   const requests = new AccessRequests(store, {
     rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
   });
