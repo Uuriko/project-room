@@ -3,7 +3,7 @@ import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, 
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
@@ -177,7 +177,7 @@ export class ShareLinks {
       const plugin = this.store.agentPlugin;
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full");
+      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       const incoming = event({ id, idempotencyKey: id, roomId: row.room_id, actorId: row.issuer_member_id,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
@@ -288,7 +288,7 @@ export class ShareLinks {
         }
       }
       const room = this.store.room(row.room_id), now = this.store.now();
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full; ask its owner for help");
+      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a
         // fresh guest can be created. A link is never recovery for another account.

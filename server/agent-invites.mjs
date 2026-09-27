@@ -16,7 +16,7 @@
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
@@ -244,7 +244,7 @@ export class AgentInvites {
       // journal event written in the same transaction. A one-slot check would
       // admit the member at the last slot and then fail journaling the
       // referral, rolling the whole join back after the fact.
-      if (room.sequence + 1 >= 10000 || Object.keys(room.state.members).length >= 100) {
+      if (room.sequence + 1 >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
