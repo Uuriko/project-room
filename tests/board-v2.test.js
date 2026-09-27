@@ -360,3 +360,38 @@ test("idempotency: works across all mutating routes", () => {
   const board = req("GET", "/claims", {});
   assert.equal(board.body.claims.length, 1);
 });
+
+test("idempotency: same key with different payload returns 422", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "mismatch-key" };
+  // First POST with body A.
+  const first = req("POST", "/notes", {
+    lane: "jill", body: { body: "Original" }, headers,
+  });
+  assert.equal(first.status, 201);
+  // Second POST with same key but different body => 422.
+  const second = req("POST", "/notes", {
+    lane: "jill", body: { body: "Different" }, headers,
+  });
+  assert.equal(second.status, 422);
+  assert.equal(second.body.error.code, "idempotency_key_mismatch");
+});
+
+test("idempotency: keys are scoped per lane", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "shared-key" };
+  // Jill uses the key.
+  const jill = req("POST", "/notes", {
+    lane: "jill", body: { body: "Jill's note" }, headers,
+  });
+  assert.equal(jill.status, 201);
+  // Codex uses the same key — should NOT collide (different lane).
+  const codex = req("POST", "/notes", {
+    lane: "codex", body: { body: "Codex's note" }, headers,
+  });
+  assert.equal(codex.status, 201);
+  assert.notEqual(codex.body.seq, jill.body.seq);
+  // Verify two notes exist.
+  const notes = req("GET", "/notes", {});
+  assert.equal(notes.body.notes.length, 2);
+});
