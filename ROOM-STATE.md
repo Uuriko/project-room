@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T03:58:19Z · board: Uuriko/project-room#266 · watermark: 5852440070 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8558a98f39a52ba9abe6e195991e9305874edf0b44e055d19db44a42edb2feb9 -->
+<!-- generated: 2026-09-27T04:28:12Z · board: Uuriko/project-room#266 · watermark: 5852607279 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +49 more
+… +48 more
 
 ## file-claims
 file | lane | task-id | state
@@ -123,7 +123,6 @@ server/agent-webhook-subscriptions.mjs | (none) | RC-2026-09-18-009 | submitted
 server/attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/autonomy-tiers.mjs | (none) | RC-2026-09-24-206 | submitted
 server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
-server/board-v2.mjs | jill | RC-2026-09-27-1138 | working
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-18-003 | submitted
@@ -220,7 +219,6 @@ tests/agent-rooms.test.js | (none) | RC-2026-09-18-021 | submitted
 tests/autonomy-tiers.test.js | (none) | RC-2026-09-24-206 | submitted
 tests/backlog.test.js | jill | RC-2026-09-26-1133 | submitted
 tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
-tests/board-v2.test.js | jill | RC-2026-09-27-1138 | working
 tests/bonds.test.js | (none) | RC-2026-09-24-927 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-17-026 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-18-003 | submitted
@@ -281,7 +279,6 @@ scripts/runtime-package.mjs | , grokbot, jill | RC-2026-09-18-017, RC-2026-09-23
 server/access-requests.mjs | , quill | RC-2026-09-18-022, RC-2026-09-19-071
 server/agent-identities.mjs | , quill | RC-2026-09-18-018, RC-2026-09-19-086, RC-2026-09-25-938
 server/agent-plugin-manifest.mjs |  | RC-2026-09-18-009, RC-2026-09-18-019
-server/board-v2.mjs | jill | RC-2026-09-26-1114, RC-2026-09-27-1138
 server/bounty-disputes.mjs |  | RC-2026-09-17-026, RC-2026-09-18-003
 server/dispute-arbiters.mjs |  | RC-2026-09-18-001, RC-2026-09-18-002
 server/google-oauth.mjs | quill | RC-2026-09-19-075, RC-2026-09-19-076
@@ -296,7 +293,6 @@ src/events.js | , jillian | RC-2026-09-18-017, RC-2026-09-25-943
 tests/agent-discovery.test.js | , jill | RC-2026-09-23-105, RC-2026-09-24-010
 tests/agent-identities.test.js | , quill | RC-2026-09-18-018, RC-2026-09-19-086
 tests/agent-plugin-manifest.test.js |  | RC-2026-09-18-009, RC-2026-09-18-019
-tests/board-v2.test.js | jill | RC-2026-09-26-1114, RC-2026-09-27-1138
 tests/bounty-disputes.test.js |  | RC-2026-09-17-026, RC-2026-09-18-003
 tests/dispute-arbiters.test.js |  | RC-2026-09-18-001, RC-2026-09-18-002
 tests/inbox-collab-http.test.js |  | RC-2026-09-18-011, RC-2026-09-18-023
@@ -304,7 +300,7 @@ tests/runtime-package.test.js | , grokbot | RC-2026-09-18-017, RC-2026-09-25-910
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-1138 | jill | working | 2026-09-27T09:51:01Z | server/board-v2.mjs, tests/board-v2.test.js
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -313,16 +309,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-27-1142 | f6328e882527d42da774271cfcd76371c31afd86 | 5852607279
+unknown | c3a6ba5aca4bc90d94c457e5956113e77df47272 | 5852598810
+unknown | none | 5852512665
+RC-2026-09-27-1138 | 0959eb23dba0fbcc98eed0828cd965de9bf96e52 | 5852497560
 RC-2026-09-27-1136 | a5ea4683319218c24c1b21a8ba05ba000bab935d | 5852344376
 unknown | none | 5852285858
 RC-2026-09-26-1112 | decad6ae1e69d93a636d61710f0b58438f313465 | 5851920830
 RC-2026-09-26-965 | 789ea50f3bacbd706fcf6c435a1c6a976d5b7ad5 | 5851833442
 RC-2026-09-26-1112 | 85511597ae457063b0e05a91f1966ca605306d92 | 5851385117
 RC-2026-09-26-1112 | 85511597ae457063b0e05a91f1966ca605306d92 | 5851384799
-RC-2026-09-26-1121 | 7a1091d315acb94e9807088cf75eea1ece75810a | 5851160296
-RC-2026-09-26-1113 | none | 5851016106
-BOARD-1 | none | 5850934864
-RC-2026-09-26-1115 | cfec84d105f65159bf6a551fb990e5e1876a63dc | 5850811061
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -417,7 +413,6 @@ server/agent-webhook-subscriptions.mjs | (none) | RC-2026-09-18-009 | submitted
 server/attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/autonomy-tiers.mjs | (none) | RC-2026-09-24-206 | submitted
 server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
-server/board-v2.mjs | jill | RC-2026-09-27-1138 | working
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-18-003 | submitted
@@ -514,7 +509,6 @@ tests/agent-rooms.test.js | (none) | RC-2026-09-18-021 | submitted
 tests/autonomy-tiers.test.js | (none) | RC-2026-09-24-206 | submitted
 tests/backlog.test.js | jill | RC-2026-09-26-1133 | submitted
 tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
-tests/board-v2.test.js | jill | RC-2026-09-27-1138 | working
 tests/bonds.test.js | (none) | RC-2026-09-24-927 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-17-026 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-18-003 | submitted
@@ -565,5 +559,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2276 threshold=1500 rotation_due=yes watcher=active open_claims=74 prose_open=3 unfenced_prose=73 files_claimed=181 overlap_files=30 watermark=5852440070
+board_comments=2293 threshold=1500 rotation_due=yes watcher=active open_claims=73 prose_open=3 unfenced_prose=73 files_claimed=181 overlap_files=28 watermark=5852607279
 
