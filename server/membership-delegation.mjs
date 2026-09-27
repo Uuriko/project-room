@@ -49,6 +49,7 @@ export class MembershipDelegation {
       fail(409, "already_administers", "That identity is the room owner and already administers membership");
     }
     return this.store.transaction(() => {
+      this.store.delegationJournal.verify();
       const existing = this.db.prepare(
         "SELECT revoked_at FROM membership_delegation_grants WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing && existing.revoked_at == null) fail(409, "grant_active", "Membership administration is already granted to this identity");
@@ -97,6 +98,7 @@ export class MembershipDelegation {
     const authority = this.store.roomAuthority(roomId);
     this.#requireOwner(auth, authority);
     return this.store.transaction(() => {
+      this.store.delegationJournal.verify();
       const existing = this.db.prepare(
         "SELECT added_invite_member FROM membership_delegation_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL").get(roomId, identityId);
       if (!existing) fail(404, "not_found", "No active membership-administration grant for this identity");
@@ -179,6 +181,7 @@ export class MembershipDelegation {
     this.#requireOwner(auth, authority);
     const adminBits = ["manage_members", "decide"];
     return this.store.transaction(() => {
+      this.store.delegationJournal.verify();
       const grant = this.db.prepare(
         "SELECT added_invite_member FROM membership_delegation_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL").get(roomId, identityId);
       const target = this.store.identities.resolveIdentityLink(identityId, roomId);
