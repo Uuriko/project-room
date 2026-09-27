@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T08:30:36Z · board: Uuriko/project-room#266 · watermark: 5854201971 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3010bbeeefc6fe7dfad813f3071045aa090187addf311ec17a30f855e230857a -->
+<!-- generated: 2026-09-27T08:58:44Z · board: Uuriko/project-room#266 · watermark: 5854240111 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-19-071 | quill | submitted | 2026-09-20T03:07:10Z | src/invite-contex
 RC-2026-09-19-072 | quill | submitted | 2026-09-20T03:07:21Z | src/app.js, tests/handoff-renderer.test.js
 RC-2026-09-19-073 | quill | submitted | 2026-09-20T03:18:56Z | server/account-login-methods.mjs, tests/magic-invalidation.test.js
 RC-2026-09-19-075 | quill | submitted | 2026-09-20T03:19:19Z | server/google-oauth.mjs, tests/google-oauth-email.test.js
-… +31 more
+… +30 more
 
 ## file-claims
 file | lane | task-id | state
@@ -49,7 +49,6 @@ docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/BOARD-ROTATION-READINESS.md | jill | RC-2026-09-26-1113 | submitted
 docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
-docs/JOB-BOT.md (new) | jill | RC-2026-09-27-1149 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
 docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-1132 | submitted
@@ -114,7 +113,6 @@ server/guest-join-routes.mjs | jill | RC-2026-09-25-912 | submitted
 server/guest-join.mjs | jill | RC-2026-09-25-912 | submitted
 server/http.mjs | Instinct | RC-2026-09-17-011 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-023 | submitted
-server/job-bot.mjs (new) | jill | RC-2026-09-27-1149 | working
 server/members-directory.mjs | (none) | RC-2026-09-24-202 | submitted
 server/messenger-ingest.mjs | quill | RC-2026-09-18-008 | submitted
 server/messenger-outbound.mjs | quill | RC-2026-09-18-008 | submitted
@@ -175,7 +173,6 @@ tests/google-oauth-email.test.js | quill | RC-2026-09-19-075 | submitted
 tests/guest-join.test.js | jill | RC-2026-09-25-912 | submitted
 tests/handoff-renderer.test.js | quill | RC-2026-09-19-072 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-023 | submitted
-tests/job-bot.test.js (new) | jill | RC-2026-09-27-1149 | working
 tests/join-p2s.test.js | quill | RC-2026-09-19-071 | submitted
 tests/magic-invalidation.test.js | quill | RC-2026-09-19-073 | submitted
 tests/members-directory.test.js | (none) | RC-2026-09-24-202 | submitted
@@ -217,7 +214,6 @@ tests/referral-invites.test.js | instinct | RC-2026-09-27-004, RC-2026-09-27-005
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-1149 | jill | working | 2026-09-27T11:47:19Z | server/job-bot.mjs (new), tests/job-bot.test.js (new), docs/JOB-BOT.md (new)
 RC-2026-09-27-004 | instinct | working | 2026-09-27T13:53:59Z | server/referral-invites.mjs, tests/referral-invites.test.js
 RC-2026-09-27-005 | instinct | working | 2026-09-27T14:13:24Z | server/referral-invites.mjs, tests/referral-invites.test.js
 
@@ -229,6 +225,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-27-1149 | c84f33cf63feb4cf6f0898c04af8b5f6752de7ea | 5854240111
+RC-2026-09-27-1149 | c84f33cf63feb4cf6f0898c04af8b5f6752de7ea | 5854239845
 RC-2026-09-27-1145 | d07fcecdba185a2e9b9597c35500aa2f0d1caf41 | 5854201821
 RC-2026-09-27-1144 | c6d8caa6e3a62cc5985e23499f9ee685c233a7ca | 5854146859
 unknown | none | 5853799499
@@ -237,8 +235,6 @@ RC-2026-09-27-1151 | none | 5853554562
 unknown | none | 5853437627
 RC-1150 | none | 5853425652
 RC-2026-09-27-1150 | none | 5853358545
-unknown | none | 5853230056
-unknown | none | 5853226958
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -259,7 +255,6 @@ docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/BOARD-ROTATION-READINESS.md | jill | RC-2026-09-26-1113 | submitted
 docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
-docs/JOB-BOT.md (new) | jill | RC-2026-09-27-1149 | working
 docs/README.md (Demigod / DIE matching table: one added row only) | (none) | RC-2026-09-18-005 | submitted
 docs/ROOM-ACTION-POLICY.md | quill-s2 | RC-2026-09-16-005 | submitted
 docs/ROOM-DEPLOYMENT.md | jill | RC-2026-09-26-1132 | submitted
@@ -324,7 +319,6 @@ server/guest-join-routes.mjs | jill | RC-2026-09-25-912 | submitted
 server/guest-join.mjs | jill | RC-2026-09-25-912 | submitted
 server/http.mjs | Instinct | RC-2026-09-17-011 | submitted
 server/inbox-collab-routes.mjs | (none) | RC-2026-09-18-023 | submitted
-server/job-bot.mjs (new) | jill | RC-2026-09-27-1149 | working
 server/members-directory.mjs | (none) | RC-2026-09-24-202 | submitted
 server/messenger-ingest.mjs | quill | RC-2026-09-18-008 | submitted
 server/messenger-outbound.mjs | quill | RC-2026-09-18-008 | submitted
@@ -385,7 +379,6 @@ tests/google-oauth-email.test.js | quill | RC-2026-09-19-075 | submitted
 tests/guest-join.test.js | jill | RC-2026-09-25-912 | submitted
 tests/handoff-renderer.test.js | quill | RC-2026-09-19-072 | submitted
 tests/inbox-collab-http.test.js | (none) | RC-2026-09-18-023 | submitted
-tests/job-bot.test.js (new) | jill | RC-2026-09-27-1149 | working
 tests/join-p2s.test.js | quill | RC-2026-09-19-071 | submitted
 tests/magic-invalidation.test.js | quill | RC-2026-09-19-073 | submitted
 tests/members-directory.test.js | (none) | RC-2026-09-24-202 | submitted
@@ -408,5 +401,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2371 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=144 overlap_files=16 watermark=5854201971
+board_comments=2373 threshold=1500 rotation_due=yes watcher=active open_claims=55 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=16 watermark=5854240111
 
