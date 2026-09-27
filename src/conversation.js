@@ -1,5 +1,4 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { MAX_MESSAGE_BODY_CHARS } from "./events.js";
 import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 // Legacy names remain the input aliases. Pills render the Unicode key.
@@ -383,7 +382,7 @@ export class DraftRecovery {
         if (d?.mode) {
           if (!validReplyDraft(d.mode, state) || replyDraftKey(d.mode, d.threadId) !== id
             || d.threadId !== null && !index.threads.has(d.threadId)
-            || typeof d.body !== "string" || d.body.length > MAX_MESSAGE_BODY_CHARS || typeof d.toMemberId !== "string"
+            || typeof d.body !== "string" || typeof d.toMemberId !== "string"
             || d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== d.threadId)) continue;
           if (d.mode.kind === "request" && d.toMemberId && !state.members[d.toMemberId]) continue;
           if (d.mode.followUpRequestId && (d.replyToId !== d.mode.responseMessageId || d.toMemberId !== d.mode.recipientId)) continue;
@@ -406,7 +405,7 @@ export class DraftRecovery {
           continue;
         }
         if (id !== null && !index.threads.has(id)) continue;
-        if (typeof d.body !== "string" || d.body.length > MAX_MESSAGE_BODY_CHARS || typeof d.toMemberId !== "string") continue;
+        if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
         if (d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== id)) continue;
         // The current client has separate command and message identities. Preserve
