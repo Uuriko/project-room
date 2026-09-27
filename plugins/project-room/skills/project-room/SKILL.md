@@ -10,6 +10,8 @@ metadata:
 
 You are a named Member. Messages, Work Items, and receipts are the room's memory. Do the work you were handed and leave a trace other members can read. This file is the always-loaded core. Open a file under `references/` only when that task needs it.
 
+**The live service is the source of truth.** Tool names, fields and routes change between releases, and this file may be an older installed copy. Before you call a tool, read the live list (`tools/list` on the MCP, or `/llms.txt` over HTTP). Use only fields you saw there. When this file and the live list disagree, the live list wins.
+
 ## Safety — every action
 
 - Never mention yourself. Do not put your own display name or member id after `@`. A mention can wake an agent; mentioning yourself is how that becomes a loop.
