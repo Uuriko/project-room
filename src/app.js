@@ -284,6 +284,7 @@ const client = new RoomClient({
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+    clearResultComparison($("#action-result-diff"));
     closeResult(false);
     selectWorkView("work");
     renderContent("#room-results-list", "");
@@ -4781,11 +4782,48 @@ function resultRow(item) {
     : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
   return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
 }
+// Both reading and reviewing compare the same pinned completion versions.
+// Each caller owns its dialog/session lifetime; late reads cannot fill a new view.
+function clearResultComparison(box) {
+  box.hidden = true; box.replaceChildren();
+}
+function loadResultComparison(workItemId, previousId, text, box, owns) {
+  clearResultComparison(box);
+  if (!previousId) return;
+  client.workResult(workItemId, { completionEventId: previousId }).then(previous => {
+    if (!owns() || !previous) return;
+    if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
+    const before = previous.result?.text?.body;
+    if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
+      box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
+        previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
+          : "This version's text has been withdrawn, so the two cannot be compared."
+      } Previous approval never carries over.</p>`;
+      box.hidden = false;
+      return;
+    }
+    if (typeof before !== "string") throw new Error("Previous version has no exact text");
+    const rows = diffResultLines(before, text.body);
+    const note = "Previous approval never carries over; review the exact new text.";
+    box.innerHTML = rows === null
+      ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
+      : (() => { const summary = diffResultSummary(rows);
+          const body = rows.length > 200 ? rows.slice(0, 200) : rows;
+          return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
+            (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
+        })();
+    box.hidden = false;
+  }).catch(() => {
+    if (!owns()) return;
+    box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+    box.hidden = false;
+  });
+}
 function resultStatus() {
   const view = resultView;
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
   const item = state.workItems[view.workItemId];
-  const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
+  const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
   $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
@@ -4795,6 +4833,7 @@ function closeResult(restore = true) {
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true;
+  clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
@@ -4841,39 +4880,7 @@ function readResult(e) {
       const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
       view.originalId = original?.id; $("#result-original").hidden = !original;
       view.loaded = true; resultStatus();
-      // F4: a resubmitted result names its previous version; show the changed
-      // bytes and restate that earlier approval never carries over.
-      const previousId = receipt.nativeText.previousCompletionEventId;
-      if (previousId) {
-        client.workResult(item.id, { completionEventId: previousId }).then(previous => {
-          if (!owns() || !previous) return;
-          if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
-          const before = previous.result?.text?.body;
-          if (previous.result?.text?.withdrawnAt || view.withdrawn) {
-            diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
-              previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
-                : "This version's text has been withdrawn, so the two cannot be compared."
-            } Previous approval never carries over.</p>`;
-            diffBox.hidden = false;
-            return;
-          }
-          if (typeof before !== "string") throw new Error("Previous version has no exact text");
-          const rows = diffResultLines(before, value.result.text.body);
-          const note = "Previous approval never carries over; review the exact new text.";
-          diffBox.innerHTML = rows === null
-            ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
-            : (() => { const summary = diffResultSummary(rows);
-                const body = rows.length > 200 ? rows.slice(0, 200) : rows;
-                return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
-                  (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
-              })();
-          diffBox.hidden = false;
-        }).catch(() => {
-          if (!owns()) return;
-          diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
-          diffBox.hidden = false;
-        });
-      }
+      loadResultComparison(item.id, receipt.nativeText.previousCompletionEventId, value.result.text, diffBox, owns);
     }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
     return;
   }
@@ -4964,6 +4971,7 @@ function loadActionText(item, action) {
   const request = (entry.textRequest ?? 0) + 1; entry.textRequest = request;
   entry.text = null; entry.textRequired = Boolean(entry.draftMessageId || ["verify", "decide"].includes(action) && item.receipt?.nativeText);
   $("#action-text").hidden = !entry.textRequired; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+  clearResultComparison($("#action-result-diff"));
   if (!entry.textRequired) return;
   $("#action-text-origin").textContent = "Loading exact text…";
   if (entry.draftMessageId) $("#action-title").textContent = "Save as result";
@@ -4972,6 +4980,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
@@ -5100,6 +5109,7 @@ function closeActionDialog({ returnFocus = true, confirmed = false } = {}) {
   actionEpoch++;
   if ($("#action-dialog").open) $("#action-dialog").close();
   if (confirmed || !entry?.uncertain) pendingAction = null;
+  if (!pendingAction) clearResultComparison($("#action-result-diff"));
   $("#resume-action").hidden = !pendingAction?.uncertain;
   if (returnFocus) restoreActionFocus(entry);
 }
