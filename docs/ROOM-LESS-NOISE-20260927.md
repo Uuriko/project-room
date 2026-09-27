@@ -198,7 +198,10 @@ from phrases such as “looks good.”
 
 Default: the message field, Send, and one labeled Options disclosure. Move
 New work, Request a reply and Attach into it, retaining the existing actions
-and permission checks. Keep the selected audience/private notice, active
+and permission checks. Peer critique identified one contextual exception:
+when an active agent is the selected recipient, keep Request a reply visible
+so its explicit pickup path is discoverable. Ordinary Send still does not
+create a formal request or promise to start a model. Keep the selected audience/private notice, active
 request mode, attached files, failures and pending-save recovery outside it.
 Closing Options must not reset a draft, recipient or attachment. Choosing an
 action must have a sensible focus destination, and Escape must not strand
@@ -286,3 +289,11 @@ member lifecycle/retention design remains separate. No records are purged.
   merging a helper without mounting it does not establish a live endpoint.
 
 Combined candidate CI and deployment are still required after integration.
+
+
+Final peer refinement: preserve the contextual agent-request action rather
+than hiding every secondary button indiscriminately. General conversation
+retains the minimal composer. The full agent tool profile is unchanged; core
+discovery grows from 20 tools / 12,556 serialized bytes to 22 / 15,234, and the
+actual JSON-RPC catalog remains below its existing 16 KiB budget. Sixty-eight
+focused tests and two independent reviews passed before integration.
