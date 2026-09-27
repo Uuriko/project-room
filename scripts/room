@@ -391,6 +391,108 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
           {kind:"unleased-prose-claim", lane:$lane, task:$task, files:$files}
         end;
 
+    # 2026-09-27 (RC-2026-09-27-2726): rotation carry-over ledger.
+    # After a board rotation (#266 -> #1160) the new board ledger
+    # comment ([room-watch][rotation-handoff]) is the authoritative
+    # record of pre-existing claims, keyed by task-id (prep packet
+    # ~/workspace/board-rotation-2026-09-25/ROTATION-PREP.md §2). Open
+    # claims are NOT re-posted as [lane][claim] comments, so without
+    # this parser the carried claims are invisible to the enforcer.
+    # Carried claims keep their ORIGINAL expiries: the ledger expires=
+    # field is authoritative, never the ledger post date — the
+    # reducer derives claim_at = expires - lease so the
+    # heartbeat-aware lease math lands exactly on the original expiry.
+    # A "supersede" note on the line (e.g. a lease renewal after a
+    # strike) drops any carried strike state.
+    def cap1($re; $k): (([capture($re)] | .[0] | .[$k]) // null);
+    def parse_handoff_claim:
+      . as $line
+      | (cap1("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)"; "t")) as $tid
+      | (cap1("lane=(?<l>[A-Za-z0-9_-]+)"; "l")) as $lane
+      | (cap1("state=(?<s>[a-z]+)"; "s")) as $state
+      | (cap1("expires=(?<e>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"; "e")) as $exp
+      | (cap1("(?:originally claimed|claimed)[ \\t]+(?<c>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"; "c")) as $claimed
+      | ([capture("lease=(?<n>[0-9]+)h"; "g")] | last | .n // null) as $leasen
+      | (($leasen | try tonumber catch null)) as $lease_h
+      | (cap1("files:[ \\t]*(?<f>[^;\\n]+)"; "f")) as $files_s
+      | (cap1("reason:[ \\t]*(?<r>[^)\\n]+)"; "r")) as $reason
+      | {task_id:$tid, lane:$lane, state:$state, expires:$exp,
+         claimed:$claimed, lease_h:$lease_h,
+         files:(if $files_s == null then []
+                else ($files_s | split(",") | map(trim)
+                      | map(select(length > 0))) end),
+         reason:($reason // ""),
+         strike_one_at:(if ($line | test("(?i)supersede")) then null
+                        else cap1("strike-one (?<ts>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"; "ts") end)};
+    def validate_handoff_claim:
+      . as $c
+      | []
+      | (if ($c.task_id // null) == null then . + ["missing task-id"] else . end)
+      | (if (($c.lane // "") | test("^[A-Za-z0-9_-]+$") | not)
+         then . + ["missing or bad lane"] else . end)
+      | (if ($c.state // null) == null then . + ["missing state"]
+         elif (["submitted","working","suspended"] | index($c.state) | not)
+           then . + ["carried state must be submitted|working|suspended, got: " + $c.state]
+         else . end)
+      | (if ($c.expires // null) == null then . + ["missing expires"]
+         elif (($c.expires | try fromdate catch -1) < 0)
+           then . + ["unparseable expires: " + $c.expires] else . end)
+      | (if ($c.claimed // null) == null then . + ["missing claimed timestamp"]
+         elif (($c.claimed | try fromdate catch -1) < 0)
+           then . + ["unparseable claimed timestamp"] else . end)
+      | (if (($c.expires // null) != null and ($c.claimed // null) != null
+             and (($c.expires | try fromdate catch -1) >= 0)
+             and (($c.claimed | try fromdate catch -1) >= 0)
+             and (($c.expires | fromdate) <= ($c.claimed | fromdate)))
+         then . + ["expires not after claimed: inconsistent lease math"] else . end)
+      | (if ($c.lease_h // null) == null then . + ["missing lease"]
+         elif ($c.lease_h < 1 or $c.lease_h > 72)
+           then . + ["lease out of range 1-72h"] else . end)
+      | (if (($c.files // []) | length) == 0 then . + ["missing files"]
+         elif ([$c.files[] | select(test("\\*"))] | length > 0)
+           then . + ["files: * forbidden"] else . end)
+      | (if (($c.reason // "") | length) == 0 then . + ["missing reason"] else . end);
+    def parse_rotation_handoff:
+      . as $body
+      | (cap1("(?m)^old issue:[ \\t]*#(?<n>[0-9]+)"; "n")) as $old
+      | (cap1("(?m)^new issue:[ \\t]*#(?<n>[0-9]+)"; "n")) as $new
+      | (cap1("(?m)^watermark:[ \\t]*(?<n>[0-9]+)"; "n")) as $wm
+      | (cap1("(?m)^unclaimed lanes:[ \\t]*(?<l>[^\\n]*)"; "l")) as $ul
+      | ([$body | split("\n")[]
+           | select(test("^open claims:[ \\t]"))
+           | parse_handoff_claim]) as $claims
+      | {old_issue:$old, new_issue:$new, watermark:$wm,
+         unclaimed_lanes:(if $ul == null then []
+                          else ($ul | split(",") | map(trim)
+                                | map(select(length > 0))) end),
+         claims:($claims | map(. + {errors: validate_handoff_claim}))}
+      | .ok = ((.old_issue != null) and (.new_issue != null)
+               and (.watermark != null))
+      | .errors = (if .ok then []
+                   else ["rotation-handoff missing header: need old issue #N, new issue #N, watermark <id> lines"]
+                   end);
+    # 2026-09-27 (RC-2026-09-27-2726): a rotation ledger can go stale
+    # between snapshot and post (RC-2026-09-27-2720 completed on #266
+    # after the ledger snapshot). The holding lane corrects it with a
+    # "Carry-over ledger amendment" naming the ledger comment id; the
+    # amendment closes the carried claim with its old-board done
+    # evidence. An amendment that does not reference the parsed
+    # handoff comment is ignored loudly, never applied.
+    def parse_ledger_amendment:
+      . as $body
+      | (cap1("amends the \\[room-watch\\]\\[rotation-handoff\\] comment posted as (?<id>[0-9]+)"; "id")) as $lid
+      | (cap1("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)[^\\n]*was COMPLETED"; "t")) as $tid
+      | (cap1("was COMPLETED on #[0-9]+ at (?<ts>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"; "ts")) as $ts
+      | (cap1("\\(PR #(?<n>[0-9]+), sha"; "n")) as $pr
+      | (cap1("sha (?<s>[0-9a-f]{7,40})"; "s")) as $sha
+      | {ledger_comment_id:$lid, task_id:$tid, completed_at:$ts,
+         pr:$pr, sha:$sha}
+      | .ok = ((.ledger_comment_id != null) and (.task_id != null)
+               and (.completed_at != null))
+      | .errors = (if .ok then []
+                   else ["ledger amendment must name the handoff comment id, a task-id, and its old-board completion time"]
+                   end);
+
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at | (.updated_at // .created_at) as $updated
@@ -413,6 +515,12 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
          then $rrf else {} end) as $rrf
       | (if ($first | test("^(\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\][ \\t]*\\[claim\\]|\\[claim\\][ \\t]*\\[[^\\]\\r\\n]*[ \\t]+[^\\]\\r\\n]*\\])")) then
            {kind:"lane-tag-unparseable", errors:["lane tag contains spaces; use a registered short lane id without spaces"]}
+         elif ($first | test("^\\[room-watch\\][ \\t]*\\[rotation-handoff\\]")) then
+           ($body | parse_rotation_handoff) as $rh
+           | {kind:"rotation-handoff", handoff:$rh}
+         elif ($first | test("^\\[[A-Za-z0-9_-]+\\][ \\t]*[Cc]arry-over ledger amendment")) then
+           ($body | parse_ledger_amendment) as $am
+           | {kind:"rotation-amendment"} + $am
          elif $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
            else ($body | prose_claim($lp.lane)) end
@@ -604,7 +712,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
 
     (reduce .[] as $e (
       {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[],
-       prose_receipts:[], unleased_prose_claims:[]};
+       prose_receipts:[], unleased_prose_claims:[], rotation:null};
       ($e.id) as $cid | ($e.at) as $at
       | if $e.kind == "claim" then
           ($e.block["task-id"] // null) as $tid
@@ -884,6 +992,101 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 else . end
               end))
           | .log += [{id:$cid, at:$at, kind:"reclaim", ok:true}]
+        elif $e.kind == "rotation-handoff" then
+          # 2026-09-27 (RC-2026-09-27-2726): the carry-over ledger is
+          # authoritative for pre-existing claims, keyed by task-id
+          # (prep packet §2). Carried claims register with their
+          # ORIGINAL expiries: claim_at is derived as
+          # expires - lease so the heartbeat-aware lease math lands
+          # exactly on the ledger expires= value (never the ledger post
+          # date). A carried task-id already registered on the new
+          # board is left alone and logged loudly — the ledger is a
+          # snapshot, not a clobber.
+          ($e.handoff // {}) as $rh
+          | if (($rh.ok // false) | not) then
+              .log += [{id:$cid, at:$at, kind:"rotation-handoff", ok:false,
+                        errors:($rh.errors // ["malformed rotation-handoff"])}]
+            else
+              .rotation = {old_issue:$rh.old_issue, new_issue:$rh.new_issue,
+                           watermark:$rh.watermark,
+                           unclaimed_lanes:$rh.unclaimed_lanes,
+                           at:$at, comment_id:$cid,
+                           carried:[$rh.claims[]
+                                    | select((.errors // []) | length == 0)
+                                    | .task_id]}
+              | (reduce $rh.claims[] as $c (.;
+                  ($c.errors // []) as $errs
+                  | if ($errs | length) > 0 then
+                      .log += [{id:$cid, at:$at, kind:"rotation-handoff",
+                                task_id:$c.task_id, ok:false, errors:$errs}]
+                    elif ((.tasks[$c.task_id] // null) != null) then
+                      .log += [{id:$cid, at:$at, kind:"rotation-handoff",
+                                task_id:$c.task_id, ok:false,
+                                errors:["carried task-id already registered on the new board; ledger entry not applied"]}]
+                    else
+                      ((($c.expires | fromdate) - ($c.lease_h * 3600)
+                        | strftime("%Y-%m-%dT%H:%M:%SZ"))) as $base
+                      | .tasks[$c.task_id] = {
+                          task_id:$c.task_id, lane:$c.lane,
+                          files:$c.files,
+                          lease:("lease=" + ($c.lease_h | tostring) + "h"),
+                          lease_h:$c.lease_h,
+                          reason:$c.reason, state:$c.state,
+                          claim_id:$cid, claim_at:$base, last_at:$at,
+                          heartbeat_at:null,
+                          last_block:{lane:$c.lane,
+                                      files:($c.files | join(", ")),
+                                      lease:("lease=" + ($c.lease_h | tostring) + "h"),
+                                      state:$c.state, reason:$c.reason,
+                                      "task-id":$c.task_id,
+                                      via:"rotation-handoff"},
+                          strike_one_at:$c.strike_one_at,
+                          released_at:null, pending_handoff:null,
+                          handoff_voided:false,
+                          receipts:[], missing_receipt:false,
+                          carried:true,
+                          carried_from:("Uuriko/project-room#" + $rh.old_issue)}
+                      | .lanes += [$c.lane]
+                      | .log += [{id:$cid, at:$at, kind:"rotation-handoff",
+                                  task_id:$c.task_id, ok:true,
+                                  note:(("carried from #" + $rh.old_issue
+                                         + " with original expiry "
+                                         + $c.expires))}]
+                    end))
+            end
+        elif $e.kind == "rotation-amendment" then
+          # 2026-09-27 (RC-2026-09-27-2726): a ledger amendment closes a
+          # carried claim with its old-board done evidence. It must
+          # reference the parsed handoff comment; otherwise it is
+          # ignored loudly, never applied.
+          ($e.task_id // null) as $tid
+          | if (($e.ok // false) | not) then
+              .log += [{id:$cid, at:$at, kind:"rotation-amendment", ok:false,
+                        errors:($e.errors // ["malformed ledger amendment"])}]
+            elif ($tid == null) or ((.tasks[$tid] // null) == null) then
+              .log += [{id:$cid, at:$at, kind:"rotation-amendment",
+                        task_id:$tid, ok:false,
+                        errors:["unknown task-id: no carried claim to amend"]}]
+            elif ((.rotation // null) == null)
+                 or ((.rotation.comment_id | tostring) != ($e.ledger_comment_id // "")) then
+              .log += [{id:$cid, at:$at, kind:"rotation-amendment",
+                        task_id:$tid, ok:false,
+                        errors:["amendment does not reference the parsed rotation-handoff comment"]}]
+            elif state_word(.tasks[$tid].state) == "completed" then
+              .log += [{id:$cid, at:$at, kind:"rotation-amendment",
+                        task_id:$tid, ok:true, note:"already terminal"}]
+            else
+              .tasks[$tid] |= (.state = "completed"
+                | .last_at = $e.completed_at
+                | .receipts += [{merged:$e.sha, pr:$e.pr,
+                                 at:$e.completed_at, comment_id:$cid,
+                                 via:"rotation-amendment"}]
+                | .missing_receipt = false)
+              | .log += [{id:$cid, at:$at, kind:"rotation-amendment",
+                          task_id:$tid, ok:true,
+                          note:(("carried claim closed by ledger amendment (PR #"
+                                 + ($e.pr // "?") + ")"))}]
+            end
         elif $e.kind == "lane-tag-unparseable" then
           .log += [{id:$cid, at:$at, kind:"lane-tag-unparseable", ok:false,
                     errors:$e.errors}]
@@ -996,7 +1199,8 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
        tasks:.tasks, illegal:.illegal, refused:.refused,
        noticed:.noticed, lanes:.lanes, log:.log,
        prose_receipts:(.prose_receipts // []),
-       unleased_prose_claims:(.unleased_prose_claims // [])}
+       unleased_prose_claims:(.unleased_prose_claims // []),
+       rotation:(.rotation // null)}
   '
 }
 
@@ -1050,7 +1254,7 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
     | ([.tasks[] | select(.prose and is_live(.state))]) as $popen
     | ([.unleased_prose_claims[]
         | "\(.comment_id) | \(.lane // "(none)") | \(.task // "-") | \(.at)"]
-       | reverse | .[0:10]) as $frows
+       | reverse | .[0:10]) as $prows
     | ((.unleased_prose_claims | length) - 10) as $frest
     | ($open_all | sort_by(.lease_expires_at // "9999")) as $open
     | ($open | map(select(.state == "working" and .lease_expires_at
@@ -1109,8 +1313,14 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       "",
       "## prose-claims-needing-fence",
       "comment-id | lane | task | at",
-      (if ($frows | length) == 0 then "(none)" else ($frows | join("\n")) end),
+      (if ($prows | length) == 0 then "(none)" else ($prows | join("\n")) end),
       (if $frest > 0 then "… +\($frest) more" else empty end),
+      "",
+      "## rotation",
+      (if .rotation then
+         ([.tasks[] | select(.carried and is_live(.state)) | .task_id]) as $livecarried
+         | "Uuriko/project-room#\(.rotation.old_issue) -> Uuriko/project-room#\(.rotation.new_issue) · watermark \(.rotation.watermark) · carried-open: \($livecarried | join(", "))"
+       else "(none)" end),
       "",
       "## signals",
       "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) prose_open=\($popen | length) unfenced_prose=\(.unleased_prose_claims | length) files_claimed=\($nfiles) overlap_files=\($overlaps | length) watermark=\(.watermark)"]
@@ -1740,6 +1950,70 @@ closed_prs_json() {
   printf '%s' "$_CLOSED_PRS_CACHE"
 }
 
+# 2026-09-27 (RC-2026-09-27-2726): changed-file lists for merged PRs —
+# the per-claim evidence behind deliverable_landed check 3. Cached per
+# PR number on disk (a merged PR file list never changes).
+# ROOM_TEST_PR_FILES_JSON overrides the whole map for fixture tests;
+# when only ROOM_TEST_PRS_JSON is set the map is empty, so _sweep-plan
+# fixture runs stay network-free unless a test opts into file evidence.
+merged_pr_files_json() { # $1 = closed-PRs JSON -> {"pr_number": [files]}
+  if [ -n "${ROOM_TEST_PR_FILES_JSON+x}" ]; then printf '%s' "$ROOM_TEST_PR_FILES_JSON"; return 0; fi
+  if [ -n "${ROOM_TEST_PRS_JSON+x}" ]; then printf '{}'; return 0; fi
+  local prs_json="$1"
+  local cache_dir="${ROOM_CACHE_DIR:-${TMPDIR:-/tmp}}/room-sweep-prfiles"
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  local numbers
+  numbers="$(printf '%s' "$prs_json" | jq -r '[.[] | select(.merged_at != null) | .number] | .[:60] | .[]' 2>/dev/null)"
+  {
+    printf '{'
+    local first=1 n f
+    for n in $numbers; do
+      f="$cache_dir/$n.json"
+      if [ ! -f "$f" ]; then
+        gh_api "repos/$REPO/pulls/$n/files?per_page=100" --jq '[.[].filename]' >"$f" 2>/dev/null \
+          || printf '[]' >"$f"
+      fi
+      if [ "$first" = 1 ]; then first=0; else printf ','; fi
+      printf '"%s":' "$n"
+      cat "$f"
+    done
+    printf '}\n'
+  }
+}
+
+# Lazily fill the sweep PR evidence globals once per process, so quiet
+# sweeps with no expired candidates make no PR API calls at all.
+sweep_pr_evidence() {
+  if [ -z "${_SWEEP_PRS_READY:-}" ]; then
+    _SWEEP_PRS_JSON="$(closed_prs_json)"
+    _SWEEP_PRFILES_JSON="$(merged_pr_files_json "$_SWEEP_PRS_JSON")"
+    _SWEEP_PRS_READY=1
+  fi
+}
+
+# 2026-09-27 (RC-2026-09-27-2726): human-format board activity naming a
+# task strictly after a window start. The machine counts only machine-format
+# heartbeats, but lanes also post prose STATUS, strike responses, and
+# receipts that the parser never sees as heartbeats. A comment strictly
+# after the window start that names the task-id alongside receipt,
+# heartbeat, status, or landing language is evidence of a live lane —
+# suppress the strike and note loudly instead of nudging or releasing.
+# Room-watch own posts are excluded (the strike nudge itself names the
+# task). The window is strict (>) on purpose: activity exactly at the
+# strike instant does not count, matching the machine heartbeat
+# boundary (room-protocol-mutation W7).
+human_board_activity() { # $1 = comments JSON, $2 = task_id, $3 = window-start ISO -> 0 on activity
+  local comments="$1" task_id="$2" ws="$3"
+  printf '%s' "$comments" | jq -e --arg t "$task_id" --arg ws "$ws" '
+    [ .[]
+      | select((.created_at // "") > $ws)
+      | select((.body // "") | test("^\\[room-watch\\]") | not)
+      | select((.body // "") | test($t + "\\b"))
+      | select((.body // "")
+               | test("(?i)receipt|merged|done|status|heartbeat|strike|landed|shipped|complete|closeout"))]
+    | length > 0' >/dev/null
+}
+
 # 2026-09-27 (deep audit): a board receipt counts only when it is anchored
 # to a REAL merged PR — the receipt's merged SHA is a prefix of a real
 # merged PR's merge_commit_sha, or its PR number matches a real merged PR.
@@ -1773,13 +2047,18 @@ validated_receipt_tasks() {
 deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable already landed
   # 2026-09-26 (RC-2026-09-26-969): RC-2026-09-25-301..304 got strike-one
   # nudges while PRs #1072-#1075 were already merged — the claims needed
-  # DONE closeout, not a nudge. Either board-visible signal suppresses the
+  # DONE closeout, not a nudge. Board-visible signals that suppress the
   # strike-one:
   #   1. a VALIDATED receipt on the board naming the task (anchored to a
   #      real merged PR — see validated_receipt_tasks), or
-  #   2. a merged PR whose title/body names the task-id.
-  local task_id="$1" st="$2" prs
-  prs="$(closed_prs_json)"
+  #   2. a merged PR whose title/body names the task-id, or
+  #   3. (2026-09-27 RC-2026-09-27-2726) a merged PR whose changed files
+  #      cover at least half the claim files — the deliverables landed
+  #      even though no receipt or TASK-ID line names the task. A
+  #      drive-by touch of one file among many is not a landing.
+  local task_id="$1" st="$2"
+  sweep_pr_evidence
+  local prs="$_SWEEP_PRS_JSON" prfiles="$_SWEEP_PRFILES_JSON"
   if validated_receipt_tasks "$st" "$prs" | grep -qx "$task_id"; then
     return 0
   fi
@@ -1790,13 +2069,24 @@ deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable
        | length > 0' >/dev/null; then
     return 0
   fi
+  local files n best
+  files="$(printf '%s' "$st" | jq -c --arg t "$task_id" '[.tasks[] | select(.task_id == $t)] | .[0].files // []')"
+  n="$(printf '%s' "$files" | jq 'length')"
+  [ "$n" -gt 0 ] || return 1
+  best="$(jq -n --argjson files "$files" --argjson fmap "$prfiles" '
+    [$fmap | to_entries[] | .value
+     | . as $pf | [$files[] | . as $f | select($pf | index($f))] | length]
+    | max // 0')"
+  [ "$best" -gt 0 ] && [ "$((best * 2))" -ge "$n" ] && return 0
   return 1
 }
 
-sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
+sweep_decide() { # $1 = state JSON, $2 = now epoch, $3 = comments JSON -> dry-run plan or live posts
   # Shared by cmd_sweep (live, under the enforcer lock) and the _sweep-plan
-  # fixture verb (dry-run, fixture comments on stdin).
-  local st="$1" now="$2" actions=0
+  # fixture verb (dry-run, fixture comments on stdin). $3 carries the raw
+  # board comments for the human-format activity check; that input only
+  # ever suppresses strikes, never proposes them.
+  local st="$1" now="$2" comments="${3:-[]}" actions=0
   while IFS= read -r t; do
     [ -n "$t" ] || continue
     local task_id lane exp strike hb
@@ -1813,6 +2103,11 @@ sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
         # landed — the claim needs DONE closeout, not a strike nudge.
         if deliverable_landed "$task_id" "$st"; then
           printf 'room: strike-one suppressed for %s: deliverable already landed (needs DONE closeout, not a nudge)\n' "$task_id"
+        elif human_board_activity "$comments" "$task_id" "$exp"; then
+          # 2026-09-27 (RC-2026-09-27-2726): prose receipt, heartbeat, or
+          # status on the board since the lease expired — a live lane the
+          # machine heartbeat counter missed. Suppress, note loudly.
+          printf 'room: strike-one suppressed for %s: human-format board activity since lease expiry (prose heartbeat/receipt — verify, do not nudge)\n' "$task_id"
         else
           sweep_strike_one "$task_id" "$lane" "$t" "$exp" "$now"; actions=$((actions + 1))
         fi
@@ -1841,7 +2136,15 @@ sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
           fi
         fi
         if [ $((now - strike_e)) -gt 14400 ] && [ "$hb_ok" = 0 ]; then
-          sweep_strike_two "$task_id" "$lane" "$t"; actions=$((actions + 1))
+          if human_board_activity "$comments" "$task_id" "$strike"; then
+            # 2026-09-27 (RC-2026-09-27-2726): prose strike response or
+            # STATUS inside the strike-one-to-now window — the
+            # comment-history check the 2026-09-27 tick did by hand
+            # (RC-2026-09-27-004/005). Suppress the release, note loudly.
+            printf 'room: strike-two suppressed for %s: human-format board activity since strike-one (prose heartbeat/status — verify, do not release)\n' "$task_id"
+          else
+            sweep_strike_two "$task_id" "$lane" "$t"; actions=$((actions + 1))
+          fi
         elif [ $((now - strike_e)) -gt 14400 ] && [ "$rel_ok" = 1 ]; then
           printf 'room: strike-two suppressed for %s: voluntary release %s after strike-one (24h grace, no strike)\n' "$task_id" "$rel"
         fi
@@ -1890,7 +2193,12 @@ cmd_sweep() {
     st="$(build_state)"
     now="$(lease_now)"
   fi
-  sweep_decide "$st" "$now"
+  # 2026-09-27 (RC-2026-09-27-2726): raw comments feed the human-format
+  # activity check. That input only suppresses strikes, never proposes
+  # them, so a slightly newer read than the deciding state is safe.
+  local comments
+  comments="$(fetch_comments)"
+  sweep_decide "$st" "$now" "$comments"
 }
 
 # ---------------------------------------------------------------------------
@@ -2340,7 +2648,8 @@ cmd__parse() { parse_events; }
 cmd__sweep_plan() {
   # fixture/testing: _sweep-plan --now ISO|EPOCH -> dry-run sweep plan for
   # fixture comments on stdin. Never locks, never posts; ROOM_TEST_PRS_JSON
-  # supplies the closed-PRs list for the deliverable-landed check.
+  # supplies the closed-PRs list and ROOM_TEST_PR_FILES_JSON the per-PR
+  # changed files for the deliverable-landed check.
   local now=""
   while [ $# -gt 0 ]; do case "$1" in
     --now) need_val "_sweep-plan" "$1" "$#" "${2:-}"; now="$2"; shift 2 ;;
@@ -2354,7 +2663,7 @@ cmd__sweep_plan() {
   wm="$(printf '%s' "$comments" | jq '[.[].id] | max // 0')"
   st="$(printf '%s' "$comments" | parse_events | reduce_state "$now" "$n" "$wm")"
   DRY_RUN=1
-  sweep_decide "$st" "$now"
+  sweep_decide "$st" "$now" "$comments"
 }
 
 cmd__receipts_plan() {
