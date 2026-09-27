@@ -146,7 +146,7 @@ test("owner account session reads the full review; removed members are absent", 
   assert.equal(report.agentConnections[0].status, "key_issued");
   assert.equal(report.agentConnections[0].sponsorMemberId, "owner");
   assert.deepEqual(report.agentConnections[0].permissions, ["accept_work", "complete_work"]);
-  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1, membershipDelegations: 0 });
+  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1, membershipDelegations: 0, delegationDecisions: 0 });
   assert.equal(report.lastActivityAt, [...report.members, ...report.guests].map(m => m.lastActivityAt).filter(Boolean).sort().at(-1));
   // The owner's room key (CLI path) reads the same report.
   const viaKey = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
@@ -304,6 +304,9 @@ test("a review of one identity shows both administration stores, and one revoke 
   } });
   f.store.delegation.grant(f.ownerKey, "commons", { identityId });
   const before = assembleAccessReview(f.store, "commons");
+  assert.equal(before.counts.delegationDecisions, 1);
+  assert.equal(before.delegationDecisionsTruncated, false);
+  assert.deepEqual(before.delegationDecisions.map(item => [item.action, item.identityId, item.actorId]), [["grant", identityId, "owner"]]);
   const row = before.members.find(item => item.memberId === identityId);
   const identity = before.agentIdentities.find(item => item.identityId === identityId);
   const grant = before.membershipDelegations.find(item => item.identityId === identityId);
@@ -313,6 +316,7 @@ test("a review of one identity shows both administration stores, and one revoke 
   assert.deepEqual(identity.authorityPaths, row.authorityPaths);
   assert.equal(grant.memberId, identityId);
   assert.equal(grant.grantedBy, "owner");
+  assert.equal(grant.auditSequence, before.delegationDecisions[0].sequence);
   assert.equal(grant.dualGrantHazard, true);
   assert.match(renderAccessReview(before), /\[DUAL-GRANT HAZARD\]/);
   const cleared = f.store.delegation.revokeEffective(f.ownerKey, "commons", { identityId });
@@ -323,6 +327,7 @@ test("a review of one identity shows both administration stores, and one revoke 
   assert.equal(next.dualGrantHazard, false);
   assert.deepEqual(next.authorityPaths, []);
   assert.equal(after.membershipDelegations.length, 0);
+  assert.deepEqual(after.delegationDecisions.map(item => item.action), ["revoke_effective", "grant"]);
   assert.equal(f.store.delegation.canAdministerMembership(
     f.store.roomAuthority("commons"),
     { member: { id: identityId, identityId, permissions: next.permissions } },

@@ -122,6 +122,7 @@ export function auditRecovery(store) {
     store.requestRuns.verifySchema({ allowAbsent: true });
     store.inbox.verify();
     store.email.verify();
+    store.delegationJournal.verify();
     store.channelUpdates.verifySchema(); store.channelUpdates.verify();
     store.handoffs.verifySchema(); store.handoffs.verify(); // Task 23: handoff journal integrity.
     const reminders = store.db.prepare("SELECT * FROM private_reminders").all();

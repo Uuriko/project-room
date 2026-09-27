@@ -66,6 +66,18 @@ export function reconcileRestoredAuthority(restored, current) {
     if (now === undefined) stale.push({ kind: "account", id: row.id.slice(0, 12), detail: `active account (${row.origin}) unknown to the current store` });
     else if (now === 0) stale.push({ kind: "account", id: row.id.slice(0, 12), detail: `account (${row.origin}) was deactivated after the backup` });
   }
+  // A restored capture can resurrect an owner-granted administrator even
+  // when the room event projection looks unchanged. Name that stale authority.
+  const currentDelegations = new Map(current.db.prepare(`SELECT room_id, identity_id, revoked_at
+    FROM membership_delegation_grants`).all().map(row => [`${row.room_id}/${row.identity_id}`, row.revoked_at]));
+  for (const row of restored.db.prepare(`SELECT room_id, identity_id FROM membership_delegation_grants
+    WHERE revoked_at IS NULL`).all()) {
+    const id = `${row.room_id}/${row.identity_id}`;
+    if (!currentDelegations.has(id)) stale.push({ kind: "membership_delegation", id,
+      detail: "membership administration grant unknown to the current store" });
+    else if (currentDelegations.get(id) !== null) stale.push({ kind: "membership_delegation", id,
+      detail: "membership administration grant was revoked after the backup" });
+  }
   for (const room of restored.db.prepare("SELECT id FROM rooms").all()) {
     const restoredMembers = restored.room(room.id).state.members;
     const currentMembers = current.room(room.id).state.members;
@@ -81,5 +93,6 @@ export function reconcileRestoredAuthority(restored, current) {
     shareLinks: restored.db.prepare("SELECT count(*) AS n FROM share_links").get().n,
     agentConnections: restored.db.prepare("SELECT count(*) AS n FROM agent_connections").get().n,
     accounts: restored.db.prepare("SELECT count(*) AS n FROM accounts").get().n,
+    membershipDelegations: restored.db.prepare("SELECT count(*) AS n FROM membership_delegation_grants").get().n,
     rooms: restored.db.prepare("SELECT count(*) AS n FROM rooms").get().n } };
 }

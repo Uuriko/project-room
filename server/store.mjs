@@ -52,6 +52,7 @@ import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mj
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
@@ -710,6 +711,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
     this.delegation = new MembershipDelegation(this);
+    this.delegationJournal = new MembershipDelegationJournal(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
@@ -790,6 +792,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // when present.
         this.inbox.stitcher.verifySchema({ allowAbsent: true });
         this.email.verify();
+        this.delegationJournal.verify({ allowAbsent: true });
         // The webhook update journal (B20) is purely additive at v27, so a
         // backup taken before it is still a valid v27 file; read-only never
         // migrates, so verify it only when present.
@@ -1101,6 +1104,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // to the table, and the grant journal's grant→revoke transitions plus
       // the owner-only grant rule are the integrity gate.
       this.db.exec(membershipDelegationSchema);
+      const hadDelegationJournal = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='membership_delegation_journal'").get();
+      this.db.exec(membershipDelegationJournalSchema);
+      if (!hadDelegationJournal) this.delegationJournal.baseline();
+      const rollbackChanges = this.delegationJournal.reconcileRollback();
+      if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
       this.db.exec(agentRoomSchema);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers

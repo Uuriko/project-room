@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
+import { membershipDelegationJournalSchema } from "../server/membership-delegation-journal.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 // RC-2026-09-18-038: owner-granted membership administration for agent
@@ -20,6 +22,7 @@ function setup(t) {
   store.initialize(initialRoom("commons"));
   store.db.exec(accessRequestSchema);
   store.db.exec(membershipDelegationSchema);
+  assert.match(membershipDelegationJournalSchema, /membership_delegation_journal/);
   const requests = new AccessRequests(store, {
     rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
   });
@@ -247,4 +250,116 @@ test("the owner remains sovereign: may approve and link with manage_members", t 
     permissions: ["manage_members"]
   });
   assert.equal(linked.roomId, "commons");
+});
+
+test("audit journal chains grants, revocations, regrants and owner effective revocation", t => {
+  const { store, delegation, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revoke(ownerToken, "commons", { identityId });
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revokeEffective(ownerToken, "commons", { identityId });
+  const rows = store.db.prepare("SELECT * FROM membership_delegation_journal ORDER BY sequence").all();
+  assert.deepEqual(rows.map(row => row.action), ["grant", "revoke", "grant", "revoke_effective"]);
+  assert.deepEqual(rows.map(row => [row.prior_active, row.next_active]), [[0, 1], [1, 0], [0, 1], [1, 0]]);
+  assert.equal(rows[1].prior_hash, rows[0].hash);
+  assert.equal(store.delegationJournal.verify().entries, 4);
+});
+
+test("a failed or unauthorized decision never adds a journal row", t => {
+  const { store, delegation, ownerToken, agent, other } = setup(t);
+  const identityId = agent.identityId;
+  assert.throws(() => delegation.grant(other.secret, "commons", { identityId }), { status: 403 });
+  assert.equal(store.delegationJournal.verify().entries, 0);
+  delegation.grant(ownerToken, "commons", { identityId });
+  assert.throws(() => delegation.grant(ownerToken, "commons", { identityId }), { status: 409 });
+  assert.equal(store.delegationJournal.verify().entries, 1);
+});
+
+test("journal verification refuses tamper, missing prefix, or table mismatch", t => {
+  const { store, delegation, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  delegation.grant(ownerToken, "commons", { identityId });
+  delegation.revoke(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 2);
+  store.db.prepare("UPDATE membership_delegation_journal SET actor_id='wrong' WHERE sequence=2").run();
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+  store.db.prepare("UPDATE membership_delegation_journal SET actor_id='owner' WHERE sequence=2").run();
+  store.db.prepare("DELETE FROM membership_delegation_journal WHERE sequence=1").run();
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+});
+
+test("legacy grant imports as unattributed baseline, not an invented owner decision", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.db.prepare(`INSERT INTO membership_delegation_grants
+    (room_id,identity_id,granted_by,granted_at,revoked_at,added_invite_member)
+    VALUES('commons',?,'owner',?,NULL,0)`).run(identityId, store.now());
+  store.db.exec("DELETE FROM membership_delegation_journal");
+  // Model a pre-journal file: a deployed trigger could not have captured this row.
+  store.db.exec("DELETE FROM membership_delegation_pending");
+  store.delegationJournal.baseline();
+  const row = store.db.prepare("SELECT * FROM membership_delegation_journal").get();
+  assert.equal(row.action, "baseline_active");
+  assert.equal(row.actor_id, "legacy_unattributed");
+  assert.equal(store.delegationJournal.verify().entries, 1);
+  // A future owner revoke is a real decision and does not rewrite history.
+  store.delegation.revoke(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 2);
+});
+
+
+test("same-schema rollback records older writer changes and imports unattributed transitions on redeploy", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  const filename = store.db.location();
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 1);
+  // Simulate the older SQL in another connection while the new writer is idle.
+  const rollback = new DatabaseSync(filename);
+  try {
+    rollback.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+      .run(Date.now(), "commons", identityId);
+    rollback.prepare("UPDATE membership_delegation_grants SET granted_by=?, granted_at=?, revoked_at=NULL WHERE room_id=? AND identity_id=?")
+      .run("owner", Date.now(), "commons", identityId);
+    assert.equal(rollback.prepare("SELECT COUNT(*) AS n FROM membership_delegation_pending").get().n, 2);
+  } finally { rollback.close(); }
+  const deployed = new RoomStore(filename);
+  try {
+    const journal = deployed.db.prepare("SELECT action,actor_id FROM membership_delegation_journal ORDER BY sequence").all();
+    assert.deepEqual(journal.map(row => row.action), ["grant", "baseline_revoked", "baseline_active"]);
+    assert.equal(journal[1].actor_id, "rollback_unattributed");
+    assert.equal(deployed.delegationJournal.verify().entries, 3);
+    assert.equal(deployed.db.prepare("SELECT COUNT(*) AS n FROM membership_delegation_pending").get().n, 0);
+    deployed.delegation.revoke(ownerToken, "commons", { identityId });
+    assert.equal(deployed.delegationJournal.verify().entries, 4);
+  } finally { deployed.close(); }
+});
+
+
+test("unrecorded grant tamper is not misclassified as a rollback", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  store.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+    .run(Date.now(), "commons", identityId);
+  store.db.exec("DELETE FROM membership_delegation_pending");
+  assert.throws(() => store.delegationJournal.reconcileRollback(), /operator reconciliation/);
+});
+
+test("rollback transitions must match the grant's final state before import", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  store.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+    .run(Date.now(), "commons", identityId);
+  store.db.prepare("UPDATE membership_delegation_pending SET next_active=1").run();
+  assert.throws(() => store.delegationJournal.reconcileRollback(), /operator reconciliation/);
+});
+
+
+test("missing rollback capture trigger refuses journal verification", t => {
+  const { store } = setup(t);
+  store.db.exec("DROP TRIGGER membership_delegation_pending_update");
+  assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
 });
