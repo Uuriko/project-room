@@ -349,7 +349,17 @@ export class BoardV2 {
     }
     let sup = null;
     if (supersedes !== null && supersedes !== undefined) {
-      sup = cleanText(supersedes, 128, "invalid_supersedes", "supersedes");
+      // Phase 3.2: supersedes must be a seq number referencing an existing decision
+      const seq = Number(supersedes);
+      if (!Number.isInteger(seq) || seq < 1 || seq > this._seq) {
+        fail(422, "invalid_supersedes", "supersedes must be a valid decision seq");
+      }
+      // Verify the target is actually a decision
+      const target = this._decisions.find(d => d.seq === seq);
+      if (!target) {
+        fail(422, "invalid_supersedes", `no decision with seq ${seq}`);
+      }
+      sup = seq;
     }
     const event = this._emit("decision", null, dc, {
       scope: sc, statement: st, reversible: rev, supersedes: sup,
@@ -393,11 +403,16 @@ export class BoardV2 {
     const overlaps = fileClaims
       .filter(fc => new Set(fc.claims.map(c => c.lane)).size > 1)
       .map(fc => ({ file: fc.file, claims: fc.claims }));
+    // Phase 3.2: Include live decisions (supersede-chain resolved)
+    const liveDecisions = [...this._resolveDecisionChains().values()]
+      .sort((a, b) => a.seq - b.seq)
+      .slice(0, lim);
     return {
       watermark: this._seq,
       claims: claims.slice(0, lim).map(c => this._public(c)),
       file_claims: fileClaims,
       overlaps,
+      decisions: liveDecisions,
     };
   }
 
@@ -431,6 +446,66 @@ export class BoardV2 {
     if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
     if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
     if (since > 0) decisions = decisions.filter(d => d.seq > since);
+    decisions.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, decisions: decisions.slice(0, lim) };
+  }
+
+  // Phase 3.2: Resolve supersede chains to find live decisions.
+  // Returns a Map of seq -> decision for decisions that are not superseded.
+  // Cycle guard: max 100 hops, then break and mark as error.
+  _resolveDecisionChains() {
+    const bySeq = new Map(this._decisions.map(d => [d.seq, d]));
+    const superseded = new Set(); // seqs that are superseded by another decision
+    
+    // Build the superseded set
+    for (const d of this._decisions) {
+      if (d.supersedes != null) {
+        superseded.add(d.supersedes);
+      }
+    }
+    
+    // Find live decisions (not in superseded set)
+    // But also need to handle chains: if A->B->C, only C is live
+    const live = new Map();
+    for (const d of this._decisions) {
+      if (!superseded.has(d.seq)) {
+        // This decision is not directly superseded, but check if it's part of a cycle
+        // Follow the chain forward to see if we loop back
+        let current = d;
+        const visited = new Set([current.seq]);
+        let hops = 0;
+        let isCycle = false;
+        
+        while (current.supersedes != null && hops < 100) {
+          const nextSeq = current.supersedes;
+          if (visited.has(nextSeq)) {
+            isCycle = true;
+            break;
+          }
+          visited.add(nextSeq);
+          const next = bySeq.get(nextSeq);
+          if (!next) break; // Broken reference, treat as terminal
+          current = next;
+          hops++;
+        }
+        
+        if (!isCycle && hops < 100) {
+          live.set(d.seq, d);
+        }
+        // If cycle or too many hops, don't include (defensive)
+      }
+    }
+    
+    return live;
+  }
+
+  // Phase 3.2: Get live decisions (supersede-chain resolved)
+  readLiveDecisions({ decider = null, scope = null, limit = DEFAULT_LIMIT } = {}) {
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    const live = this._resolveDecisionChains();
+    let decisions = [...live.values()];
+    if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
+    if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
     decisions.sort((a, b) => a.seq - b.seq);
     return { watermark: this._seq, decisions: decisions.slice(0, lim) };
   }
@@ -547,6 +622,13 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
       return { status: 200, body: board.readBoard(query) };
     }
     if (path === "/claims") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    // Phase 3.2: GET /board — materialized board view with supersede-chain resolution
+    if (path === "/board" && method === "GET") {
+      rejectUnknown(query, ["lane", "state", "file", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readBoard(query) };
+    }
+    if (path === "/board") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
 
     const tp = parseTaskPath(path);
     if (tp && method === "POST" && tp.action) {
