@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T13:58:30Z · board: Uuriko/project-room#266 · watermark: 5855662532 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=76579442cf807c2dcf2230bcef9ab9b5bc7ed1250cc655eb8c88341139ee60f3 -->
+<!-- generated: 2026-09-27T14:28:57Z · board: Uuriko/project-room#266 · watermark: 5856566000 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -218,7 +218,7 @@ tests/referral-invites.test.js | instinct | RC-2026-09-27-004, RC-2026-09-27-005
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-005 | instinct | working | 2026-09-27T14:13:24Z | server/referral-invites.mjs, tests/referral-invites.test.js
+(none)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -406,5 +406,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2381 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5855662532
+board_comments=2384 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5856566000
 
