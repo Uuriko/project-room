@@ -648,6 +648,21 @@ attention-enabled tool count).
   receipt to inspect current status. Partial, requester-only, or closed reads
   expose no response recipes. These reads do not execute or reserve an action.
 
+  Local MCP failed reply reads return `type: "reply_read_refused"` and
+  `outcome: "read_failed"`, with recovery steps for that read. Missing and
+  inaccessible requests share the same guidance: list requests available to your
+  connection, without inferring whether a private request exists. Changed history
+  or identity requires reconciliation; never silently reset a cursor. A transient
+  read failure can be retried with the same selection after recovery. This does not
+  change write recovery: an unknown write outcome still requires the exact saved
+  input and operation ID.
+
+  Automatic request pickup emits one `connection_unavailable` notice per
+  consecutive outage. A successful queue cycle permits a later outage notice.
+  Polling and backoff continue unchanged while notices are quiet; individual
+  `needs_attention` request notifications remain separate. This suppression is
+  local to the running process and does not acknowledge or change any request.
+
 - Help actions: `room_offer_help`, `room_select_help_offer`, `room_withdraw_help_offer`, `room_decline_help_offer`, `room_release_help_offer`.
 
 Work actions run through the same MCP surface (gated by capability bits) and

@@ -1,5 +1,6 @@
 import { openRequestJournal, runRequestOnce, runRequestQueue } from "../client/request-runner.mjs";
 import test from "node:test";
+import { createServer } from "node:http";
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -735,4 +736,96 @@ test("a REST-only recipient follows the supplied command recipe and verifies its
   const final = await (await fetch(f.origin + recipe.verify.path, { headers })).json();
   assert.equal(final.request.status, "answered"); assert.equal(final.request.responseMessageId, command.data.messageId);
   assert.deepEqual(final.responseHttpActions, []);
+});
+
+
+test("MCP failed request reads give private-safe read recovery instead of uncertain-write advice", async t => {
+  const f = await fixture(t), privateQuestion = f.open("private-other", { toMemberId: "reviewer" }), adapter = await f.mcp();
+  const read = async args => {
+    const response = await adapter.call("room_read_request", args);
+    assert.equal(response.result.isError, true); return response.result.structuredContent;
+  };
+  const before = f.store.room("commons").sequence;
+  const missing = await read({ requestMessageId: "absent-question" });
+  assert.equal(missing.outcome, "read_failed");
+  assert.deepEqual(missing.next, [{ tool: "room_list_requests", arguments: { direction: "both", status: "all" } }]);
+  assert.deepEqual(await read({ requestMessageId: privateQuestion.command.data.messageId }), missing);
+  assert.equal(/unknown write|requestId exactly/.test(missing.message), false);
+  const q = f.open("read-error-cursor");
+  await f.client.replyAction("room_reply", { requestId: "read-error-clarify", replyToId: q.command.data.messageId, body: "Clarification" });
+  const selection = { requestMessageId: q.command.data.messageId, limit: 1 };
+  const page = (await adapter.call("room_read_request", selection)).result.structuredContent;
+  const changed = JSON.parse(Buffer.from(page.page.nextCursor, "base64url")); changed.horizonEventId = "different-anchor";
+  const failed = await read({ ...selection, cursor: Buffer.from(JSON.stringify(changed)).toString("base64url") });
+  assert.equal(failed.code, "reply_history_changed"); assert.equal(failed.outcome, "read_failed");
+  assert.deepEqual(failed.next, []); assert.match(failed.message, /never.*reset/i);
+  const invalid = await read({ ...selection, cursor: "abc" });
+  assert.equal(invalid.code, "invalid_reply_cursor"); assert.equal(invalid.outcome, "read_failed");
+  assert.equal(f.store.room("commons").sequence, before + 2);
+});
+
+test("automatic pickup reports one connection failure per outage and reports a later outage after recovery", { timeout: 20000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
+  let reads = 0;
+  const gateway = createServer(async (req, res) => {
+    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+      reads++;
+      if (reads !== 3) {
+        res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "Temporary outage" } }));
+        if (reads === 5) setTimeout(() => controller.abort(), 50);
+        return;
+      }
+    }
+    const upstream = await fetch(f.origin + req.url, { headers: req.headers });
+    res.writeHead(upstream.status, { "Content-Type": "application/json" }); res.end(await upstream.text());
+  });
+  await new Promise(resolve => gateway.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { controller.abort(); gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); });
+  const sequence = f.store.room("commons").sequence;
+  await runRequestQueue({ ...a, connection: { ...f.config, origin: `http://127.0.0.1:${gateway.address().port}` },
+    signal: controller.signal, stream: false, intervalMs: 1000,
+    execute: async () => { throw new Error("An empty queue must not execute"); }, emit: value => observed.push(value) });
+  assert.equal(reads, 5);
+  assert.deepEqual(observed, [{ status: "connection_unavailable" }, { status: "connection_unavailable" }]);
+  assert.equal(f.store.room("commons").sequence, sequence);
+});
+
+
+test("MCP transport failures distinguish a failed read from a saved answer with a lost response", async t => {
+  const f = await fixture(t);
+  const gateway = createServer(async (req, res) => {
+    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+      res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "PRIVATE upstream detail" } })); return;
+    }
+    let body = ""; for await (const chunk of req) body += chunk;
+    const upstream = await fetch(f.origin + req.url, { method: req.method, headers: req.headers, ...(body ? { body } : {}) });
+    if (req.method === "POST" && req.url.endsWith("/commands")) { await upstream.text(); res.destroy(); return; }
+    res.writeHead(upstream.status, { "Content-Type": "application/json" }); res.end(await upstream.text());
+  });
+  await new Promise(resolve => gateway.listen(0, "127.0.0.1", resolve));
+  const directory = join(f.directory, "recovery-proxy");
+  saveAgentConnection(directory, { ...f.config, origin: `http://127.0.0.1:${gateway.address().port}` });
+  const adapter = await openMcpTestClient(directory);
+  t.after(async () => { await adapter.close(); gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); });
+  const args = { direction: "incoming", status: "open" };
+  const read = (await adapter.call("room_list_requests", args)).result.structuredContent;
+  assert.equal(read.outcome, "read_failed"); assert.deepEqual(read.next, [{ tool: "room_list_requests", arguments: args }]);
+  assert.equal(JSON.stringify(read).includes("PRIVATE upstream detail"), false);
+  const q = f.open("lost-answer"), context = await f.client.replyContext(q.command.data.messageId), input = f.respond(context, { requestId: "lost-answer-write" });
+  const uncertain = (await adapter.call("room_respond_to_request", input)).result.structuredContent;
+  assert.equal(uncertain.type, "reply_refused"); assert.equal(uncertain.outcome, "not_confirmed");
+  assert.match(uncertain.message, /Preserve unknown write input/);
+  const retry = await f.client.replyAction("room_respond_to_request", input);
+  assert.equal(retry.duplicate, true);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+});
+
+test("automatic pickup keeps separate failed-request notifications visible", async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
+  t.after(() => controller.abort());
+  const ids = [f.open("failed-one").command.data.messageId, f.open("failed-two").command.data.messageId];
+  await runRequestQueue({ ...a, signal: controller.signal, stream: false, intervalMs: 1000,
+    execute: async () => { throw new Error("Host needs operator attention"); },
+    emit: value => { observed.push(value); if (observed.length === 2) controller.abort(); } });
+  assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId })));
 });
