@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
 import { hostReplyBody } from "../client/host-result.mjs";
 import test from "node:test";
@@ -48,7 +49,7 @@ test("request journey: request, clarify and answer stay in chat without closing 
   const f = await setup(t), owner = await f.login("owner"), guest = await f.login("guest");
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
-  await owner.locator("#request-reply").click();
+  await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Which agenda should we use?");
   await owner.locator("#message-to-select").selectOption("guest");
   await input(owner).press("Enter"); await saved(owner);
@@ -124,7 +125,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
-  await input(page).fill("Ordinary draft"); await page.locator("#request-reply").click();
+  await input(page).fill("Ordinary draft"); await openComposerOptions(page); await page.locator("#request-reply").click();
   await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
   let alter = true; const commands = [];
   await page.route("**/api/rooms/commons/commands", async route => {
@@ -139,7 +140,7 @@ test("unconfirmed receipt locks the exact request; ordinary drafts remain separa
   assert.match(await page.locator("#composer-status").textContent(), /Save not confirmed/);
   assert.equal(await input(page).evaluate(el => el.readOnly), true);
   await page.locator("#request-exit").click(); assert.equal(await input(page).inputValue(), "Ordinary draft");
-  await page.locator("#request-reply").click();
+  await openComposerOptions(page); await page.locator("#request-reply").click();
   assert.equal(await input(page).inputValue(), "An explicit question");
   await page.getByRole("button", { name: "Retry original", exact: true }).click(); await saved(page);
   assert.deepEqual(commands[0], commands[1]);
@@ -199,7 +200,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     assert.equal(await page.locator("#message-to-select").isDisabled(), true);
     assert.match(await page.locator("#request-mode-label").textContent(), /Earlier exchange included/);
     assert.match(await page.locator("#thread-context").textContent(), /includes private messages/);
-    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.doesNotMatch(await page.locator("#message-form").innerText(), /Visible to everyone here/);
     assert.equal(await record(page, "follow-answer").locator('[data-message-action="request-follow-up"]').evaluate(el => getComputedStyle(el).opacity), "1");
     await input(page).fill("Add keyboard support");

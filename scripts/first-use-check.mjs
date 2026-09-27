@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { ensureSidebarClosed } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Agent-operated usability regression, not evidence from human participants.
@@ -126,7 +127,7 @@ for (const touch of [false, true]) {
     await message.locator('[data-message-action="work"]').click();
     await owner.locator('#work-title-input').fill('An edited suggestion');
     await owner.locator('#cancel-work-button').click();
-    await owner.locator('#new-work-button').click();
+    await openComposerOptions(owner); await owner.locator('#new-work-button').click();
     assert.equal(await owner.locator('#work-title-input').inputValue(), '');
     assert.equal(await owner.locator('#source-message-id').inputValue(), '');
     await owner.locator('#assignee-select').selectOption('owner');

@@ -245,7 +245,7 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
           }
           if (isWorkTool(selected.name)) value = workActionRefusal(cause) ?? { ...value, outcome: "not_confirmed",
             retry: "Retain the exact original input. A lost or cancelled response does not prove the operation was not saved." };
-          if (isReplyTool(selected.name)) value = replyRefusal(cause);
+          if (isReplyTool(selected.name)) value = replyRefusal(cause, { name: selected.name, args });
           if (isHelpTool(selected.name)) value = helpActionRefusal(cause) ?? { ...value, outcome: "not_confirmed",
             retry: "Retain the exact original input and requestId. Cancellation or a missing response does not prove the operation was not saved." };
           if (selected.name === "room_post_draft") value = { ...value, outcome: "not_confirmed", retry: "Retain the exact original input. Cancellation or a missing response does not prove the draft was not saved." };

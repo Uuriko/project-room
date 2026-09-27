@@ -368,9 +368,12 @@ export class ReferralInvites {
     if (this.now() >= expiresAt) rejectAndFail(410, "invite_expired", "That invite has expired", "expired");
     if (depth > maxDepth) rejectAndFail(409, "referral_depth_exceeded", "That invite is past the chain depth limit", "depth_exceeded");
     const preRoom = this.store.room(roomId);
-    // The inviter must still be an active member at redeem time; a removed
-    // inviter's outstanding tokens stop working.
-    if (preRoom.state.members[ledger.inviter_member_id]?.active === false) {
+    // A truthy map lookup treats toString as an active inviter, so redeem
+    // continues and mints an identity for an inviter who never joined.
+    const inviterId = ledger.inviter_member_id;
+    const members = preRoom.state.members;
+    const inviter = members && Object.hasOwn(members, inviterId) ? members[inviterId] : undefined;
+    if (!inviter || inviter.active === false) {
       rejectAndFail(410, "invite_expired", "That invite is no longer valid", "inviter_inactive");
     }
 

@@ -94,7 +94,9 @@ export class ShareLinks {
     return humans + agents;
   }
   authority(row) {
-    const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
+    const members = this.store.room(row.room_id).state.members;
+    // A truthy map lookup treats toString as the issuer and then throws on permissions.includes.
+    const member = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : undefined;
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
     // Agent-issued links carry no account. An explicit owner-granted admin
     // keeps issuance authority only while its grant and revision remain current.

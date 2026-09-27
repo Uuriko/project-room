@@ -24,6 +24,14 @@ test("handles mirror the server: trimmed displayName, id fallback", () => {
   assert.equal(dmConsentHandleOf({ id: "ghost", displayName: "   " }), "ghost");
 });
 
+test("an inherited peer id is not a DM participant", () => {
+  const members = { me: member("me", "Me") };
+  assert.equal(dmConsentPeerSummary([], members, "me", "toString"), null);
+  assert.deepEqual(incomingDmRequests([
+    idRow("toString", "me", "x", "Me", "pending", false)
+  ], members, "me"), []);
+  assert.equal(Object.hasOwn(members, "toString"), false);
+});
 test("peer summary maps outgoing/incoming directions; self and unknown are null", () => {
   const consents = [
     idRow("me", "bob", "Me", "Bob", "pending", true),
@@ -110,6 +118,15 @@ test("actions: incoming pending gets approve/reject/block; blocked gets unblock"
 test("pair descriptions narrate both directions honestly", () => {
   const lines = dmConsentPairDescription({ outgoing: "pending", incoming: null }, "Bob");
   assert.ok(lines.some(l => /still pending/.test(l)));
+  assert.ok(lines.some(l => /You can message Bob now/.test(l)));
+  const incoming = dmConsentPairDescription({ outgoing: "blocked", incoming: "pending" }, "Bob");
+  assert.ok(incoming.some(l => /Bob can message you now/.test(l)));
+  for (const state of ["rejected", "revoked"]) {
+    const denied = dmConsentPairDescription({ outgoing: state, incoming: null }, "Bob").join(" ");
+    assert.match(denied, /You cannot message Bob/);
+    assert.match(denied, /request again/);
+    assert.doesNotMatch(denied, /unblock/);
+  }
   const blocked = dmConsentPairDescription({ outgoing: "blocked", incoming: "blocked" }, "Bob");
   assert.ok(blocked.some(l => /isn't accepting/.test(l)));
   assert.ok(blocked.some(l => /You've blocked/.test(l)));

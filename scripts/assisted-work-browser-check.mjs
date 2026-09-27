@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -86,7 +87,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The owner explicitly proposes and accepts both outcomes through the UI.
     const workIds = [];
     for (const title of ["First scoped change", "Second overlapping change"]) {
-      await page.locator("#new-work-button").click();
+      await openComposerOptions(page); await page.locator("#new-work-button").click();
       await page.locator("#work-title-input").fill(title);
       await page.locator("#work-done-input").fill("Post a versioned result after separately authorized external work.");
       await page.locator("#work-options > summary").click();

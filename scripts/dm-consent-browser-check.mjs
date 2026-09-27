@@ -137,7 +137,7 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
 
   // --- Alice revokes; she is back to requesting. ---
   await aliceBob2.getByRole("button", { name: "Revoke my consent", exact: true }).click();
-  await aliceBob2.getByText("Request again").waitFor();
+  await aliceBob2.getByRole("button", { name: "Request again", exact: true }).waitFor();
 
   // --- Explicit denial: after revoke the gate refuses the DM and names the next step. ---
   await selectRecipient(a.page, "bob");

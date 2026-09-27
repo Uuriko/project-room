@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
@@ -49,7 +50,7 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     if (!await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
   };
   await input.fill("Keep ordinary room writing.");
-  await page.locator("#request-reply").click(); await input.fill("Keep my general question.");
+  await openComposerOptions(page); await page.locator("#request-reply").click(); await input.fill("Keep my general question.");
   await page.locator("#request-exit").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
   await openWork(); await card.locator("[data-ask-credit]").click();
   assert.match(await page.locator("#request-mode-label").textContent(), /Ask about credit/);
@@ -60,7 +61,7 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   await page.screenshot({ path: join(directory, "question.png") });
   await page.locator("#request-exit").click(); await page.locator("#thread-back").click();
   assert.equal(await input.inputValue(), "Keep ordinary room writing.");
-  await page.locator("#request-reply").click(); assert.equal(await input.inputValue(), "Keep my general question.");
+  await openComposerOptions(page); await page.locator("#request-reply").click(); assert.equal(await input.inputValue(), "Keep my general question.");
   await page.locator("#request-exit").click(); await openWork(); await card.locator("[data-ask-credit]").click();
   assert.equal(await input.inputValue(), "Who wrote the original draft, and which parts used AI?");
   result("second-text", "A newer outside draft.");

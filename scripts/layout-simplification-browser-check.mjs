@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -60,7 +61,7 @@ for (const [width, account] of [[1440, false], [390, false], [320, false], [1440
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep this draft while I inspect the room');
     mkdirSync('test-results/layout', { recursive: true });
     await page.screenshot({ path: `test-results/layout/room-${width}${account ? "-account" : ""}.png` });
-    await page.locator('#new-work-button').click();
+    await openComposerOptions(page); await page.locator('#new-work-button').click();
     await page.locator('#work-dialog').waitFor();
     assert.equal(await page.locator('#work-options').evaluate(e => e.open), false);
     await page.screenshot({ path: `test-results/layout/work-${width}${account ? "-account" : ""}.png` });

@@ -620,6 +620,12 @@ attention-enabled tool count).
 - `room_begin_work` — Begin selected work by performing the next verified accept, exact-scope claim, and start. working is the Room work state, not a host start. A recorded accept is reconciled from its operation receipt, then Begin continues. A response that never returns the stage id cannot be recovered unless the caller already held that invocationRequestId. A different scope stops and shows the current claim. The browser records the existing Room action and does not invoke Begin.
 - Work actions: `room_propose_work`, `room_accept_work`, `room_start_work`, `room_block_work`, `room_resolve_blocker`, `room_record_completion`, `room_submit_text_result`, `room_record_verification`, `room_acquire_claim`, `room_release_claim`, `room_renew_claim`, `room_supersede_work`, `room_record_handoff`, `room_clear_halt`.
 - Reply actions: `room_reply`, `room_request_reply`, `room_respond_to_request`, `room_cancel_request`, `room_list_requests`, `room_read_request`, `room_request_history`.
+  Hosted default core discovery includes `room_read_request` and
+  `room_respond_to_request`, so a fresh client can follow an incoming formal ask
+  from `room_needs_me` through selected context, answer, and verified closure
+  without loading the full catalog. These are the same handlers, schemas and
+  permissions as the full profile. Ordinary `room_reply` remains conversational.
+
   `room_read_messages` and `room_read_inbox` mark formal requests with `requestKind: "reply"` and a
   `nextRead` pointer; ordinary directed chat has neither. Follow that pointer (or
   `room_list_requests.nextReads`) and finish every selected conversation page.
@@ -647,6 +653,21 @@ attention-enabled tool count).
   a timeout—never fetch another recipe for a retry. Follow `verify` after the
   receipt to inspect current status. Partial, requester-only, or closed reads
   expose no response recipes. These reads do not execute or reserve an action.
+
+  Local MCP failed reply reads return `type: "reply_read_refused"` and
+  `outcome: "read_failed"`, with recovery steps for that read. Missing and
+  inaccessible requests share the same guidance: list requests available to your
+  connection, without inferring whether a private request exists. Changed history
+  or identity requires reconciliation; never silently reset a cursor. A transient
+  read failure can be retried with the same selection after recovery. This does not
+  change write recovery: an unknown write outcome still requires the exact saved
+  input and operation ID.
+
+  Automatic request pickup emits one `connection_unavailable` notice per
+  consecutive outage. A successful queue cycle permits a later outage notice.
+  Polling and backoff continue unchanged while notices are quiet; individual
+  `needs_attention` request notifications remain separate. This suppression is
+  local to the running process and does not acknowledge or change any request.
 
 - Help actions: `room_offer_help`, `room_select_help_offer`, `room_withdraw_help_offer`, `room_decline_help_offer`, `room_release_help_offer`.
 

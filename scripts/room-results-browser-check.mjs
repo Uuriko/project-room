@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
@@ -123,9 +124,9 @@ test("guest Results remain useful with large text and no creation controls", { t
 test("creating new work from the composer requires explicit confirmed submission", { timeout: 30000 }, async t => {
   const f = await setup(t, { expectedWrites: 1 }), p = f.p;
   assert.equal(await p.locator("#new-work-button").getAttribute("aria-label"), "New work");
-  await p.locator("#new-work-button").click(); await p.locator("#cancel-work-button").click();
+  await openComposerOptions(p); await p.locator("#new-work-button").click(); await p.locator("#cancel-work-button").click();
   assert.equal(await p.locator("#work-dialog").isVisible(), false);
-  await p.locator("#new-work-button").click();
+  await openComposerOptions(p); await p.locator("#new-work-button").click();
   await p.locator("#work-title-input").fill("Follow up on the result");
   await p.locator("#work-done-input").fill("One clear next action.");
   await p.locator("#work-options > summary").click();
