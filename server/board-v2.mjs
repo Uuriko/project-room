@@ -120,11 +120,12 @@ export class BoardV2 {
   constructor({ now = () => Date.now() } = {}) {
     this._now = now;
     this._seq = 0;
+    this._events = []; // unified append-only event log (Phase 3.1)
     this._claims = new Map(); // task_id -> claim record
     this._mirror = new Map(); // seq -> { issue, comment_id }
-    this._notes = []; // append-only note events
-    this._findings = []; // append-only finding events
-    this._decisions = []; // append-only decision events
+    this._notes = []; // append-only note events (legacy, see _events)
+    this._findings = []; // append-only finding events (legacy, see _events)
+    this._decisions = []; // append-only decision events (legacy, see _events)
     this._idempotency = new Map(); // idempotency-key -> { status, body }
   }
 
@@ -135,6 +136,8 @@ export class BoardV2 {
     const event = { seq: this._seq, at: iso(this._now()), kind, task_id: taskId, lane, payload };
     if (opts.supersedes != null) event.supersedes = opts.supersedes;
     if (opts.idempotencyKey != null) event.idempotency_key = opts.idempotencyKey;
+    // Phase 3.1: append to unified event log
+    this._events.push(event);
     return event;
   }
 
@@ -432,6 +435,22 @@ export class BoardV2 {
     return { watermark: this._seq, decisions: decisions.slice(0, lim) };
   }
 
+  // Phase 3.1: Unified event log with cursor pagination.
+  // Returns events in seq order, with has_more indicating if more exist beyond limit.
+  readEvents({ kind = null, lane = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let events = [...this._events];
+    if (kind !== null && kind !== undefined) events = events.filter(e => e.kind === kind);
+    if (lane !== null && lane !== undefined) events = events.filter(e => e.lane === cleanLane(lane));
+    if (since > 0) events = events.filter(e => e.seq > since);
+    events.sort((a, b) => a.seq - b.seq);
+    // Fetch one extra to determine has_more
+    const slice = events.slice(0, lim + 1);
+    const has_more = slice.length > lim;
+    return { watermark: this._seq, events: slice.slice(0, lim), has_more };
+  }
+
   // --- mirror map: (issue, comment_id) <-> seq translation for migration ---
   recordMirror({ seq, issue, comment_id }) {
     const s = Number(seq);
@@ -591,6 +610,13 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
       storeIdempotent(authed, resp.status, resp.body);
       return resp;
     }
+    // Phase 3.1: Unified event log with cursor pagination
+    if (path === "/events" && method === "GET") {
+      rejectUnknown(query, ["kind", "lane", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readEvents(query) };
+    }
+    if (path === "/events") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
     if (path === "/notes" && method === "GET") {
       rejectUnknown(query, ["lane", "thread", "severity", "since_seq", "limit"], "query");
       return { status: 200, body: board.readNotes(query) };
