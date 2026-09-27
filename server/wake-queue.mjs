@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { wakeQueueLimits as limits } from "./wake-queue-limits.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Re-exported from the leaf module so existing importers keep working; the
@@ -163,6 +164,12 @@ export class WakeQueue {
   enqueue(token, roomId, request, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      // Guests may read and chat but may not queue wake intents. The wake
+      // queue authenticates directly and bypasses store.command, so the
+      // RoomStore guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot queue wake intents");
       const fields = ["requestId", "queueKey", "intent", "dueAt", "maxAttempts"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
         || !validId(request.requestId) || !validId(request.queueKey) || !Number.isSafeInteger(request.dueAt)
@@ -207,6 +214,12 @@ export class WakeQueue {
   pause(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      // Guests may read and chat but may not change wake-queue stop control.
+      // pause() authenticates directly and bypasses store.command, so the
+      // RoomStore guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot pause wake intents");
       const subject = this.subject(auth, roomId, memberId, { change: true });
       const fields = ["requestId", "reason"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
@@ -230,6 +243,12 @@ export class WakeQueue {
   resume(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      // Guests may read and chat but may not change wake-queue stop control.
+      // resume() authenticates directly and bypasses store.command, so the
+      // RoomStore guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot resume wake intents");
       const subject = this.subject(auth, roomId, memberId, { change: true });
       const keys = request && !Array.isArray(request) ? Object.keys(request) : null;
       const reasonOk = !keys?.includes("reason") || request.reason === null || typeof request.reason === "string" && request.reason.length <= 200;
@@ -251,6 +270,12 @@ export class WakeQueue {
   requeue(token, roomId, request, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      // Guests may read and chat but may not queue wake intents. requeue()
+      // authenticates directly and bypasses store.command, so the RoomStore
+      // guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot requeue wake intents");
       const fields = ["requestId", "queueKey", "dueAt"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
         || !validId(request.requestId) || !validId(request.queueKey) || !Number.isSafeInteger(request.dueAt)) fail(422, "invalid_wake", "Supply a queue key, due time and request ID.");

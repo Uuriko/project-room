@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 import { wakeQueueLimits } from "../server/wake-queue.mjs";
 import { surfaceClass } from "../server/action-classes.mjs";
 
@@ -122,4 +123,30 @@ test("receipt capacity bounds requeue as well as enqueue", t => {
   assert.equal(f.list().length, 1);
   assert.equal(receipts(), wakeQueueLimits.receipts, "refused commands write no receipt");
   assert.equal(f.enqueue({ requestId: first.receipt.requestId, maxAttempts: 1 }).duplicate, true, "an exact retry at the cap still returns its historical receipt");
+});
+
+test("guest-agent members cannot enqueue, pause, resume or requeue wake intents; reads stay open", t => {
+  const f = fixture(t);
+  // Production guest admission mints member ids carrying the guest-agent-
+  // prefix exactly; the denial keys on that shape, so the fixture does too.
+  const guestId = "guest-agent-wake-01";
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: guestId, displayName: "Guest visit", kind: "agent", permissions: [], accountableHumanId: "owner" } });
+  const guestKey = f.store.issueAccessKey("commons", guestId);
+
+  const denied = fn => {
+    try { fn(); } catch (error) { assert.equal(error.status, 403); assert.equal(error.code, "guest_scope_denied"); return; }
+    assert.fail("expected a guest_scope_denied rejection");
+  };
+  denied(() => f.store.wakeQueue.enqueue(guestKey, "commons",
+    { requestId: randomUUID(), queueKey: "recipe:guest-probe", intent: { recipe: "guest-probe" }, dueAt: f.at(), maxAttempts: 3 }));
+  denied(() => f.store.wakeQueue.pause(guestKey, "commons", { requestId: randomUUID(), reason: "stop" }));
+  denied(() => f.store.wakeQueue.resume(guestKey, "commons", { requestId: randomUUID() }));
+  denied(() => f.store.wakeQueue.requeue(guestKey, "commons",
+    { requestId: randomUUID(), queueKey: "recipe:guest-probe", dueAt: f.at() }));
+
+  // No wake row landed for the guest; the read surface still answers and a
+  // non-guest member's enqueue is unchanged.
+  assert.equal(f.store.wakeQueue.list(guestKey, "commons").wakes.length, 0);
+  assert.equal(f.enqueue().receipt.state, "pending");
 });

@@ -14,6 +14,7 @@ import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
 import { validId } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -100,6 +101,12 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
+      // Guests may read and chat but may not store room files. stage()
+      // authenticates directly and bypasses store.command, so the RoomStore
+      // guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot stage room files");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -195,6 +202,12 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
+      // Guests may read and chat but may not store room files. discard()
+      // authenticates directly and bypasses store.command, so the RoomStore
+      // guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot discard room files");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -218,6 +231,12 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
+      // Guests may read and chat but may not store room files. commit()
+      // authenticates directly and bypasses store.command, so the RoomStore
+      // guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot commit room files");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
       this.expire(roomId, this.store.now());
