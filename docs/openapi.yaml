@@ -1282,8 +1282,8 @@ paths:
     get:
       summary: Public opportunity feed
       description: >-
-        Read-only discovery of open work across owner opt-in directory-listed
-        rooms (no login): open help-wanted invitations on non-terminal work
+        Read-only discovery of open work across owner opt-in directory-listed,
+        feed-enabled rooms (no login): open help-wanted invitations on non-terminal work
         items, and proposed/funded bounties with live deadlines. Decoupled
         from admission — reading the feed grants nothing; acting on an
         opportunity uses the normal invite/join flow. Rebuilt field-by-field
@@ -4646,6 +4646,59 @@ paths:
           description: unauthenticated
         '403':
           description: owner_required
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/opportunities:
+    get:
+      summary: Opportunity feed visibility (owner)
+      description: >-
+        Room owner only. Reports the independent public opportunity-feed
+        setting. Existing rooms default to enabled; a room must also be
+        directory-listed and unarchived before its opportunities appear.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Current setting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+    post:
+      summary: Toggle public opportunity-feed visibility (owner)
+      description: >-
+        Room owner only. Exactly { enabled }. Disabling removes all room
+        opportunities (help wanted and bounties) from the public feed,
+        including room-filtered reads, without changing directory listing
+        or the underlying work. Re-enabling restores eligible items.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: New setting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
         '422':
           $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/public-face/rotate:

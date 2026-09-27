@@ -11,10 +11,10 @@
 //      with status "open" and a live expiry) on non-terminal work;
 //   2. bounties in proposed/funded state with a live deadline.
 //
-// Room-level opt-in reuses the #605 public directory: only rooms their owner
-// flagged discoverable appear, and archived rooms never do. Posting work or
-// funding a bounty in a listed room is itself the opt-in for that item —
-// there is no separate feed toggle to forget.
+// Room-level discovery requires directory discoverability and an independent
+// owner-controlled opportunity-feed flag. Existing listed rooms default to
+// feed-on; an owner can hide work and bounties from the feed without unlisting
+// the room or altering either underlying record. Archived rooms never appear.
 //
 // Sanitization is a strict field-by-field rebuild — never a passthrough.
 // The module takes the RoomStore (db handle) and is shaped like
@@ -86,7 +86,7 @@ const parseSince = value => {
 
 const TERMINAL_WORK_STATES = new Set(["completed", "superseded"]);
 
-// Rooms whose owner opted into public discovery and which are not archived.
+// Listed, feed-enabled, non-archived rooms only.
 function listedRoomIds(db, roomId) {
   if (roomId != null) {
     if (typeof roomId !== "string" || !roomId || roomId.length > 128) fail(422, "invalid_room", "room must be a room id");
@@ -94,14 +94,14 @@ function listedRoomIds(db, roomId) {
         SELECT s.room_id AS roomId
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
-        WHERE s.discoverable = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
+        WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
     return row ? [row.roomId] : [];
   }
   return db.prepare(`
       SELECT s.room_id AS roomId
       FROM room_directory_settings s
       JOIN rooms r ON r.id = s.room_id
-      WHERE s.discoverable = 1 AND r.archived_at IS NULL
+      WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL
       ORDER BY s.room_id ASC`).all().map(r => r.roomId);
 }
 
