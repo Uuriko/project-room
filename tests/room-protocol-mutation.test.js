@@ -212,9 +212,11 @@ test("W2: sweep plans nothing when now is exactly the lease expiry instant", () 
   assert.doesNotMatch(out, /PLAN: strike-one/);
 });
 
-test("W3: sweep ignores submitted (non-working) claims past their lease", () => {
+test("W3: sweep plans strike-one for expired submitted claims (2026-09-26 submitted-state rot fix)", () => {
+  // Submitted claims now have an expiry path: the two-strike takeover
+  // applies uniformly to working and submitted states.
   const out = sweepDry([claimComment(1, "2026-09-23T18:00:00Z", { state: "submitted" })]);
-  assert.doesNotMatch(out, /PLAN:/);
+  assert.match(out, /PLAN: strike-one nudge for RC-2026-09-26-9001/);
 });
 
 test("W4: sweep plans strike-two when the 4h grace elapsed with no heartbeat", () => {
