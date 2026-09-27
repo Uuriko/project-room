@@ -117,3 +117,31 @@ test("owner changes a live guest capability and re-redeem does not widen it", as
     data: { id: "after-downgrade", type: "message.posted", data: { messageId: "after-downgrade", body: "no" } } }));
   assert.equal(store.guestInvites.guestTierOf(chat.member.id), "read_only");
 });
+
+
+test("chat projection hides work drafts, other people's DMs, deleted bodies and their reactions", async t => {
+  const { guest, request, store, owner } = await setup(t);
+  const chat = await guest("Privacy", "chat_only");
+  const post = (id, data) => store.command(owner, "commons", {
+    id: `post-${id}`, type: "message.posted", data: { messageId: id, ...data }
+  });
+  post("ordinary", { body: "PUBLIC-CANARY" });
+  post("private", { body: "PRIVATE-CANARY", toMemberId: "owner" });
+  post("erase-me", { body: "DELETED-CANARY" });
+  post("reply-to-private", { body: "REPLY-CANARY", replyToId: "private" });
+  store.command(owner, "commons", { id: "erase-event", type: "message.deleted",
+    data: { messageId: "erase-me", expectedMessageRevision: 0, reason: "cleanup" } });
+  store.command(owner, "commons", { id: "reaction-private", type: "message.reaction_set",
+    data: { messageId: "private", reaction: "👍", active: true } });
+  const page = await request("/api/rooms/commons/chat", { token: chat.token });
+  assert.equal(page.status, 200);
+  assert(page.body.messages.some(m => m.body === "PUBLIC-CANARY"));
+  for (const marker of ["PRIVATE-CANARY", "DELETED-CANARY", "REPLY-CANARY", "private", "erase-me", "reply-to-private"]) {
+    assert.equal(JSON.stringify(page.body.messages).includes(marker), false, marker);
+  }
+  assert.equal(page.body.messages.some(m => m.kind === "reaction"), false);
+  denied(await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
+    data: { id: "reply-private", type: "message.posted", data: { messageId: "reply-private", body: "bad", replyToId: "private" } } }));
+  denied(await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
+    data: { id: "react-private", type: "message.reaction_set", data: { messageId: "private", reaction: "👍", active: true } } }));
+});
