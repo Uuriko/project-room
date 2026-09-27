@@ -34,7 +34,7 @@ function backlogFile() {
 const fakeBin = mkdtempSync(join(tmpdir(), "backlog-gh-"));
 writeFileSync(join(fakeBin, "gh"), `#!/bin/sh
 case "$*" in
-  "api --paginate repos/Uuriko/project-room/issues/266/comments?per_page=100")
+  "api --paginate repos/Uuriko/project-room/issues/1160/comments?per_page=100")
     case "$BACKLOG_BOARD_MODE" in
       unavailable) exit 1 ;;
       malformed) printf 'not-json\\n' ;;
