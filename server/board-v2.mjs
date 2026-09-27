@@ -9,11 +9,11 @@
 // GitHub comment ids to seq via the mirror map, so mirror-issue rotation
 // can never orphan a cursor).
 //
-// This prototype is in-memory with an injectable clock and is NOT mounted
-// in server/http.mjs (no production behavior change). `handleBoardV2Request`
+// This prototype is in-memory with an injectable clock. `handleBoardV2Request`
 // implements the exact route contract from the design doc so the prototype's
-// contract IS the production contract; the deployment PR adds persistence
-// (SQLite, see design §3) and the http.mjs wiring.
+// contract IS the production contract; the deployment wiring (RC-2026-09-27-2720)
+// mounts it in server/http.mjs over the durable state machine in
+// server/board-v2-durable.mjs (SQLite, see design §3).
 
 const TASK_ID_RE = /^RC-\d{4}-\d{2}-\d{2}-\d+$/;
 const LANE_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -115,6 +115,16 @@ function rejectUnknown(body, allowed, what) {
 // ---------------------------------------------------------------------------
 
 const iso = ms => new Date(ms).toISOString();
+
+// Exported for server/board-v2-durable.mjs: the durable state machine reuses
+// the prototype's validation grammar verbatim, so both surfaces reject
+// identical input with identical codes. Additive export; no behavior change.
+export {
+  cleanTaskId, cleanLane, cleanPath, cleanFiles, cleanLease, cleanText,
+  rejectUnknown,
+  LIVE_STATES, TERMINAL_STATES, MAX_REASON_CHARS, MAX_NOTE_CHARS, MAX_FILES,
+  MAX_PATH_CHARS, MAX_LIMIT, DEFAULT_LIMIT, iso,
+};
 
 export class BoardV2 {
   constructor({ now = () => Date.now() } = {}) {

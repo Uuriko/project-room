@@ -145,6 +145,10 @@ export function createDurableBoardV2(db, { now = () => Date.now() } = {}) {
     payload: parse(row.payload, "event.payload"),
     ...(row.supersedes != null ? { supersedes: row.supersedes } : {}),
     ...(row.idempotency_key != null ? { idempotency_key: row.idempotency_key } : {}),
+    // RC-2026-09-27-2720: mirror refs are columns, not payload — expose them
+    // so the durable state machine can serve mirrorSince()/health() without
+    // private SQL. Absent when recordMirror was never called for the event.
+    ...(row.mirror_issue != null ? { mirror_issue: row.mirror_issue, mirror_comment: row.mirror_comment } : {}),
   });
 
   return {
