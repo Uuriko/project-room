@@ -1466,6 +1466,7 @@ function selectOptions(selector, members, blank) {
   if (previous) select.value = previous;
   select.dataset.signature = signature;
 }
+const WORK_PERMISSIONS = ["accept_work", "complete_work"];
 function syncWorkForm() {
   if (!state || busy) return;
   setWorkRetry(workRetryLocked);
@@ -1477,8 +1478,14 @@ function syncWorkForm() {
   const writing = $("#work-mode-select").value === "write";
   syncWorkPolicy();
   const reviewing = $("#require-verification").checked;
-  selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission))), "Choose assignee");
+  const assignable = active.filter(member => [...WORK_PERMISSIONS, ...(writing ? ["write_external"] : [])]
+    .every(permission => member.permissions.includes(permission)));
+  selectOptions("#assignee-select", assignable, "Choose assignee");
+  const waiting = active.filter(member => member.kind === "agent" && !assignable.includes(member));
+  if ($("#assignee-hint")) {
+    $("#assignee-hint").hidden = waiting.length === 0;
+    $("#assignee-hint").textContent = waiting.length ? `${waiting.map(m => m.displayName).join(", ")} can't take work yet. Change that in People.` : "";
+  }
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
   selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
@@ -1657,6 +1664,12 @@ function render() {
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
+  // H4: agents that joined through a room link arrive with no permissions, so
+  // they never appear as assignees. The click handler leaves owner-connected
+  // agents alone, because changing their access retires their connection key.
+  const workControl = m => !ownerView || m.kind !== "agent" || m.active === false
+    || WORK_PERMISSIONS.every(p => m.permissions.includes(p)) ? ""
+    : `<button type="button" class="text-button" data-member-work="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>Let them take work</button>`;
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
   // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
   const memberActions = m => {
@@ -1694,7 +1707,7 @@ function render() {
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -3727,6 +3740,32 @@ $("#share-link-admins").addEventListener("click", e => {
     revealPeopleChrome(); $("#people-panel > summary").focus();
   }, { once: true });
   $("#share-link-dialog").close();
+});
+$("#presence-list").addEventListener("click", async e => {
+  const button = e.target.closest("[data-member-work]");
+  if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
+  e.preventDefault();
+  const member = state.members[button.dataset.memberWork];
+  if (!member || member.kind !== "agent" || member.active === false) return;
+  const permissions = [...new Set([...member.permissions, ...WORK_PERMISSIONS])], generation = client.generation;
+  memberActionBusy = true; button.disabled = true;
+  try {
+    const { connections = [] } = await client.request(client.path("/agent-connections"));
+    if (generation !== client.generation || !state) return;
+    if (connections.some(row => row.memberId === member.id && row.status === "key_issued")) {
+      notice(`${member.displayName} connected with its own key. In Add agent, open Manage connections and choose Contribute work.`, true);
+      return;
+    }
+    const entry = draftCommand(null, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision, permissions, active: true });
+    await client.send(entry.command);
+    if (generation !== client.generation || !state) return;
+    notice(`${member.displayName} can take work now.`);
+  } catch (error) {
+    if (generation === client.generation && state) notice(error.message || "Not saved. Try again.", true);
+  } finally {
+    memberActionBusy = false;
+    if (generation === client.generation && state) render();
+  }
 });
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-admin]");
