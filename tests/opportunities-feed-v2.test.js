@@ -242,3 +242,45 @@ test('listed room projection is read once for help and bounty in the same feed',
     store.db.prepare = originalPrepare;
   }
 });
+
+test("the public feed still returns bounties for 100 listed rooms when SQL rejects more than 100 binds", async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store } = fixture;
+  const now = fixture.now();
+  const ids = [];
+  const insertRoom = store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES (?,?,?,NULL)");
+  const listRoom = store.db.prepare("INSERT INTO room_directory_settings (room_id, discoverable, listed_at, updated_at) VALUES (?,1,?,?)");
+  for (let i = 0; i < 100; i++) {
+    const roomId = `listed-${String(i).padStart(3, "0")}`;
+    const bountyId = `b-listed-${String(i).padStart(3, "0")}`;
+    insertRoom.run(roomId, 1, JSON.stringify({ room: { title: `Listed ${i}` } }));
+    listRoom.run(roomId, now, now);
+    seedBounty(store, { bountyId, roomId, state: "funded", deadlineMs: now + 3600e3 });
+    ids.push(bountyId);
+  }
+  insertRoom.run("secret-room", 1, JSON.stringify({ room: { title: "Secret" } }));
+  seedBounty(store, { bountyId: "b-secret", roomId: "secret-room", state: "funded", deadlineMs: now + 3600e3 });
+  const db = store.db, prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const res = await get("/api/opportunities.json?limit=100");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.opportunities.map(row => row.bountyId).sort(), ids);
+  assert.equal(JSON.stringify(body).includes("b-secret"), false);
+  assert.equal(JSON.stringify(body).includes("poster-member"), false);
+});

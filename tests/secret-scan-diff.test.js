@@ -42,7 +42,7 @@ import {
   parseDiff,
   scanAddedUnits,
 } from "../scripts/secret-scan-diff.mjs";
-import { ALLOWLIST, SKIP_FILES } from "../scripts/secret-scan-check.mjs";
+import { ALLOWLIST, SKIP_FILES, SAFE_ENTROPY_TOKENS } from "../scripts/secret-scan-check.mjs";
 import { scanText } from "../server/secret-scan.mjs";
 
 const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -279,7 +279,7 @@ test("zero false positives against the origin/main tree", () => {
         }
         if (buf.length > 2 * 1024 * 1024) continue;
         if (buf.subarray(0, 8000).includes(0)) continue; // binary
-        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST })) {
+        for (const f of scanText(buf.toString("utf8"), { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS })) {
           findings.push(`${rel}:${f.line} [${f.rule}]`);
         }
       }
@@ -312,4 +312,29 @@ test("the gate's own new files do not self-flag", () => {
   }
   const findings = scanAddedUnits(units, allowlist);
   assert.deepEqual(findings, [], `self-flagged files:\n${findings.join("\n")}`);
+});
+
+test("rotation path exceptions never conceal a credential elsewhere on the same line", () => {
+  const paths = [
+    '$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt',
+    'repos/$REPO/issues/$OLD_ISSUE/comments?per_page=100',
+    '$SCRATCH/fb-repo/fallback/jill-20260926T214500Z.md',
+  ];
+  for (const candidate of paths) {
+    const findings = scanAddedUnits([{ path: 'scripts/rotation-cutover.sh', line: 1,
+      text: `path="${candidate}"; ${fakePassword()}` }], []);
+    assert.ok(findings.some(finding => finding.includes('[generic-secret]')), `credential beside ${candidate} must remain detectable`);
+  }
+});
+
+
+test("exact entropy exceptions retain other entropy tokens and credential patterns", () => {
+  for (const token of SAFE_ENTROPY_TOKENS) {
+    assert.deepEqual(scanText(token, { safeEntropyTokens: SAFE_ENTROPY_TOKENS }), []);
+    const withCredential = scanText(`${token} ${fakeGithubToken()}`, { safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+    assert.ok(withCredential.some(finding => finding.rule === "github-token"));
+  }
+  const shapedCredential = fakeGithubToken();
+  assert.ok(scanText(shapedCredential, { safeEntropyTokens: [shapedCredential] }).some(finding => finding.rule === "github-token"),
+    "an entropy exception never exempts credential-shaped tokens from pattern rules");
 });

@@ -229,10 +229,10 @@ Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
             commits on branch room-state (from origin/main if missing) and
             pushes; never force-pushes; never touches main.
   sweep     [--dry-run]
-            Lease sweep: expired working claims get a RECLAIM strike-one nudge
-            (@-mention, 4h grace); strike-two releases the task back to
-            submitted with no lane; illegal transitions get a RECLAIM
-            rejection notice.
+            Lease sweep: expired working/submitted claims get a RECLAIM
+            strike-one nudge (@-mention, 4h grace); strike-two releases the
+            task back to submitted with no lane; illegal transitions get a
+            RECLAIM rejection notice.
   receipts-scan [--post] [--dry-run]
             Completed tasks / merged PRs older than 24h without a room-receipt
             block. --post posts one prose digest comment (no protocol prefix;
@@ -269,17 +269,6 @@ gh_api() { # args... -> stdout JSON; dies on failure
 }
 
 fetch_comments() { # -> JSON array of all comments on the board issue
-  # Test-only escape hatch: when ROOM_BOARD_FIXTURE points at a JSON file
-  # holding a comments array, use it instead of the network. This keeps unit
-  # tests that drive board-reading verbs (e.g. `backlog pull`'s overlap
-  # guard) offline and fast; paginating the whole live board exceeds test
-  # spawn timeouts as the board grows. Never set in production or cron —
-  # live guards must always read the live board (fail closed).
-  if [ -n "${ROOM_BOARD_FIXTURE:-}" ]; then
-    [ -f "$ROOM_BOARD_FIXTURE" ] || die "ROOM_BOARD_FIXTURE not found: $ROOM_BOARD_FIXTURE"
-    cat "$ROOM_BOARD_FIXTURE"
-    return 0
-  fi
   gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100" 2>/dev/null \
     | jq -s 'add // []' \
     || die "failed to fetch board comments from $(board_addr)"
@@ -719,17 +708,24 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             ($e[$k] // null) as $m
             | if ($m | not) then .
               else ($m.t) as $tid
-              # Strike stamps only bite live held claims. A stamp replayed
-              # against a terminal or already-released claim is ignored, so a
-              # rogue or duplicate strike can never flip a done claim back to
-              # submitted (2026-09-19: strike-two hit completed
+              # Strike stamps bite working- or submitted-state held claims
+              # (2026-09-26: submitted-state rot fix — a claim that never
+              # moved submitted→working previously had no expiry path: the
+              # sweep never nominated it and the reducer ignored its stamps.
+              # The two-strike takeover now applies uniformly, per §4
+              # "when a lease expires with no heartbeat, expiry is
+              # two-strike"). A stamp replayed against a terminal,
+              # suspended, or already-released claim is ignored, so a
+              # rogue or duplicate strike can never flip a done claim back
+              # to submitted (2026-09-19: strike-two hit completed
               # RC-2026-09-18-031).
               | if (($k == "strike_one") or ($k == "strike_two"))
                    and ((.tasks[$tid] // null) != null)
-                   and (state_word(.tasks[$tid].state) != "working"
+                   and ((state_word(.tasks[$tid].state) != "working"
+                         and state_word(.tasks[$tid].state) != "submitted")
                         or ((.tasks[$tid].lane // null) == null)) then
                   .log += [{id:$cid, at:$at, kind:"reclaim", task_id:$tid, ok:true,
-                            ignored:($k + " ignored: claim not working/held")}]
+                            ignored:($k + " ignored: claim not held (working/submitted)")}]
                 elif $k == "strike_one" and ((.tasks[$tid] // null) != null) then
                   # F1/F2: strike-one is set-once. Strike stamps are
                   # unauthenticated comment text: anyone who can post can
@@ -891,7 +887,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
 
 build_state() { # -> state JSON on stdout (live board)
   local comments now n wm newest now_op ref ref_src
-  comments="$(fetch_comments)"
+  comments="$(fetch_comments)" || return 1
   # Board reference clock: the GitHub API Date header is a true board-server
   # reading of "now". Fallback: the newest board comment timestamp, which is
   # a lower bound on board time (it can only ever reveal a behind operator
@@ -1661,7 +1657,11 @@ sweep_decide() { # $1 = state JSON, $2 = now epoch -> dry-run plan or live posts
         fi
       fi
     fi
-  done < <(printf '%s' "$st" | jq -c '.tasks[] | select(.state == "working" and .lane != null and ((.terminal // false) | not))')
+  # Strike candidates: working OR submitted held claims whose lease expired.
+  # (2026-09-26: submitted-state claims were previously never nominated, so a
+  # claim that never moved submitted→working had no expiry path at all —
+  # the submitted-state rot gap. Suspended claims stay out of scope.)
+  done < <(printf '%s' "$st" | jq -c '.tasks[] | select((.state == "working" or .state == "submitted") and .lane != null and ((.terminal // false) | not))')
   while IFS= read -r ill; do
     [ -n "$ill" ] || continue
     local task_id from attempted by at cid noticed
@@ -1887,15 +1887,30 @@ cmd_jev_shadow() {
 }
 
 cmd_metrics() {
-  local since=""
+  local since="" since_epoch=""
   while [ $# -gt 0 ]; do case "$1" in
     --since) need_val "metrics" "$1" "$#" "${2:-}"; since="$2"; shift 2 ;;
     *) die "metrics: unknown flag $1" ;;
   esac; done
+  if [ -n "$since" ]; then
+    if [[ "$since" =~ ^(.*)([+-])([0-9]{2}):?([0-9]{2})$ ]]; then
+      local base="${BASH_REMATCH[1]}Z" sign="${BASH_REMATCH[2]}" hh="${BASH_REMATCH[3]}" mm="${BASH_REMATCH[4]}"
+      local base_epoch
+      base_epoch="$(iso_epoch "$base" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+      local off=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+      if [ "$sign" = "+" ]; then
+        since_epoch=$(( base_epoch - off ))
+      else
+        since_epoch=$(( base_epoch + off ))
+      fi
+    else
+      since_epoch="$(iso_epoch "$since" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+    fi
+  fi
   local comments n wm st lo hi days cpd
   comments="$(fetch_comments)"
-  if [ -n "$since" ]; then
-    comments="$(printf '%s' "$comments" | jq --arg s "$since" '[.[] | select(.created_at >= $s)]')"
+  if [ -n "$since_epoch" ]; then
+    comments="$(printf '%s' "$comments" | jq --argjson s "$since_epoch" '[.[] | select((.created_at | fromdateiso8601) >= $s)]')"
   fi
   n="$(printf '%s' "$comments" | jq 'length')"
   wm="$(printf '%s' "$comments" | jq 'map(.id) | max // 0')"
@@ -2038,12 +2053,15 @@ cmd_backlog() {
       local ov state_tmp
       # Build the board state once and hand it to the guard: without --state,
       # cmd_overlaps rebuilds it with a full paginated board fetch itself.
-      # (Fetch failure keeps the old tolerance: empty result, pull proceeds.)
+      # An unreadable board is unknown ownership, never evidence of free files.
       state_tmp="$(mktemp)"
-      if build_state > "$state_tmp" 2>/dev/null; then
-        ov="$(cmd_overlaps --state "$state_tmp" --files "$files" 2>/dev/null || true)"
-      else
-        ov=""
+      if ! build_state > "$state_tmp"; then
+        rm -f "$state_tmp"
+        die "backlog pull: cannot verify current board ownership; retry after the board is readable"
+      fi
+      if ! ov="$(cmd_overlaps --state "$state_tmp" --files "$files")"; then
+        rm -f "$state_tmp"
+        die "backlog pull: overlap check failed; no files were claimed"
       fi
       rm -f "$state_tmp"
       if [ -n "$ov" ] && printf '%s' "$ov" | grep -v '(unclaimed)$' | grep -q .; then

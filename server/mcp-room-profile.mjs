@@ -9,6 +9,7 @@
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -291,17 +292,30 @@ function listWork(store, secret, args) {
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
+  const replyRequests = replyListing?.requests.map(request => ({
+    id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
+    nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+  })) ?? null;
   return {
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
-    work
+    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   };
 }
 
 async function callLandTool(store, secret, name, args) {
   const auth = store.authenticate(secret, args.roomId);
+  // add/remove/report are room writes; the read-only tier applies to them
+  // exactly as it does to command-backed writes (issue #993).
+  if (name !== "list_land_queue") {
+    enforceAutonomyTierForAction({
+      db: store.db, roomId: args.roomId, state: store.room(args.roomId).state, actor: auth.member, action: name,
+      fail: (status, code, message) => { throw new ServiceError(status, code, message); },
+    });
+  }
   const memberId = auth.member.id;
   if (name === "list_land_queue") return store.landQueue.list(args.roomId, memberId);
   if (name === "add_land_item") {

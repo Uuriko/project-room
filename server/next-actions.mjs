@@ -37,7 +37,6 @@
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
-import { workClaimRegistry } from "./work-claim-routes.mjs";
 
 class NextActionsError extends Error {
   constructor(code, message) { super(message); this.name = "NextActionsError"; this.code = code; }
@@ -317,7 +316,7 @@ export class NextActions {
     } catch { /* newcomers unavailable */ }
     const workClaims = [];
     try {
-      for (const item of workClaimRegistry.list(roomId) ?? []) {
+      for (const item of this.store.workClaims.list(roomId) ?? []) {
         if (item?.owner !== memberId || item?.state !== "claimed") continue;
         const leaseMs = typeof item.leaseExpiresAt === "string" ? Date.parse(item.leaseExpiresAt) : NaN;
         workClaims.push({ id: item.id, title: item.title, state: item.state, leaseExpiresAtMs: Number.isFinite(leaseMs) ? leaseMs : null });

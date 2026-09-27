@@ -7,7 +7,7 @@
 #   gh api -i /rate_limit                        -> Date header (board clock)
 #   gh api --paginate repos/.../issues/.../comments -> canned comments JSON
 #   gh api repos/.../issues/...                  -> {"comments": N}
-# Everything else returns {}.
+# Unexpected calls fail; the fake cannot silently accept writes.
 #
 # Env: FAKE_GH_COMMENTS (JSON array of comment objects),
 #      FAKE_GH_DATE (HTTP-date string, e.g. "Sat, 26 Sep 2026 21:30:00 GMT").
@@ -42,6 +42,7 @@ if [ "$mode" = "rate" ]; then
   exit 0
 fi
 
+[ -n "$mode" ] || { printf "unexpected gh call: %s\n" "$*" >&2; exit 91; }
 body="{}"
 if [ "$mode" = "comments" ]; then
   body="${FAKE_GH_COMMENTS:-[]}"

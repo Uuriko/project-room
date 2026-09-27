@@ -1,3 +1,4 @@
+import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
 // the public join tools, behind Authorization: Bearer pri_….
 //
@@ -99,6 +100,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
   const identity = { roomId, memberId: auth.member.id };
+  if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
+  if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
   if (isHelpTool(name)) {
     const command = buildHelpCommand(name, rest);
     return recorded(store, secret, roomId, identity, command, receipt => recordedHelpAction(name, command, receipt));

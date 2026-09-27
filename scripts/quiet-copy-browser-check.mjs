@@ -30,9 +30,9 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     const { fixture, page, errors, origin } = await setup(t, viewport);
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    // Auth first paint is Welcome + Google + More options. Keys, invite,
+    // Auth first paint is the wordmark + Google/email + More options. Keys, invite,
     // GitHub/email/magic/passkey/recovery, and session restore stay collapsed.
-    assert.equal(await page.locator("#auth-title").textContent(), "Welcome to Project Room");
+    assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
     assert.equal(await page.locator("#google-signin").isVisible(), true);
     assert.equal(await page.locator("#signin-more").textContent(), "More options");
     assert.equal(await page.locator("#signin-more").isVisible(), true);
@@ -52,7 +52,11 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.locator("#key-signin > summary").click();
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
-    await clickChrome(page, "#refresh-button");
+    assert.equal(await page.locator(".topbar").isVisible(), false, "healthy signed-out entry has no utility-only navbar");
+    await page.reload();
+    await page.locator("#auth-panel").waitFor({ state: "visible" });
+    await page.locator("#signin-more").click();
+    await page.locator("#key-signin > summary").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");

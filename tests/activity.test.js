@@ -175,6 +175,33 @@ test("activity list: paging, type filter, and validation", async t => {
   assert.equal((await f.call("/api/rooms/commons/activity")).status, 401, "no credential, no feed");
 });
 
+test("marking 100 activity events read succeeds when SQL rejects more than 100 binds", async t => {
+  const f = await serve(t);
+  const insert = f.store.db.prepare("INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at) VALUES('commons','mention','owner','Owner',?,'','maya',1,NULL)");
+  const ids = [];
+  for (let i = 0; i < 100; i++) ids.push(Number(insert.run(`bind-${i}`).lastInsertRowid));
+  const db = f.store.db, prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const marked = await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.mayaKey, data: { ids } });
+  assert.equal(marked.status, 200);
+  assert.equal(marked.body.read, 100);
+  assert.equal(db.prepare("SELECT count(*) n FROM activity_events WHERE user_id='maya' AND read_at IS NULL").get().n, 0);
+});
+
 test("unread count, mark read, mark all read", async t => {
   const f = await serve(t);
   seedActivity(f);

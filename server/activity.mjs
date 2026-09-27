@@ -20,8 +20,7 @@
 // never recorded without its triggering message/reaction. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
-import { extractMentions } from "./mentions.mjs";
-import { resolveMentionTarget } from "./mention-lifecycle.mjs";
+import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
@@ -129,11 +128,8 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
     const body = typeof data.body === "string" ? data.body : "";
     const identityNames = identityNamesFor(store, roomId);
     const recipients = new Map(); // userId -> { type, threadId }
-    let names = [];
-    try { names = extractMentions(body); } catch { names = []; }
-    for (const name of names) {
-      const target = resolveMentionTarget(members, identityNames, name, senderId);
-      if (target && !recipients.has(target)) recipients.set(target, { type: "mention", threadId: "" });
+    for (const target of resolveMentionTargetsInText(members, identityNames, body, senderId)) {
+      recipients.set(target, { type: "mention", threadId: "" });
     }
     let threadRootId = "";
     if (data.replyToId) {
@@ -287,11 +283,14 @@ export function markActivityRead(store, token, roomId, data, expectedSessionBind
   const member = auth.member;
   return store.transaction(() => {
     const now = store.now();
-    const placeholders = data.ids.map(() => "?").join(",");
-    const result = store.db.prepare(
-      `UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL AND id IN (${placeholders})`
-    ).run(now, roomId, member.id, ...data.ids);
-    return { ...viewerEnvelope(auth, roomId), read: result.changes };
+    // One row per statement. The route accepts 200 ids, and an IN list plus
+    // the three scope binds exceeds Durable Object SQL's 100-bind limit.
+    const update = store.db.prepare(
+      "UPDATE activity_events SET read_at=? WHERE room_id=? AND user_id=? AND read_at IS NULL AND id=?"
+    );
+    let read = 0;
+    for (const id of data.ids) read += update.run(now, roomId, member.id, id).changes;
+    return { ...viewerEnvelope(auth, roomId), read };
   });
 }
 

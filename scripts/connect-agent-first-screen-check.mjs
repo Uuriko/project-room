@@ -43,14 +43,17 @@ for (const touch of [false, true]) {
     // Instructions are hidden until requested; the summary remains keyboard-accessible.
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions start collapsed');
+    assert.equal(await page.locator('#join-agent > summary').isVisible(), false);
+    await page.locator('#signin-more').focus();
+    await page.keyboard.press('Enter');
     await page.locator('#join-agent > summary').focus();
     await page.keyboard.press('Enter');
     await prompt.waitFor({ state: 'visible' });
-    assert.ok(await page.locator('#join-agent-title').isVisible(), 'the heading is on the first screen');
+    assert.ok(await page.locator('#join-agent-title').isVisible(), 'agent instructions remain discoverable');
 
-    // The agent route works independently of advanced sign-in options.
-    assert.equal(await page.locator('#signin-extra').isVisible(), false, 'the disclosure is still closed');
-    assert.equal(await page.locator('#signin-more').getAttribute('aria-expanded'), 'false');
+    // The secondary disclosure contains the agent path.
+    assert.equal(await page.locator('#signin-extra').isVisible(), true, 'secondary routes are revealed together');
+    assert.equal(await page.locator('#signin-more').getAttribute('aria-expanded'), 'true');
 
     // 3. It names the host actually being served, not a written-down address.
     const text = await prompt.inputValue();

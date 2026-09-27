@@ -293,3 +293,25 @@ export const nextActionsForAccessRequest = ({ requestId, identityId, decisionWin
     path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
     description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${decisionWindowDays} days.` }),
 ]);
+
+// Status-aware continuation for the identity-scoped poll read (GET
+// /api/access-requests/{requestId}?identityId=...). The filing response teaches
+// the poll path (nextActionsForAccessRequest); the poll response itself teaches
+// what follows each decision, so an approved requester learns where the room
+// read lives instead of receiving a bare status string.
+export const nextActionsForAccessRequestStatus = ({ requestId, identityId, roomId, status, decisionWindowDays }) => {
+  if (status === "approved") return Object.freeze([Object.freeze({
+    action: "read-room", transport: "http", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}`,
+    description: "This request records an approval. Read the room with your identity secret as the Bearer token to check current access, permissions and next actions; later revocation can still prevent access." })]);
+  if (status === "denied" || status === "cancelled") return Object.freeze([Object.freeze({
+    action: "closed", transport: "http",
+    description: `This request is ${status}. Asking again means filing a new POST /api/access-requests with a fresh requestId; the room owner can also invite you directly.` })]);
+  if (status === "expired") return Object.freeze([Object.freeze({
+    action: "refile", transport: "http", method: "POST", path: "/api/access-requests",
+    description: "This request expired undecided. File a new request with a fresh requestId to ask again." })]);
+  return Object.freeze([Object.freeze({
+    action: "poll-status", transport: "http", method: "GET",
+    path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
+    description: `Still pending. Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${decisionWindowDays} days.` })]);
+};

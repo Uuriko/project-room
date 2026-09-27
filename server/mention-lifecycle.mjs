@@ -55,33 +55,37 @@ export function effectiveMentionState({ state, timeoutAt }, nowMs) {
   return state;
 }
 
-// Resolve an @name to a room member id. `members` is the room projection's
-// members map ({ memberId: { displayName, kind, active } });
-// `identityNames` maps memberId -> linked agent-identity display name.
-// Match order: memberId, then displayName, then identity display name —
-// all case-insensitive, first match wins. Skips the sender and inactive
-// members; returns null when nothing resolves (never invent a recipient).
+// Exact ids take precedence over names. Display-name prefixes end at a
+// whitespace boundary ("Claude" in "Claude (Cowork)", not "Cl"), and only
+// resolve when unique across the active roster, including the sender.
+function mentionCandidates(members, identityNames) {
+  const candidates = [];
+  for (const [memberId, member] of Object.entries(members ?? {})) {
+    if (!member || member.active === false) continue;
+    [memberId, member.displayName, identityNames?.[memberId]].forEach((name, rank) => {
+      if (typeof name !== "string" || !name.trim()) return;
+      candidates.push({ memberId, lower: name.toLowerCase(), rank });
+      if (rank === 1) {
+        for (const match of name.matchAll(/\s+/g)) {
+          if (match.index > 0) candidates.push({ memberId, lower: name.slice(0, match.index).toLowerCase(), rank: 3 });
+        }
+      }
+    });
+  }
+  return candidates;
+}
+
+function uniqueTarget(candidates, senderMemberId) {
+  if (!candidates.length) return null;
+  const rank = Math.min(...candidates.map(candidate => candidate.rank));
+  const ids = new Set(candidates.filter(candidate => candidate.rank === rank).map(candidate => candidate.memberId));
+  return ids.size === 1 && !ids.has(senderMemberId) ? [...ids][0] : null;
+}
+
 export function resolveMentionTarget(members, identityNames, name, senderMemberId) {
-  if (typeof name !== "string" || name.length === 0) return null;
-  const lower = name.toLowerCase();
-  const entries = Object.entries(members ?? {});
-  const eligible = ([memberId, member]) =>
-    member && member.active !== false && memberId !== senderMemberId;
-  for (const [memberId] of entries) {
-    if (!eligible([memberId, members[memberId]])) continue;
-    if (memberId.toLowerCase() === lower) return memberId;
-  }
-  for (const [memberId, member] of entries) {
-    if (!eligible([memberId, member])) continue;
-    const display = typeof member.displayName === "string" ? member.displayName.toLowerCase() : "";
-    if (display !== "" && display === lower) return memberId;
-  }
-  for (const [memberId, member] of entries) {
-    if (!eligible([memberId, member])) continue;
-    const identity = typeof identityNames?.[memberId] === "string" ? identityNames[memberId].toLowerCase() : "";
-    if (identity !== "" && identity === lower) return memberId;
-  }
-  return null;
+  if (typeof name !== "string" || !name) return null;
+  return uniqueTarget(mentionCandidates(members, identityNames)
+    .filter(candidate => candidate.lower === name.toLowerCase()), senderMemberId);
 }
 
 export const mentionStateSchema = `
@@ -104,44 +108,28 @@ export const mentionStateSchema = `
   );
 `;
 
-// Resolve every @mention in a message body to member ids, matching whole
-// display names that contain spaces or punctuation ("@Test producer",
-// "@Claude (Cowork)"). The single-token parse could only ever see "@Test",
-// so members with multi-word names were never mentioned at all. At each "@"
-// (not glued to a preceding word, email or handle) the longest member id,
-// display name or linked identity name that matches case-insensitively and
-// ends at a word boundary wins; ties keep resolveMentionTarget's order
-// (member id, then display name, then identity name). Skips the sender and
-// inactive members, never invents a recipient, and returns ids in first
-// appearance order without duplicates.
-//
-// `@_Name` is a silent mention (Zulip). Skip it here so wake, push, and
-// mention rows never see it. The text is left unchanged for the renderer.
+// Resolve explicit @mentions using the longest complete label first, then
+// exact-id/name precedence and uniqueness. Never fall back from an ambiguous
+// longer label to a shorter recipient. Silent @_mentions, email addresses,
+// inactive members, and self-mentions do not create delivery targets.
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
   if (typeof text !== "string" || text.length === 0 || text.length > 20000) return [];
-  const candidates = [];
-  for (const [memberId, member] of Object.entries(members ?? {})) {
-    if (!member || member.active === false || memberId === senderMemberId) continue;
-    const names = [memberId, member.displayName, identityNames?.[memberId]];
-    names.forEach((name, rank) => {
-      if (typeof name === "string" && name.trim().length > 0) candidates.push({ memberId, lower: name.toLowerCase(), rank });
-    });
-  }
-  if (candidates.length === 0) return [];
+  const candidates = mentionCandidates(members, identityNames);
   const lowerText = text.toLowerCase(), found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
     const nameAt = at + 1;
-    let best = null;
+    let matches = [], longest = 0;
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
       if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
       if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
-      if (!best || candidate.lower.length > best.lower.length
-        || (candidate.lower.length === best.lower.length && candidate.rank < best.rank)) best = candidate;
+      if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
+      if (candidate.lower.length === longest) matches.push(candidate);
     }
-    if (best && !found.includes(best.memberId)) found.push(best.memberId);
+    const target = uniqueTarget(matches, senderMemberId);
+    if (target && !found.includes(target)) found.push(target);
   }
   return found;
 }

@@ -22,6 +22,8 @@ import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG } from "./agent-webhook-subscriptions.mjs";
+import { isRoomAccessToken } from "./guest-agent-links.mjs";
+import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView } from "./room-key-presence.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -633,7 +635,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // arrived while the agent was offline); the host acknowledges them via
   // POST /api/agent-heartbeats/ack once handled. GET reads the agent's
   // host presence. heartbeats:report posts and acks; heartbeats:read
-  // reads. The owner identity secret grants both.
+  // reads. The owner identity secret grants both. A room access key for a
+  // single-room linked agent may report and read pull-only presence for
+  // itself; wake URLs and push stay on the identity secret.
+  const heartbeatActor = (req, scope) => isRoomAccessToken(bearer(req))
+    ? roomKeyPresenceAuth(store, bearer(req))
+    : agentAuth(req, scope);
   const heartbeatNext = pendingWakes => pendingWakes.length > 0
     ? [Object.freeze({ action: "ack-wakes", method: "POST", path: "/api/agent-heartbeats/ack",
         description: "Acknowledge the wake signals you received (signalIds) so they stop being returned on the next heartbeat." })]
@@ -641,7 +648,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const reportHeartbeat = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-heartbeat:${remoteAddress}`, 120);
-    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    const roomKey = isRoomAccessToken(bearer(req));
+    let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+    const initialIdentity = auth.identityId;
     const data = await body(req);
     // RC-2026-09-24-203: the body stays backward-compatible — hostId + mode
     // are required, wakeUrl / cadenceSeconds / pushNotification are optional.
@@ -649,16 +658,29 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId") || !Object.hasOwn(data, "mode"))
       reject(422, "invalid_heartbeat", "hostId and mode (wakeable|pull-only) are required; wakeUrl, cadenceSeconds, and pushNotification are optional");
+    if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
     // Subscribe-time SSRF guard: the push url's hostname must resolve to a
     // public address BEFORE the sync heartbeat() upsert stores anything.
-    // Shape validation (token, auth) happens inside heartbeat().
-    if (data.pushNotification !== undefined && data.pushNotification !== null) {
+    // Shape validation (token, auth) happens inside heartbeat(). A room key
+    // never reaches this check: pull-only refuses pushNotification first.
+    else if (data.pushNotification !== undefined && data.pushNotification !== null) {
       await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
     }
-    const { host, pendingWakes, pushConfigured, pushSuspended, reachability } = store.agentHeartbeats.heartbeat({
-      agentId: auth.identityId, hostId: data.hostId, mode: data.mode,
-      wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
-      pushNotification: data.pushNotification ?? null });
+    const { host, pendingWakes, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
+      auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+      if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
+      let hostId = data.hostId;
+      if (roomKey) {
+        assertRoomKeyPullOnly(store, auth.identityId, data);
+        hostId = roomKeyHostId(auth, data.hostId);
+        assertRoomKeyPullOnly(store, auth.identityId, { ...data, hostId });
+      }
+      const result = store.agentHeartbeats.heartbeat({
+        agentId: auth.identityId, hostId, mode: data.mode,
+        wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
+        pushNotification: data.pushNotification ?? null });
+      return roomKey ? { ...result, pendingWakes: store.agentHeartbeats.pendingWakes(auth.identityId, { roomId: auth.roomId }) } : result;
+    });
     // A suspended push subscription tells the agent how to re-arm it: POST
     // a fresh pushNotification on the next heartbeat.
     const next = [...heartbeatNext(pendingWakes)];
@@ -671,17 +693,22 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-heartbeat-ack:${remoteAddress}`, 120);
-    const auth = agentAuth(req, requiredScope("heartbeats:report"));
+    let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+    const initialIdentity = auth.identityId;
     const data = await body(req);
     if (!data || !exact(data, ["signalIds"]) || !Array.isArray(data.signalIds))
       reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field");
-    return json(res, 200, store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds }));
+    return json(res, 200, store.transaction(() => {
+      auth = heartbeatActor(req, requiredScope("heartbeats:report"));
+      if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
+      return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null });
+    }));
   });
 
   const readHeartbeats = translate(async (req, res) => {
-    const auth = agentAuth(req, requiredScope("heartbeats:read"));
+    const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-heartbeats-read:${auth.identityId}`, 120);
-    return json(res, 200, store.agentHeartbeats.statusOf(auth.identityId));
+    return json(res, 200, auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
   });
 
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {

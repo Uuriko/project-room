@@ -4,6 +4,8 @@
 // its own draft), routing, and handoffs — plus restart persistence, room
 // scoping, and the typed error codes.
 import test from "node:test";
+import { request as httpRequest } from "node:http";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -635,4 +637,39 @@ test("room scoping: collab data never crosses rooms", async t => {
   // A commons member cannot reach the den's collab routes at all.
   const forbidden = await get(f, `${den}/assignments`, f.humanKey);
   assert.ok([401, 403].includes(forbidden.status), `expected 401/403, got ${forbidden.status}`);
+});
+
+for (const scenario of ["revoked credential", "demoted agent"]) test(`collab refuses ${scenario} during body upload without a note`, { timeout: 10000 }, async t => {
+  const f = setup(t); await f.serve();
+  const token = f.store.issueAccessKey("commons", agentIdOf(f));
+  const data = JSON.stringify({ threadId: "slow-upload", body: "must not be written" });
+  let observed;
+  const authenticated = new Promise(resolve => { observed = resolve; });
+  const original = f.store.authenticate.bind(f.store);
+  f.store.authenticate = (...args) => {
+    const result = original(...args);
+    if (args[0] === token) { f.store.authenticate = original; observed(); }
+    return result;
+  };
+  t.after(() => { f.store.authenticate = original; });
+  let upload;
+  const response = new Promise((resolve, reject) => {
+    upload = httpRequest(new URL("/api/rooms/commons/collab/notes", f.origin), { method: "POST", headers: {
+      authorization: `Bearer ${token}`, "content-type": "application/json", "content-length": Buffer.byteLength(data)
+    } }, res => {
+      let value = ""; res.setEncoding("utf8"); res.on("data", part => { value += part; });
+      res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(value) }));
+    });
+    upload.on("error", reject);
+  });
+  t.after(() => upload.destroy());
+  upload.write(data.slice(0, 1));
+  await authenticated;
+  if (scenario === "revoked credential") f.store.revoke(token);
+  else setTier(f.store.db, "commons", agentIdOf(f), "t1_readonly");
+  upload.end(data.slice(1));
+  const result = await response;
+  assert.equal(result.status, scenario === "revoked credential" ? 401 : 403);
+  assert.equal(result.body.error.code, scenario === "revoked credential" ? "unauthenticated" : "agent_readonly");
+  assert.deepEqual(f.store.collab.listThreadNotes("commons", "slow-upload"), []);
 });
