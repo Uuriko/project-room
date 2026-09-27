@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T13:28:17Z · board: Uuriko/project-room#266 · watermark: 5855662532 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
+<!-- generated: 2026-09-27T13:58:30Z · board: Uuriko/project-room#266 · watermark: 5855662532 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=76579442cf807c2dcf2230bcef9ab9b5bc7ed1250cc655eb8c88341139ee60f3 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -218,7 +218,6 @@ tests/referral-invites.test.js | instinct | RC-2026-09-27-004, RC-2026-09-27-005
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-004 | instinct | working | 2026-09-27T13:53:59Z | server/referral-invites.mjs, tests/referral-invites.test.js
 RC-2026-09-27-005 | instinct | working | 2026-09-27T14:13:24Z | server/referral-invites.mjs, tests/referral-invites.test.js
 
 ## unclaimed-lanes
