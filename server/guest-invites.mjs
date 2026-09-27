@@ -10,6 +10,7 @@
 // The ga1. token is never posted publicly. Storage is purely additive
 // (guest_invites + guest_members tables, IF NOT EXISTS, no schema version
 // bump), following the wake-queue / heartbeat additive pattern.
+import { guestCapabilities, guestCapabilitySchema } from "./guest-capability-scopes.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
@@ -42,6 +43,7 @@ export const GUEST_BADGE_SUFFIX = " (guest)";
 // outside guest:*; the per-request gate in RoomStore#command refuses any
 // non-guest command type outright (dual-check with this issuance table).
 export const GUEST_INVITE_TIERS = Object.freeze({
+  ...guestCapabilities,
   observer: Object.freeze(["guest:read", "guest:post"]),
   contributor: Object.freeze(["guest:read", "guest:post", "guest:draft"]),
 });
@@ -65,7 +67,7 @@ export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 // Concurrent external guests per room. The existing ga1. ceiling
 // (GUEST_AGENT_MAX_JOINS = 10) stays as the absolute member cap.
 export const GUEST_INVITE_MAX_ACTIVE_PER_ROOM = 5;
-const GUEST_ACCESS_TEXT = "Read the room and its history, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.";
+const GUEST_ACCESS_TEXT = "Observer reads and chats; read_only cannot write. chat_only can post and react through the narrow chat feed, not read room state. Contributor may draft. No work lifecycle, invites, polls, or administration.";
 
 const RESERVED_GUEST_NAMES = ["guest", "guest agent", "owner", "room owner", "admin", "administrator", "system", "moderator"];
 
@@ -172,6 +174,8 @@ export function guestInviteContract() {
     tiers: {
       observer: [...GUEST_INVITE_TIERS.observer],
       contributor: [...GUEST_INVITE_TIERS.contributor],
+      read_only: [...GUEST_INVITE_TIERS.read_only],
+      chat_only: [...GUEST_INVITE_TIERS.chat_only],
     },
     credentialTtlMs: {
       default: GUEST_CREDENTIAL_TTL_DEFAULT_MS,
@@ -237,6 +241,10 @@ export class GuestInvites {
     return verifySchemaText(this.db, guestInviteSchema, "Guest invite")(opts);
   }
 
+  verifyCapabilitySchema(opts) {
+    return verifySchemaText(this.db, guestCapabilitySchema, "Guest capability")(opts);
+  }
+
   verifySelfServeSchema(opts) {
     return verifySchemaText(this.db, guestSelfServeSchema, "Guest self-serve")(opts);
   }
@@ -282,7 +290,8 @@ export class GuestInvites {
     if (!row) return null;
     const member = this.store.room(row.room_id).state.members[memberId];
     if (!member || member.active === false) return null;
-    return row.tier;
+    const hasOverrides = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='guest_capability_scopes'").get();
+    return (hasOverrides ? this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='member' AND id=?").get(memberId)?.scope : null) ?? row.tier;
   }
 
   // Journaled guest-seat deactivation shared by the expiry sweep and the LRU
@@ -411,7 +420,7 @@ export class GuestInvites {
 
   mint(token, roomId, details, binding) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
-    const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
+    const allowed = ["requestId", "roomId", "guestLabel", "tier", "scope", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const { requestId, guestLabel, expectedOwnerRevision } = details;
     if (!validId(requestId) || !Number.isSafeInteger(expectedOwnerRevision) || expectedOwnerRevision < 0) {
@@ -422,6 +431,7 @@ export class GuestInvites {
       fail(422, "invalid_guest_invite", "Name the guest project so the invite list stays readable");
     }
     const tier = "observer";
+    if (details.scope !== undefined && !Object.hasOwn(guestCapabilities, details.scope)) fail(422, "invalid_guest_invite", "Scope is read_only or chat_only");
     if (details.tier !== undefined && details.tier !== "observer") {
       fail(422, "invalid_guest_invite", "Invites mint at observer; the owner upgrades to contributor explicitly");
     }
@@ -441,7 +451,14 @@ export class GuestInvites {
       this.store.guestAgentLinks.sweepExpired(token, roomId, binding);
       const prior = this.db.prepare("SELECT * FROM guest_invites WHERE room_id=? AND minted_by_member_id=? AND issue_request_id=?")
         .get(roomId, auth.member.id, requestId);
-      if (prior) return { ...this.issued(prior, roomId), duplicate: true };
+      if (prior) {
+        if (prior.guest_label !== guestLabel.trim() || prior.tier !== tier
+          || prior.credential_ttl_ms !== credentialTtlMs || prior.redeem_by - prior.created_at !== redeemWindowMs)
+          fail(409, "idempotency_conflict", "Request ID was used for different invite terms");
+        const priorScope = this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='invite' AND id=?").get(prior.id)?.scope ?? null;
+        if (priorScope !== (details.scope ?? null)) fail(409, "idempotency_conflict", "Request ID was used for a different guest capability");
+        return { ...this.issued(prior, roomId), duplicate: true };
+      }
       if (this.db.prepare("SELECT count(*) n FROM guest_invites").get().n >= 5000) fail(409, "pilot_limit", "Invite retention limit reached");
       const code = newInviteCode();
       const now = this.store.now();
@@ -451,17 +468,19 @@ export class GuestInvites {
         VALUES(?,?,?,?,?,?,?,?,?,?,?, 'active')`)
         .run(inviteId, hash(code), roomId, tier, credentialTtlMs, guestLabel.trim(),
           auth.member.id, auth.account.id, requestId, now, now + redeemWindowMs);
+      if (details.scope) this.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('invite',?,?)").run(inviteId, details.scope);
       const row = this.inviteRow(hash(code));
       return { ...this.issued(row, roomId, code), duplicate: false };
     });
   }
 
   issued(row, roomId, code) {
+    const tier = this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='invite' AND id=?").get(row.id)?.scope ?? row.tier;
     const out = {
       inviteId: row.id,
       roomId,
-      tier: row.tier,
-      scopes: [...GUEST_INVITE_TIERS[row.tier]],
+      tier,
+      scopes: [...GUEST_INVITE_TIERS[tier]],
       credentialTtlMs: row.credential_ttl_ms,
       redeemBy: row.redeem_by,
       guestLabel: row.guest_label,
@@ -480,11 +499,12 @@ export class GuestInvites {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
       const room = this.store.room(row.room_id).state.room;
+      const tier = this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='invite' AND id=?").get(row.id)?.scope ?? row.tier;
       return {
         room: { id: room.id, title: room.title },
         kind: "guest-invite",
-        tier: row.tier,
-        scopes: [...GUEST_INVITE_TIERS[row.tier]],
+        tier,
+        scopes: [...GUEST_INVITE_TIERS[tier]],
         access: GUEST_ACCESS_TEXT,
         credentialTtlMs: row.credential_ttl_ms,
         redeemBy: row.redeem_by,
@@ -525,20 +545,20 @@ export class GuestInvites {
       const seat = this.seatOf(roomId, identity.identityId);
       const existingMember = seat && room.state.members[seat.member_id];
       let memberId;
-      let tier = row.tier;
+      let tier = this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='invite' AND id=?").get(row.id)?.scope ?? row.tier;
       let duplicate = false;
       if (existingMember && existingMember.active !== false && isGuestAgentMemberId(existingMember.id)) {
         // The same face reuses its member. A new invite upgrades nothing
         // by itself; tier changes stay an explicit owner decision.
         memberId = existingMember.id;
-        tier = seat.tier;
+        tier = this.guestTierOf(existingMember.id);
         duplicate = true;
       } else if (existingMember && existingMember.kind === "agent" && isGuestAgentMemberId(existingMember.id)) {
         // The same identity's seat was deactivated (owner disconnect or
         // expiry sweep). Reactivate it identity-bound instead of failing
         // seat_taken forever on the deterministic id.
         memberId = existingMember.id;
-        tier = seat.tier;
+        tier = this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='member' AND id=?").get(existingMember.id)?.scope ?? seat.tier;
         duplicate = true;
         room = this.reactivateGuestSeat(roomId, room, row.minted_by_member_id, row.id, existingMember);
       } else {
@@ -584,6 +604,7 @@ export class GuestInvites {
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
           .run(memberId, roomId, identity.identityId, row.tier, row.id, now);
+        if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('member',?,?)").run(memberId, tier);
       }
       // Burn the invite: single-use, bound to the identity that redeemed it.
       this.db.prepare("UPDATE guest_invites SET status='redeemed', redeemed_at=?, redeemed_by_identity_id=?, redeemed_member_id=? WHERE id=? AND status='active'")
@@ -842,7 +863,7 @@ export class GuestInvites {
           void code_hash; void minted_by_account_id;
           return {
             inviteId: row.id,
-            tier: row.tier,
+            tier: this.db.prepare("SELECT scope FROM guest_capability_scopes WHERE kind='invite' AND id=?").get(row.id)?.scope ?? row.tier,
             credentialTtlMs: row.credential_ttl_ms,
             guestLabel: row.guest_label,
             mintedByMemberId: row.minted_by_member_id,
@@ -935,14 +956,15 @@ export class GuestInvites {
   // on every command, so the change takes effect immediately.
   upgrade(token, roomId, memberId, tier, binding) {
     if (!isGuestAgentMemberId(memberId)) fail(422, "invalid_guest_invite", "That member is not a guest");
-    if (!Object.hasOwn(GUEST_INVITE_TIERS, tier)) fail(422, "invalid_guest_invite", "Tier is observer or contributor");
+    if (!Object.hasOwn(GUEST_INVITE_TIERS, tier)) fail(422, "invalid_guest_invite", "Unsupported guest capability");
     return this.store.transaction(() => {
       this.ownerGate(token, roomId, binding);
       const seat = this.db.prepare("SELECT tier FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
+      const effectiveTier = seat && this.guestTierOf(memberId);
       if (!seat) fail(404, "guest_not_found", "No guest seat with that member id");
       const member = this.store.room(roomId).state.members[memberId];
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
-      if (seat.tier === tier) return { memberId, tier, unchanged: true };
+      if (effectiveTier === tier) return { memberId, tier, unchanged: true };
       // The tier change is journaled as a MEMBER_ACCESS_CHANGED carrying
       // exactly the validator's four fields — no `tier` key: the tier itself
       // lives in guest_members, and the journal records the owner as actor
@@ -953,8 +975,10 @@ export class GuestInvites {
         type: T.MEMBER_ACCESS_CHANGED,
         data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: true },
       }, binding);
-      this.db.prepare("UPDATE guest_members SET tier=? WHERE member_id=? AND room_id=?").run(tier, memberId, roomId);
-      return { memberId, tier, unchanged: false };
+      this.db.prepare("UPDATE guest_members SET tier=? WHERE member_id=? AND room_id=?").run(Object.hasOwn(guestCapabilities, tier) ? "observer" : tier, memberId, roomId);
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('member',?,?) ON CONFLICT(kind,id) DO UPDATE SET scope=excluded.scope").run(memberId, tier);
+      else this.db.prepare("DELETE FROM guest_capability_scopes WHERE kind='member' AND id=?").run(memberId);
+      return { memberId, tier, scopes: [...GUEST_INVITE_TIERS[tier]], unchanged: false };
     });
   }
 

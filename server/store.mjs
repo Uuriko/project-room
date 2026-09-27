@@ -66,7 +66,8 @@ import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
+import { guestCapabilitySchema, guestCapabilities } from "./guest-capability-scopes.mjs";
+import { GuestInvites, GUEST_INVITE_TIERS, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
@@ -812,6 +813,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
+        this.guestInvites.verifyCapabilitySchema({ allowAbsent: true }); // #890: optional guest capability overrides; read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
@@ -1021,6 +1023,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      this.db.exec(guestCapabilitySchema);
       // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
@@ -2415,6 +2418,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch,identity_secret_hash) VALUES(?,?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null, identitySecretHash);
     return token;
   }
+  // Capability evaluated from durable seat state on every request, not from the
+  // credential's issuance snapshot. Legacy ga1 and self-serve seats remain observer.
+  guestCapability(auth) {
+    if (!auth?.member || !isGuestAgentMemberId(auth.member.id)) return null;
+    return this.guestInvites.guestTierOf(auth.member.id) ?? "observer";
+  }
+  requireGuestRead(auth, { chat = false } = {}) {
+    const tier = this.guestCapability(auth);
+    if (tier === "chat_only" && !chat) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
+  }
+  requireGuestWrite(auth, { chat = false } = {}) {
+    const tier = this.guestCapability(auth);
+    if (tier === "read_only" || tier === "chat_only" && !chat)
+      fail(403, "guest_scope_denied", "Guest members cannot perform this action");
+  }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
     // Round-2 #101: multi-room agent identities. One identity secret works in
     // every room the identity is linked to; rooms keep sovereignty via link/unlink.
@@ -2540,6 +2558,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
@@ -2560,7 +2579,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // F3: derived, read-time change list for one work item from its own revision
     // events. Never a write; the event log stays the only record.
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const guestAuth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(guestAuth);
       const room = this.room(roomId);
       const item = room.state.workItems[workItemId];
       if (!item) fail(404, "work_not_found", "Choose an existing work item");
@@ -2575,6 +2595,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
+      this.requireGuestRead(auth);
       if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) fail(422, "invalid_charter_revision", "Choose an instructions version");
       const current = charterContext(room.state.room);
       const selected = revision ?? current.revision;
@@ -2597,6 +2618,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   workSessions(token, roomId, { status = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (status != null && !isSessionStatus(status)) fail(422, "invalid_session_status", "Choose one session status");
       const room = this.room(roomId);
       const sessions = listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() });
@@ -2882,7 +2904,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const search = opts.search ?? null;
     if (search !== null && (typeof search !== "string" || !search.trim() || search.length > 80)) fail(422, "invalid_search", "Search is 1 to 80 characters");
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
@@ -2913,7 +2936,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Round-2 #106: JSONL event-log export for audit/portability. Streams
   // {sequence, event} lines; the consumer replays them in order for #107.
   *exportEvents(token, roomId, expectedSessionBinding = null) {
-    this.authenticate(token, roomId, expectedSessionBinding);
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    this.requireGuestRead(auth);
     const sequence = this.room(roomId).sequence;
     const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
     let after = 0;
@@ -2970,7 +2994,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // reply tree (messages whose replyToId chains back to the root).
   messageThread(token, roomId, messageId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const guestAuth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(guestAuth);
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const root = room.state.messages.find(m => m.id === messageId);
@@ -3000,6 +3025,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
@@ -3029,7 +3055,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // each provider is currently working on. Members-only read.
   providerHeartbeats(token, roomId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       const { members } = this.roomAuthority(roomId);
       const room = this.room(roomId);
       const now = this.now();
@@ -3065,6 +3092,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
         fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
       }
@@ -3086,6 +3114,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
@@ -3097,6 +3126,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
@@ -3113,6 +3143,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
       const room = this.room(roomId);
@@ -3123,6 +3154,41 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return { ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  // A separate chat projection avoids passing room/work/audit fields through
+  // the general event feed. Cursors may skip non-chat events but their bodies
+  // and types never enter this response. DMs remain restricted to their pair.
+  chatAfter(token, roomId, after = 0, limit = 50, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+        fail(422, "invalid_cursor", "Invalid chat cursor or limit");
+      const sequence = this.roomAuthority(roomId).sequence;
+      if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history");
+      const rows = this.db.prepare(`SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
+        AND json_extract(body,'$.type') IN (?,?) ORDER BY sequence LIMIT ?`)
+        .all(roomId, after, T.MESSAGE_POSTED, T.MESSAGE_REACTION_SET, limit + 1);
+      const page = rows.slice(0, limit);
+      const indexedMessages = new Map(this.room(roomId).state.messages.map(message => [message.id, message]));
+      const canSee = message => Boolean(message && message.body !== null && !message.deletedAt
+        && !message.workItemId && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id))
+        && (!message.replyToId || canSee(indexedMessages.get(message.replyToId))));
+      const messages = page.map(({ sequence, body }) => {
+        const chatEvent = JSON.parse(body);
+        if (chatEvent.type === T.MESSAGE_REACTION_SET) {
+          if (!canSee(indexedMessages.get(chatEvent.data.messageId))) return null;
+          return { sequence, kind: "reaction", from: chatEvent.actorId,
+            messageId: chatEvent.data.messageId, reaction: chatEvent.data.reaction, active: chatEvent.data.active };
+        }
+        const messageId = chatEvent.data.messageId ?? chatEvent.id;
+        const message = indexedMessages.get(messageId);
+        if (!canSee(message) || message.replyToId && !canSee(indexedMessages.get(message.replyToId))) return null;
+        return { sequence, kind: "message", from: chatEvent.actorId, messageId,
+          body: message.body, replyToId: message.replyToId ?? null, at: chatEvent.at };
+      }).filter(Boolean);
+      const next = page.at(-1)?.sequence ?? after;
+      return { roomId, messages, next, hasMore: rows.length > limit };
     });
   }
   eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
@@ -3137,6 +3203,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.flipExpiredMentions(roomId);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
       if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
       for (const [name, value] of [["since", since], ["until", until]]) {
@@ -3214,6 +3281,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // write-capable transaction, which cannot nest inside a read-only one.
     // authenticate() is a pure read, so calling it twice is harmless.
     const preAuth = this.authenticate(token, roomId, expectedSessionBinding);
+    this.requireGuestRead(preAuth);
     const dmRequests = this.dmConsents.pendingFor(roomId, preAuth.member.id);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -3338,6 +3406,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestRead(auth);
       const room = this.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
@@ -3362,6 +3431,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     validateCommand(command);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      this.requireGuestWrite(auth, { chat: true });
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and set
       // reactions; drafts (message.posted carrying a workItemId) need the
@@ -3371,9 +3441,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (auth.member && isGuestAgentMemberId(auth.member.id)) {
         const tier = this.guestInvites.guestTierOf(auth.member.id) ?? "observer";
         const isDraft = command.type === T.MESSAGE_POSTED && command.data?.workItemId != null;
-        const allowed = command.type === T.MESSAGE_REACTION_SET
-          || (command.type === T.MESSAGE_POSTED && (!isDraft || tier === "contributor"));
+        const scopes = Object.hasOwn(guestCapabilities, tier) ? guestCapabilities[tier] : GUEST_INVITE_TIERS[tier];
+        const narrowChat = tier !== "chat_only" || command.type !== T.MESSAGE_POSTED
+          || Object.keys(command.data ?? {}).every(key => ["messageId", "body", "replyToId"].includes(key));
+        const allowed = scopes?.includes("guest:post") && narrowChat && (command.type === T.MESSAGE_REACTION_SET
+          || (command.type === T.MESSAGE_POSTED && (!isDraft || scopes.includes("guest:draft"))));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
+        if (tier === "chat_only") {
+          const targetId = command.type === T.MESSAGE_REACTION_SET ? command.data.messageId : command.data?.replyToId;
+          if (targetId) {
+            const target = this.room(roomId).state.messages.find(m => m.id === targetId);
+            const messages = new Map(this.room(roomId).state.messages.map(message => [message.id, message]));
+            const visible = message => Boolean(message && message.body !== null && !message.deletedAt && !message.workItemId
+              && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id))
+              && (!message.replyToId || visible(messages.get(message.replyToId))));
+            if (!visible(target))
+              fail(403, "guest_scope_denied", "Guest members cannot perform this action");
+          }
+        }
       }
       const fingerprint = hash(canonical(command));
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
@@ -3861,6 +3946,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Terminal states return the current state unchanged (idempotent).
   acknowledgeMention(token, roomId, messageEventId, expectedSessionBinding = null) {
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    this.requireGuestWrite(auth);
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
       const messageRow = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?").get(roomId, messageEventId);
@@ -3891,6 +3977,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // card's "N mentions unacknowledged"). Supports state and after filters.
   listMentions(token, roomId, { state = null, after = null, memberId = null } = {}, expectedSessionBinding = null) {
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    this.requireGuestRead(auth);
     const target = memberId ?? auth.member.id;
     if (typeof target !== "string" || !target) fail(422, "invalid_mention_query", "memberId must be a non-empty string");
     if (state !== null && !["delivered", "acknowledged", "responded", "timed_out"].includes(state)) {
