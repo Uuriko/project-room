@@ -107,7 +107,7 @@ test('bounty draft receipts match durable event sequences and replay after Worke
     const response = await mf.dispatchFetch('http://localhost/bounty-receipts');
     assert.equal(response.status, 200, await response.clone().text());
     const receipt = await response.json();
-    assert.deepEqual(receipt, { sequences: [1, 2], drafts: 2 });
+    assert.deepEqual(receipt, { sequences: [2, 3], drafts: 2 });
     await mf.dispose(); mf = new Miniflare(config);
     const resumed = await mf.dispatchFetch('http://localhost/bounty-receipts-resume');
     assert.equal(resumed.status, 200, await resumed.clone().text());

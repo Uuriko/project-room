@@ -57,7 +57,9 @@ export class StoreTestRoom {
         assert.deepEqual(retry.body, result.body);
       }
       assert.notEqual(receipts[0].seq, receipts[1].seq);
-      assert.deepEqual(escrow.listEvents(room), receipts);
+      const feed = escrow.listEvents(room);
+      assert.equal(feed[0].type, 'genesis.issued');
+      assert.deepEqual(feed.slice(1), receipts);
       assert.equal(escrow.listBounties(room).length, 2);
       return Response.json({ sequences: receipts.map(event => event.seq), drafts: 2 });
     }
