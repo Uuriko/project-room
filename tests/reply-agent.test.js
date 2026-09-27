@@ -597,6 +597,9 @@ test("a fresh recipient discovers how to answer from messages and verifies closu
   const adapter = await f.mcp();
   const messages = (await adapter.call("room_read_messages", {})).result.structuredContent;
   const inbox = (await adapter.call("room_read_inbox", {})).result.structuredContent;
+  const listing = inbox.next.find(step => step.action === "list-open-requests").nextRead;
+  const listed = (await adapter.call(listing.tool, listing.arguments)).result.structuredContent;
+  assert.deepEqual(listed.requests.map(request => request.id), [id]);
   const incoming = messages.messages.find(message => message.messageId === id);
   assert.deepEqual(inbox.directMessages.find(message => message.messageId === id).nextRead, incoming.nextRead);
   assert.equal(incoming.requestKind, "reply");
