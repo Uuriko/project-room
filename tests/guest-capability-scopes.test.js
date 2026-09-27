@@ -147,4 +147,8 @@ test("chat projection hides work drafts, other people's DMs, deleted bodies and 
     data: { id: "reply-private", type: "message.posted", data: { messageId: "reply-private", body: "bad", replyToId: "private" } } }));
   denied(await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
     data: { id: "react-private", type: "message.reaction_set", data: { messageId: "private", reaction: "👍", active: true } } }));
+  for (const messageId of ["reply-to-private", "erase-me", "draft-hidden"]) {
+    denied(await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
+      data: { id: `react-${messageId}`, type: "message.reaction_set", data: { messageId, reaction: "👍", active: true } } }));
+  }
 });

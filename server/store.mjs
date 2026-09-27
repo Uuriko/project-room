@@ -3442,7 +3442,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const targetId = command.type === T.MESSAGE_REACTION_SET ? command.data.messageId : command.data?.replyToId;
           if (targetId) {
             const target = this.room(roomId).state.messages.find(m => m.id === targetId);
-            if (!target || target.workItemId || target.toMemberId && ![target.authorId, target.toMemberId].includes(auth.member.id))
+            const visible = message => message && message.body !== null && !message.deletedAt && !message.workItemId
+              && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id));
+            const parent = target?.replyToId && this.room(roomId).state.messages.find(m => m.id === target.replyToId);
+            if (!visible(target) || target.replyToId && !visible(parent))
               fail(403, "guest_scope_denied", "Guest members cannot perform this action");
           }
         }
