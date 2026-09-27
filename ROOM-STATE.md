@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T19:58:51Z · board: Uuriko/project-room#266 · watermark: 5859322518 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
+<!-- generated: 2026-09-27T20:28:18Z · board: Uuriko/project-room#266 · watermark: 5859541475 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -128,8 +128,8 @@ server/next-actions.mjs | jill | RC-2026-09-25-911 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
-server/referral-invites.mjs | instinct | RC-2026-09-27-004 | working
-server/referral-invites.mjs | instinct | RC-2026-09-27-005 | working
+server/referral-invites.mjs | (none) | RC-2026-09-27-004 | submitted
+server/referral-invites.mjs | (none) | RC-2026-09-27-005 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/sms-ingest.mjs | quill | RC-2026-09-18-008 | submitted
 server/sms-outbound.mjs | quill | RC-2026-09-18-008 | submitted
@@ -192,8 +192,8 @@ tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-27-1153 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
-tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
-tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
+tests/referral-invites.test.js | (none) | RC-2026-09-27-004 | submitted
+tests/referral-invites.test.js | (none) | RC-2026-09-27-005 | submitted
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
@@ -221,7 +221,7 @@ server/agent-plugin-manifest.mjs |  | RC-2026-09-18-009, RC-2026-09-18-019
 server/bounty-disputes.mjs |  | RC-2026-09-17-026, RC-2026-09-18-003
 server/dispute-arbiters.mjs |  | RC-2026-09-18-001, RC-2026-09-18-002
 server/google-oauth.mjs | quill | RC-2026-09-19-075, RC-2026-09-19-076
-server/referral-invites.mjs | instinct | RC-2026-09-27-004, RC-2026-09-27-005
+server/referral-invites.mjs |  | RC-2026-09-27-004, RC-2026-09-27-005
 src/app.js | quill | RC-2026-09-19-068, RC-2026-09-19-072, RC-2026-09-19-080, RC-2026-09-19-083, RC-2026-09-19-085
 tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105, RC-2026-09-27-2715
 tests/agent-identities.test.js | , quill | RC-2026-09-18-018, RC-2026-09-19-086
@@ -229,7 +229,7 @@ tests/agent-plugin-manifest.test.js |  | RC-2026-09-18-009, RC-2026-09-18-019
 tests/bounty-disputes.test.js |  | RC-2026-09-17-026, RC-2026-09-18-003
 tests/dispute-arbiters.test.js |  | RC-2026-09-18-001, RC-2026-09-18-002
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131, RC-2026-09-27-1153
-tests/referral-invites.test.js | instinct | RC-2026-09-27-004, RC-2026-09-27-005
+tests/referral-invites.test.js |  | RC-2026-09-27-004, RC-2026-09-27-005
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -352,8 +352,8 @@ server/next-actions.mjs | jill | RC-2026-09-25-911 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
-server/referral-invites.mjs | instinct | RC-2026-09-27-004 | working
-server/referral-invites.mjs | instinct | RC-2026-09-27-005 | working
+server/referral-invites.mjs | (none) | RC-2026-09-27-004 | submitted
+server/referral-invites.mjs | (none) | RC-2026-09-27-005 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/sms-ingest.mjs | quill | RC-2026-09-18-008 | submitted
 server/sms-outbound.mjs | quill | RC-2026-09-18-008 | submitted
@@ -416,8 +416,8 @@ tests/oauth-stateless.test.js | quill | RC-2026-09-19-076 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/ralph-loop.test.js | jill | RC-2026-09-27-1153 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
-tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
-tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
+tests/referral-invites.test.js | (none) | RC-2026-09-27-004 | submitted
+tests/referral-invites.test.js | (none) | RC-2026-09-27-005 | submitted
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-prose-claims.test.js | quill-s2 | RC-2026-09-17-001 | submitted
 tests/route-docs-check.test.js | quill | RC-2026-09-19-081 | submitted
@@ -431,5 +431,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2406 threshold=1500 rotation_due=yes watcher=active open_claims=58 prose_open=4 unfenced_prose=73 files_claimed=146 overlap_files=23 watermark=5859322518
+board_comments=2457 threshold=1500 rotation_due=yes watcher=active open_claims=58 prose_open=4 unfenced_prose=73 files_claimed=146 overlap_files=23 watermark=5859541475
 
