@@ -114,7 +114,11 @@ test("S4: unparseable strike-one stamp is refused, never recorded", { skip: "BUG
     "expected a refused-stamp log entry");
 });
 
-test("S7: strike-two at exactly strike_one_at + 14400s releases the claim", () => {
+test("S7: strike-two at exactly strike_one_at + 14400s is rejected (grace boundary is <=)", () => {
+  // 2026-09-27 (deep audit 5850228747): the 4h grace boundary is <= 14400.
+  // Sweep only proposes past 14400s (-gt), so the reducer must reject a
+  // stamp at exactly +14400s — otherwise a forged stamp at the boundary
+  // would be honored while the enforcer itself never posts there.
   const s1 = "2026-09-27T02:00:01Z";
   const s2 = "2026-09-27T06:00:01Z"; // exactly 14400s later
   const st = stateOf(
@@ -123,9 +127,8 @@ test("S7: strike-two at exactly strike_one_at + 14400s releases the claim", () =
      strikeTwoComment(3, s2)],
     "2026-09-27T07:00:00Z"
   );
-  assert.equal(taskOf(st).state, "submitted");
-  assert.equal(taskOf(st).lane, null);
-  assert.equal(taskOf(st).strike_one_at, null);
+  assert.equal(taskOf(st).state, "working");
+  assert.equal(taskOf(st).strike_one_at, s1);
 });
 
 test("S9: heartbeat exactly at strike_one_at does not block strike-two", () => {
@@ -230,7 +233,10 @@ test("W4: sweep plans strike-two when the 4h grace elapsed with no heartbeat", (
 
 test("W5: sweep plans nothing at exactly 14400s after strike-one", () => {
   const out = sweepDry([
-    ...expiredWorking(),
+    // Claim at 15:00Z + 6h = 21:00Z expiry; strike-one at 21:40Z is 40m
+    // after expiry (not premature). Pinned clock 01:40Z is exactly 14400s
+    // after the strike-one.
+    claimComment(1, "2026-09-23T15:00:00Z"),
     strikeOneComment(2, "2026-09-23T21:40:00Z"), // exactly 14400s before the pinned clock
   ]);
   assert.doesNotMatch(out, /PLAN:/);
