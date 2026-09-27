@@ -30,7 +30,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
@@ -1130,9 +1130,9 @@ function syncComposerChrome() {
     // DMs are open by default (2026-09-24): only an explicit denial
     // (blocked/rejected/revoked) is surfaced, so a refusal is never a
     // surprise. No row / pending / approved needs no callout.
-    const recipient = to && state?.members?.[to] ? state.members[to] : null;
-    if (recipient) {
-      note.textContent = `Private — only you and ${recipient.displayName} can see this message.`;
+    const audience = composerAudienceNote(state?.members, to);
+    if (audience) {
+      note.textContent = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
