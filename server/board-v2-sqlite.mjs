@@ -8,13 +8,13 @@
 // implementation with the same interface, per docs/BOARD-V2-DESIGN.md §3.
 //
 // Schema:
-// - board_v2_claims: materialized claim rows (fast reads)
-// - board_v2_events: append-only event log (the watermark)
-// - board_v2_mirror: singleton mirror state
-// - board_v2_idempotency: idempotency key cache
+// - board_vtwo_claims: materialized claim rows (fast reads)
+// - board_vtwo_events: append-only event log (the watermark)
+// - board_vtwo_mirror: singleton mirror state
+// - board_vtwo_idempotency: idempotency key cache
 
 export const boardV2Schema = `
-  CREATE TABLE IF NOT EXISTS board_v2_claims (
+  CREATE TABLE IF NOT EXISTS board_vtwo_claims (
     task_id     TEXT PRIMARY KEY,
     lane        TEXT NOT NULL,
     files       TEXT NOT NULL,
@@ -28,7 +28,7 @@ export const boardV2Schema = `
     last_seq    INTEGER NOT NULL,
     receipts    TEXT NOT NULL DEFAULT '[]'
   );
-  CREATE TABLE IF NOT EXISTS board_v2_events (
+  CREATE TABLE IF NOT EXISTS board_vtwo_events (
     seq       INTEGER PRIMARY KEY AUTOINCREMENT,
     at        TEXT NOT NULL,
     kind      TEXT NOT NULL,
@@ -40,21 +40,21 @@ export const boardV2Schema = `
     mirror_issue   INTEGER,
     mirror_comment INTEGER
   );
-  CREATE TABLE IF NOT EXISTS board_v2_mirror (
+  CREATE TABLE IF NOT EXISTS board_vtwo_mirror (
     id             INTEGER PRIMARY KEY CHECK (id = 1),
     current_issue  INTEGER NOT NULL,
     issues         TEXT NOT NULL DEFAULT '[]'
   );
-  CREATE TABLE IF NOT EXISTS board_v2_idempotency (
+  CREATE TABLE IF NOT EXISTS board_vtwo_idempotency (
     scoped_key TEXT PRIMARY KEY,
     status INTEGER NOT NULL,
     body TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS idx_board_v2_events_kind ON board_v2_events(kind);
-  CREATE INDEX IF NOT EXISTS idx_board_v2_events_task ON board_v2_events(task_id);
-  CREATE INDEX IF NOT EXISTS idx_board_v2_events_lane ON board_v2_events(lane);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_kind ON board_vtwo_events(kind);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_task ON board_vtwo_events(task_id);
+  CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 
 const parse = (text, what) => {
@@ -79,10 +79,10 @@ export function createDurableBoardV2(db, { now = () => Date.now() } = {}) {
   });
 
   // Claims
-  const selectClaim = stmt("SELECT * FROM board_v2_claims WHERE task_id = ?");
-  const selectClaimsByLane = stmt("SELECT * FROM board_v2_claims WHERE lane = ? ORDER BY last_seq ASC");
-  const selectAllClaims = stmt("SELECT * FROM board_v2_claims ORDER BY last_seq ASC");
-  const upsertClaim = stmt(`INSERT INTO board_v2_claims
+  const selectClaim = stmt("SELECT * FROM board_vtwo_claims WHERE task_id = ?");
+  const selectClaimsByLane = stmt("SELECT * FROM board_vtwo_claims WHERE lane = ? ORDER BY last_seq ASC");
+  const selectAllClaims = stmt("SELECT * FROM board_vtwo_claims ORDER BY last_seq ASC");
+  const upsertClaim = stmt(`INSERT INTO board_vtwo_claims
     (task_id, lane, files, lease, lease_h, reason, state, claim_seq, claim_at, heartbeat_at, last_seq, receipts)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(task_id) DO UPDATE SET
@@ -93,33 +93,33 @@ export function createDurableBoardV2(db, { now = () => Date.now() } = {}) {
       receipts=excluded.receipts`);
 
   // Events
-  const insertEvent = stmt(`INSERT INTO board_v2_events
+  const insertEvent = stmt(`INSERT INTO board_vtwo_events
     (at, kind, task_id, lane, payload, supersedes, idempotency_key)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  const selectEvent = stmt("SELECT * FROM board_v2_events WHERE seq = ?");
-  const selectEvents = stmt("SELECT * FROM board_v2_events WHERE seq > ? ORDER BY seq ASC LIMIT ?");
-  const selectEventsByKind = stmt("SELECT * FROM board_v2_events WHERE kind = ? AND seq > ? ORDER BY seq ASC LIMIT ?");
-  const maxSeq = stmt("SELECT MAX(seq) as max_seq FROM board_v2_events");
+  const selectEvent = stmt("SELECT * FROM board_vtwo_events WHERE seq = ?");
+  const selectEvents = stmt("SELECT * FROM board_vtwo_events WHERE seq > ? ORDER BY seq ASC LIMIT ?");
+  const selectEventsByKind = stmt("SELECT * FROM board_vtwo_events WHERE kind = ? AND seq > ? ORDER BY seq ASC LIMIT ?");
+  const maxSeq = stmt("SELECT MAX(seq) as max_seq FROM board_vtwo_events");
 
   // Mirror
-  const selectMirror = stmt("SELECT * FROM board_v2_mirror WHERE id = 1");
-  const upsertMirror = stmt(`INSERT INTO board_v2_mirror (id, current_issue, issues)
+  const selectMirror = stmt("SELECT * FROM board_vtwo_mirror WHERE id = 1");
+  const upsertMirror = stmt(`INSERT INTO board_vtwo_mirror (id, current_issue, issues)
     VALUES (1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET current_issue=excluded.current_issue, issues=excluded.issues`);
-  const selectMirrorEntry = stmt("SELECT seq FROM board_v2_events WHERE mirror_issue = ? AND mirror_comment = ? LIMIT 1");
-  const updateEventMirror = stmt("UPDATE board_v2_events SET mirror_issue = ?, mirror_comment = ? WHERE seq = ?");
+  const selectMirrorEntry = stmt("SELECT seq FROM board_vtwo_events WHERE mirror_issue = ? AND mirror_comment = ? LIMIT 1");
+  const updateEventMirror = stmt("UPDATE board_vtwo_events SET mirror_issue = ?, mirror_comment = ? WHERE seq = ?");
 
   // Idempotency
-  const selectIdem = stmt("SELECT * FROM board_v2_idempotency WHERE scoped_key = ?");
-  const upsertIdem = stmt(`INSERT INTO board_v2_idempotency
+  const selectIdem = stmt("SELECT * FROM board_vtwo_idempotency WHERE scoped_key = ?");
+  const upsertIdem = stmt(`INSERT INTO board_vtwo_idempotency
     (scoped_key, status, body, fingerprint, created_at)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(scoped_key) DO UPDATE SET
       status=excluded.status, body=excluded.body,
       fingerprint=excluded.fingerprint, created_at=excluded.created_at`);
-  const deleteIdem = stmt("DELETE FROM board_v2_idempotency WHERE scoped_key = ?");
-  const countIdem = stmt("SELECT COUNT(*) as n FROM board_v2_idempotency");
-  const oldestIdem = stmt("SELECT scoped_key FROM board_v2_idempotency ORDER BY created_at ASC LIMIT 1");
+  const deleteIdem = stmt("DELETE FROM board_vtwo_idempotency WHERE scoped_key = ?");
+  const countIdem = stmt("SELECT COUNT(*) as n FROM board_vtwo_idempotency");
+  const oldestIdem = stmt("SELECT scoped_key FROM board_vtwo_idempotency ORDER BY created_at ASC LIMIT 1");
 
   const rowToClaim = row => ({
     task_id: row.task_id,
