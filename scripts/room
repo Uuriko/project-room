@@ -204,6 +204,9 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             Read-only file-claim registry check. With --files, reports which
             live claims already hold those files (pre-claim collision check).
             Without --files, reports every file held by 2+ live claims.
+  claim-status --task-id ID [--state PATH]
+            Pre-flight check: print one claim's live state (lane, state,
+            lease expiry, files, last heartbeat, open strikes).
   handoff   --task-id ID --from LANE --to LANE --context "..." [--note "..."] [--dry-run]
             Post [lane]HANDOFF: with room-handoff block + restated claim block
             naming the receiving lane. (Transfers on ACK, not on post.)
@@ -528,6 +531,40 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
       # "it needs a heartbeat" means heartbeats keep the lease alive.
       else (epoch($t.heartbeat_at // $t.claim_at) + $t.lease_h * 3600) end;
 
+    # R3 (2026-09-27, RC-2026-09-27-1145): file-scope parsing for the
+    # reducer-level overlap refusal. A file entry may carry a trailing
+    # parenthesized scope naming the claimed sub-area, e.g.
+    # "server/store.mjs (OTel fanout span only)". An entry with no scope
+    # claims the whole file. Scope text is trimmed and case-folded for
+    # comparison. Entries whose parens do not match the trailing pattern
+    # are treated as unscoped whole-file claims.
+    def filescope($f):
+      (($f | capture("^(?<p>[^()]+?)[ \\t]*\\((?<s>[^()]+)\\)[ \\t]*$")) // null)
+      | if . == null then {path: ($f | trim), scope: null}
+        else {path: (.p | trim), scope: (.s | trim | ascii_downcase)} end;
+    # Overlap semantics (ROOM-PROTOCOL.md section 4e): an unscoped entry
+    # overlaps any entry on the same path; two scoped entries overlap only
+    # when their scopes match exactly after normalization.
+    def scope_overlaps($a; $b):
+      if $a.path != $b.path then false
+      elif ($a.scope == null or $b.scope == null) then true
+      else $a.scope == $b.scope end;
+    # R3: collisions between candidate entries and live claims held by a
+    # DIFFERENT lane. Released claims (lane null after strike-two) and
+    # terminal states never block; same-lane entries never collide.
+    def overlap_hits($lane; $entries):
+      ([$entries[] | {entry: ., parsed: filescope(.)}]) as $want
+      | ([.tasks[]
+          | select(is_live(.state) and (.lane != null)
+                   and (.lane != $lane) and (.released_at == null))]) as $holders
+      | [$want[] as $w
+         | ($holders[] | . as $h
+            | ($h.files[] | {entry: ., parsed: filescope(.)}
+               | select(scope_overlaps($w.parsed; .parsed))
+               | {entry: $w.entry, path: $w.parsed.path,
+                  holder_lane: $h.lane, holder_task: $h.task_id,
+                  holder_entry: .entry}))];
+
     def validate_claim($b):
       []
       | (if (($b["task-id"] // "") == "") then . + ["missing task-id"]
@@ -584,18 +621,36 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
             else ($e.block | validate_claim(.)) as $errs
               | if ($errs | length) > 0 then
                   .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:false, errors:$errs}]
-                else
-                  .tasks[$tid] = {
-                    task_id:$tid, lane:$e.block.lane,
-                    files:(($e.block.files // "") | split(",") | map(trim) | map(select(length > 0))),
-                    lease:$e.block.lease, lease_h:lease_h_of($e.block.lease),
-                    reason:$e.block.reason, state:$e.block.state,
-                    claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
-                    last_block:$e.block, strike_one_at:null, released_at:null,
-                    pending_handoff:null, handoff_voided:false,
-                    receipts:[], missing_receipt:false }
-                  | .lanes += [$e.block.lane]
-                  | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:true}]
+                else ((($e.block.files // "") | split(",") | map(trim) | map(select(length > 0)))) as $fentries
+                  | (overlap_hits($e.block.lane; $fentries)) as $hits
+                  | if ($hits | length) > 0 then
+                      # R3 (2026-09-27, RC-2026-09-27-1145): reducer-level
+                      # refusal closes the TOCTOU gap between the client-side
+                      # overlaps check and board acceptance. A claim whose
+                      # files overlap a live claim held by another lane is
+                      # never registered; the refusal is recorded, never
+                      # silent.
+                      .refused += [{task_id:$tid, by_lane:$e.block.lane, colliding:"files",
+                                    holder_lane:$hits[0].holder_lane, holder_task:$hits[0].holder_task,
+                                    overlapping:$hits, at:$at, comment_id:$cid, via:"fenced"}]
+                      | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:false,
+                                  errors:["file-overlap refused: "
+                                    + ([$hits[]
+                                        | "\(.entry) collides with \(.holder_entry) held by \(.holder_lane) (\(.holder_task))"]
+                                       | join("; "))]}]
+                    else
+                      .tasks[$tid] = {
+                        task_id:$tid, lane:$e.block.lane,
+                        files:$fentries,
+                        lease:$e.block.lease, lease_h:lease_h_of($e.block.lease),
+                        reason:$e.block.reason, state:$e.block.state,
+                        claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
+                        last_block:$e.block, strike_one_at:null, released_at:null,
+                        pending_handoff:null, handoff_voided:false,
+                        receipts:[], missing_receipt:false }
+                      | .lanes += [$e.block.lane]
+                      | .log += [{id:$cid, at:$at, kind:"claim", task_id:$tid, ok:true}]
+                    end
                 end
             end
         elif $e.kind == "status" then
@@ -849,21 +904,36 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
               | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
                           ok:false,
                           errors:["duplicate claim refused; task-id already used"]}]
-            else
-              .tasks[$tid] = {
-                task_id:$tid, lane:$e.lane,
-                files:$e.files, lease:"lease=12h", lease_h:12,
-                reason:$e.reason, state:"submitted",
-                claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
-                last_block:({lane:$e.lane, files:($e.files | join(", ")),
-                             lease:"lease=12h", state:"submitted",
-                             reason:$e.reason, "task-id":$tid, via:"prose"}),
-                strike_one_at:null, released_at:null,
-                pending_handoff:null, handoff_voided:false,
-                receipts:[], missing_receipt:false, prose:true }
-              | .lanes += [$e.lane]
-              | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
-                          ok:true, via:"prose"}]
+            else (overlap_hits($e.lane; $e.files)) as $hits
+              | if ($hits | length) > 0 then
+                  # R3 (2026-09-27, RC-2026-09-27-1145): same reducer-level
+                  # overlap refusal for prose claims — a prose [lane][claim]
+                  # on files held live by another lane is never registered.
+                  .refused += [{task_id:$tid, by_lane:$e.lane, colliding:"files",
+                                holder_lane:$hits[0].holder_lane, holder_task:$hits[0].holder_task,
+                                overlapping:$hits, at:$at, comment_id:$cid, via:"prose"}]
+                  | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
+                              ok:false, via:"prose",
+                              errors:["file-overlap refused: "
+                                + ([$hits[]
+                                    | "\(.entry) collides with \(.holder_entry) held by \(.holder_lane) (\(.holder_task))"]
+                                   | join("; "))]}]
+                else
+                  .tasks[$tid] = {
+                    task_id:$tid, lane:$e.lane,
+                    files:$e.files, lease:"lease=12h", lease_h:12,
+                    reason:$e.reason, state:"submitted",
+                    claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
+                    last_block:({lane:$e.lane, files:($e.files | join(", ")),
+                                 lease:"lease=12h", state:"submitted",
+                                 reason:$e.reason, "task-id":$tid, via:"prose"}),
+                    strike_one_at:null, released_at:null,
+                    pending_handoff:null, handoff_voided:false,
+                    receipts:[], missing_receipt:false, prose:true }
+                  | .lanes += [$e.lane]
+                  | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
+                              ok:true, via:"prose"}]
+                end
             end
         elif $e.kind == "unleased-prose-claim" then
           # Visible, not silent: prose claims that could not be fenced into a
@@ -1435,6 +1505,46 @@ cmd_overlaps() {
          | if (.holders | length) == 0 then "\(.file) | (unclaimed)"
            else "\(.file) | \([.holders[].lane] | unique | sort | join(", ")) | \([.holders[].task] | unique | sort | join(", "))" end)
       end'
+}
+
+# R5 (2026-09-27, RC-2026-09-27-1145): claim-status --task-id ID — pre-flight
+# check. Prints one claim's live board state (lane, state, lease expiry,
+# files, last heartbeat, open strikes) so a lane can verify before drafting
+# a follow-up instead of reading the whole board. --state PATH reads a
+# state JSON snapshot instead of fetching the live board (testing).
+cmd_claim_status() {
+  local task="" state_path=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --task-id) need_val "claim-status" "$1" "$#" "${2:-}"; task="$2"; shift 2 ;;
+    --state) need_val "claim-status" "$1" "$#" "${2:-}"; state_path="$2"; shift 2 ;;
+    *) die "claim-status: unknown flag $1" ;;
+  esac; done
+  [ -n "$task" ] || die "claim-status: --task-id required"
+  local st found
+  if [ -n "$state_path" ]; then
+    st="$(cat "$state_path")"
+  else
+    st="$(build_state)"
+  fi
+  found="$(printf '%s' "$st" | jq -r --arg t "$task" '[.tasks[] | select(.task_id == $t)] | length')"
+  [ "$found" -gt 0 ] 2>/dev/null || die "claim-status: unknown task-id $task"
+  printf '%s' "$st" | jq -r --arg t "$task" '
+    (.tasks[] | select(.task_id == $t)) as $c
+    | [ "task: " + $c.task_id,
+        "lane: " + ($c.lane // "(released)"),
+        "state: " + $c.state,
+        "files: " + (($c.files // []) | join(", ")),
+        "lease: " + ($c.lease // "(none)"),
+        "lease_expires_at: " + ($c.lease_expires_at // "(none)"),
+        "last_heartbeat: " + ($c.heartbeat_at // "(none)"),
+        "open_strikes: "
+          + (if (($c.strike_one_at // null) != null)
+                and (($c.released_at // null) == null)
+             then "strike-one at " + $c.strike_one_at
+             else "(none)" end),
+        "claim_id: " + (($c.claim_id // "(unknown)") | tostring),
+        "claim_at: " + ($c.claim_at // "(unknown)") ]
+    | .[]'
 }
 
 # ---------------------------------------------------------------------------
@@ -2340,7 +2450,7 @@ main() {
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
       guard_enforcer_freshness "$verb"
       "cmd_${verb//-/_}" "$@" ;;
-    claim|heartbeat|release|query|overlaps|handoff|receipt|backlog|_parse|_state|_clock|_sweep-plan|_receipts-plan|jev-shadow)
+    claim|heartbeat|release|query|overlaps|claim-status|handoff|receipt|backlog|_parse|_state|_clock|_sweep-plan|_receipts-plan|jev-shadow)
       # Per-verb --help must not fall through to a live run (2026-09-19:
       # `sweep --help` executed a live sweep because cmd_sweep ignores args).
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac

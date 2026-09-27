@@ -247,6 +247,27 @@ a signal for John (add items or pause the loop).
 
 John's single lever: reorder `BACKLOG.md` (or comment the desired order on
 #266 and a lane applies it). The file is the schedule.
+
+### 4e. File scopes in claims (R3, 2026-09-27)
+
+A claim's `files:` entry may carry a trailing parenthesized scope naming
+the claimed sub-area, e.g. `server/store.mjs (OTel fanout span only)`. An
+entry with no scope claims the whole file. The board reducer
+(`scripts/room rebuild`) refuses a claim whose files overlap another
+lane's *live* claim, recording the refusal — this is the machine closing
+the TOCTOU gap between the client-side `overlaps` pre-check and board
+acceptance. Overlap semantics:
+
+- Same path, either entry unscoped → overlap (an unscoped claim covers the
+  whole file, so it collides with any scoped entry on that file).
+- Same path, both scoped → overlap only when the scope text matches
+  exactly after trimming and case-folding.
+- Different paths → never overlap.
+- Only live claims (`submitted`/`working`/`suspended`) held by a *different*
+  lane block; same-lane entries never collide, and released (strike-two,
+  lane cleared) or terminal (`completed`/`failed`/`cancelled`) claims free
+  their files.
+
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
