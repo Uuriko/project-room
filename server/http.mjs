@@ -167,6 +167,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
+  boardV2Enabled = (globalThis.process?.env ?? {})["ROOM_BOARD_V2_ENABLED"] === "1",
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
   // Human browser push stays off until VAPID keys are present. Node reads
@@ -3379,6 +3380,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // write: per the guest policy they stay out of claims-board
       // participation (same posture as the work-claims funnel).
       if (boardV2Match) {
+        // The database-wide board needs a separate multi-room authorization
+        // review before hosted rollout. Existing room APIs stay available.
+        if (boardV2Enabled !== true) reject(503, "board_v2_disabled", "The coordination board is not enabled on this deployment");
         const lane = auth.member.id;
         if (typeof lane !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(lane)) {
           reject(401, "unauthenticated", "Member id cannot serve as a board lane");
@@ -3843,7 +3847,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "needs-attention" && req.method === "GET") {
         // #662: owner-only rollup of everything awaiting an owner decision.
-        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence));
+        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence, Date.now(), { cursor: url.searchParams.get("cursor") }));
       }
       if (route === "jev-shadow" && req.method === "GET") {
         // Jev-harness shadow-review surface (docs/JEV-GATES.md): owner-only,

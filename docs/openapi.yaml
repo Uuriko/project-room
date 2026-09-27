@@ -3166,6 +3166,10 @@ paths:
       description: >
         Authenticated members list board claims with optional lane/state/file
         filters. Responses are paginated on the board watermark.
+        The entire board/v2 route family is opt-in: authenticated requests
+        receive 503 board_v2_disabled unless ROOM_BOARD_V2_ENABLED=1.
+        The database-wide registry is not room-partitioned; hosted enablement
+        remains pending a separate multi-room authorization review.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -9177,11 +9181,21 @@ paths:
         spend-allowance headroom below 20% (or over), and claim leases expiring
         within 24h. 403 owner_required for anyone else. Each item carries the
         concrete next action so approvals live in the conversation surface
-        instead of a separate admin area.
+        instead of a separate admin area. Returns at most 25 items per page, with
+        actions ahead of informational notices when the queue exceeds 25.
+        itemCount counts all collected items; actionCount counts action-severity
+        items. Informational shadow escalations cover only the five most recent.
+        Use the opaque nextCursor/previousCursor to navigate. If the collected
+        queue changes, continuation restarts at offset zero with reset=true;
+        clients replace the displayed page rather than append it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque continuation returned by this endpoint; stale or invalid cursors restart the first page.
       responses:
-        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, actionCount, pageOffset, reset, nextCursor, previousCursor, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
   /api/rooms/{roomId}/jev-shadow:
     get:

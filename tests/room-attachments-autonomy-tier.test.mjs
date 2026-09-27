@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
+import { demoteToReadonly, setTier } from "../server/autonomy-tiers.mjs";
 
 function serve(t, { start = Date.parse("2026-09-26T12:00:00Z") } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-attachments-tier-"));
@@ -95,4 +95,42 @@ test("room owner is exempt from the tier gate on attachments", t => {
   f.demote("agent2");
   const discarded = f.store.roomAttachments.discard(f.keys.owner, "commons", "f10");
   assert.equal(discarded.status, "discarded");
+});
+
+test("guest-agent members are denied staging, discarding and committing room files; reads stay open", t => {
+  const f = serve(t);
+  // Production guest admission mints member ids carrying the guest-agent-
+  // prefix exactly; the denial keys on that shape, so the fixture does too.
+  const guestId = "guest-agent-att-01";
+  f.send("owner", T.MEMBER_ADDED, { memberId: guestId, displayName: "Guest visit", kind: "agent", permissions: [], accountableHumanId: "owner" });
+  // t2_standard so the guest passes the autonomy tier gate and reaches the
+  // guest denial (the tier gate precedes it, mirroring referral-invites).
+  setTier(f.store.db, "commons", guestId, "t2_standard", { updatedBy: "owner", nowMs: f.clock.now });
+  const guestKey = f.store.issueAccessKey("commons", guestId);
+
+  const staged = capture(() => f.store.roomAttachments.stage(guestKey, "commons", {
+    id: "g1", filename: "n.txt", mediaType: "text/plain", data: fileData()
+  }));
+  assert.equal(staged.status, 403);
+  assert.equal(staged.code, "guest_scope_denied");
+
+  // The guest denial fires before the uploader/owner checks, so discard and
+  // commit on another member's staged file are refused as guest_scope_denied.
+  f.store.roomAttachments.stage(f.keys.agent2, "commons", {
+    id: "own", filename: "n.txt", mediaType: "text/plain", data: fileData()
+  });
+  const discarded = capture(() => f.store.roomAttachments.discard(guestKey, "commons", "own"));
+  assert.equal(discarded.status, 403);
+  assert.equal(discarded.code, "guest_scope_denied");
+
+  const messageId = randomUUID();
+  f.send("owner", T.MESSAGE_POSTED, { messageId, body: "owner message for commit target" });
+  const committed = capture(() => f.store.roomAttachments.commit(guestKey, "commons", { id: "own", messageId }));
+  assert.equal(committed.status, 403);
+  assert.equal(committed.code, "guest_scope_denied");
+
+  // Nothing landed for the guest; the read surface still answers.
+  const rows = f.store.db.prepare("SELECT id FROM room_attachments WHERE room_id=? AND state IN ('staged','committed')").all("commons");
+  assert.deepEqual(rows.map(row => row.id), ["own"]);
+  assert.ok(Array.isArray(f.store.roomAttachments.list(guestKey, "commons").files), "guest reads remain open");
 });

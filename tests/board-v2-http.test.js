@@ -41,7 +41,7 @@ const taskId = () => `RC-2026-09-27-${taskSeq++}`;
 
 async function serveFixture(t) {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store });
+  const server = createRoomServer({ boardV2Enabled: true, store: fixture.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -261,7 +261,7 @@ test("board state survives a full server reopen", async t => {
     const store = new RoomStore(dbPath, { now: () => Date.now() });
     if (fresh) store.initialize(initialRoom());
     const ownerKey = store.issueAccessKey("commons", "owner");
-    const server = createRoomServer({ store });
+    const server = createRoomServer({ store, boardV2Enabled: true });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const request = (path, { method = "GET", data } = {}) => fetch(origin + path, {
