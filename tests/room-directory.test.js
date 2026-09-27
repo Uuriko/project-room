@@ -57,6 +57,27 @@ test("owner toggles discoverability; non-owner is refused", () => {
   assert.equal(off.listedAt, null);
 });
 
+test("feed setting is owner-only, independent of directory listing, and survives re-listing", () => {
+  const store = makeStore({ r1: stateFor("r1") });
+  const dir = new RoomDirectory(store);
+  assert.deepEqual(dir.opportunityStatus("r1", "owner"), { roomId: "r1", enabled: true });
+  assert.equal(errOf(() => dir.opportunityStatus("r1", "alice")).code, "owner_only");
+  assert.equal(errOf(() => dir.setOpportunities("r1", "alice", false)).code, "owner_only");
+  assert.equal(errOf(() => dir.setOpportunities("r1", "owner", "false")).code, "invalid_opportunities");
+  // Opting out before listing must not opt the room into the directory.
+  assert.deepEqual(dir.setOpportunities("r1", "owner", false), { roomId: "r1", enabled: false });
+  assert.deepEqual(dir.list().rooms, []);
+  dir.set("r1", "owner", true);
+  assert.equal(dir.list().rooms.length, 1);
+  assert.equal(dir.opportunityStatus("r1", "owner").enabled, false);
+  dir.set("r1", "owner", false);
+  dir.set("r1", "owner", true);
+  assert.equal(dir.opportunityStatus("r1", "owner").enabled, false);
+  dir.setOpportunities("r1", "owner", true);
+  assert.equal(dir.opportunityStatus("r1", "owner").enabled, true);
+  assert.equal(errOf(() => dir.setOpportunities("missing", "owner", false)).code, "room_not_found");
+});
+
 test("unknown room 404s on owner routes", () => {
   const store = makeStore({ r1: stateFor("r1") });
   const dir = new RoomDirectory(store);
