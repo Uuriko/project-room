@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T11:29:19Z · board: Uuriko/project-room#266 · watermark: 5855391061 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
+<!-- generated: 2026-09-27T11:59:47Z · board: Uuriko/project-room#266 · watermark: 5855496481 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=3f07e23f37721ea4f5b48eddfd5ede3086d532c1ca8f69b6440227d90db14bea -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -229,6 +229,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-27-1153 | 1f3fbd5fd5fa639f9699b638c68f532493b7ea48 | 5855496070
 RC-004 | none | 5855388097
 unknown | none | 5855369237
 RC-2026-09-27-1149 | c84f33cf63feb4cf6f0898c04af8b5f6752de7ea | 5854240111
@@ -238,7 +239,6 @@ RC-2026-09-27-1144 | c6d8caa6e3a62cc5985e23499f9ee685c233a7ca | 5854146859
 unknown | none | 5853799499
 unknown | none | 5853766202
 RC-2026-09-27-1151 | none | 5853554562
-unknown | none | 5853437627
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -407,5 +407,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2378 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5855391061
+board_comments=2380 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5855496481
 
