@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T14:58:44Z · board: Uuriko/project-room#266 · watermark: 5856836224 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
+<!-- generated: 2026-09-27T15:29:24Z · board: Uuriko/project-room#266 · watermark: 5857116918 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=27fed73633e4a6c84ff0bb485e09ed4ecaf690fa764812345d38d297fba2cf44 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-19-071 | quill | submitted | 2026-09-20T03:07:10Z | src/invite-contex
 RC-2026-09-19-072 | quill | submitted | 2026-09-20T03:07:21Z | src/app.js, tests/handoff-renderer.test.js
 RC-2026-09-19-073 | quill | submitted | 2026-09-20T03:18:56Z | server/account-login-methods.mjs, tests/magic-invalidation.test.js
 RC-2026-09-19-075 | quill | submitted | 2026-09-20T03:19:19Z | server/google-oauth.mjs, tests/google-oauth-email.test.js
-… +31 more
+… +32 more
 
 ## file-claims
 file | lane | task-id | state
@@ -100,6 +100,7 @@ server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-18-003 | submitted
+server/bounty-escrow.mjs | jillianai | RC-2026-09-27-1154 | submitted
 server/channel-adapters/index.mjs | quill | RC-2026-09-18-008 | submitted
 server/channel-adapters/messenger.mjs | quill | RC-2026-09-18-008 | submitted
 server/channel-adapters/sms.mjs | quill | RC-2026-09-18-008 | submitted
@@ -161,6 +162,7 @@ tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
 tests/bonds.test.js | (none) | RC-2026-09-24-927 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-17-026 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-18-003 | submitted
+tests/bounty-identity.test.js | jillianai | RC-2026-09-27-1154 | submitted
 tests/channel-messenger-adapter.test.js | quill | RC-2026-09-18-008 | submitted
 tests/channel-sms-adapter.test.js | quill | RC-2026-09-18-008 | submitted
 tests/claim-validate.test.js | (none) | RC-2026-09-24-204 | submitted
@@ -309,6 +311,7 @@ server/board-v2.mjs | jill | RC-2026-09-26-1114 | submitted
 server/bonds.mjs | (none) | RC-2026-09-24-927 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-17-026 | submitted
 server/bounty-disputes.mjs | (none) | RC-2026-09-18-003 | submitted
+server/bounty-escrow.mjs | jillianai | RC-2026-09-27-1154 | submitted
 server/channel-adapters/index.mjs | quill | RC-2026-09-18-008 | submitted
 server/channel-adapters/messenger.mjs | quill | RC-2026-09-18-008 | submitted
 server/channel-adapters/sms.mjs | quill | RC-2026-09-18-008 | submitted
@@ -370,6 +373,7 @@ tests/board-v2.test.js | jill | RC-2026-09-26-1114 | submitted
 tests/bonds.test.js | (none) | RC-2026-09-24-927 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-17-026 | submitted
 tests/bounty-disputes.test.js | (none) | RC-2026-09-18-003 | submitted
+tests/bounty-identity.test.js | jillianai | RC-2026-09-27-1154 | submitted
 tests/channel-messenger-adapter.test.js | quill | RC-2026-09-18-008 | submitted
 tests/channel-sms-adapter.test.js | quill | RC-2026-09-18-008 | submitted
 tests/claim-validate.test.js | (none) | RC-2026-09-24-204 | submitted
@@ -406,5 +410,5 @@ tests/ux-copy.test.js | quill | RC-2026-09-19-083 | submitted
 … +63 more
 
 ## signals
-board_comments=2391 threshold=1500 rotation_due=yes watcher=active open_claims=56 prose_open=3 unfenced_prose=73 files_claimed=141 overlap_files=18 watermark=5856836224
+board_comments=2392 threshold=1500 rotation_due=yes watcher=active open_claims=57 prose_open=4 unfenced_prose=73 files_claimed=143 overlap_files=18 watermark=5857116918
 
