@@ -3455,6 +3455,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       });
       let state;
       try {
+        // New referral attribution requires a real member. Keep this at live
+        // admission so previously accepted events remain replayable, including
+        // exact command retries handled above before this validation.
+        if (command.type === T.MEMBER_ADDED && command.data.referredBy != null) {
+          const referrer = Object.hasOwn(room.state.members, command.data.referredBy)
+            ? room.state.members[command.data.referredBy] : null;
+          if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
+        }
         if (requestMode === "respond") {
           const basis = this.db.prepare("SELECT id,body FROM events WHERE room_id=? AND sequence=?").get(roomId, command.data.contextSequence);
           if (basis?.id !== command.data.contextEventId || JSON.parse(basis.body).type !== T.MESSAGE_POSTED) throw new Error("Stale reply request context sequence");

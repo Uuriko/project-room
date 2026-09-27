@@ -649,7 +649,9 @@ function addMember(state, incoming) {
       throw new Error("referredBy must be a member id");
     }
     if (incoming.data.referredBy === memberId) throw new Error("a member cannot refer themselves");
-    const referrer = Object.hasOwn(state.members, incoming.data.referredBy) ? state.members[incoming.data.referredBy] : null;
+    // Historical events admitted prototype names as referrers. Preserve their
+    // replay; live commands enforce own-member attribution before persistence.
+    const referrer = state.members?.[incoming.data.referredBy];
     if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
   }
   state.members[memberId] = {
