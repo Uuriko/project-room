@@ -21,6 +21,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 async function serve(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-"));
@@ -401,4 +402,36 @@ test("an actual enrolled toString inviter retains private referral admission aut
   assert.equal(store.room("commons").state.members[joined.json.memberId].active, true);
   assert.equal(JSON.stringify(preview.json).includes("toString"), false);
   assert.equal(JSON.stringify(joined.json).includes("toString"), false);
+});
+
+test("guest members cannot mint referral invites", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  // Faithful guest fixture through the real GX guest-invite redeem path:
+  // the member id carries the guest-agent- prefix exactly as production
+  // guest admission produces.
+  const minted = await post(origin, "/api/rooms/commons/guest-invites", {
+    requestId: randomUUID(), guestLabel: "Guest visit", expectedOwnerRevision: 0,
+  }, ownerKey);
+  assert.equal(minted.status, 201);
+  const identity = store.identities.create("Guest Visitor");
+  const keys = generateKeyPair();
+  const cardBody = { name: "Guest Visitor", description: "visiting agent", capabilities: ["chat"] };
+  const redeemed = await post(origin, "/api/guest-invites/redeem", {
+    inviteCode: minted.json.code,
+    card: { ...cardBody, publicKey: keys.publicKey,
+      signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) },
+  }, identity.secret);
+  assert.equal(redeemed.status, 201);
+  const guest = redeemed.json;
+  assert.ok(guest.token.startsWith("ga1."), "guest credential is a guest-agent bearer");
+  assert.ok(guest.member.id.startsWith("guest-agent-"), "member id carries the guest prefix");
+  assert.equal(store.room("commons").state.members[guest.member.id].active, true);
+
+  const attempt = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, guest.token);
+  assert.equal(attempt.status, 403);
+  assert.equal(attempt.json?.error?.code, "guest_scope_denied");
+  // The owner audit ledger must not record a minted token for the guest.
+  assert.equal(store.db.prepare(
+    "SELECT count(*) n FROM referral_invites WHERE inviter_member_id = ? AND status = 'minted'"
+  ).get(guest.member.id).n, 0);
 });

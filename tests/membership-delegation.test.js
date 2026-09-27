@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
@@ -362,4 +365,50 @@ test("missing rollback capture trigger refuses journal verification", t => {
   const { store } = setup(t);
   store.db.exec("DROP TRIGGER membership_delegation_pending_update");
   assert.throws(() => store.delegationJournal.verify(), /operator reconciliation/);
+});
+
+test("HTTP delegation-revoke strips direct admin bits as well as the grant", async t => {
+  // The HTTP route is the only consumer of the partial revoke(); it must
+  // expose the complete revokeEffective() instead, or a direct
+  // manage_members/decide bit survives a demotion.
+  const directory = mkdtempSync(join(tmpdir(), "project-room-delegation-http-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  store.db.exec(accessRequestSchema);
+  store.db.exec(membershipDelegationSchema);
+  const ownerToken = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const post = async (path, body, token) => {
+    const res = await fetch(`${origin}${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: origin, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  };
+
+  const identity = store.identities.create("Demote Me");
+  const linked = store.identities.link(ownerToken, "commons", {
+    identityId: identity.identityId, displayName: "Demote Me", permissions: ["accept_work"],
+  });
+  // Direct member-bit admin authority (the #742 path), alongside a table grant.
+  const before = store.room("commons").state.members[linked.memberId];
+  store.command(ownerToken, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+    memberId: linked.memberId, expectedMemberRevision: before.revision,
+    permissions: [...before.permissions, "manage_members", "decide"], active: true,
+  } });
+  store.delegation.grant(ownerToken, "commons", { identityId: identity.identityId });
+  assert.ok(store.delegation.hasGrant("commons", identity.identityId));
+
+  const revoked = await post("/api/rooms/commons/membership-delegation/revoke",
+    { identityId: identity.identityId }, ownerToken);
+  assert.equal(revoked.status, 200);
+  assert.equal(revoked.json?.identityId, identity.identityId);
+
+  const after = store.room("commons").state.members[linked.memberId];
+  assert.equal(after.permissions.includes("manage_members"), false, "manage_members bit must be stripped");
+  assert.equal(after.permissions.includes("decide"), false, "decide bit must be stripped");
+  assert.equal(store.delegation.hasGrant("commons", identity.identityId), false, "grant row must be revoked");
 });
