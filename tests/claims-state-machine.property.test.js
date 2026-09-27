@@ -140,6 +140,7 @@ function sweepDryRun(comments, boardSec) {
       FAKE_GH_COMMENTS: JSON.stringify(comments),
       FAKE_GH_DATE: new Date(boardSec * 1000).toUTCString(),
       ROOM_CLOCK_OP: String(boardSec),
+      ROOM_TEST_PRS_JSON: "[]", // fixture has no merged deliverables; never ask live GitHub
       ROOM_ENFORCER_ALLOW_STALE: "1",
     },
   });
