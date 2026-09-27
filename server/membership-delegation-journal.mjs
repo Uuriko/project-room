@@ -47,11 +47,13 @@ export class MembershipDelegationJournal {
     const previous = this.db.prepare("SELECT hash FROM membership_delegation_journal WHERE room_id=? ORDER BY sequence DESC LIMIT 1").get(roomId);
     const row = { room_id: roomId, identity_id: identityId, action, actor_id: actorId,
       recorded_at: at, prior_active: Number(priorActive), next_active: Number(nextActive), prior_hash: previous?.hash ?? ZERO };
+    // Read the generated key through SQL: Durable Object run() reports changes,
+    // not Node SQLite's lastInsertRowid. RETURNING is shared by both adapters.
     const inserted = this.db.prepare(`INSERT INTO membership_delegation_journal
       (room_id,identity_id,action,actor_id,recorded_at,prior_active,next_active,prior_hash,hash)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(roomId, identityId, action, actorId, at,
+      VALUES (?,?,?,?,?,?,?,?,?) RETURNING sequence`).get(roomId, identityId, action, actorId, at,
       row.prior_active, row.next_active, row.prior_hash, "pending");
-    row.sequence = Number(inserted.lastInsertRowid);
+    row.sequence = Number(inserted.sequence);
     const hash = rowHash(row);
     this.db.prepare("UPDATE membership_delegation_journal SET hash=? WHERE sequence=?").run(hash, row.sequence);
     // The trigger also records new-writer changes; consume exactly the matching
