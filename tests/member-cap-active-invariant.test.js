@@ -54,7 +54,7 @@ test("invitation acceptance counts active seats and refuses the next admission",
     expectedIssuerMemberRevision: store.room(roomId).state.members.owner.revision,
     expectedSessionBinding: ownerSession.sessionBinding
   });
-  const first = offer("new-member");
+  offer("new-member");
   const redemptionId = randomUUID();
   const accepted = store.acceptInvitation(slot.token, invitationToken, {
     redemptionId, expectedRevision: 0, expectedSessionBinding: target.sessionBinding
