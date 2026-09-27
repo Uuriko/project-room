@@ -145,4 +145,10 @@ Pilot targets are acceptance goals, not estimates: no critical access misunderst
 
 ## Execution record
 
-Implementation and validation receipts will be appended after the fixed candidate is tested. Research and plan alone are not shipment.
+The implementation now includes the invitation scope/recovery repair, visible summary copying, and a correction to hide lifecycle guidance when the viewer has no lifecycle action. The summary remains title plus literal reported text; no identity, evidence link, verification badge or invitation is added to the export.
+
+Independent review selected one relevant security prerequisite from Grok’s frozen manifest: original commit `41417b20` rejects inherited member IDs in reply-history recovery. Its authorship is preserved when integrated. The reviewer reproduced the pre-fix failure, corrected the regression’s prototype target, and ran 24 focused tests. The remaining 17 checkpoints are outside this release and remain pending review.
+
+Request-discovery review caught two issues before landing: legacy messages with ignored request fields need the supported policy stamp before advertising a formal-request pointer; unrelated viewers must not receive a participant-only continuation. Null action templates must produce the normal invalid-response error. These checks supplement the current-context and stale-basis contract.
+
+Final candidate, hosted CI and deployment receipts will be recorded separately after validation. Research, local tests, merge and runtime shipment are distinct states.
