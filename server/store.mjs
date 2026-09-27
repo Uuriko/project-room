@@ -158,6 +158,8 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// Inactive members retain their history, but do not occupy an admission seat.
+export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
 // RC-2026-09-18-012: presented agent API-key credentials ("rak_"+secret).
@@ -2340,7 +2342,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!rolePermissions || permissions.length !== rolePermissions.length || permissions.some((permission, index) => permission !== rolePermissions[index])) {
         fail(409, "invitation_scope_invalid", "Stored invitation grants no longer match its immutable role policy");
       }
-      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       refuseArchivedWrite(room.state);
       const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       let state;
@@ -3443,7 +3445,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         && workItem != null && !isTerminalSession(sessionRecord(workItem).status);
       const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || command.type === T.ROOM_ARCHIVED;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
-      if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       // Graduated autonomy tiers: read fresh from the table on every command,
       // so a demotion to t1_readonly wins on the agent's next write. New
