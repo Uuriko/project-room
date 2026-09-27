@@ -18,6 +18,12 @@ from dynamic_credentials import add_surrogate_to_request
 ALLOWED_HOSTS = ("api.cloudflare.com",)
 BASE = "https://api.cloudflare.com"
 
+# 2026-09-27 (deep audit 5850308933): the script name selects which Worker
+# receives the production bindings. Accept only the known project-room
+# script names; an arbitrary name would deploy the bundle (with production
+# bindings) to the wrong Worker.
+ALLOWED_SCRIPT_NAMES = ("project-room", "project-room-staging")
+
 def api(method, path, body=None, content_type="application/json"):
     data = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else None)
     headers = {}
@@ -65,6 +71,10 @@ def main():
               file=sys.stderr)
         sys.exit(2)
     script_name, account_id, public_dir, bundle_path = sys.argv[1:5]
+    if script_name not in ALLOWED_SCRIPT_NAMES:
+        print(f"refusing: unknown script name {script_name!r} "
+              f"(allowed: {', '.join(ALLOWED_SCRIPT_NAMES)})", file=sys.stderr)
+        sys.exit(2)
     SCRIPT = script_name
 
     # 1. Manifest
