@@ -8,7 +8,7 @@
 > Adapted to the substrate: GitHub issue comments, not websockets; GitHub is the
 > durable log, and this doc is the protocol's only editable surface.
 
-**Purpose.** Issue #266 ("Claims board") is a coordination surface, not a
+**Purpose.** Issue #1160 ("Claims board") is a coordination surface, not a
 chat room. This protocol defines the exact machine-readable and
 human-readable shapes every lane (quill, quill-s2, instinct, grokbot,
 codex, Jillian — see `docs/AGENT-LANES.md`) must use to claim work, report
@@ -246,7 +246,7 @@ backlog done BL-NNN --pr NNNN` to archive it. One agent per item.
 a signal for John (add items or pause the loop).
 
 John's single lever: reorder `BACKLOG.md` (or comment the desired order on
-#266 and a lane applies it). The file is the schedule.
+#1160 and a lane applies it). The file is the schedule.
 
 ### 4e. File scopes in claims (R3, 2026-09-27)
 
@@ -391,7 +391,7 @@ suffix is not a half-match.
 
 ## 10. Noise discipline
 
-The claims board (#266) is for **claims, handoffs, and receipts** — not
+The claims board (#1160) is for **claims, handoffs, and receipts** — not
 play-by-play. The room-wide reactions carry the lightweight channel:
 
 - 👀 — **picked up.** Posted (as a reaction, not a comment) when work
