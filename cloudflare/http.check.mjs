@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { build } from 'esbuild';
@@ -352,5 +354,45 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
     const snapshot = await call(false, '/api/rooms/shared-entry', null, peer.secret);
     assert.equal(snapshot.viewerId, peer.memberId);
     assert.equal(snapshot.state.members[peer.memberId].displayName, 'Cross-entry peer');
+  } finally { await mf.dispose(); }
+});
+
+test('Worker bounty HTTP receipts create distinct durable webhook deliveries without dispatch', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const origin = 'https://room.example.test';
+  const config = { modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
+    durableObjectsPersist: await mkdtemp(join(tmpdir(), 'project-room-cf-bounty-http-')),
+    bindings: { ROOM_ORIGIN: origin } };
+  let mf = new Miniflare(config);
+  const call = async (path, key, data) => {
+    const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
+      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
+        ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
+      ...(data ? { body: JSON.stringify(data) } : {}) });
+    assert.equal(response.status, data ? 201 : 200, await response.clone().text());
+    return response.json();
+  };
+  try {
+    const { ownerKey } = await call('/__test-bounty-provision');
+    const payloads = ['one', 'two'].map(id => ({ title: id, criteria: 'Synthetic unfunded draft',
+      amount: 1, deadline: new Date(Date.now() + 3600000).toISOString(), idempotencyKey: id }));
+    const receipts = [];
+    for (const data of payloads) {
+      const result = await call('/api/rooms/commons/bounties', ownerKey, data);
+      assert.equal(result.bounty.state, 'proposed');
+      receipts.push(result);
+    }
+    const queued = await call('/__test-bounty-queue');
+    assert.equal(queued.deliveries.length, 2, 'each proposal must queue a separate delivery');
+    assert.deepEqual(queued.events.filter(event => event.type === 'bounty.proposed'), receipts.map(result => result.receipt.event));
+    assert.deepEqual(queued.deliveries, receipts.map(result => ({ event_id: `bounty-event-${result.receipt.event.seq}`, state: 'pending', attempts: 0 })));
+    await mf.dispose(); mf = new Miniflare(config);
+    assert.deepEqual(await call('/__test-bounty-queue'), queued); // Also disables dispatch in the restarted fixture.
+    for (let i = 0; i < payloads.length; i++) assert.deepEqual(await call('/api/rooms/commons/bounties', ownerKey, payloads[i]), receipts[i]);
+    assert.deepEqual(await call('/__test-bounty-queue'), queued);
   } finally { await mf.dispose(); }
 });
