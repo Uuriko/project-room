@@ -157,7 +157,7 @@ export function roomTrust(state) {
 // Humans own themselves. An agent belongs to its accountable human, or to
 // the room owner when that sponsor was never recorded.
 export function memberOwnerId(state, memberId) {
-  const member = state?.members?.[memberId];
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
   if (!member) return null;
   if (typeof member.accountableHumanId === "string" && member.accountableHumanId) return member.accountableHumanId;
   if (member.kind === "human") return member.id;
@@ -273,7 +273,7 @@ export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"
 // Owner, manage_members, or invite_member (agents may hold invite_member
 // without manage_members/decide). Used by invite-code mint/redeem.
 export function canInviteMembers(state, memberId) {
-  const member = state?.members?.[memberId];
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
   if (!member || member.active === false) return false;
   if (memberId === state.room?.ownerId) return true;
   return member.permissions.includes("manage_members") || member.permissions.includes("invite_member");
@@ -649,7 +649,7 @@ function addMember(state, incoming) {
       throw new Error("referredBy must be a member id");
     }
     if (incoming.data.referredBy === memberId) throw new Error("a member cannot refer themselves");
-    const referrer = state.members?.[incoming.data.referredBy];
+    const referrer = Object.hasOwn(state.members, incoming.data.referredBy) ? state.members[incoming.data.referredBy] : null;
     if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
   }
   state.members[memberId] = {
