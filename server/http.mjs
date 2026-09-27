@@ -2984,6 +2984,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
+        if (action === "list_land_queue") store.requireGuestRead(auth);
+        else store.requireGuestWrite(auth);
         rate(`read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });

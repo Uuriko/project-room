@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { guestCapabilities } from "../server/guest-capability-scopes.mjs";
 
 async function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), "room-guest-capability-"));
@@ -56,13 +57,14 @@ const denied = result => { assert.equal(result.status, 403); assert.equal(result
 test("read-only GX guest reads but cannot mutate through HTTP, store or MCP", async t => {
   const { store, guest, request, rpc } = await setup(t);
   const read = await guest("Reader", "read_only");
-  assert.deepEqual(read.scopes, ["guest:read"]);
+  assert.deepEqual(read.scopes, [...guestCapabilities.read_only]);
   assert.equal((await request("/api/rooms/commons", { token: read.token })).status, 200);
   assert.equal((await request("/api/rooms/commons/events", { token: read.token })).status, 200);
   denied(await request("/api/rooms/commons/commands", { method: "POST", token: read.token,
     data: { id: "reader-message", type: "message.posted", data: { messageId: "reader-message", body: "no" } } }));
   assert.throws(() => store.command(read.token, "commons", { id: "reader-direct", type: "message.posted",
     data: { messageId: "reader-direct", body: "no" } }), e => e.code === "guest_scope_denied");
+  denied(await request("/api/rooms/commons/remove_land_item", { method: "POST", token: read.token, data: { itemId: "dummy" } }));
   denied(await request("/api/rooms/commons/files", { method: "POST", token: read.token,
     data: { id: "r-file", filename: "r.txt", mediaType: "text/plain", data: "YQ==" } }));
   const posted = await rpc("room_post_message", { roomId: "commons", body: "no" }, read.identity.secret);
@@ -73,7 +75,7 @@ test("read-only GX guest reads but cannot mutate through HTTP, store or MCP", as
 test("chat-only GX guest sees only chat projection across HTTP, store, MCP, files and SSE", async t => {
   const { store, guest, request, rpc } = await setup(t);
   const chat = await guest("Chatter", "chat_only");
-  assert.deepEqual(chat.scopes, ["guest:post"]);
+  assert.deepEqual(chat.scopes, [...guestCapabilities.chat_only]);
   for (const path of ["", "/events", "/context", "/activation-pack", "/agent-inbox", "/files", "/stream", "/search?q=x"]) {
     const res = await request(`/api/rooms/commons${path}`, { token: chat.token });
     denied(res);
@@ -98,6 +100,7 @@ test("chat-only GX guest sees only chat projection across HTTP, store, MCP, file
     assert.equal(value.isError, true, tool);
     assert.equal(value.structuredContent.code, "unauthenticated", tool);
   }
+  denied(await request("/api/rooms/commons/list_land_queue", { token: chat.token }));
   denied(await request("/api/rooms/commons/files", { method: "POST", token: chat.token,
     data: { id: "c-file", filename: "c.txt", mediaType: "text/plain", data: "YQ==" } }));
 });
