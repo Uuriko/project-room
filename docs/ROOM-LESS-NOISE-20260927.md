@@ -135,16 +135,19 @@ The second peer review did identify a current gap: both compact adapters omit
 the visible message's work link. Add nullable `workItemId` directly from that
 already filtered message, without fetching additional work metadata. Verify
 HTTP client and hosted adapter parity, old messages without a work field,
-private-message omission for other members and unchanged read-only behavior.
+private-message omission for other members and no new writes from this change.
+Existing message reads may still expire mention records internally.
 
 The 100-member pilot bound counts retained membership records. Changing it to
 active-only would not bound retained history or projection size. Investigate
 join-path consistency and useful capacity reporting; do not delete inactive
 members or silently remove the resource bound as a quick growth fix.
 
-Ask a live REST-only recipient to use the already shipped HTTP recipe without
-source lookup, then verify terminal state. Report unavailable participants or
-failed attempts honestly. Synthetic tests and firsthand agent experience do
+A live REST-only recipient used the existing HTTP recipe without source
+lookup and submitted the response by filling its body. A separate selected
+read verified answered revision 1. Guessed detail/inbox routes failed first;
+the supplied next-read pointer succeeded. This supports improving discovery,
+not introducing another protocol. Other participants have not all responded. Synthetic tests and firsthand agent experience do
 not replace first-time human observation.
 
 ## Removed from this execution list
@@ -176,3 +179,110 @@ send a private message, recover an unavailable recipient, answer a request and
 return to a second task. Record successful actions, wrong-audience attempts,
 unnecessary retries and help requests. Do not call agent consensus evidence
 of human retention or viral growth.
+
+
+## Refined direction: simple for people, capable for agents
+
+The product rule is conversation first. A person should enter the room, read,
+write and send without choosing a workflow. Explicit decisions appear beside
+the request or result that needs them. Agents use precise operations behind
+that experience, with the same authorization and durable records.
+
+A second critique of the human/agent split confirmed that we should hide
+secondary controls, not current consequences. Our own collaboration included
+an ordinary answer that did not close its formal request. Therefore ordinary
+Send remains ordinary chat. We will not infer approval or request completion
+from phrases such as “looks good.”
+
+### G. Make the composer quiet
+
+Default: the message field, Send, and one labeled Options disclosure. Move
+New work, Request a reply and Attach into it, retaining the existing actions
+and permission checks. Keep the selected audience/private notice, active
+request mode, attached files, failures and pending-save recovery outside it.
+Closing Options must not reset a draft, recipient or attachment. Choosing an
+action must have a sensible focus destination, and Escape must not strand
+keyboard focus in hidden content.
+
+Remove the Friends dialog's protocol payload explanation from its ordinary
+human view. Retain who can see the conversation and that messages do not grant
+permission; the precise protocol stays in the agent guide.
+
+Acceptance: real desktop and 320px browser journeys; ordinary send without
+workflow setup; keyboard disclosure; file selection and retained attachment;
+formal request and answer still explicit; inactive private recipient refusal;
+no horizontal overflow or hidden keyboard targets. Capture before/after views.
+
+### H. Give the default agent profile a complete answer path
+
+Source inspection found that the default hosted catalog advertises message
+and attention discovery but omits the existing selected-request read and
+response tools. A client restricted to advertised tools can find a formal
+question yet lack the tools to answer it. Add those two existing tools to the
+core profile with concise descriptions. Reuse their handlers, schemas and
+permission checks. The full profile and automation runners remain available.
+
+Acceptance: a fresh hosted client using only the default tools/list follows
+an incoming question, reads its context, answers through the advertised
+operation and verifies the terminal state. Ordinary reply must not close it;
+private, stale and incompletely read context must retain existing refusals.
+Measure catalog size as an implementation cost, not a model-quality result.
+
+### Research that refined this split
+
+[GOV.UK Details](https://design-system.service.gov.uk/components/details/)
+recommends disclosure for information only some people need, while keeping
+commonly needed information visible. This is why audience and current failures
+stay out of Options. [W3C's disclosure pattern](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/)
+provides keyboard and expanded-state guidance. Use ordinary disclosure rather
+than pretending a collection of buttons is an ARIA menu.
+
+[Microsoft HAX explanations](https://www.microsoft.com/en-us/haxtoolkit/guideline/make-clear-why-the-system-did-what-it-did/)
+support available, useful explanations while warning against misplaced trust.
+A short action summary plus optional evidence is preferable to either an
+opaque Allow button or a permanent protocol dump.
+
+[Anthropic's tool-use engineering](https://www.anthropic.com/engineering/advanced-tool-use)
+describes selective discovery and programmatic orchestration. Our inference:
+keep routine agent paths complete and compact, with rich specialist tools
+available when needed. This patch repairs a broken discovery path; it does not
+introduce another orchestration engine or claim measured inference savings.
+
+### What this refinement deliberately takes out
+
+Do not add a human/agent mode switch, a new dashboard, a second approval state,
+or popups for ordinary conversation. Do not hide permissions or automate their
+granting. Existing contextual action cards already serve human decisions.
+Keep richer APIs, optional profiles, local runners, exact retry IDs and
+incremental context for agents.
+
+Broad navigation restructuring is outside this patch after peer critique:
+Catch up, activity and directed requests have different unread/closure rules.
+First validate the quieter composer, then observe which navigation people
+actually use. A future bounded automation attempt limit also needs a precise
+contract for in-flight operations; it is not a prerequisite for this release.
+
+The retained-member capacity exploration confirms all three relevant join
+checks count retained records. Usage reporting already exposes member count
+and headroom. An active-only bound would leave retained history unbounded;
+member lifecycle/retention design remains separate. No records are purged.
+
+
+## Execution evidence recorded before the final release gate
+
+- Directional DM and stale-recipient browser checks passed; the stale private
+  draft already refused safely, so no delivery rewrite was necessary.
+- Invitation authority checks passed 45 focused tests, including real member
+  names that coincide with object-prototype properties and malformed persisted
+  rows rejected through HTTP. Refusal can journal a rejection; the invariant
+  is no new account/session/admission or join consumption.
+- Read recovery and outage suppression passed 71 focused checks. Failed
+  baselines reproduced both defects. Read guidance changes local MCP only;
+  HTTP and hosted error envelopes were not rewritten.
+- Compact work linkage passed 25 reply-request tests. Independent review
+  verified that no private work metadata is joined into message reads.
+- Live cold-recipient success is agent evidence, not a first-time human study.
+  Record actual route and current state verification with release receipts;
+  merging a helper without mounting it does not establish a live endpoint.
+
+Combined candidate CI and deployment are still required after integration.
