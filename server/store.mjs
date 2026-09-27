@@ -3166,17 +3166,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const canSee = message => Boolean(message && message.body !== null && !message.deletedAt
         && !message.workItemId && (!message.toMemberId || [message.authorId, message.toMemberId].includes(auth.member.id)));
       const messages = page.map(({ sequence, body }) => {
-        const event = JSON.parse(body);
-        if (event.type === T.MESSAGE_REACTION_SET) {
-          if (!canSee(indexedMessages.get(event.data.messageId))) return null;
-          return { sequence, kind: "reaction", from: event.actorId,
-            messageId: event.data.messageId, reaction: event.data.reaction, active: event.data.active };
+        const chatEvent = JSON.parse(body);
+        if (chatEvent.type === T.MESSAGE_REACTION_SET) {
+          if (!canSee(indexedMessages.get(chatEvent.data.messageId))) return null;
+          return { sequence, kind: "reaction", from: chatEvent.actorId,
+            messageId: chatEvent.data.messageId, reaction: chatEvent.data.reaction, active: chatEvent.data.active };
         }
-        const messageId = event.data.messageId ?? event.id;
+        const messageId = chatEvent.data.messageId ?? chatEvent.id;
         const message = indexedMessages.get(messageId);
         if (!canSee(message) || message.replyToId && !canSee(indexedMessages.get(message.replyToId))) return null;
-        return { sequence, kind: "message", from: event.actorId, messageId,
-          body: message.body, replyToId: message.replyToId ?? null, at: event.at };
+        return { sequence, kind: "message", from: chatEvent.actorId, messageId,
+          body: message.body, replyToId: message.replyToId ?? null, at: chatEvent.at };
       }).filter(Boolean);
       const next = page.at(-1)?.sequence ?? after;
       return { roomId, messages, next, hasMore: rows.length > limit };
