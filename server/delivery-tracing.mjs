@@ -195,6 +195,11 @@ export class DeliveryTracer {
     this.endpoint = cfg.endpoint;
     this.serviceName = cfg.serviceName;
     this._buffer = []; // finished spans awaiting export/flush
+    // 2026-09-27 (deep audit 5850213111): bound the outage buffer. Without
+    // a cap, a down OTLP endpoint leaves spans accumulating forever (the
+    // export throws, the buffer is never cleared) — an unbounded memory
+    // leak. Drop oldest on overflow; telemetry is best-effort.
+    this._maxBuffer = 1000;
   }
 
   get isEnabled() { return this.enabled; }
@@ -230,6 +235,7 @@ export class DeliveryTracer {
 
   _onSpanEnd(span) {
     if (!this.enabled) return;
+    if (this._buffer.length >= this._maxBuffer) this._buffer.shift(); // drop oldest
     this._buffer.push(span);
     // Best-effort export; never let telemetry break the request path.
     if (this.endpoint) void this._export().catch(() => {});

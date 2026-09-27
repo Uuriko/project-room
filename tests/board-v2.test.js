@@ -15,8 +15,8 @@ const T0 = Date.parse("2026-09-26T21:00:00.000Z");
 function setup() {
   let nowMs = T0;
   const board = new BoardV2({ now: () => nowMs });
-  const req = (method, path, { query = {}, body = null, lane = "jill" } = {}) =>
-    handleBoardV2Request(board, { method, path, query, body, lane });
+  const req = (method, path, { query = {}, body = null, lane = "jill", headers = {} } = {}) =>
+    handleBoardV2Request(board, { method, path, query, body, lane, headers });
   const advance = ms => { nowMs += ms; };
   return { board, req, advance, now: () => nowMs };
 }
@@ -234,4 +234,323 @@ test("BoardV2Error carries status+code for the handler's typed envelope", () => 
   assert.equal(err.status, 409);
   assert.equal(err.code, "claim_conflict");
   assert.deepEqual(err.fields, { holders: [] });
+});
+
+test("notes: append-only events queryable by lane/thread/severity", () => {
+  const { req } = setup();
+  // Post a note with thread and severity.
+  const posted = req("POST", "/notes", {
+    lane: "jill",
+    body: { thread: "sprint-7", body: "Milestone reached: board v2 prototype", severity: "milestone" },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.note.lane, "jill");
+  assert.equal(posted.body.note.thread, "sprint-7");
+  assert.equal(posted.body.note.severity, "milestone");
+  assert.equal(posted.body.watermark, 1);
+  // A second note from another lane, no thread.
+  req("POST", "/notes", { lane: "codex", body: { body: "Working on efficiency" } });
+  // Query by lane filters correctly.
+  const byLane = req("GET", "/notes", { query: { lane: "jill" } });
+  assert.equal(byLane.body.notes.length, 1);
+  assert.equal(byLane.body.notes[0].thread, "sprint-7");
+  // Query by thread.
+  const byThread = req("GET", "/notes", { query: { thread: "sprint-7" } });
+  assert.equal(byThread.body.notes.length, 1);
+  // Invalid severity is 422, not silently stored.
+  const bad = req("POST", "/notes", { lane: "jill", body: { body: "x", severity: "urgent" } });
+  assert.equal(bad.status, 422);
+  assert.equal(bad.body.error.code, "invalid_severity");
+});
+
+test("findings: severity enum + required fields enforced at write time", () => {
+  const { req } = setup();
+  const posted = req("POST", "/findings", {
+    lane: "instinct",
+    body: {
+      severity: "high",
+      title: "Invite revocation bypass",
+      evidence: ["test output", "code review"],
+      recommendation: "Gate revoke() on autonomy tier",
+    },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.finding.severity, "high");
+  assert.equal(posted.body.finding.title, "Invite revocation bypass");
+  assert.deepEqual(posted.body.finding.evidence, ["test output", "code review"]);
+  // Missing severity is 422.
+  const noSev = req("POST", "/findings", {
+    lane: "instinct",
+    body: { title: "x", recommendation: "y" },
+  });
+  assert.equal(noSev.status, 422);
+  assert.equal(noSev.body.error.code, "invalid_severity");
+  // Invalid severity value is 422.
+  const badSev = req("POST", "/findings", {
+    lane: "instinct",
+    body: { severity: "catastrophic", title: "x", recommendation: "y" },
+  });
+  assert.equal(badSev.status, 422);
+  // Query by severity filters.
+  req("POST", "/findings", {
+    lane: "jill",
+    body: { severity: "low", title: "Minor", recommendation: "Note it" },
+  });
+  const high = req("GET", "/findings", { query: { severity: "high" } });
+  assert.equal(high.body.findings.length, 1);
+  assert.equal(high.body.findings[0].lane, "instinct");
+});
+
+test("decisions: decider authority recorded, superseding supported", () => {
+  const { req } = setup();
+  const posted = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Merge queue enabled", reversible: true },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.decision.decider, "john");
+  assert.equal(posted.body.decision.scope, "room");
+  assert.equal(posted.body.decision.reversible, true);
+  const v1Seq = posted.body.seq;
+  // A superseding decision links to the prior one by seq.
+  const v2 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Merge queue enabled with strict mode", supersedes: v1Seq },
+  });
+  assert.equal(v2.body.decision.supersedes, v1Seq);
+  // Invalid supersedes (non-existent seq) is 422.
+  const badSup = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Bad", supersedes: 99999 },
+  });
+  assert.equal(badSup.status, 422);
+  assert.equal(badSup.body.error.code, "invalid_supersedes");
+  // Missing scope is 422.
+  const noScope = req("POST", "/decisions", { lane: "john", body: { statement: "x" } });
+  assert.equal(noScope.status, 422);
+  assert.equal(noScope.body.error.code, "invalid_scope");
+  // Query by decider.
+  const byDecider = req("GET", "/decisions", { query: { decider: "john" } });
+  assert.equal(byDecider.body.decisions.length, 2);
+});
+
+test("idempotency: same key returns cached response without re-executing", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "test-key-123" };
+  const noteBody = { body: "First note" };
+  // First POST creates the note.
+  const first = req("POST", "/notes", { lane: "jill", body: noteBody, headers });
+  assert.equal(first.status, 201);
+  const firstSeq = first.body.seq;
+  // Second POST with same key returns the cached response (same seq, no new event).
+  const second = req("POST", "/notes", { lane: "jill", body: noteBody, headers });
+  assert.equal(second.status, 201);
+  assert.equal(second.body.seq, firstSeq);
+  // Verify only one note was actually created.
+  const notes = req("GET", "/notes", {});
+  assert.equal(notes.body.notes.length, 1);
+  // Different key creates a new note.
+  const third = req("POST", "/notes", {
+    lane: "jill", body: noteBody, headers: { "Idempotency-Key": "different-key" },
+  });
+  assert.notEqual(third.body.seq, firstSeq);
+});
+
+test("idempotency: works across all mutating routes", () => {
+  const { req } = setup();
+  const key = { "Idempotency-Key": "claim-key-1" };
+  // Claim with idempotency key.
+  const c1 = req("POST", "/claims", { lane: "jill", body: claimBody(), headers: key });
+  assert.equal(c1.status, 201);
+  const c2 = req("POST", "/claims", { lane: "jill", body: claimBody(), headers: key });
+  assert.equal(c2.body.claim.task_id, c1.body.claim.task_id);
+  // Only one claim exists (duplicate task-id would 409 on re-execution).
+  const board = req("GET", "/claims", {});
+  assert.equal(board.body.claims.length, 1);
+});
+
+test("idempotency: same key with different payload returns 422", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "mismatch-key" };
+  // First POST with body A.
+  const first = req("POST", "/notes", {
+    lane: "jill", body: { body: "Original" }, headers,
+  });
+  assert.equal(first.status, 201);
+  // Second POST with same key but different body => 422.
+  const second = req("POST", "/notes", {
+    lane: "jill", body: { body: "Different" }, headers,
+  });
+  assert.equal(second.status, 422);
+  assert.equal(second.body.error.code, "idempotency_key_mismatch");
+});
+
+test("idempotency: keys are scoped per lane", () => {
+  const { req } = setup();
+  const headers = { "Idempotency-Key": "shared-key" };
+  // Jill uses the key.
+  const jill = req("POST", "/notes", {
+    lane: "jill", body: { body: "Jill's note" }, headers,
+  });
+  assert.equal(jill.status, 201);
+  // Codex uses the same key — should NOT collide (different lane).
+  const codex = req("POST", "/notes", {
+    lane: "codex", body: { body: "Codex's note" }, headers,
+  });
+  assert.equal(codex.status, 201);
+  assert.notEqual(codex.body.seq, jill.body.seq);
+  // Verify two notes exist.
+  const notes = req("GET", "/notes", {});
+  assert.equal(notes.body.notes.length, 2);
+});
+
+test("GET /events: returns unified event log with cursor pagination", () => {
+  const { req } = setup();
+  // Create a claim (seq 1), a note (seq 2), a finding (seq 3).
+  const c = req("POST", "/claims", { body: claimBody() });
+  assert.equal(c.status, 201);
+  const n = req("POST", "/notes", { lane: "jill", body: { body: "Test note" } });
+  assert.equal(n.status, 201);
+  const f = req("POST", "/findings", {
+    lane: "jill",
+    body: { severity: "high", title: "Test", recommendation: "Fix it" },
+  });
+  assert.equal(f.status, 201);
+
+  // GET /events should return all three in seq order.
+  const events = req("GET", "/events", {});
+  assert.equal(events.status, 200);
+  assert.equal(events.body.watermark, 3);
+  assert.equal(events.body.events.length, 3);
+  assert.equal(events.body.events[0].seq, 1);
+  assert.equal(events.body.events[0].kind, "claim");
+  assert.equal(events.body.events[1].seq, 2);
+  assert.equal(events.body.events[1].kind, "note");
+  assert.equal(events.body.events[2].seq, 3);
+  assert.equal(events.body.events[2].kind, "finding");
+  assert.equal(events.body.has_more, false);
+});
+
+test("GET /events: since_seq cursor filters correctly", () => {
+  const { req } = setup();
+  req("POST", "/claims", { body: claimBody() });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note 1" } });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note 2" } });
+
+  // since_seq=1 should return seq 2 and 3 only.
+  const events = req("GET", "/events", { query: { since_seq: "1" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 2);
+  assert.equal(events.body.events[0].seq, 2);
+  assert.equal(events.body.events[1].seq, 3);
+});
+
+test("GET /events: kind filter works", () => {
+  const { req } = setup();
+  req("POST", "/claims", { body: claimBody() });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note" } });
+
+  const events = req("GET", "/events", { query: { kind: "note" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 1);
+  assert.equal(events.body.events[0].kind, "note");
+});
+
+test("GET /events: lane filter works", () => {
+  const { req } = setup();
+  req("POST", "/notes", { lane: "jill", body: { body: "Jill note" } });
+  req("POST", "/notes", { lane: "codex", body: { body: "Codex note" } });
+
+  const events = req("GET", "/events", { query: { lane: "codex" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 1);
+  assert.equal(events.body.events[0].lane, "codex");
+});
+
+test("GET /events: limit with has_more", () => {
+  const { req } = setup();
+  for (let i = 0; i < 5; i++) {
+    req("POST", "/notes", { lane: "jill", body: { body: `Note ${i}` } });
+  }
+
+  // limit=2 should return 2 events with has_more=true.
+  const events = req("GET", "/events", { query: { limit: "2" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 2);
+  assert.equal(events.body.has_more, true);
+  assert.equal(events.body.watermark, 5);
+});
+
+test("GET /events: rejects unknown query params", () => {
+  const { req } = setup();
+  const res = req("GET", "/events", { query: { bogus: "1" } });
+  assert.equal(res.status, 422);
+  assert.equal(res.body.error.code, "unknown_field");
+});
+
+test("GET /events: POST returns 405", () => {
+  const { req } = setup();
+  const res = req("POST", "/events", { body: {} });
+  assert.equal(res.status, 405);
+});
+
+test("Phase 3.2: readBoard includes live decisions (supersede-chain resolved)", () => {
+  const { req } = setup();
+  // Create v1 decision
+  const v1 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Policy v1" },
+  });
+  assert.equal(v1.status, 201);
+  const v1Seq = v1.body.seq;
+  
+  // Create v2 that supersedes v1
+  const v2 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Policy v2", supersedes: v1Seq },
+  });
+  assert.equal(v2.status, 201);
+  
+  // readBoard should include only v2 (v1 is superseded)
+  const board = req("GET", "/board", {});
+  assert.equal(board.status, 200);
+  assert.ok(board.body.decisions);
+  assert.equal(board.body.decisions.length, 1);
+  assert.equal(board.body.decisions[0].seq, v2.body.seq);
+  assert.equal(board.body.decisions[0].statement, "Policy v2");
+});
+
+test("Phase 3.2: supersede chain A->B->C resolves to C only", () => {
+  const { req } = setup();
+  const a = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "A" },
+  });
+  const b = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "B", supersedes: a.body.seq },
+  });
+  req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "C", supersedes: b.body.seq },
+  });
+  
+  const board = req("GET", "/board", {});
+  assert.equal(board.body.decisions.length, 1);
+  assert.equal(board.body.decisions[0].statement, "C");
+});
+
+test("Phase 3.2: independent decisions both appear", () => {
+  const { req } = setup();
+  req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "a", statement: "Decision A" },
+  });
+  req("POST", "/decisions", {
+    lane: "jane",
+    body: { scope: "b", statement: "Decision B" },
+  });
+  
+  const board = req("GET", "/board", {});
+  assert.equal(board.body.decisions.length, 2);
 });

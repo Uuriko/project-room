@@ -79,8 +79,14 @@ jobs:
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - run: npm test
-  browser:
+  browser-shards:
+    name: browser shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -92,17 +98,39 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
         # Same suites as test:browser, plus a junit file under test-results/ for the step below.
-        run: npm run test:browser:ci
+        run: scripts/test-env.sh npm run test:browser:ci -- --shard=${{ matrix.shard }}/4
       - name: Report failing browser tests as annotations and job summary
         # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
         if: always()
-        run: node scripts/report-test-failures.mjs test-results/browser-junit.xml
+        run: node scripts/report-test-failures.mjs test-results/browser-junit-${{ matrix.shard }}-of-4.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: conversation-browser-evidence
+          name: conversation-browser-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: ignore
+  # Keep the required check name stable. Dependency success alone cannot prove
+  # the intended matrix was complete: require each exact-run completion receipt.
+  browser:
+    needs: browser-shards
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: conversation-browser-evidence-*-attempt-${{ github.run_attempt }}
+          path: browser-evidence
+          merge-multiple: true
+      - name: Require all four successful browser shards from this run
+        if: always()
+        env:
+          BROWSER_MATRIX_RESULT: ${{ needs.browser-shards.result }}
+        run: node scripts/browser-shards-check.mjs browser-evidence
   cloudflare:
     runs-on: ubuntu-latest
     steps:

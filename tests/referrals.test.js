@@ -223,3 +223,49 @@ test("leaderboard ranks referrers by successful joins, most first", t => {
   assert.equal(board.myReferralCount, 2);
   assert.equal(board.myReferrals.length, 2);
 });
+
+
+test("member admission refuses inherited referrers without persisting membership or events", t => {
+  const { store, ownerKey, roomId } = fixture(t);
+  const before = store.room(roomId);
+  for (const referredBy of ["toString", "hasOwnProperty", "valueOf", "missing-member"]) {
+    assert.throws(() => store.command(ownerKey, roomId, { id: `bad-referrer-${referredBy}`, type: "member.added", data: {
+      memberId: `candidate-${referredBy}`, displayName: "Candidate", kind: "agent", permissions: [], referredBy
+    } }), error => error.code === "command_rejected" && error.status === 422 && /referredBy must be an active member/.test(error.message));
+    assert.equal(store.room(roomId).sequence, before.sequence);
+    assert.equal(Object.hasOwn(store.room(roomId).state.members, `candidate-${referredBy}`), false);
+  }
+  store.command(ownerKey, roomId, { id: "real-named-referrer", type: "member.added", data: {
+    memberId: "toString", displayName: "Actual referrer", kind: "human", permissions: []
+  } });
+  store.command(ownerKey, roomId, { id: "valid-referral", type: "member.added", data: {
+    memberId: "valid-candidate", displayName: "Candidate", kind: "agent", permissions: [], referredBy: "toString"
+  } });
+  assert.equal(store.room(roomId).state.members["valid-candidate"].referredBy, "toString");
+});
+
+
+test("persisted legacy inherited-referrer events replay after reopening without rewriting history", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-legacy-referral-"));
+  const database = join(directory, "room.sqlite");
+  const original = new RoomStore(database);
+  original.initialize(initialRoom("commons"));
+  const ownerKey = original.issueAccessKey("commons", "owner");
+  const admitted = original.command(ownerKey, "commons", { id: "legacy-referral", type: "member.added", data: {
+    memberId: "legacy-agent", displayName: "Legacy agent", kind: "agent", permissions: [], referredBy: "owner"
+  } });
+  // The older reducer accepted Object.prototype names as absent referrers.
+  // Materialize that serialized historical event on disk, without asking
+  // today's admission path to accept it or mocking the replay implementation.
+  const historical = { ...admitted.event, data: { ...admitted.event.data, referredBy: "toString" } };
+  const serialized = JSON.stringify(historical);
+  original.db.prepare("UPDATE events SET body=? WHERE room_id=? AND sequence=?").run(serialized, "commons", admitted.sequence);
+  original.close();
+  const reopened = new RoomStore(database);
+  t.after(() => { reopened.close(); rmSync(directory, { recursive: true, force: true }); });
+  const rebuilt = reopened.rebuildProjection("commons");
+  assert.equal(rebuilt.sequence, admitted.sequence);
+  assert.equal(rebuilt.state.members["legacy-agent"].referredBy, "toString");
+  assert.equal(Object.hasOwn(rebuilt.state.members, "toString"), false);
+  assert.equal(reopened.db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?").get("commons", admitted.sequence).body, serialized);
+});

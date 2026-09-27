@@ -48,7 +48,7 @@ async function setup(t, mobile = false) {
   const card = page.locator('[data-work-record-id="test-handoff"]'), dialog = page.locator("#result-copy-dialog"), input = page.locator("#result-copy-preview"), copy = page.locator("#result-copy-button");
   const open = async () => {
     await card.waitFor();
-    if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
+    assert.equal(await card.locator("[data-copy-result]").isVisible(), true, "summary copying is directly discoverable");
     await card.locator("[data-copy-result]").click(); await dialog.waitFor({ state: "visible" });
   };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/result-copy-${name}.png` }); };
@@ -59,7 +59,10 @@ for (const mobile of [false, true]) test(`result copy ${mobile ? "mobile" : "des
   const f = await setup(t, mobile), { page } = f, before = f.snapshot();
   const storage = () => page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
   const stored = await storage();
-  assert.equal(await f.card.locator("[data-copy-result]").isVisible(), false);
+  assert.equal(await f.card.locator(".work-details").evaluate(node => node.open), false);
+  assert.equal(await f.card.locator("[data-copy-result]").isVisible(), true);
+  await f.card.locator("[data-copy-result]").scrollIntoViewIfNeeded();
+  await f.capture(mobile ? "discoverable-mobile" : "discoverable-desktop");
   await f.open(); const seed = await f.input.inputValue();
   assert.equal(seed, `${before.state.workItems["test-handoff"].title}\n\nReported result\n${before.state.workItems["test-handoff"].receipt.summary}`);
   for (const privateText of [f.keys.owner, "private-version", "not-for-export", "ROOM-RETURN", "Please prepare an agenda", "Approved", "Verified"]) assert.equal(seed.includes(privateText), false);
@@ -158,10 +161,12 @@ test("result copy: source changes and A/B/A edits suppress held feedback without
 
 test("result copy: Add-result drafts are independent and observed access loss clears export drafts during a copy", { timeout: 30000 }, async t => {
   const f = await setup(t), { page } = f; await f.open(); await page.keyboard.press("Escape");
+  if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
   await f.card.locator('[data-portable-mode="result"]').click(); await page.locator("#portable-result").fill("Unsent external proposal"); await page.keyboard.press("Escape");
   await f.open(); await f.input.fill("Private export draft");
   await f.card.locator("[data-copy-result]").evaluate(node => node.click()); assert.equal(await f.input.inputValue(), "Private export draft");
   await page.keyboard.press("Escape");
+  if (!await f.card.locator(".work-details").evaluate(node => node.open)) await f.card.locator(".work-details > summary").click();
   await f.card.locator('[data-portable-mode="result"]').click(); assert.equal(await page.locator("#portable-result").inputValue(), "Unsent external proposal"); await page.keyboard.press("Escape");
   await f.open(); await page.evaluate(() => window.copyBehavior = "hold"); await f.copy.click();
   // Rotate the same member's credential: the service ends the old browser session.
@@ -192,7 +197,7 @@ test("result copy: unavailable clipboard, closed-draft sign-out warning and relo
   assert.equal((await f.input.inputValue()).includes("Reload clears"), false); assert.deepEqual(f.errors, []);
 });
 
-test("result copy: superseded work retains reported history and close can focus its collapsed work card", { timeout: 30000 }, async t => {
+test("result copy: superseded work retains reported history and close returns to its visible copy control", { timeout: 30000 }, async t => {
   const f = await setup(t), { page } = f; await f.open(); await f.input.fill("Old result copy");
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: "replacement", title: "Replacement", definitionOfDone: "New work", accountableMemberId: "owner", mode: "read" } });
   f.mutate("owner", T.WORK_SUPERSEDED, { supersededByWorkItemId: "replacement", reason: "New direction" });
@@ -203,5 +208,5 @@ test("result copy: superseded work retains reported history and close can focus 
   await f.dialog.locator("summary").click(); assert.match(await page.locator("#result-copy-source").textContent(), /Replaced/);
   await f.card.locator(".work-details").evaluate(node => node.open = false);
   await page.keyboard.press("Escape");
-  await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "test-handoff"); assert.deepEqual(f.errors, []);
+  await page.waitForFunction(() => document.activeElement?.dataset.copyResult === "test-handoff"); assert.deepEqual(f.errors, []);
 });

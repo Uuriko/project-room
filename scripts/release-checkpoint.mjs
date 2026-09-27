@@ -38,8 +38,27 @@ function checkObservation(row) {
     detailsUrl: evidenceUrl(row?.detailsUrl ?? row?.targetUrl) };
 }
 
+function validVersion(value) {
+  return value?.status === "ok" && Boolean(sha(value.sourceRevision));
+}
+
+function candidateFor(metadata) {
+  return metadata?.state === "MERGED" ? sha(metadata.mergeCommit?.oid) : sha(metadata?.headRefOid);
+}
+
+// Compare BASE=candidate to HEAD=observed revision. Commit lists may be paginated;
+// only the pinned comparison metadata establishes ancestry.
+function containment(observation, candidate, target, stable) {
+  if (!stable || !candidate || !target || observation?.error || observation?.base !== candidate || observation?.head !== target) return "unknown";
+  const value = observation.value;
+  if (sha(value?.base_commit?.sha) !== candidate || !sha(value?.merge_base_commit?.sha)) return "unknown";
+  if (["ahead", "identical"].includes(value.status) && sha(value.merge_base_commit.sha) === candidate) return "contains";
+  if (["behind", "diverged"].includes(value.status) && sha(value.merge_base_commit.sha) !== candidate) return "does_not_contain";
+  return "unknown";
+}
+
 // Pure reduction used by the CLI: input snapshots are observations, never authority.
-export function summarizeCheckpoint({ checkedAt, repository, prNumber, expectedRevision = null, before, checks, after, doors }) {
+export function summarizeCheckpoint({ checkedAt, repository, prNumber, expectedRevision = null, before, checks, after, doors, mainBefore, mainAfter, comparisons = [], workers = [] }) {
   const initial = before?.value, latest = after?.value;
   const head = sha(initial?.headRefOid), finalHead = sha(latest?.headRefOid), checkHead = sha(checks?.value?.headRefOid);
   const base = sha(initial?.baseRefOid), finalBase = sha(latest?.baseRefOid);
@@ -59,27 +78,47 @@ export function summarizeCheckpoint({ checkedAt, repository, prNumber, expectedR
     else { state = "passed"; reason = "observed_checks_completed"; }
   }
   const expected = sha(expectedRevision);
-  const doorViews = (doors ?? []).map(door => {
-    const sourceRevision = sha(door.value?.sourceRevision);
-    return { origin: door.origin, checkedAt: door.checkedAt, httpStatus: door.httpStatus ?? null,
+  const candidate = candidateFor(latest);
+  const prStable = !before?.error && !after?.error && head && head === finalHead
+    && base && base === finalBase && initial?.baseRefName === latest?.baseRefName
+    && initial?.state === latest?.state && candidate && candidateFor(initial) === candidate;
+  const main = sha(mainBefore?.value?.object?.sha), finalMain = sha(mainAfter?.value?.object?.sha);
+  const mainStable = Boolean(main && main === finalMain && !mainBefore?.error && !mainAfter?.error);
+  const comparisonFor = target => comparisons.find(row => row.base === candidate && row.head === target);
+  const currentMain = { revision: main, finalRevision: finalMain,
+    state: mainStable ? "stable" : "unknown",
+    reason: !main || !finalMain || mainBefore?.error || mainAfter?.error ? "observation_failed" : main !== finalMain ? "main_changed" : "observed_unchanged",
+    observations: { before: mainBefore?.checkedAt ?? null, after: mainAfter?.checkedAt ?? null },
+    candidateContainment: containment(comparisonFor(main), candidate, main, prStable && mainStable) };
+
+  const publicView = (door, worker = false) => {
+    const valid = door.httpStatus === 200 && !door.error && validVersion(door.value) && (!worker || door.value.servedBy === "worker");
+    const sourceRevision = valid ? sha(door.value.sourceRevision) : null;
+    return { origin: door.origin, endpoint: worker ? "/api/version/worker" : "/api/version", checkedAt: door.checkedAt, httpStatus: door.httpStatus ?? null,
       reachable: door.httpStatus === 200, sourceRevision, buildId: safeText(door.value?.buildId, 128),
-      error: door.error ?? null,
+      error: door.error ?? (door.httpStatus === 200 && !valid ? "invalid_version_response" : null),
+      candidateContainment: containment(comparisonFor(sourceRevision), candidate, sourceRevision, prStable && mainStable && valid),
+      ...(worker ? { reportedDurableObject: valid ? { name: safeText(door.value.durableObject?.name), id: safeText(door.value.durableObject?.id) } : null } : {}),
       revisionMatch: !expected ? "not_requested" : !sourceRevision || door.error || door.httpStatus !== 200 ? "unknown"
         : sourceRevision === expected ? "match" : "mismatch" };
-  });
+  };
+  const doorViews = (doors ?? []).map(door => publicView(door));
+  const workerViews = workers.map(door => publicView(door, true));
   return {
-    schemaVersion: 1, checkedAt, repository, expectedRevision: expected,
+    schemaVersion: 2, checkedAt, repository, expectedRevision: expected,
+    currentMain, candidate: { revision: candidate, kind: latest?.state === "MERGED" ? "merge_commit" : "pr_head", stable: Boolean(prStable) },
     pullRequest: { number: prNumber, url: `https://github.com/${repository}/pull/${prNumber}`,
-      state: safeText(latest?.state ?? initial?.state), headRevision: head, finalHeadRevision: finalHead,
+      mergeRevision: sha(latest?.mergeCommit?.oid), state: safeText(latest?.state ?? initial?.state), headRevision: head, finalHeadRevision: finalHead,
       baseBranch: safeText(latest?.baseRefName ?? initial?.baseRefName), baseRevision: base, finalBaseRevision: finalBase,
       mergeStateStatus: safeText(latest?.mergeStateStatus ?? initial?.mergeStateStatus),
       observations: { before: before?.checkedAt ?? null, checks: checks?.checkedAt ?? null, after: after?.checkedAt ?? null },
       errors: [before?.error, checks?.error, after?.error].filter(Boolean),
       checks: { state, reason, revision: checkHead, requiredChecksEvaluated: false, integrationBaseVerified: false, rows } },
-    doors: doorViews,
+    doors: doorViews, workers: workerViews,
     authenticatedProbe: "not_performed",
-    limitations: ["Passed means the observed check rollup succeeded for an unchanged head across PR snapshots. Required branch rules were not evaluated.",
-      "PR-reported base metadata was observed; check runs were not bound to a tested base or merge revision. The current base branch tip and merge readiness are not verified.",
+    limitations: ["Merged describes GitHub state, not deployment. Containment is Git ancestry of a reported revision, not verification of deployed bytes or retained behavior.",
+      "Both public version URLs may share a backend. Their agreement does not establish independent Worker versions or Worker/Durable Object equality.","Passed means the observed check rollup succeeded for an unchanged head across PR snapshots. Required branch rules were not evaluated.",
+      "PR-reported base metadata was observed; check runs were not bound to a tested base or merge revision. Main was separately observed; the PR tested integration base and merge readiness remain unverified.",
       "HTTP 200 means public version endpoint reachability only. No authenticated room access, deployment, or application health is verified.",
       "Source revision is reported metadata, not a bundle digest. Use scripts/release-evidence.mjs for digest-based evidence."]
   };
@@ -92,20 +131,25 @@ export function checkpointMarkdown(report) {
     `PR: ${pr.url}`, `Head: ${pr.headRevision ?? "unknown"}`, `Head after check collection: ${pr.finalHeadRevision ?? "unknown"}`,
     `PR-reported base: ${markdownText(pr.baseBranch)} (${pr.finalBaseRevision ?? "unknown"})`,
     `GitHub merge state: ${markdownText(pr.mergeStateStatus)} (not independently verified)`,
-    `Observed checks: **${pr.checks.state}** (${pr.checks.reason})`, ""];
+    `Observed checks: **${pr.checks.state}** (${pr.checks.reason})`,
+    `PR state: ${markdownText(pr.state)}; merge revision: ${pr.mergeRevision ?? "unknown"}`,
+    `Current main: ${report.currentMain.finalRevision ?? "unknown"} (${report.currentMain.reason}); candidate containment: ${report.currentMain.candidateContainment}`,
+    `Candidate: ${report.candidate.revision ?? "unknown"} (${report.candidate.kind}); deployment is not verified.`, ""];
   for (const row of pr.checks.rows) lines.push(`- ${markdownText(row.workflow ? `${row.workflow} / ${row.name}` : row.name)}: ${row.status}${row.conclusion ? ` (${markdownText(row.conclusion)})` : ""}${row.detailsUrl ? ` — [check details](<${row.detailsUrl}>)` : ""}`);
   if (pr.errors.length) lines.push("", `Collection errors: ${pr.errors.map(markdownText).join(", ")}`);
   lines.push("", "## Public version endpoints", "", `Expected source revision: ${report.expectedRevision ?? "not supplied"}`, "");
   for (const door of report.doors) {
-    lines.push(`- ${markdownText(door.origin)} — HTTP ${door.httpStatus ?? "unknown"}; source ${door.sourceRevision ?? "unknown"}; build ${markdownText(door.buildId)}; expected revision: ${door.revisionMatch}. Checked ${markdownText(door.checkedAt)}${door.error ? `; ${door.error}` : ""}.`);
+    lines.push(`- ${markdownText(door.origin)} — HTTP ${door.httpStatus ?? "unknown"}; source ${door.sourceRevision ?? "unknown"}; build ${markdownText(door.buildId)}; expected revision: ${door.revisionMatch}; candidate ancestry: ${door.candidateContainment}. Checked ${markdownText(door.checkedAt)}${door.error ? `; ${door.error}` : ""}.`);
   }
+  lines.push("", "## Independent Worker diagnostics", "");
+  for (const worker of report.workers) lines.push(`- ${markdownText(worker.origin)}${worker.endpoint} — HTTP ${worker.httpStatus ?? "unknown"}; Worker source ${worker.sourceRevision ?? "unknown"}; candidate ancestry: ${worker.candidateContainment}; reported object name ${markdownText(worker.reportedDurableObject?.name)}, id ${markdownText(worker.reportedDurableObject?.id)}${worker.error ? `; ${worker.error}` : ""}.`);
   lines.push("", "## Limits", "", ...report.limitations.map(text => `- ${text}`), "");
   return lines.join("\n");
 }
 
-async function ghSnapshot(repository, prNumber, fields) {
+async function ghRead(args) {
   try {
-    const { stdout } = await run("gh", ["pr", "view", String(prNumber), "--repo", repository, "--json", fields],
+    const { stdout } = await run("gh", args,
       { timeout: TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: "1" } });
     return { checkedAt: new Date().toISOString(), value: JSON.parse(stdout) };
   } catch (error) {
@@ -113,10 +157,16 @@ async function ghSnapshot(repository, prNumber, fields) {
   }
 }
 
-async function versionProbe(origin) {
+const ghSnapshot = (repository, prNumber, fields) => ghRead(["pr", "view", String(prNumber), "--repo", repository, "--json", fields]);
+const mainSnapshot = repository => ghRead(["api", `repos/${repository}/git/ref/heads/main`]);
+async function compareSnapshot(repository, base, head) {
+  return { ...await ghRead(["api", `repos/${repository}/compare/${base}...${head}?per_page=1`]), base, head };
+}
+
+async function versionProbe(origin, worker = false) {
   const observation = { origin, checkedAt: new Date().toISOString(), httpStatus: null };
   try {
-    const response = await fetch(`${origin}/api/version`, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "manual",
+    const response = await fetch(`${origin}/api/version${worker ? "/worker" : ""}`, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "manual",
       headers: { Accept: "application/json" } });
     observation.httpStatus = response.status;
     if (response.status !== 200) { await response.body?.cancel(); return { ...observation, error: "http_error" }; }
@@ -127,7 +177,7 @@ async function versionProbe(origin) {
       chunks.push(chunk);
     }
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...observation, error: "invalid_version_response" };
+    if (!validVersion(value) || (worker && value.servedBy !== "worker")) return { ...observation, error: "invalid_version_response" };
     return { ...observation, value };
   } catch (error) {
     return { ...observation, error: ["TimeoutError", "AbortError"].includes(error.name) ? "request_timeout" : error instanceof SyntaxError ? "invalid_json" : "request_failed" };
@@ -166,15 +216,21 @@ async function main(argv) {
   if (argv.length === 1 && argv[0] === "--help") { console.log(HELP); return; }
   let args;
   try { args = options(argv); } catch { console.error(HELP); process.exitCode = 2; return; }
-  const metadata = "number,headRefOid,baseRefName,baseRefOid,state,mergeStateStatus";
+  const metadata = "number,headRefOid,baseRefName,baseRefOid,state,mergeStateStatus,mergeCommit";
   const collectPR = async () => {
     const before = await ghSnapshot(args.repository, args.prNumber, metadata);
     const checks = await ghSnapshot(args.repository, args.prNumber, "headRefOid,statusCheckRollup");
     const after = await ghSnapshot(args.repository, args.prNumber, metadata);
     return { before, checks, after };
   };
-  const [pr, doors] = await Promise.all([collectPR(), Promise.all(args.origins.map(versionProbe))]);
-  const report = summarizeCheckpoint({ ...args, ...pr, doors, checkedAt: new Date().toISOString() });
+  const [pr, doors, workers, mainBefore] = await Promise.all([collectPR(),
+    Promise.all(args.origins.map(origin => versionProbe(origin))),
+    Promise.all(args.origins.map(origin => versionProbe(origin, true))), mainSnapshot(args.repository)]);
+  const candidate = candidateFor(pr.after.value);
+  const targets = [...new Set([sha(mainBefore.value?.object?.sha), ...[...doors, ...workers].filter(door => !door.error && validVersion(door.value)).map(door => sha(door.value.sourceRevision))].filter(Boolean))];
+  const comparisons = candidate ? await Promise.all(targets.map(target => compareSnapshot(args.repository, candidate, target))) : [];
+  const mainAfter = await mainSnapshot(args.repository);
+  const report = summarizeCheckpoint({ ...args, ...pr, doors, workers, mainBefore, mainAfter, comparisons, checkedAt: new Date().toISOString() });
   const json = JSON.stringify(report, null, 2) + "\n", markdown = checkpointMarkdown(report);
   if (args.output) {
     try {
@@ -184,7 +240,7 @@ async function main(argv) {
       await writeFile(resolve(directory, "release-checkpoint.md"), markdown, { mode: 0o600 });
     } catch { console.error("Could not write checkpoint output."); process.exitCode = 2; return; }
   } else process.stdout.write(args.format === "markdown" ? markdown : json);
-  if (report.pullRequest.errors.length || report.pullRequest.checks.state === "unknown" || report.doors.some(door => door.error)) process.exitCode = 1;
+  if (report.pullRequest.errors.length || report.pullRequest.checks.state === "unknown" || report.currentMain.state === "unknown" || report.currentMain.candidateContainment === "unknown" || [...report.doors, ...report.workers].some(door => door.error || door.candidateContainment === "unknown")) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

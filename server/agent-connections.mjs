@@ -186,10 +186,12 @@ export class AgentConnections {
       const before = this.row(roomId, memberId);
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room access changed; refresh first");
       if (action !== "disconnect" && (expiresAt <= now || expiresAt > now + 30 * 86400000 + 3600000)) fail(422, "invalid_expiry", "Choose an expiry within 30 days");
-      if (action === "create" ? Boolean(before || this.store.room(roomId).state.members[memberId])
+      const roomMembers = this.store.room(roomId).state.members;
+      const existingMember = Object.hasOwn(roomMembers, memberId) ? roomMembers[memberId] : undefined;
+      if (action === "create" ? Boolean(before || existingMember)
         : !before || before.status === "disconnected" || before.generation !== expectedGeneration
-          || this.store.room(roomId).state.members[memberId]?.revision !== expectedMemberRevision) fail(409, "connection_changed", "This connection changed; refresh first");
-      if (action === "rotate" && this.store.room(roomId).state.members[memberId].active === false) fail(409, "connection_changed", "This membership ended; create a new connection");
+          || existingMember?.revision !== expectedMemberRevision) fail(409, "connection_changed", "This connection changed; refresh first");
+      if (action === "rotate" && existingMember?.active === false) fail(409, "connection_changed", "This membership ended; create a new connection");
       if (action !== "disconnect" && this.db.prepare("SELECT count(*) n FROM agent_connection_operations WHERE room_id=?").get(roomId).n >= 1000) fail(409, "pilot_limit", "Connection history limit reached");
       if (action !== "disconnect") {
         if (this.db.prepare("SELECT count(*) n FROM credentials WHERE room_id=?").get(roomId).n >= 5000) fail(409, "pilot_limit", "Credential retention limit reached");
