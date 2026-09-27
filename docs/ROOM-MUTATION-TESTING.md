@@ -156,6 +156,13 @@ the server-only imports the parity test never touches):
   are in the campaign log (`.tmp/room-mutate/` during the run) and the
   expected-killer column of the catalog table above held for all 28.
 
+Re-run 2026-09-27 against the rebased base (`origin/main` 678c4b13): all 28
+anchors still occur exactly once; **28 killed, 0 survived, 0 errors** again.
+This run also exercised the new baseline gate — the unmutated overlay passes
+the full suite first (exit 0/0), so no kill can be attributed to a harness
+error. M7/M8 die on the genuine parity failure (mutated bash accepts
+`lease=0h`/`73h`, the real `server/claim-validate.mjs` rejects them).
+
 ### Incidental finding (not a mutant)
 
 Writing S4 exposed a genuine baseline bug: `def epoch($s): (($s |
