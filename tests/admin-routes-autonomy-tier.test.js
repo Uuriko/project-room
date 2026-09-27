@@ -67,3 +67,15 @@ test("t1_readonly delegate cannot decide access requests; owner still can", asyn
   const decided = requests.decide(f.keys.owner, "commons", second.requestId, { decision: "deny" });
   assert.equal(decided.status, "denied");
 });
+
+test("t1_readonly agent with manage_members grant cannot revoke invites; owner still can", t => {
+  const f = setup(t);
+  const first = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Peer1" }, null);
+  const second = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Peer2" }, null);
+  f.demote("agent");
+  const refused = capture(() => f.store.invites.revoke(f.keys.agent, "commons", first.inviteId));
+  assert.equal(refused.status, 403);
+  assert.equal(refused.code, "agent_readonly");
+  const revoked = f.store.invites.revoke(f.keys.owner, "commons", second.inviteId);
+  assert.equal(revoked.revoked, true);
+});
