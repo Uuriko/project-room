@@ -6,6 +6,7 @@
 // idempotency are the same path as POST /api/rooms/:id/commands.
 // Shareable login links (#628) are not part of this surface.
 
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
@@ -344,7 +345,8 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
   }
   if (name === "room_check_access" && args.roomId === undefined) {
-    const rooms = store.identities.roomsForIdentity(identity.identityId).map(row => ({
+    const rooms = store.identities.roomsForIdentity(identity.identityId).filter(row =>
+      !isGuestAgentMemberId(row.memberId) || store.guestCapability({ member: { id: row.memberId } }) !== "chat_only").map(row => ({
       roomId: row.roomId, title: row.title ?? row.roomId, memberId: row.memberId
     }));
     return {
@@ -356,6 +358,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
   const roomId = args.roomId;
   if (name === "room_check_access") {
     const auth = store.authenticate(secret, roomId);
+    store.requireGuestRead(auth);
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       roomId, memberId: auth.member.id, identityId: auth.identityId ?? identity.identityId,
@@ -364,7 +367,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
     };
   }
   if (name === "room_activation_pack") {
-    store.authenticate(secret, roomId);
+    store.requireGuestRead(store.authenticate(secret, roomId));
     return buildActivationPack(store, roomId);
   }
   if (name === "get_room_context") {
@@ -642,6 +645,15 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           : validRoomArgs(name, args);
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
+      // room_create names a *future* room; it has no member to authenticate yet.
+      if (args.roomId && name !== "room_create") {
+        const current = store.authenticate(secret, args.roomId);
+        if (name !== "room_read_messages" && name !== "room_post_message" && name !== "room_react")
+          store.requireGuestRead(current);
+        if (name !== "room_read_messages" && name !== "room_post_message" && name !== "room_react"
+          && HOSTED_TOOLS.find(entry => entry.name === name)?.annotations?.readOnlyHint === false)
+          store.requireGuestWrite(current);
+      }
       if (isHostedStdioTool(name)) {
         const outcome = await callHostedStdioTool(store, secret, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
