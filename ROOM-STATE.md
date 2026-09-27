@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T07:28:47Z · board: Uuriko/project-room#266 · watermark: 5853799499 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=9fbc87937b2680b44a708fbf20579c30ee79ff0226ecdf1e2e2552f4c382fab8 -->
+<!-- generated: 2026-09-27T08:00:56Z · board: Uuriko/project-room#266 · watermark: 5853980285 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=1be07e2976e16d2bfccf4203cf040355fe3300477ec99ed61b8d67851b8350cf -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-18-021 | (none) | submitted | 2026-09-19T02:14:48Z | server/agent-roo
 RC-2026-09-18-022 | (none) | submitted | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | (none) | submitted | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
 RC-2026-09-18-033 | quill | submitted | 2026-09-19T04:00:11Z | client/room-agent.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
-… +54 more
+… +55 more
 
 ## file-claims
 file | lane | task-id | state
@@ -171,6 +171,7 @@ server/open-join.mjs | (none) | RC-2026-09-18-017 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
+server/referral-invites.mjs | instinct | RC-2026-09-27-004 | working
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-088 | submitted
 server/sms-ingest.mjs | quill | RC-2026-09-18-008 | submitted
@@ -260,6 +261,7 @@ tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
 tests/otel-wiring.test.js | jill | RC-2026-09-27-1144 | working
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
+tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
 tests/room-claim-status.test.js (new) | jill | RC-2026-09-27-1145 | working
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-overlap-refusal.test.js (new) | jill | RC-2026-09-27-1145 | working
@@ -318,6 +320,7 @@ RC-2026-09-27-1147 | jill | working | 2026-09-27T11:47:17Z | NONE
 RC-2026-09-27-1148 | jill | working | 2026-09-27T11:47:18Z | NONE
 RC-2026-09-27-1149 | jill | working | 2026-09-27T11:47:19Z | server/job-bot.mjs (new), tests/job-bot.test.js (new), docs/JOB-BOT.md (new)
 RC-2026-09-27-1145 | jill | working | 2026-09-27T13:03:08Z | scripts/room, tests/room-overlap-refusal.test.js (new), tests/room-claim-status.test.js (new)
+RC-2026-09-27-004 | instinct | working | 2026-09-27T13:53:59Z | server/referral-invites.mjs, tests/referral-invites.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -479,6 +482,7 @@ server/open-join.mjs | (none) | RC-2026-09-18-017 | submitted
 server/outbound-webhooks.mjs | quill | RC-2026-09-19-087 | submitted
 server/owner-attention.mjs | jill | RC-2026-09-21-001 | submitted
 server/receipts-search.mjs | (none) | RC-2026-09-24-205 | submitted
+server/referral-invites.mjs | instinct | RC-2026-09-27-004 | working
 server/room-lifecycle.mjs | quill | RC-2026-09-19-080 | submitted
 server/room-lifecycle.mjs | quill | RC-2026-09-19-088 | submitted
 server/sms-ingest.mjs | quill | RC-2026-09-18-008 | submitted
@@ -568,6 +572,7 @@ tests/open-join.test.js | (none) | RC-2026-09-18-017 | submitted
 tests/otel-wiring.test.js | jill | RC-2026-09-27-1144 | working
 tests/ralph-loop.test.js | jill | RC-2026-09-26-1131 | submitted
 tests/receipts-search.test.js | (none) | RC-2026-09-24-205 | submitted
+tests/referral-invites.test.js | instinct | RC-2026-09-27-004 | working
 tests/room-claim-status.test.js (new) | jill | RC-2026-09-27-1145 | working
 tests/room-creation.test.js | quill | RC-2026-09-19-080 | submitted
 tests/room-overlap-refusal.test.js (new) | jill | RC-2026-09-27-1145 | working
@@ -588,5 +593,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2364 threshold=1500 rotation_due=yes watcher=active open_claims=79 prose_open=3 unfenced_prose=73 files_claimed=188 overlap_files=29 watermark=5853799499
+board_comments=2366 threshold=1500 rotation_due=yes watcher=active open_claims=80 prose_open=3 unfenced_prose=73 files_claimed=190 overlap_files=29 watermark=5853980285
 
