@@ -193,3 +193,122 @@ export function verifyKeyRotation({ agentId, card, newPublicKey, oldPublicKey, r
 }
 
 export { SigningError };
+
+// ---------------------------------------------------------------------------
+// A2A v1.0 §8.4 JWS Agent Card signatures (RC-2026-09-27-2715).
+//
+// The house scheme above signs a canonical subset of the card with raw
+// Ed25519. A2A v1.0 instead signs the whole card (minus `signatures`) as a
+// JWS (RFC 7515) over a JCS (RFC 8785) canonical payload:
+//
+//   signing input = ASCII(BASE64URL(UTF8(protected)) || "." || BASE64URL(payload))
+//
+// Both schemes share the room's Ed25519 key; the JWS `alg` is "EdDSA"
+// (RFC 8037 — node:crypto Ed25519 with a null digest is PureEdDSA, exactly
+// what JWS EdDSA requires). This module stays pure: node:crypto only, no
+// dependencies, no I/O.
+//
+// The existing canonicalize() (recursive key sort, no whitespace, arrays keep
+// order) IS JCS for card payloads: cards contain only strings, booleans,
+// arrays, and objects — no floats or exotic types — and the only property
+// dropped from the payload is `signatures`. Note on spec §8.4's "remove
+// properties with default values": that rule is defined against the A2A proto
+// schema via ProtoJSON explicit presence (an explicitly-set optional field
+// KEEPS its default value — e.g. `pushNotifications: false` is included when
+// present). The room's discovery card is not a proto message, so there is no
+// proto schema to judge defaults against; every property present in the
+// served card is significant, and the payload is the served card minus
+// `signatures`, nothing else. A verifier MUST apply the same rule —
+// verifyCardJws does — or signatures will not match.
+// ---------------------------------------------------------------------------
+
+const b64urlEncode = buffer => buffer.toString("base64url");
+
+const b64urlDecode = (value, label) => {
+  if (typeof value !== "string" || value.length === 0) {
+    fail("invalid_signing_input", `${label} must be a base64url string`);
+  }
+  return Buffer.from(value, "base64url");
+};
+
+// The exact bytes a JWS signature covers: the card minus the `signatures`
+// field, canonicalized per RFC 8785. Throws SigningError on bad input.
+export function jwsPayloadBytes(card) {
+  if (card === null || typeof card !== "object" || Array.isArray(card)) {
+    fail("invalid_signing_input", "card must be an object");
+  }
+  const { signatures: _dropped, ...rest } = card;
+  return Buffer.from(JSON.stringify(canonicalize(rest)), "utf8");
+}
+
+// Build the JWS Protected Header and return it base64url-encoded. Per A2A
+// v1.0 §8.4 the header MUST carry `alg` and `kid`; `typ` SHOULD be "JOSE";
+// `jku` (JWKS URL for key discovery) MAY be included.
+export function jwsProtectedHeader({ keyId, jku }) {
+  if (typeof keyId !== "string" || keyId.length === 0) {
+    fail("invalid_signing_input", "keyId must be a non-empty string");
+  }
+  const header = { alg: "EdDSA", typ: "JOSE", kid: keyId };
+  if (jku !== undefined) {
+    if (typeof jku !== "string" || jku.length === 0) {
+      fail("invalid_signing_input", "jku must be a non-empty string when present");
+    }
+    header.jku = jku;
+  }
+  return b64urlEncode(Buffer.from(JSON.stringify(header), "utf8"));
+}
+
+// The JWS signing input for a card: ASCII(protected + "." + base64url(payload)).
+// Returns { protected, input } so signers keep the exact protected bytes.
+export function jwsSigningInput({ card, keyId, jku }) {
+  const payload = jwsPayloadBytes(card);
+  const protectedHeader = jwsProtectedHeader({ keyId, jku });
+  return {
+    protected: protectedHeader,
+    input: Buffer.from(`${protectedHeader}.${b64urlEncode(payload)}`, "ascii"),
+  };
+}
+
+// Sign a card as an A2A v1.0 AgentCardSignature { protected, signature }.
+// Throws SigningError on bad inputs; never returns a partial signature.
+export function signCardJws({ card, privateKey, keyId, jku }) {
+  const key = importPrivateKey(privateKey);
+  const { protected: protectedHeader, input } = jwsSigningInput({ card, keyId, jku });
+  return {
+    protected: protectedHeader,
+    signature: sign(null, input, key).toString("base64url"),
+  };
+}
+
+// Verify an A2A v1.0 AgentCardSignature against the card and public key.
+// Returns false (never throws) for any malformed or non-matching input:
+// verifiers treat "no" as the safe answer. Verification uses the JWS's own
+// `protected` bytes verbatim — the signature covers those exact bytes — and
+// recomputes the payload from the presented card minus `signatures`.
+export function verifyCardJws({ card, publicKey, jws }) {
+  try {
+    if (jws === null || typeof jws !== "object" || Array.isArray(jws)) return false;
+    const protectedHeader = jws.protected;
+    if (typeof protectedHeader !== "string" || protectedHeader.length === 0) return false;
+    const headerJson = JSON.parse(b64urlDecode(protectedHeader, "protected").toString("utf8"));
+    if (headerJson.alg !== "EdDSA") return false;
+    const key = importPublicKey(publicKey);
+    const sig = b64urlDecode(jws.signature, "signature");
+    if (sig.length !== 64) return false;
+    const payload = jwsPayloadBytes(card);
+    const input = Buffer.from(`${protectedHeader}.${b64urlEncode(payload)}`, "ascii");
+    return verify(null, input, key, sig);
+  } catch {
+    return false;
+  }
+}
+
+// The room's pinned public key as a JWK (RFC 7517) for the JWKS key-discovery
+// document. Throws SigningError on bad inputs.
+export function publicKeyToJwk({ publicKey, keyId }) {
+  if (typeof keyId !== "string" || keyId.length === 0) {
+    fail("invalid_signing_input", "keyId must be a non-empty string");
+  }
+  const raw = decodeBase64(publicKey, 32, "publicKey");
+  return { kty: "OKP", crv: "Ed25519", x: raw.toString("base64url"), kid: keyId };
+}
