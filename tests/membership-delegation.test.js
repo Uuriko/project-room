@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
@@ -295,6 +296,8 @@ test("legacy grant imports as unattributed baseline, not an invented owner decis
     (room_id,identity_id,granted_by,granted_at,revoked_at,added_invite_member)
     VALUES('commons',?,'owner',?,NULL,0)`).run(identityId, store.now());
   store.db.exec("DELETE FROM membership_delegation_journal");
+  // Model a pre-journal file: a deployed trigger could not have captured this row.
+  store.db.exec("DELETE FROM membership_delegation_pending");
   store.delegationJournal.baseline();
   const row = store.db.prepare("SELECT * FROM membership_delegation_journal").get();
   assert.equal(row.action, "baseline_active");
@@ -303,4 +306,53 @@ test("legacy grant imports as unattributed baseline, not an invented owner decis
   // A future owner revoke is a real decision and does not rewrite history.
   store.delegation.revoke(ownerToken, "commons", { identityId });
   assert.equal(store.delegationJournal.verify().entries, 2);
+});
+
+
+test("same-schema rollback records older writer changes and imports unattributed transitions on redeploy", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  const filename = store.db.location();
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  assert.equal(store.delegationJournal.verify().entries, 1);
+  // Simulate the older SQL in another connection while the new writer is idle.
+  const rollback = new DatabaseSync(filename);
+  try {
+    rollback.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+      .run(Date.now(), "commons", identityId);
+    rollback.prepare("UPDATE membership_delegation_grants SET granted_by=?, granted_at=?, revoked_at=NULL WHERE room_id=? AND identity_id=?")
+      .run("owner", Date.now(), "commons", identityId);
+    assert.equal(rollback.prepare("SELECT COUNT(*) AS n FROM membership_delegation_pending").get().n, 2);
+  } finally { rollback.close(); }
+  const deployed = new RoomStore(filename);
+  try {
+    const journal = deployed.db.prepare("SELECT action,actor_id FROM membership_delegation_journal ORDER BY sequence").all();
+    assert.deepEqual(journal.map(row => row.action), ["grant", "baseline_revoked", "baseline_active"]);
+    assert.equal(journal[1].actor_id, "rollback_unattributed");
+    assert.equal(deployed.delegationJournal.verify().entries, 3);
+    assert.equal(deployed.db.prepare("SELECT COUNT(*) AS n FROM membership_delegation_pending").get().n, 0);
+    deployed.delegation.revoke(ownerToken, "commons", { identityId });
+    assert.equal(deployed.delegationJournal.verify().entries, 4);
+  } finally { deployed.close(); }
+});
+
+
+test("unrecorded grant tamper is not misclassified as a rollback", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  store.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+    .run(Date.now(), "commons", identityId);
+  store.db.exec("DELETE FROM membership_delegation_pending");
+  assert.throws(() => store.delegationJournal.reconcileRollback(), /operator reconciliation/);
+});
+
+test("rollback transitions must match the grant's final state before import", t => {
+  const { store, ownerToken, agent } = setup(t);
+  const identityId = agent.identityId;
+  store.delegation.grant(ownerToken, "commons", { identityId });
+  store.db.prepare("UPDATE membership_delegation_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+    .run(Date.now(), "commons", identityId);
+  store.db.prepare("UPDATE membership_delegation_pending SET next_active=1").run();
+  assert.throws(() => store.delegationJournal.reconcileRollback(), /operator reconciliation/);
 });

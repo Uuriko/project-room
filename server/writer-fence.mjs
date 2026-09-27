@@ -36,6 +36,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // rule are the integrity gate.
   "membership_delegation_grants",
   "membership_delegation_journal",
+  "membership_delegation_pending",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path

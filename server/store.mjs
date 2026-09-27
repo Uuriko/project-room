@@ -1101,7 +1101,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const hadDelegationJournal = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='membership_delegation_journal'").get();
       this.db.exec(membershipDelegationJournalSchema);
       if (!hadDelegationJournal) this.delegationJournal.baseline();
-      this.delegationJournal.verify();
+      const rollbackChanges = this.delegationJournal.reconcileRollback();
+      if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
       this.db.exec(agentRoomSchema);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers
