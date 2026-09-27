@@ -67,7 +67,29 @@ export async function submitReplyAction(client, identity, name, args, { signal }
     message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
   return recordedReplyAction(name, args, command, receipt);
 }
-export function replyRefusal(cause) {
+export function replyRefusal(cause, { name, args = {} } = {}) {
+  if (replyRoute(name)) {
+    const recovery = {
+      reply_request_not_found: ["This request is not available to this connection. It may be ordinary chat, missing, or outside your access. List your available requests; do not infer whether another participant has a private request.",
+        [{ tool: "room_list_requests", arguments: { direction: "both", status: "all" } }]],
+      invalid_reply_selection: ["Choose a supported request selection and one continuation or checkpoint. Keep the original selection until you have corrected it.", []],
+      invalid_reply_cursor: ["The continuation does not match a supported read. Check the original selection and saved cursor; never silently reset or substitute a checkpoint.", []],
+      reply_cursor_identity_changed: ["The saved read belongs to a different identity or access state. Reconcile the connection and original selection; never silently reset the checkpoint.", [{ tool: "room_check_access" }]],
+      reply_history_changed: ["The saved history boundary no longer matches. Reconcile the original selection and room history before starting a reviewed new read; never silently reset the checkpoint.", []],
+      reply_context_unavailable: ["Current context is unavailable to this connection. Ask the requester for a visible clarification through an authorized channel before answering.", []],
+      reply_entry_too_large: ["A selected entry exceeds the read budget. Smaller pages cannot split that entry; request a separately authorized export or clarification.", []],
+      reply_list_too_large: ["Narrow the request direction or status selection before reading again.", []],
+      invalid_response: ["The response did not validate for this room, identity or read window. Do not use it as answer context. Check the connection and reconcile the original read.", [{ tool: "room_check_access" }]]
+    };
+    const known = Object.hasOwn(recovery, cause?.code), code = known ? cause.code : "read_failed";
+    const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code });
+    const accessFailure = [401, 403].includes(cause?.status);
+    const [message, next] = known ? recovery[code] : accessFailure
+      ? ["This read could not authenticate or access the selected room. Keep the saved connection and check existing access.", ax.next]
+      : ["This read failed; no answer was submitted by it. Retry the same read and selection after service recovery. Preserve saved continuations until reconciled.", [{ tool: name, arguments: args }]];
+    return { type: "reply_read_refused", code, outcome: "read_failed", message,
+      status: ax.status, reason: code, hint: message, next };
+  }
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found", "reply_context_unavailable",
     "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command"];
   const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: allowed.includes(cause?.code) ? cause.code : "not_confirmed", message: cause?.message });

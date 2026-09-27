@@ -436,7 +436,7 @@ export class RoomAgentClient {
     const page = await this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
     const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
-      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
+      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
       ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
       ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),

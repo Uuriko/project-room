@@ -71,10 +71,42 @@ test("ordinary directed messages and ignored historical request fields remain or
   const hosted = await callHostedStdioTool(f.store, key, "room_read_messages", { roomId: "commons" });
   for (const result of [await client.roomMessages(), hosted.value]) {
     const legacy = result.messages.find(message => message.body === "Legacy data");
+    assert.equal(legacy.workItemId, null);
     assert.equal(Object.hasOwn(legacy, "nextRead"), false);
     assert.equal(Object.hasOwn(legacy, "requestKind"), false);
   }
   auditRecovery(f.store);
+});
+
+test("compact message reads retain work links without exposing private messages to other members", async t => {
+  const f = fixture(t);
+  f.send("owner", { id: "linked-work", type: "work.proposed", data: {
+    workItemId: "linked-work", title: "Review", definitionOfDone: "A useful answer", accountableMemberId: "agent", mode: "read"
+  } });
+  const publicMessage = f.post("owner", { messageId: "linked-public", body: "Public context", workItemId: "linked-work" });
+  f.post("owner", { messageId: "unlinked", body: "No work selected" });
+  const q = f.open("guest", { workItemId: "linked-work" }, "linked-private-question");
+  const sequence = f.store.room("commons").sequence;
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  for (const memberId of ["agent", "reviewer"]) {
+    const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId, token: f.keys[memberId] });
+    const args = { after: publicMessage.sequence - 1, limit: 100 };
+    const hosted = await callHostedStdioTool(f.store, f.keys[memberId], "room_read_messages", { roomId: "commons", ...args });
+    for (const result of [await client.roomMessages(args), hosted.value]) {
+      assert.equal(result.messages.find(row => row.messageId === "linked-public").workItemId, "linked-work");
+      assert.equal(result.messages.find(row => row.messageId === "unlinked").workItemId, null);
+      const question = result.messages.find(row => row.messageId === q.command.data.messageId);
+      if (memberId === "agent") {
+        assert.equal(question.workItemId, "linked-work");
+        assert.equal(question.requestKind, "reply");
+        assert.equal(question.nextRead.arguments.requestMessageId, q.command.data.messageId);
+      } else assert.equal(question, undefined);
+      assert.equal(result.hasMore, false);
+    }
+  }
+  assert.equal(f.store.room("commons").sequence, sequence);
 });
 
 test("explicit answer appends once, retains exact historical retries and does not complete work", t => {

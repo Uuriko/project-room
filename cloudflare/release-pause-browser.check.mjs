@@ -1,4 +1,4 @@
-import { clickChrome, ensureSidebarClosed } from '../scripts/room-chrome.mjs';
+import { clickChrome, ensureSidebarClosed, openComposerOptions } from '../scripts/room-chrome.mjs';
 // Disposable workerd/browser release recovery proof; never provisions live data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -68,7 +68,6 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await guestOption.waitFor({ state: 'attached' });
     const guestId = await guestOption.getAttribute('value');
     await context.request.post(origin + '/__test-dm-consent', { data: { fromMemberId: 'owner', toMemberId: guestId } });
-    assert.equal(await page.locator('#composer-options').count(), 0);
     assert.equal(await page.locator('#remember-drafts').count(), 0);
     const drafts = () => page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)
       .filter(([key]) => /^project-room:drafts:v\d+$/.test(key)).map(([key, raw]) => {
@@ -82,6 +81,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
 
     for (const request of [false, true]) {
       if (request) {
+        await openComposerOptions(page);
         await page.locator('#request-reply').click();
         await page.locator('#message-to-select').selectOption(guestId);
       }

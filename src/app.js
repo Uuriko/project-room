@@ -30,7 +30,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
@@ -1130,9 +1130,9 @@ function syncComposerChrome() {
     // DMs are open by default (2026-09-24): only an explicit denial
     // (blocked/rejected/revoked) is surfaced, so a refusal is never a
     // surprise. No row / pending / approved needs no callout.
-    const recipient = to && state?.members?.[to] ? state.members[to] : null;
-    if (recipient) {
-      note.textContent = `Private — only you and ${recipient.displayName} can see this message.`;
+    const audience = composerAudienceNote(state?.members, to);
+    if (audience) {
+      note.textContent = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
@@ -2233,7 +2233,13 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  $("#request-reply").hidden = !state || active;
+  const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
+  const members = state?.members;
+  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
+  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
+  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
+  requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
   const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
@@ -2306,6 +2312,20 @@ async function openRequestMode(kind, id) {
     if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
   }
 }
+const composerOptions = $("#composer-options");
+composerOptions.addEventListener("click", event => {
+  if (!event.target.closest("button")) return;
+  composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+}, true);
+composerOptions.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !composerOptions.open) return;
+  event.preventDefault(); event.stopPropagation(); composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+});
+document.addEventListener("click", event => {
+  if (!composerOptions.contains(event.target)) composerOptions.open = false;
+});
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
 $("#recipe-preview-toggle").addEventListener("click", () => {
   const panel = $("#recipe-preview");
@@ -4568,7 +4588,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#conversation-title");
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }

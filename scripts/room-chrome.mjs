@@ -136,3 +136,9 @@ export async function clickWorkAction(card, action, { keyboard = false } = {}) {
     await control.click();
   }
 }
+
+// Explicit user step for secondary composer actions; never intercept clicks.
+export async function openComposerOptions(page) {
+  const details = page.locator("#composer-options");
+  if (!(await details.evaluate(node => node.open))) await details.locator(":scope > summary").click();
+}

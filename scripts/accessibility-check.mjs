@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
@@ -104,9 +105,9 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.ok(await contrast() >= 4.5, "primary control contrast on hover");
 
   // Canceling the inline work form returns focus to the control that opened it.
-  await page.locator("#new-work-button").click();
+  await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#cancel-work-button").click();
-  await page.waitForFunction(() => document.activeElement.id === "new-work-button");
+  await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
 
   // The primary action stays visible while secondary evidence uses keyboard More.
   const producerCard = page.locator('[data-work-record-id="producer-choice"]');

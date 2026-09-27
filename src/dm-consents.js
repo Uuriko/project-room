@@ -58,7 +58,8 @@ function rowDirection(row, selfId, peerId, peerHandle) {
 //   incoming — the peer's ability to DM me (I am the target)
 // Returns null for the member themselves or unknown peers.
 export function dmConsentPeerSummary(consents, members, selfId, peerId) {
-  const peer = members?.[peerId];
+  // A truthy map lookup treats toString as a peer and returns a DM card for nobody.
+  const peer = members && Object.hasOwn(members, peerId) ? members[peerId] : undefined;
   if (!peer || peerId === selfId) return null;
   const handle = dmConsentHandleOf(peer);
   let outgoing = null, incoming = null, incomingReason = "";
@@ -84,7 +85,8 @@ export function incomingDmRequests(consents, members, selfId) {
     // server-computed outgoing flag (true only for my own requests).
     if (tgtId ? tgtId !== selfId : row?.outgoing) continue;
     if (reqId && reqId === selfId) continue;
-    let requesterId = reqId && members?.[reqId] ? reqId : null;
+    // A truthy map lookup treats toString as a requester and keeps that id on the decide list.
+    let requesterId = reqId && members && Object.hasOwn(members, reqId) ? reqId : null;
     if (!requesterId && !reqId) requesterId = resolve(row?.requester);
     if (!requesterId) continue;
     out.push({ requesterId, requester: row.requester, reason: row.reason ?? "", at: row.createdAt ?? null });
@@ -105,18 +107,18 @@ export function dmConsentPairDescription(summary, peerName) {
   const name = peerName || "them";
   const lines = [];
   const outgoingText = {
-    pending: `Your request to message ${name} is still pending.`,
+    pending: `Your request to message ${name} is still pending. You can message ${name} now; approval is not required.`,
     approved: `${name} approved your request — you can message them directly.`,
-    rejected: `${name} declined your request. DMs with them stay off until they unblock you.`,
+    rejected: `You cannot message ${name}: they declined your request. You can request again.`,
     blocked: `${name} isn't accepting DM requests from you.`,
-    revoked: `DMs with ${name} are off — consent was revoked.`,
+    revoked: `You cannot message ${name}: consent was revoked. You can request again.`,
   }[summary?.outgoing];
   const incomingText = {
-    pending: `${name} wants to message you — approve, reject, or block below.`,
-    approved: summary?.outgoing ? `${name} can message you directly.` : `${name} can message you directly, and you can answer.`,
-    rejected: `You declined ${name}'s request. They can ask again.`,
+    pending: `${name} can message you now. Their request is pending; declining or blocking stops their messages.`,
+    approved: `${name} can message you directly.`,
+    rejected: `You declined ${name}'s request. They cannot message you, but can request again.`,
     blocked: `You've blocked ${name} — they can't message you or send new requests.`,
-    revoked: `DM consent with ${name} was revoked.`,
+    revoked: `${name} cannot message you: consent was revoked. They can request again.`,
   }[summary?.incoming];
   if (outgoingText) lines.push(outgoingText);
   if (incomingText) lines.push(incomingText);

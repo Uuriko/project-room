@@ -1473,3 +1473,17 @@ summary { overflow-wrap: anywhere; }
 .join-agent[open] > summary { margin-bottom: .75rem; }
 
 .auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }
+
+/* Secondary chat actions are disclosed without hiding active audience or errors. */
+.composer-row { grid-template-columns: minmax(0, 1fr) 44px; }
+.composer-row > button[type="submit"] { grid-column: 2; }
+.composer-options { position: relative; grid-column: 1; grid-row: 2; justify-self: start; }
+.composer-options > summary { display: flex; align-items: center; min-height: 44px; padding: .35rem .6rem; cursor: pointer; color: var(--muted); font-size: .85rem; }
+.composer-options-panel { position: absolute; bottom: calc(100% + .5rem); left: 0; z-index: 25; width: min(18rem, calc(100vw - 4rem)); padding: .4rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); box-shadow: 0 .4rem 1.5rem #0005; }
+.composer-options-panel > button { display: flex; align-items: center; justify-content: flex-start; gap: .5rem; width: 100%; min-height: 44px; height: auto; padding: .6rem; font-size: .85rem; text-align: left; }
+.composer-options-panel > button[hidden] { display: none; }
+.composer-options-panel .composer-add-label { display: inline; font-size: inherit; }
+.composer-options-panel #request-reply { min-height: 44px; padding: .6rem; font-size: .85rem; max-width: 100%; text-align: left; white-space: normal; }
+@media (max-width: 520px) {
+  .composer-options { margin-right: auto; }
+}

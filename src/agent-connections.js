@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionStanding, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, suggestedConfigDir, capabilitySummary, connectionSeat, connectionStanding, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName, catalogSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -151,7 +151,7 @@ export function installAgentConnections({ client, getState }) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName;
         const members = getState()?.members;
-        const seat = members ? members[row.memberId] : undefined;
+        const seat = connectionSeat(members, row.memberId);
         const standing = connectionStanding({
           connectionStatus: row.status,
           memberFound: members ? seat != null : null,

@@ -82,7 +82,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#status").textContent(), "", "entering the room is its own success feedback");
     assert.equal(await page.locator(".connection-bar").isVisible(), true);
-    assert.equal(await page.locator("#composer-options").count(), 0, "composer has no Options disclosure");
+    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#draft-hint").count(), 0);
     const hint = await page.locator("#message-input").getAttribute("aria-description");
     assert.match(hint, /Enter to send|Return for a new line/);
