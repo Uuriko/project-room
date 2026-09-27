@@ -350,3 +350,18 @@ Deliberately not:
 - Whether `scripts/room claim`'s file-collision guard (which only matches
   single-file claims — the `contains("|"+f+"|")` check can't hit inside a
   comma-joined list) gets fixed or retired in favor of the API's 409.
+
+## Hosted rollout gate (2026-09-27)
+
+The HTTP route family is implemented but disabled by default. Set
+`ROOM_BOARD_V2_ENABLED=1` only on an explicitly selected deployment, or pass
+`boardV2Enabled: true` to the Node server factory. An authenticated request
+without opt-in receives `503 board_v2_disabled`; existing room APIs remain
+available. Production rollout has not selected this flag.
+
+The registry is database-wide, not partitioned by the room used for
+authentication. Its multi-room authorization and post-body credential checks
+must be reviewed before enabling it on the public hosted service. The storage
+adapter sequence repair and opt-in Worker tests establish runtime behavior,
+not approval of that authorization design. The four existing tables remain;
+this gate performs no schema or data deletion.
