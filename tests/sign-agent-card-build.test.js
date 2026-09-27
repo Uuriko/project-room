@@ -88,7 +88,7 @@ test("signed build writes an A2A v1.0 JWS covering the served envelope", async t
 test("unsigned build writes AGENT_CARD_JWS_SIGNATURES = null", t => {
   const directory = mkdtempSync(join(tmpdir(), "card-build-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const outputPath = join(directory, "signed.mjs"), key = generateKeyPair();
+  const outputPath = join(directory, "signed.mjs"), _key = generateKeyPair();
   const card = { name: "Fixture", deployed: { revision: "unsigned-jws-revision" } };
   signAgentCard({ privateKey: null, card, outputPath, allowUnsigned: true });
   const unsigned = readFileSync(outputPath, "utf8");
