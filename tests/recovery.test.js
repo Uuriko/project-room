@@ -135,6 +135,7 @@ test("online capture preserves all application tables, identity boundaries and e
   f.store.db.prepare(`INSERT INTO guest_members(member_id,room_id,guest_identity_id,tier,invite_id,created_at)
     VALUES('guest-agent-recovery','commons',?,'observer','recovery-guest-invite',?)`)
     .run(identityId, f.now());
+  f.store.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('member','guest-agent-recovery','read_only')").run();
   // Seed one self-serve guest seat + its request-ID idempotency record so
   // the capture covers guest_selfserve and guest_selfserve_idem
   // (RC-2026-09-25-912). Written directly: the join path needs a signed

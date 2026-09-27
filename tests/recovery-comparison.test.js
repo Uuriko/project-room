@@ -46,6 +46,21 @@ test('equal independently captured data is not permission to reopen; all applica
   }
 });
 
+test('guest capability downgrade is marked as an access change, not a content-only diff', async t => {
+  const f = await fixture(t);
+  f.store.db.prepare(`INSERT INTO guest_invites
+    (id,code_hash,room_id,tier,credential_ttl_ms,guest_label,minted_by_member_id,issue_request_id,created_at,redeem_by,status)
+    VALUES('compare-invite',?,'commons','observer',3600000,'Compare','owner','compare-request',1,3600001,'redeemed')`)
+    .run('a'.repeat(64));
+  f.store.db.prepare(`INSERT INTO guest_members(member_id,room_id,guest_identity_id,tier,invite_id,created_at)
+    VALUES('guest-agent-compare','commons','compare-id','observer','compare-invite',1)`).run();
+  const before = await f.capture();
+  f.store.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('member','guest-agent-compare','read_only')").run();
+  const report = compare(before, await f.capture());
+  assert.equal(report.accessDifferences, true);
+  assert.equal(delta(report, 'guest_capability_scopes').added, 1);
+});
+
 test('private thread mute changes are included in capture comparison', async t => {
   const f = await fixture(t);
   f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'message.posted',
