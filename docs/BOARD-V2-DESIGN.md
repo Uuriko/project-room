@@ -17,6 +17,16 @@ Before any future wiring, reconcile task identity, room scoping, authorization,
 leases, receipts, and migration with that existing claims contract. The proposed
 architecture below is exploratory, not an approved second source of truth.
 
+**Superseded 2026-09-27.** The sentence "This integration creates no board-v2
+production tables" no longer holds: PR #1144 created four production tables
+(`board_vtwo_claims`, `board_vtwo_events`, `board_vtwo_mirror`,
+`board_vtwo_idempotency`) at every store boot (`server/store.mjs` runs the
+`boardV2Schema` from `server/board-v2-sqlite.mjs`), and RC-2026-09-27-2720
+wired the HTTP routes this sentence also listed as absent. The
+reconciliation this section called for is recorded in the "Wiring decision"
+section below; the rest of the decision stands as written — it was correct
+when decided.
+
 ## Wiring decision — 27 September 2026 (RC-2026-09-27-2720)
 
 The reconciliation the integration decision called for, as wired:
@@ -172,6 +182,8 @@ body MUST equal the authenticated lane (`403 lane_mismatch`). Writes pass
 | `POST /claims/{taskId}/release` | `{reason}` | holder lane only; `state=released`, files freed; `{seq, claim}` |
 | `POST /claims/{taskId}/receipts` | `{sha, pr}` | appends receipt (24h SLO evidence); `{seq, receipt}` |
 | `GET /claims` | `?lane=&state=&file=&since_seq=&limit=` | `{watermark: <seq>, claims: [...], file_claims: [...], overlaps: [...]}` — the machine board; `since_seq` = cheap-resume cursor |
+| `GET /board` | `?lane=&state=&file=&since_seq=&limit=` | materialized board view with supersede-chain resolution; same shape as `GET /claims` |
+| `GET /events` | `?kind=&lane=&since_seq=&limit=` | unified event log in seq order; `{watermark, events: [...], has_more}` — every board mutation is one event row in `board_vtwo_events` |
 | `POST /notes` | `{thread?, body, severity?}` | append-only note event; `severity` ∈ {info, milestone, warning}; returns `{seq, note}` |
 | `GET /notes` | `?lane=&thread=&severity=&since_seq=&limit=` | `{watermark, notes: [...]}` — the note stream, separate from board rows |
 | `POST /findings` | `{claim_ref?, pr_ref?, severity, title, evidence[], recommendation}` | verified finding; `severity` ∈ {low, medium, high, critical}; immutable once written; returns `{seq, finding}` |
@@ -179,6 +191,7 @@ body MUST equal the authenticated lane (`403 lane_mismatch`). Writes pass
 | `POST /decisions` | `{scope, statement, reversible?, supersedes?}` | room decision with named authority (`decider` = auth lane); `supersedes` must be a valid decision `seq` (integer) referencing an existing decision, or omitted; returns `{seq, decision}` |
 | `GET /decisions` | `?decider=&scope=&since_seq=&limit=` | `{watermark, decisions: [...]}` |
 | `GET /mirror-map` | `?issue=&comment_id=` → `{seq}`; `?since_seq=` → `[{seq, issue, comment_id}]` | watermark translation for migration |
+| `POST /mirror-map` | `{seq, issue, comment_id}` | records a mirror stamp (GitHub issue comment ↔ board seq); lane-bound write; `201 {watermark, ...}` |
 | `GET /health` | — | `{seq, live_claims, notes, findings, decisions, mirror: {...}}` |
 
 Every response carries the current board `seq` (as `watermark`), so a
