@@ -45,8 +45,8 @@ async function mode(page, id, kind) {
   assert.equal(await page.locator("#composer-status").textContent(), "");
 }
 
-test("request journey: request, clarify and answer stay in chat without closing work", { timeout: 60000 }, async t => {
-  const f = await setup(t), owner = await f.login("owner"), guest = await f.login("guest");
+for (const width of [1280, 390]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
+  const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
@@ -56,13 +56,20 @@ test("request journey: request, clarify and answer stay in chat without closing 
   assert.equal(await input(owner).inputValue(), "Keep my ordinary draft");
   const id = Object.keys(f.state().replyRequests)[0];
   assert.equal(f.state().replyRequests[id].recipientId, "guest");
-  await record(guest, id).locator('[data-message-action="reply"]').click();
+  const clarify = record(guest, id).getByRole("button", { name: "Clarify", exact: true });
+  assert.equal(await clarify.getAttribute("title"), "Reply without closing this request");
+  assert.equal(await record(owner, id).getByRole("button", { name: "Reply", exact: true }).count(), 1);
+  await clarify.focus(); await guest.keyboard.press("Enter");
   await input(guest).fill("Should it include the review?"); await input(guest).press("Enter");
   await guest.waitForFunction(() => !document.querySelector("#message-input").disabled && !document.querySelector("#message-input").value);
   assert.equal(f.state().replyRequests[id].status, "open");
-  await mode(guest, id, "answered");
+  const clarification = f.state().messages.find(message => message.body === "Should it include the review?");
+  assert.equal(await record(guest, clarification.id).getByRole("button", { name: "Reply", exact: true }).count(), 1);
+  await record(guest, id).getByRole("button", { name: "Answer request", exact: true }).click();
+  await guest.getByRole("button", { name: "Send answer", exact: true }).waitFor();
+  await idle(guest);
   await input(guest).fill("Use the short agenda, including the review.");
-  await guest.screenshot({ path: "test-results/request-answer-desktop.png", fullPage: true });
+  await guest.screenshot({ path: `test-results/request-answer-${width}.png`, fullPage: true });
   await input(guest).press("Shift+Enter");
   assert.match(await input(guest).inputValue(), /\n$/);
   await input(guest).press("Enter"); await saved(guest);

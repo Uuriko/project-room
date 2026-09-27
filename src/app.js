@@ -2000,7 +2000,9 @@ function messageLinksHTML(m, { linked, moderation, count, muted, canReact = fals
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
   const reactHtml = canReact
     ? `<button class="message-to-work" type="button" data-message-action="add-reaction" data-message-id="${esc(m.id)}">Add reaction</button>` : "";
-  const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>`;
+  const request = state.replyRequests?.[m.id];
+  const clarify = request?.status === "open" && request.recipientId === session.member.id;
+  const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button"${clarify ? ' title="Reply without closing this request"' : ""}>${clarify ? "Clarify" : "Reply"}</button>`;
   const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
   // Attention: mark-unread rewinds the read horizon; save/unsave toggles the
   // per-member "later" list. Both ride the ⋯ overflow menu.
@@ -2219,7 +2221,7 @@ function requestControls(message) {
     : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
   const actions = [];
   if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
-  if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
+  if (open && own === request.recipientId) actions.push(["answered", "Answer request"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
   return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
@@ -2236,7 +2238,7 @@ function syncRequestComposer() {
   requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
@@ -2252,7 +2254,7 @@ function syncRequestComposer() {
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
   renderComposerLength();
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
-  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
+  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
   input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
