@@ -120,16 +120,61 @@ export class BoardV2 {
   constructor({ now = () => Date.now() } = {}) {
     this._now = now;
     this._seq = 0;
+    this._events = []; // unified append-only event log (Phase 3.1)
     this._claims = new Map(); // task_id -> claim record
     this._mirror = new Map(); // seq -> { issue, comment_id }
+    this._notes = []; // append-only note events (legacy, see _events)
+    this._findings = []; // append-only finding events (legacy, see _events)
+    this._decisions = []; // append-only decision events (legacy, see _events)
+    this._idempotency = new Map(); // idempotency-key -> { status, body }
   }
 
   get seq() { return this._seq; }
 
-  _emit(kind, taskId, lane, payload) {
+  _emit(kind, taskId, lane, payload, opts = {}) {
     this._seq += 1;
     const event = { seq: this._seq, at: iso(this._now()), kind, task_id: taskId, lane, payload };
+    if (opts.supersedes != null) event.supersedes = opts.supersedes;
+    if (opts.idempotencyKey != null) event.idempotency_key = opts.idempotencyKey;
+    // Phase 3.1: append to unified event log
+    this._events.push(event);
     return event;
+  }
+
+  // Idempotency: store the response for a key, or return the cached response.
+  // Returns { cached: true, response } if the key was seen, else { cached: false }.
+  // Idempotency: 24h TTL (Stripe's window), per-lane scoping, payload fingerprinting.
+  // Same key + different payload => 422 (IETF Idempotency-Key draft), not cached response.
+  _checkIdempotency(lane, key, fingerprint) {
+    if (key == null) return { cached: false };
+    const scopedKey = `${lane}:${key}`;
+    const hit = this._idempotency.get(scopedKey);
+    if (!hit) return { cached: false };
+    // TTL: expire after 24h.
+    const ageMs = this._now() - hit.created_at;
+    if (ageMs > 24 * 60 * 60 * 1000) {
+      this._idempotency.delete(scopedKey);
+      return { cached: false };
+    }
+    // Payload mismatch: same key with different payload is a 422, not a cache hit.
+    if (hit.fingerprint !== fingerprint) {
+      return { cached: false, mismatch: true };
+    }
+    return { cached: true, response: { status: hit.status, body: hit.body } };
+  }
+
+  _storeIdempotency(lane, key, fingerprint, status, body) {
+    if (key == null) return;
+    const scopedKey = `${lane}:${key}`;
+    // Bound the cache: keep only the most recent 1000 keys (secondary to TTL).
+    if (this._idempotency.size >= 1000) {
+      const oldest = this._idempotency.keys().next().value;
+      this._idempotency.delete(oldest);
+    }
+    this._idempotency.set(scopedKey, {
+      status, body, fingerprint,
+      created_at: this._now(),
+    });
   }
 
   _getLive(taskId) {
@@ -244,6 +289,89 @@ export class BoardV2 {
     return { seq: event.seq, receipt };
   }
 
+  postNote({ lane, thread = null, body, severity = null }) {
+    const ln = cleanLane(lane);
+    const bd = cleanText(body, MAX_NOTE_CHARS, "invalid_body", "body");
+    let th = null;
+    if (thread !== null && thread !== undefined) {
+      th = cleanText(thread, 128, "invalid_thread", "thread");
+    }
+    let sev = null;
+    if (severity !== null && severity !== undefined) {
+      if (!["info", "milestone", "warning"].includes(severity)) {
+        fail(422, "invalid_severity", "severity must be info, milestone, or warning");
+      }
+      sev = severity;
+    }
+    const event = this._emit("note", null, ln, { thread: th, body: bd, severity: sev });
+    const note = { seq: event.seq, at: event.at, lane: ln, thread: th, body: bd, severity: sev };
+    this._notes.push(note);
+    return { seq: event.seq, note };
+  }
+
+  postFinding({ lane, claim_ref = null, pr_ref = null, severity, title, evidence = [], recommendation }) {
+    const ln = cleanLane(lane);
+    if (!["low", "medium", "high", "critical"].includes(severity)) {
+      fail(422, "invalid_severity", "severity must be low, medium, high, or critical");
+    }
+    const ti = cleanText(title, 200, "invalid_title", "title");
+    const rec = cleanText(recommendation, MAX_REASON_CHARS, "invalid_recommendation", "recommendation");
+    let cr = null;
+    if (claim_ref !== null && claim_ref !== undefined) cr = cleanTaskId(claim_ref);
+    let pr = null;
+    if (pr_ref !== null && pr_ref !== undefined) {
+      if (!(typeof pr_ref === "number" && Number.isInteger(pr_ref) && pr_ref > 0)) {
+        fail(422, "invalid_pr_ref", "pr_ref must be a positive integer");
+      }
+      pr = pr_ref;
+    }
+    if (!Array.isArray(evidence)) fail(422, "invalid_evidence", "evidence must be an array");
+    const ev = evidence.slice(0, 20).map(e => cleanText(e, 500, "invalid_evidence", "evidence item"));
+    const event = this._emit("finding", cr, ln, {
+      pr_ref: pr, severity, title: ti, evidence: ev, recommendation: rec,
+    });
+    const finding = {
+      seq: event.seq, at: event.at, lane: ln, claim_ref: cr, pr_ref: pr,
+      severity, title: ti, evidence: ev, recommendation: rec,
+    };
+    this._findings.push(finding);
+    return { seq: event.seq, finding };
+  }
+
+  postDecision({ decider, scope, statement, reversible = null, supersedes = null }) {
+    const dc = cleanLane(decider);
+    const sc = cleanText(scope, 128, "invalid_scope", "scope");
+    const st = cleanText(statement, MAX_REASON_CHARS, "invalid_statement", "statement");
+    let rev = null;
+    if (reversible !== null && reversible !== undefined) {
+      if (typeof reversible !== "boolean") fail(422, "invalid_reversible", "reversible must be a boolean");
+      rev = reversible;
+    }
+    let sup = null;
+    if (supersedes !== null && supersedes !== undefined) {
+      // Phase 3.2: supersedes must be a seq number referencing an existing decision
+      const seq = Number(supersedes);
+      if (!Number.isInteger(seq) || seq < 1 || seq > this._seq) {
+        fail(422, "invalid_supersedes", "supersedes must be a valid decision seq");
+      }
+      // Verify the target is actually a decision
+      const target = this._decisions.find(d => d.seq === seq);
+      if (!target) {
+        fail(422, "invalid_supersedes", `no decision with seq ${seq}`);
+      }
+      sup = seq;
+    }
+    const event = this._emit("decision", null, dc, {
+      scope: sc, statement: st, reversible: rev, supersedes: sup,
+    });
+    const decision = {
+      seq: event.seq, at: event.at, decider: dc, scope: sc,
+      statement: st, reversible: rev, supersedes: sup,
+    };
+    this._decisions.push(decision);
+    return { seq: event.seq, decision };
+  }
+
   readBoard({ lane = null, state = null, file = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
     const since = Number(since_seq) || 0;
     const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
@@ -275,12 +403,127 @@ export class BoardV2 {
     const overlaps = fileClaims
       .filter(fc => new Set(fc.claims.map(c => c.lane)).size > 1)
       .map(fc => ({ file: fc.file, claims: fc.claims }));
+    // Phase 3.2: Include live decisions (supersede-chain resolved)
+    const liveDecisions = [...this._resolveDecisionChains().values()]
+      .sort((a, b) => a.seq - b.seq)
+      .slice(0, lim);
     return {
       watermark: this._seq,
       claims: claims.slice(0, lim).map(c => this._public(c)),
       file_claims: fileClaims,
       overlaps,
+      decisions: liveDecisions,
     };
+  }
+
+  readNotes({ lane = null, thread = null, severity = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let notes = [...this._notes];
+    if (lane !== null && lane !== undefined) notes = notes.filter(n => n.lane === cleanLane(lane));
+    if (thread !== null && thread !== undefined) notes = notes.filter(n => n.thread === thread);
+    if (severity !== null && severity !== undefined) notes = notes.filter(n => n.severity === severity);
+    if (since > 0) notes = notes.filter(n => n.seq > since);
+    notes.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, notes: notes.slice(0, lim) };
+  }
+
+  readFindings({ lane = null, severity = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let findings = [...this._findings];
+    if (lane !== null && lane !== undefined) findings = findings.filter(f => f.lane === cleanLane(lane));
+    if (severity !== null && severity !== undefined) findings = findings.filter(f => f.severity === severity);
+    if (since > 0) findings = findings.filter(f => f.seq > since);
+    findings.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, findings: findings.slice(0, lim) };
+  }
+
+  readDecisions({ decider = null, scope = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let decisions = [...this._decisions];
+    if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
+    if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
+    if (since > 0) decisions = decisions.filter(d => d.seq > since);
+    decisions.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, decisions: decisions.slice(0, lim) };
+  }
+
+  // Phase 3.2: Resolve supersede chains to find live decisions.
+  // Returns a Map of seq -> decision for decisions that are not superseded.
+  // Cycle guard: max 100 hops, then break and mark as error.
+  _resolveDecisionChains() {
+    const bySeq = new Map(this._decisions.map(d => [d.seq, d]));
+    const superseded = new Set(); // seqs that are superseded by another decision
+    
+    // Build the superseded set
+    for (const d of this._decisions) {
+      if (d.supersedes != null) {
+        superseded.add(d.supersedes);
+      }
+    }
+    
+    // Find live decisions (not in superseded set)
+    // But also need to handle chains: if A->B->C, only C is live
+    const live = new Map();
+    for (const d of this._decisions) {
+      if (!superseded.has(d.seq)) {
+        // This decision is not directly superseded, but check if it's part of a cycle
+        // Follow the chain forward to see if we loop back
+        let current = d;
+        const visited = new Set([current.seq]);
+        let hops = 0;
+        let isCycle = false;
+        
+        while (current.supersedes != null && hops < 100) {
+          const nextSeq = current.supersedes;
+          if (visited.has(nextSeq)) {
+            isCycle = true;
+            break;
+          }
+          visited.add(nextSeq);
+          const next = bySeq.get(nextSeq);
+          if (!next) break; // Broken reference, treat as terminal
+          current = next;
+          hops++;
+        }
+        
+        if (!isCycle && hops < 100) {
+          live.set(d.seq, d);
+        }
+        // If cycle or too many hops, don't include (defensive)
+      }
+    }
+    
+    return live;
+  }
+
+  // Phase 3.2: Get live decisions (supersede-chain resolved)
+  readLiveDecisions({ decider = null, scope = null, limit = DEFAULT_LIMIT } = {}) {
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    const live = this._resolveDecisionChains();
+    let decisions = [...live.values()];
+    if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
+    if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
+    decisions.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, decisions: decisions.slice(0, lim) };
+  }
+
+  // Phase 3.1: Unified event log with cursor pagination.
+  // Returns events in seq order, with has_more indicating if more exist beyond limit.
+  readEvents({ kind = null, lane = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let events = [...this._events];
+    if (kind !== null && kind !== undefined) events = events.filter(e => e.kind === kind);
+    if (lane !== null && lane !== undefined) events = events.filter(e => e.lane === cleanLane(lane));
+    if (since > 0) events = events.filter(e => e.seq > since);
+    events.sort((a, b) => a.seq - b.seq);
+    // Fetch one extra to determine has_more
+    const slice = events.slice(0, lim + 1);
+    const has_more = slice.length > lim;
+    return { watermark: this._seq, events: slice.slice(0, lim), has_more };
   }
 
   // --- mirror map: (issue, comment_id) <-> seq translation for migration ---
@@ -310,7 +553,10 @@ export class BoardV2 {
 
   health() {
     const live = [...this._claims.values()].filter(c => LIVE_STATES.has(c.state)).length;
-    return { seq: this._seq, live_claims: live, mirror_entries: this._mirror.size };
+    return {
+      seq: this._seq, live_claims: live, mirror_entries: this._mirror.size,
+      notes: this._notes.length, findings: this._findings.length, decisions: this._decisions.length,
+    };
   }
 }
 
@@ -328,7 +574,7 @@ function parseTaskPath(path) {
   return m ? { taskId: decodeURIComponent(m[1]), action: m[2] ?? null } : null;
 }
 
-export function handleBoardV2Request(board, { method, path, query = {}, body = null, lane = null }) {
+export function handleBoardV2Request(board, { method, path, query = {}, body = null, lane = null, headers = {} }) {
   const needLane = () => {
     if (typeof lane !== "string" || !LANE_RE.test(lane)) fail(401, "unauthenticated", "lane credential required");
     return lane;
@@ -337,14 +583,39 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (!isObj(body)) fail(422, "invalid_body", "JSON object body required");
     return body;
   };
+  // Idempotency: POSTs should carry Idempotency-Key. If the key was seen,
+  // return the cached response without re-executing (exactly-once).
+  // Fingerprint = method + path + body (stable JSON). Mismatch => 422.
+  const idempotencyKey = headers["idempotency-key"] || headers["Idempotency-Key"] || null;
+  const fingerprint = idempotencyKey
+    ? `${method}:${path}:${JSON.stringify(body ?? null)}`
+    : null;
+  const checkIdempotent = (authedLane) => {
+    if (method !== "POST" || !idempotencyKey) return null;
+    const hit = board._checkIdempotency(authedLane, idempotencyKey, fingerprint);
+    if (hit.mismatch) {
+      fail(422, "idempotency_key_mismatch", "Idempotency-Key already used with a different payload");
+    }
+    if (hit.cached) return hit.response;
+    return null;
+  };
+  const storeIdempotent = (authedLane, status, responseBody) => {
+    if (method === "POST" && idempotencyKey) {
+      board._storeIdempotency(authedLane, idempotencyKey, fingerprint, status, responseBody);
+    }
+  };
   try {
     if (path === "/claims" && method === "POST") {
       const b = needBody();
       rejectUnknown(b, CLAIM_BODY_FIELDS, "claim");
       const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
       if (b.lane !== undefined && b.lane !== authed) fail(403, "lane_mismatch", "body lane must equal the authenticated lane");
       const out = board.postClaim({ ...b, lane: authed });
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(authed, resp.status, resp.body);
+      return resp;
     }
     if (path === "/claims" && method === "GET") {
       rejectUnknown(query, ["lane", "state", "file", "since_seq", "limit"], "query");
@@ -352,25 +623,37 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     }
     if (path === "/claims") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
 
+    // Phase 3.2: GET /board — materialized board view with supersede-chain resolution
+    if (path === "/board" && method === "GET") {
+      rejectUnknown(query, ["lane", "state", "file", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readBoard(query) };
+    }
+    if (path === "/board") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
     const tp = parseTaskPath(path);
     if (tp && method === "POST" && tp.action) {
       const b = needBody();
       const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
+      let resp;
       if (tp.action === "heartbeat") {
         rejectUnknown(b, ["note"], "heartbeat");
         const out = board.heartbeat({ task_id: tp.taskId, lane: authed, note: b.note ?? null });
-        return { status: 200, body: { watermark: board.seq, ...out } };
-      }
-      if (tp.action === "release") {
+        resp = { status: 200, body: { watermark: board.seq, ...out } };
+      } else if (tp.action === "release") {
         rejectUnknown(b, ["reason"], "release");
         if (b.reason === undefined) fail(422, "invalid_reason", "reason must be a non-empty string");
         const out = board.release({ task_id: tp.taskId, lane: authed, reason: b.reason });
-        return { status: 200, body: { watermark: board.seq, ...out } };
-      }
-      if (tp.action === "receipts") {
+        resp = { status: 200, body: { watermark: board.seq, ...out } };
+      } else if (tp.action === "receipts") {
         rejectUnknown(b, ["sha", "pr"], "receipt");
         const out = board.postReceipt({ task_id: tp.taskId, lane: authed, sha: b.sha, pr: b.pr ?? null });
-        return { status: 201, body: { watermark: board.seq, ...out } };
+        resp = { status: 201, body: { watermark: board.seq, ...out } };
+      }
+      if (resp) {
+        storeIdempotent(authed, resp.status, resp.body);
+        return resp;
       }
     }
     if (tp && !tp.action) return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
@@ -389,10 +672,84 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
     if (path === "/mirror-map" && method === "POST") {
       const b = needBody();
       rejectUnknown(b, ["seq", "issue", "comment_id"], "mirror-map");
-      needLane();
+      const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
       const out = board.recordMirror(b);
-      return { status: 201, body: { watermark: board.seq, ...out } };
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(authed, resp.status, resp.body);
+      return resp;
     }
+    if (path === "/notes" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["thread", "body", "severity"], "note");
+      const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
+      if (b.body === undefined) fail(422, "invalid_body", "body must be a non-empty string");
+      const out = board.postNote({ lane: authed, thread: b.thread ?? null, body: b.body, severity: b.severity ?? null });
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(authed, resp.status, resp.body);
+      return resp;
+    }
+    // Phase 3.1: Unified event log with cursor pagination
+    if (path === "/events" && method === "GET") {
+      rejectUnknown(query, ["kind", "lane", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readEvents(query) };
+    }
+    if (path === "/events") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    if (path === "/notes" && method === "GET") {
+      rejectUnknown(query, ["lane", "thread", "severity", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readNotes(query) };
+    }
+    if (path === "/notes") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    if (path === "/findings" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["claim_ref", "pr_ref", "severity", "title", "evidence", "recommendation"], "finding");
+      const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
+      if (b.severity === undefined) fail(422, "invalid_severity", "severity is required");
+      if (b.title === undefined) fail(422, "invalid_title", "title must be a non-empty string");
+      if (b.recommendation === undefined) fail(422, "invalid_recommendation", "recommendation must be a non-empty string");
+      const out = board.postFinding({
+        lane: authed, claim_ref: b.claim_ref ?? null, pr_ref: b.pr_ref ?? null,
+        severity: b.severity, title: b.title, evidence: b.evidence ?? [], recommendation: b.recommendation,
+      });
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(authed, resp.status, resp.body);
+      return resp;
+    }
+    if (path === "/findings" && method === "GET") {
+      rejectUnknown(query, ["lane", "severity", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readFindings(query) };
+    }
+    if (path === "/findings") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    if (path === "/decisions" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["scope", "statement", "reversible", "supersedes"], "decision");
+      const authed = needLane();
+      const cached = checkIdempotent(authed);
+      if (cached) return cached;
+      if (b.scope === undefined) fail(422, "invalid_scope", "scope must be a non-empty string");
+      if (b.statement === undefined) fail(422, "invalid_statement", "statement must be a non-empty string");
+      const out = board.postDecision({
+        decider: authed, scope: b.scope, statement: b.statement,
+        reversible: b.reversible ?? null, supersedes: b.supersedes ?? null,
+      });
+      const resp = { status: 201, body: { watermark: board.seq, ...out } };
+      storeIdempotent(authed, resp.status, resp.body);
+      return resp;
+    }
+    if (path === "/decisions" && method === "GET") {
+      rejectUnknown(query, ["decider", "scope", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readDecisions(query) };
+    }
+    if (path === "/decisions") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
     if (path === "/health" && method === "GET") {
       return { status: 200, body: board.health() };
     }

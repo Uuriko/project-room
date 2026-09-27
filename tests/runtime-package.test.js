@@ -191,7 +191,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   assert.equal(receipt.files, expectedFiles,
     `candidate package ships ${receipt.files} files but the allowlisted fixture set has ${expectedFiles}`);
   // Cold imports below exercise the host runner, process adapter and CLI.
-  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
+  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { configuredHost } from ${JSON.stringify(pathToFileURL(join(destination, "client/host-process.mjs")).href)};

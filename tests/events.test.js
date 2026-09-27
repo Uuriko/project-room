@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EVENT_TYPES, WORK_STATES, applyEvent, event, replay, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { EVENT_TYPES, WORK_STATES, applyEvent, event, replay, MAX_MESSAGE_BODY_CHARS, canInviteMembers, memberOwnerId } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 
 const ROOM_ID = "room-project-room-v0";
@@ -586,4 +586,19 @@ test("deleting a message removes every earlier version as well as the current on
   assert.equal(tombstone.body, null); assert.deepEqual(tombstone.editHistory, []);
   assert.equal(tombstone.deletedBy, "maya"); assert.equal(tombstone.revision, 2);
   assert.equal(JSON.stringify(tombstone).includes("first"), false);
+});
+
+
+test("member ownership and invitation authority ignore inherited names but retain actual members", () => {
+  const state = baseState();
+  for (const id of ["toString", "hasOwnProperty", "valueOf"]) {
+    assert.equal(memberOwnerId(state, id), null, `absent ${id} has no accountable owner`);
+    assert.equal(canInviteMembers(state, id), false, `absent ${id} has no invite authority`);
+  }
+  const added = applyEvent(state, fixedEvent("own-inherited-member", EVENT_TYPES.MEMBER_ADDED, "potter", {
+    memberId: "toString", displayName: "Actual member", kind: "agent", permissions: ["invite_member"]
+  }));
+  assert.equal(memberOwnerId(added, "toString"), "potter");
+  assert.equal(canInviteMembers(added, "toString"), true);
+  assert.equal(canInviteMembers(state, "potter"), true);
 });

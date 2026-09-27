@@ -27,8 +27,8 @@ export function consumeJoinFragment() {
   const value = location.hash.slice(6);
   history.replaceState(history.state, "", location.pathname + location.search);
   // Optional purpose: #join/<token>/<kind>/<id> points the guest at the question or
-  // result they were invited to help with. The fragment never leaves the browser,
-  // so the link exports nothing else from the private room.
+  // result they were invited to open. This is a navigation hint, not an access
+  // boundary: accepting the invitation still grants the documented room access.
   const segments = value.split("/");
   let focus = null;
   if (segments.length === 3 && ["work", "message"].includes(segments[1])) {
@@ -327,7 +327,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#share-link-url").value = inviteUrl;
       if ($("#share-link-code")) $("#share-link-code").value = result.code || "";
       $("#share-purpose-note").hidden = !purposeItem;
-      if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Nothing else in the room is shared.`;
+      if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
@@ -627,7 +627,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   joinDialog.addEventListener("close", () => {
     onAccountSignin(null);
     joinVersion++;
-    const pendingToken = joinSecret, attempted = joinAttempted, landed = joinLanded, roomTitle = previewRoomTitle;
+    const pendingToken = joinSecret, pendingFocus = joinFocus, attempted = joinAttempted, landed = joinLanded, roomTitle = previewRoomTitle;
     joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; previewRoomTitle = null;
     joinAttempted = false; joinLanded = false;
     $("#join-link-form").reset();
@@ -638,7 +638,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       // bar keeps the invitation, so reopening it (or reloading) resumes the
       // same join idempotently instead of landing on the fixtures inbox.
       suppressJoinHash = true;
-      location.hash = `#join/${pendingToken}`;
+      location.hash = `#join/${pendingToken}${pendingFocus ? `/${pendingFocus.kind}/${encodeURIComponent(pendingFocus.id)}` : ""}`;
     }
     if (!getState()) {
       $("#auth-panel").hidden = false;

@@ -62,6 +62,14 @@ expect_not_in() { # $1 = name, $2 = file, $3 = fixed-string pattern (must not ap
   fi
 }
 
+expect_jq() { # $1 = name, $2 = state JSON file, $3 = jq filter (must output true)
+  if jq -e "$3" "$2" >/dev/null; then
+    pass=$((pass + 1)); printf 'ok   %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL %s\n  jq filter false: %s\n' "$1" "$3"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # (a) strike-two after a voluntary prose release (RC-2026-09-25-7401)
 # Claim 6h lease at 00:00, strike-one stamped 06:16, prose STATUS release
@@ -184,7 +192,7 @@ cat > "$TMPD/c.json" <<'EOF'
 ]
 EOF
 
-export ROOM_TEST_PRS_JSON='[{"number":1087,"merged_at":"2026-09-26T07:00:00Z","title":"[jill] fix thing","body":"RC-2026-09-26-904: fixed the thing.\n\nPatch handoff: https://github.com/Uuriko/project-room/issues/266#issuecomment-1"},{"number":1088,"merged_at":null,"title":"unrelated","body":"nothing"}]'
+export ROOM_TEST_PRS_JSON='[{"number":1087,"merged_at":"2026-09-26T07:00:00Z","title":"[jill] fix thing","body":"RC-2026-09-26-904: fixed the thing.\n\nPatch handoff: https://github.com/Uuriko/project-room/issues/266#issuecomment-1"},{"number":1088,"merged_at":null,"title":"unrelated","body":"nothing"},{"number":1090,"merged_at":"2026-09-26T07:30:00Z","merge_commit_sha":"4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e","title":"[jill] c906 work","body":"RC-2026-09-26-906: done."}]'
 
 "$ROOM" _sweep-plan --now 2026-09-26T08:00:00Z < "$TMPD/c.json" > "$TMPD/c.out"
 
@@ -218,6 +226,177 @@ expect_in     "c2/drive-by PR mention does not suppress strike-one (909)" \
   "$TMPD/c2.out" "PLAN: strike-one nudge for RC-2026-09-26-909"
 expect_not_in "c2/no deliverable-landed suppression on mere mention" \
   "$TMPD/c2.out" "strike-one suppressed for RC-2026-09-26-909"
+
+# ---------------------------------------------------------------------------
+# (d) the post-strike release grace is BOUNDED to 24h (deep audit 5850225536)
+# Claim 6h lease at 00:00, strike-one 06:16, prose release 06:30.
+# At 2026-09-27T05:00Z (22.5h after release) strike-two stays suppressed;
+# at 2026-09-27T08:00Z (25.5h after release) the plan fires again.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/d.json" <<'EOF'
+[
+ {"id": 30, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] d\n\n```room-claim\ntask-id:    RC-2026-09-26-910\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 31, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-910 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-910:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-910 · lane:jill"},
+ {"id": 32, "created_at": "2026-09-26T06:30:00Z", "body": "[jill]STATUS: Releasing RC-2026-09-26-910 (review-only; files NONE). The review has not been performed, so this lease should not stay reserved."}
+]
+EOF
+
+export ROOM_TEST_PRS_JSON='[]'
+"$ROOM" _sweep-plan --now 2026-09-27T05:00:00Z < "$TMPD/d.json" > "$TMPD/d-inside.out"
+"$ROOM" _sweep-plan --now 2026-09-27T08:00:00Z < "$TMPD/d.json" > "$TMPD/d-after.out"
+
+expect_in     "d/release grace still suppresses inside 24h (910)" \
+  "$TMPD/d-inside.out" "strike-two suppressed for RC-2026-09-26-910"
+expect_not_in "d/no strike-two PLAN inside the grace window" \
+  "$TMPD/d-inside.out" "PLAN: strike-two release for RC-2026-09-26-910"
+expect_in     "d/strike-two fires again after the 24h grace (910)" \
+  "$TMPD/d-after.out" "PLAN: strike-two release for RC-2026-09-26-910"
+
+# ---------------------------------------------------------------------------
+# (e) F3 reducer: exact +4h boundary and 24h release grace (5850228747)
+# 911: strike-one 06:16, forged strike-two stamped at exactly +14400s —
+#      ignored (grace boundary is <=, sweep only posts past 14400s).
+# 912: strike-one 06:16, release 06:30, forged strike-two 12:00 (inside the
+#      24h grace) — ignored. 913: same shape, forged strike-two at
+#      2026-09-27T08:00Z (after the grace) — honored, claim released.
+# Observed at the _state boundary: task state + reducer log lines.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/e.json" <<'EOF'
+[
+ {"id": 40, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] e911\n\n```room-claim\ntask-id:    RC-2026-09-26-911\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 41, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-911 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-911:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-911 · lane:jill"},
+ {"id": 42, "created_at": "2026-09-26T10:16:00Z", "body": "[quill-s2]RECLAIM (strike 2): @jill - no heartbeat 4h after strike-one. (quill-s2, scheduled, quill)\n\n<!-- room:strike-two:RC-2026-09-26-911:2026-09-26T10:16:00Z -->\n\n· claim:RC-2026-09-26-911 · lane:jill"},
+ {"id": 43, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] e912\n\n```room-claim\ntask-id:    RC-2026-09-26-912\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 44, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-912 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-912:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-912 · lane:jill"},
+ {"id": 45, "created_at": "2026-09-26T06:30:00Z", "body": "[jill]STATUS: Releasing RC-2026-09-26-912 (review-only; files NONE)."},
+ {"id": 46, "created_at": "2026-09-26T12:00:00Z", "body": "[quill-s2]RECLAIM (strike 2): @jill - no heartbeat 4h after strike-one. (quill-s2, scheduled, quill)\n\n<!-- room:strike-two:RC-2026-09-26-912:2026-09-26T12:00:00Z -->\n\n· claim:RC-2026-09-26-912 · lane:jill"},
+ {"id": 47, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] e913\n\n```room-claim\ntask-id:    RC-2026-09-26-913\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 48, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-913 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-913:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-913 · lane:jill"},
+ {"id": 49, "created_at": "2026-09-26T06:30:00Z", "body": "[jill]STATUS: Releasing RC-2026-09-26-913 (review-only; files NONE)."},
+ {"id": 50, "created_at": "2026-09-27T08:00:00Z", "body": "[quill-s2]RECLAIM (strike 2): @jill - no heartbeat 4h after strike-one. (quill-s2, scheduled, quill)\n\n<!-- room:strike-two:RC-2026-09-26-913:2026-09-27T08:00:00Z -->\n\n· claim:RC-2026-09-26-913 · lane:jill"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/e.json" | "$ROOM" _state --now 2026-09-27T09:00:00Z > "$TMPD/e.state"
+
+expect_in     "e/exact +14400s forged strike-two ignored (911)" \
+  "$TMPD/e.state" "strike-two before the 4h strike grace elapsed"
+expect_jq     "e/911 not released by the boundary stamp" \
+  "$TMPD/e.state" '.tasks | map(select(.task_id=="RC-2026-09-26-911"))[0].state != "submitted"'
+expect_in     "e/forged strike-two inside 24h release grace ignored (912)" \
+  "$TMPD/e.state" "inside the 24h voluntary-release grace"
+expect_jq     "e/forged strike-two after the grace honored (913 released)" \
+  "$TMPD/e.state" '.tasks | map(select(.task_id=="RC-2026-09-26-913"))[0].state == "submitted"'
+
+# ---------------------------------------------------------------------------
+# (f) premature pre-expiry strike-one stamps are ignored (5850230537)
+# 914: 6h lease from 00:00 (expires 06:00), forged strike-one at 01:00 —
+#      ignored, strike_one_at stays null. 915: same lease, strike-one at
+#      06:16 — recorded.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/f.json" <<'EOF'
+[
+ {"id": 60, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] f914\n\n```room-claim\ntask-id:    RC-2026-09-26-914\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 61, "created_at": "2026-09-26T01:00:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-914 expired 5h ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-914:2026-09-26T01:00:00Z -->\n\n· claim:RC-2026-09-26-914 · lane:jill"},
+ {"id": 62, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] f915\n\n```room-claim\ntask-id:    RC-2026-09-26-915\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 63, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-915 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-915:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-915 · lane:jill"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/f.json" | "$ROOM" _state --now 2026-09-26T08:00:00Z > "$TMPD/f.state"
+
+expect_in     "f/premature strike-one ignored (914)" \
+  "$TMPD/f.state" "strike-one before lease expiry: ignored (premature stamp"
+expect_jq     "f/914 strike_one_at stays null" \
+  "$TMPD/f.state" '.tasks | map(select(.task_id=="RC-2026-09-26-914"))[0].strike_one_at == null'
+expect_jq     "f/control: post-expiry strike-one recorded (915)" \
+  "$TMPD/f.state" '.tasks | map(select(.task_id=="RC-2026-09-26-915"))[0].strike_one_at == "2026-09-26T06:16:00Z"'
+
+# ---------------------------------------------------------------------------
+# (g) strike stamps in EDITED comments are ignored (5850231451)
+# 916: strike-one comment edited after posting (updated_at > created_at) —
+#      ignored. 917: identical but unedited — recorded.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/g.json" <<'EOF'
+[
+ {"id": 70, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] g916\n\n```room-claim\ntask-id:    RC-2026-09-26-916\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 71, "created_at": "2026-09-26T06:16:00Z", "updated_at": "2026-09-26T07:00:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-916 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-916:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-916 · lane:jill"},
+ {"id": 72, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] g917\n\n```room-claim\ntask-id:    RC-2026-09-26-917\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 73, "created_at": "2026-09-26T06:16:00Z", "body": "[quill-s2]RECLAIM (strike 1): @jill - lease on RC-2026-09-26-917 expired 16m ago, no heartbeat seen. (quill-s2, scheduled, quill)\n\n<!-- room:strike-one:RC-2026-09-26-917:2026-09-26T06:16:00Z -->\n\n· claim:RC-2026-09-26-917 · lane:jill"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/g.json" | "$ROOM" _state --now 2026-09-26T08:00:00Z > "$TMPD/g.state"
+
+expect_in     "g/edited strike-one ignored (916)" \
+  "$TMPD/g.state" "strike-one in an edited comment"
+expect_jq     "g/916 strike_one_at stays null" \
+  "$TMPD/g.state" '.tasks | map(select(.task_id=="RC-2026-09-26-916"))[0].strike_one_at == null'
+expect_jq     "g/control: unedited strike-one recorded (917)" \
+  "$TMPD/g.state" '.tasks | map(select(.task_id=="RC-2026-09-26-917"))[0].strike_one_at == "2026-09-26T06:16:00Z"'
+
+# ---------------------------------------------------------------------------
+# (h) a bare [done] appends no receipt: missing_receipt stays true (5850232752)
+# 918: [done] with no receipt fence — completed, receipts empty,
+#      flagged by receipts-scan. 919: [done] WITH a receipt fence — not flagged.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/h.json" <<'EOF'
+[
+ {"id": 80, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] h918\n\n```room-claim\ntask-id:    RC-2026-09-26-918\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 81, "created_at": "2026-09-26T01:00:00Z", "body": "[jill][done] RC-2026-09-26-918 done, no receipt fence here."},
+ {"id": 82, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] h919\n\n```room-claim\ntask-id:    RC-2026-09-26-919\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 83, "created_at": "2026-09-26T01:00:00Z", "body": "[jill][done] RC-2026-09-26-919 landed\n\n```room-done\ntask-id: RC-2026-09-26-919\npr: 1091\nmerged: a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4\n```"}
+]
+EOF
+
+"$ROOM" _parse < "$TMPD/h.json" | "$ROOM" _state --now 2026-09-26T08:00:00Z > "$TMPD/h.state"
+
+expect_jq     "h/bare done completes the claim (918)" \
+  "$TMPD/h.state" '.tasks | map(select(.task_id=="RC-2026-09-26-918"))[0].state == "completed"'
+expect_jq     "h/bare done keeps missing_receipt true (918)" \
+  "$TMPD/h.state" '.tasks | map(select(.task_id=="RC-2026-09-26-918"))[0].missing_receipt == true'
+expect_jq     "h/control: fenced done records the receipt (919)" \
+  "$TMPD/h.state" '.tasks | map(select(.task_id=="RC-2026-09-26-919"))[0].receipts[0].merged == "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"'
+
+export ROOM_TEST_PRS_JSON='[]'
+"$ROOM" _receipts-plan --now 2026-09-28T00:00:00Z < "$TMPD/h.json" > "$TMPD/h.out" || true
+
+expect_in     "h/receipts-scan flags the bare done (918)" \
+  "$TMPD/h.out" "RC-2026-09-26-918"
+expect_not_in "h/receipts-scan does not flag the fenced done (919)" \
+  "$TMPD/h.out" "RC-2026-09-26-919"
+
+# ---------------------------------------------------------------------------
+# (i) forged prose receipts no longer suppress strike-one (5850227334)
+# 920: expired claim + prose receipt with a fabricated SHA, no real PR —
+#      strike-one fires. 921: same shape, but the SHA prefixes a real
+#      merged PR's merge_commit_sha — suppressed.
+# ---------------------------------------------------------------------------
+
+cat > "$TMPD/i.json" <<'EOF'
+[
+ {"id": 90, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] i920\n\n```room-claim\ntask-id:    RC-2026-09-26-920\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 91, "created_at": "2026-09-26T07:00:00Z", "body": "[jill][receipt] RC-2026-09-26-920 landed\n\nMerged as deadbeefdeadbeefdeadbeefdeadbeefdeadbeef.\n\n```room-receipt\ntask-id:    RC-2026-09-26-920\nmerged:      deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\nattribution: (jill, agent, quill)\n```"},
+ {"id": 92, "created_at": "2026-09-26T00:00:00Z", "body": "[jill][claim] i921\n\n```room-claim\ntask-id:    RC-2026-09-26-921\nlane:       jill\nfiles:      scripts/room\nlease:      lease=6h\nstate:      working\nreason:     fixture\n```"},
+ {"id": 93, "created_at": "2026-09-26T07:00:00Z", "body": "[jill][receipt] RC-2026-09-26-921 landed\n\nMerged as b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5.\n\n```room-receipt\ntask-id:    RC-2026-09-26-921\nmerged:      b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5\nattribution: (jill, agent, quill)\n```"}
+]
+EOF
+
+export ROOM_TEST_PRS_JSON='[{"number":1091,"merged_at":"2026-09-26T07:30:00Z","merge_commit_sha":"b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6a7","title":"[jill] i921 work","body":"RC-2026-09-26-921: done."}]'
+
+"$ROOM" _sweep-plan --now 2026-09-26T08:00:00Z < "$TMPD/i.json" > "$TMPD/i.out"
+
+expect_in     "i/fabricated receipt does not suppress strike-one (920)" \
+  "$TMPD/i.out" "PLAN: strike-one nudge for RC-2026-09-26-920"
+expect_not_in "i/no deliverable-landed suppression on a forged SHA (920)" \
+  "$TMPD/i.out" "strike-one suppressed for RC-2026-09-26-920"
+expect_in     "i/SHA-anchored receipt still suppresses strike-one (921)" \
+  "$TMPD/i.out" "strike-one suppressed for RC-2026-09-26-921"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -438,6 +438,8 @@ export class RoomAgentClient {
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
       body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
       ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+      ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
+        && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     }));
     return { roomId: this.#roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
@@ -611,23 +613,36 @@ export class RoomAgentClient {
   // delivery modes and review policies. Claim/update/release/reassign are
   // owner-gated server-side; reads need room membership only.
   workClaims({ signal } = {}) { return this.#request("/work-claims", undefined, signal); }
-  workClaimCreate({ id, title, reviewPolicy, note } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
       ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+      ...(tags === undefined ? {} : { tags }),
+      ...(files === undefined ? {} : { files }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
-  claimWorkItem(id, { note, leaseHours, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
-      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
+        ...(files === undefined ? {} : { files }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
-        ...(reviewedBy === undefined ? {} : { reviewedBy }) }, signal);
+        ...(reviewedBy === undefined ? {} : { reviewedBy }),
+        ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
+  }
+  reviewWorkItem(id, { note, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
+      { ...(note === undefined ? {} : { note }) }, signal);
+  }
+  renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
+      { progressMessageId, ...(note === undefined ? {} : { note }),
+        ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
   }
   releaseWorkItem(id, { note, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
@@ -640,16 +655,18 @@ export class RoomAgentClient {
   }
   sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
   // Convenience: claim, creating the item first when it does not exist yet.
-  async workClaim(id, { title, note, leaseHours, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, signal }); }
+  // title, reviewPolicy and tags apply only to creation; files apply to every
+  // claim. Omitted files retain the declaration, while [] explicitly clears it.
+  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, note }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, signal });
     }
   }
-  async workComplete(id, { deliveryMode, note, reviewedBy, signal } = {}) {
-    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, signal });
+  async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, signal } = {}) {
+    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, signal });
   }
   async workRelease(id, { note, signal } = {}) { return this.releaseWorkItem(id, { note, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
