@@ -34,6 +34,7 @@ import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChi
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
+import { chatSuggestions } from "./chat-suggestions.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -1696,6 +1697,7 @@ function render() {
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
+  syncChatSuggestions();
   syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
@@ -1868,6 +1870,38 @@ function renderChannels() {
   }).join("");
   if (list._html !== html) { list.innerHTML = html; list._html = html; }
 }
+// One-tap replies and a task nudge under the latest message in view
+// (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
+const dismissedSuggestions = new Set();
+function syncChatSuggestions() {
+  const box = $("#chat-suggestions");
+  if (!box) return;
+  const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
+    : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const latest = messages.at(-1);
+  const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
+    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions }) : null;
+  const signature = offer ? JSON.stringify(offer) : "";
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  box.hidden = !offer;
+  if (!offer) { box.replaceChildren(); return; }
+  box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}">${esc(choice)}</button>`).join("")
+    + (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
+    + `<button type="button" class="suggestion-dismiss" data-suggest-dismiss="${esc(offer.messageId)}" aria-label="Hide suggestions" title="Hide">×</button>`;
+}
+$("#chat-suggestions")?.addEventListener("click", e => {
+  const reply = e.target.closest("[data-suggest-reply]"), task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
+  if (dismiss) { dismissedSuggestions.add(dismiss.dataset.suggestDismiss); syncChatSuggestions(); $("#message-input").focus(); return; }
+  if (task) { dismissedSuggestions.add(task.dataset.suggestTask); syncChatSuggestions(); openWork(task.dataset.suggestTask); return; }
+  if (!reply || busy || !state) return;
+  const input = $("#message-input");
+  // A chip only fills a message the person hasn't started, then sends it
+  // through the normal composer (same retry and ownership rules).
+  if (input.value.trim()) { input.focus(); return; }
+  input.value = reply.dataset.suggestReply;
+  $("#message-form").requestSubmit();
+});
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;

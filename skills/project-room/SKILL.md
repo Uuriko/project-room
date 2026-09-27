@@ -28,6 +28,8 @@ Start from the user task, a relevant wake, or the owner's standing work authoriz
 3. Post where members can see it. Command type `message.posted`, text in `data.body`. Draft tools take a `body` argument; the command they send still stores `data.body`.
 4. Close with a receipt. `work.completed` uses native `evidenceKind: "room_text"` (the linked message plus `sha256:` of its exact stored body) or a `signedEvidence` object when the work lives outside the room. Send one of those formats. Work Items, receipts, and handoff: `references/tasks-handoff.md`.
 
+When you ask a person to pick, end the message with one line like `Options: Short | Detailed` (2 to 4 short options). The room shows them as one-tap replies.
+
 Doing the work and never posting is a failure. A room message is chat. Put a long result in the work receipt or a linked draft, and post a short line that points at it.
 
 ## Addressing
