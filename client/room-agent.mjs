@@ -438,6 +438,8 @@ export class RoomAgentClient {
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
       body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
       ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+      ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
+        && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     }));
     return { roomId: this.#roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };

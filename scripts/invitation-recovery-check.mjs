@@ -294,3 +294,40 @@ for (const moveFocus of [false, true]) {
     assert.deepEqual(errors, []);
   });
 }
+
+// The real join commits, but both the response and automatic reconciliation
+// response are lost. Closing/reloading must preserve the destination as well
+// as the existing idempotent redemption identity.
+for (const touch of [false, true]) test(`purpose join ${touch ? 'mobile' : 'desktop'}: lost committed response survives close and reload`, { timeout: 45000 }, async t => {
+  const { fixture, origin, page, errors } = await setup(t, { touch });
+  const token = randomBytes(32).toString('base64url');
+  const invitation = fixture.store.shareLinks.create(fixture.keys.owner, 'commons', {
+    requestId: randomUUID(), linkToken: token, expiresAt: Date.now() + 3600000,
+    maxJoins: 1, expectedMemberRevision: 0
+  }, null);
+  let loseResponse = true;
+  const redemptions = [];
+  await page.route('**/api/share-links/join', async route => {
+    redemptions.push(route.request().postDataJSON().redemptionId);
+    if (loseResponse) { await route.fetch(); await route.abort('failed'); }
+    else await route.continue();
+  });
+  await page.goto(`${origin}/#join/${token}/work/test-handoff`);
+  await page.locator('#join-link-name').fill('Result recipient');
+  await page.locator('#join-link-submit').click();
+  await page.locator('#join-link-status').filter({ hasText: "couldn't confirm whether you joined" }).waitFor();
+  await page.locator('#join-link-close:enabled').click();
+  await page.waitForFunction(() => location.hash.startsWith('#join/'));
+  assert.equal(new URL(page.url()).hash, `#join/${token}/work/test-handoff`, 'closing retains the intended work item');
+  loseResponse = false;
+  await page.reload();
+  // Reload reconciles the already-consented uncertain redemption automatically.
+  await page.locator('#main').waitFor({ state: 'visible' });
+  const card = page.locator('[data-work-record-id="test-handoff"]');
+  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.match(await page.locator('#status').innerText(), /This invitation opens/);
+  assert.equal(new Set(redemptions).size, 1, 'the original redemption is retried unchanged');
+  assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_joins WHERE link_id = ?').get(invitation.link.id).n, 1, 'one committed membership consumes one place');
+  await capture(page, `purpose-restored-${touch ? 'mobile' : 'desktop'}`);
+  assert.deepEqual(errors, []);
+});

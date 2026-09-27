@@ -145,6 +145,7 @@ test("selected work shows one primary next action and keeps the others behind Mo
   assert.equal(html.match(/<button type="button"/g).length, 3);
   assert.match(html, /data-focus-key="work-more:work"/);
   assert.match(html, /Does not invoke Begin or start a host/);
+  assert.equal(renderWorkActions(accepted, { id: "reader", active: true, permissions: [] }, { now }), "", "no action explanation is shown to a reader without actions");
   const write = { ...accepted, mode: "write" };
   const claim = presentedWorkActions(write, member, now);
   assert.equal(claim.primary.action, "claim");
