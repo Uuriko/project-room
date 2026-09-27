@@ -223,3 +223,23 @@ test("leaderboard ranks referrers by successful joins, most first", t => {
   assert.equal(board.myReferralCount, 2);
   assert.equal(board.myReferrals.length, 2);
 });
+
+
+test("member admission refuses inherited referrers without persisting membership or events", t => {
+  const { store, ownerKey, roomId } = fixture(t);
+  const before = store.room(roomId);
+  for (const referredBy of ["toString", "hasOwnProperty", "valueOf"]) {
+    assert.throws(() => store.command(ownerKey, roomId, { id: `bad-referrer-${referredBy}`, type: "member.added", data: {
+      memberId: `candidate-${referredBy}`, displayName: "Candidate", kind: "agent", permissions: [], referredBy
+    } }), /referredBy must be an active member/);
+    assert.equal(store.room(roomId).sequence, before.sequence);
+    assert.equal(Object.hasOwn(store.room(roomId).state.members, `candidate-${referredBy}`), false);
+  }
+  store.command(ownerKey, roomId, { id: "real-named-referrer", type: "member.added", data: {
+    memberId: "toString", displayName: "Actual referrer", kind: "human", permissions: []
+  } });
+  store.command(ownerKey, roomId, { id: "valid-referral", type: "member.added", data: {
+    memberId: "valid-candidate", displayName: "Candidate", kind: "agent", permissions: [], referredBy: "toString"
+  } });
+  assert.equal(store.room(roomId).state.members["valid-candidate"].referredBy, "toString");
+});

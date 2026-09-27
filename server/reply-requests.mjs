@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
@@ -158,6 +160,16 @@ export class ReplyRequests {
             toMemberId: request.requesterId, workItemId: request.workItemId },
           requiredInput: ["requestId", "body"]
         })) : [];
+        result.responseHttpActions = result.responseActions.map(action => {
+          const command = buildReplyCommand({ roomId, memberId: auth.member.id }, action.tool,
+            { ...action.arguments, requestId: randomUUID(), body: "pending caller input" });
+          delete command.data.body;
+          return { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/commands`, command,
+            requiredInput: ["command.data.body"],
+            instructions: "Add only your answer or decline reason at command.data.body, then POST command as the JSON body. command.id is this new operation's retry ID; data.responseToRequestId and data.replyToId identify the original question. Preserve the entire filled command on an unknown result; never obtain a new recipe for a retry. Do not add requestPolicyVersion. A receipt is not current status; follow verify.",
+            verify: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` }
+          };
+        });
         // Current preparation shares this authenticated read transaction. It is
         // intentionally distinct from the frozen conversation page and answer basis.
         const instructions = charterContext(state.room);

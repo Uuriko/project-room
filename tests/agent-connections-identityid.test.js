@@ -48,6 +48,18 @@ test("create with a malformed or unknown identityId is also rejected 422 at vali
   assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connections").get().n, 0);
 });
 
+test("create with an inherited object name is not treated as an existing member", t => {
+  const f = fixture(t);
+  assert.throws(() => f.apply(f.createRequest({ memberId: "constructor" })), err => err.code === "invalid_connection");
+  const req = f.createRequest({ memberId: "toString" });
+  const result = f.apply(req);
+  assert.equal(result.duplicate, false);
+  const member = f.store.room("commons").state.members.toString;
+  assert.equal(member?.kind, "agent");
+  assert.equal(member?.id, "toString");
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM agent_connections WHERE member_id=?").get("toString").n, 1);
+});
+
 test("create without identityId is unchanged: enrolls, no link, no identity echo", t => {
   const f = fixture(t);
   const req = f.createRequest();
