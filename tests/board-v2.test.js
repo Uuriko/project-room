@@ -530,7 +530,7 @@ test("Phase 3.2: supersede chain A->B->C resolves to C only", () => {
     lane: "john",
     body: { scope: "test", statement: "B", supersedes: a.body.seq },
   });
-  const c = req("POST", "/decisions", {
+  req("POST", "/decisions", {
     lane: "john",
     body: { scope: "test", statement: "C", supersedes: b.body.seq },
   });
