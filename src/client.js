@@ -605,14 +605,14 @@ export class RoomClient {
       throw error;
     }
   }
-  async needsAttention() {
+  async needsAttention(cursor = null) {
     // #662: owner-only rollup of everything awaiting an owner decision.
     // 403 owner_required means the viewer is not the owner — not a failure.
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
     try {
-      const result = await this.request(this.path("/needs-attention"));
+      const result = await this.request(this.path(`/needs-attention${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`));
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;

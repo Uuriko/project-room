@@ -201,3 +201,42 @@ test("report carries the viewer echo the browser client requires (no session kil
   const client = new RoomClient({});
   assert.equal(client.ownsResponse(report, session), true, "the rollup must survive the client identity check");
 });
+
+// Owner-boundary contract: continuation reaches every pending request, stays
+// bounded, and restarts rather than skipping when the live queue changes.
+test("attention pages reach every request and reset stale continuations", t => {
+  const f = setup(t);
+  const add = n => {
+    const identity = f.store.identities.create(`Page joiner ${n}`);
+    f.accessRequests.request("commons", { identityId: identity.identityId, displayName: `Page joiner ${n}`,
+      requestedPermissions: ["accept_work"], requestId: `page-${String(n).padStart(3, "0")}` });
+  };
+  for (let n = 1; n <= 60; n++) add(n);
+  const page = cursor => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "commons", null, f.clock.now, { cursor });
+  const first = page(null);
+  assert.equal(first.itemCount, 60);
+  assert.equal(first.actionCount, 60);
+  assert.equal(first.items.length, 25);
+  assert.equal(first.previousCursor, null);
+  assert.ok(first.nextCursor);
+  const second = page(first.nextCursor), third = page(second.nextCursor);
+  assert.equal(second.pageOffset, 25);
+  assert.equal(third.items.length, 10);
+  assert.equal(third.nextCursor, null);
+  assert.deepEqual(page(second.previousCursor).items, first.items);
+  const all = [...first.items, ...second.items, ...third.items];
+  assert.equal(new Set(all.map(item => item.id)).size, 60);
+  assert.ok(all.some(item => item.id === "page-060"));
+  add(61);
+  const changed = page(second.nextCursor);
+  assert.equal(changed.reset, true);
+  assert.equal(changed.pageOffset, 0);
+  assert.equal(changed.itemCount, 61);
+  const deny = changed.items[0];
+  f.accessRequests.decide(f.keys.owner, "commons", deny.id, deny.actions[1].body);
+  const removed = page(changed.nextCursor);
+  assert.equal(removed.reset, true);
+  assert.equal(removed.itemCount, 60);
+  assert.equal(removed.items.some(item => item.id === deny.id), false);
+  assert.throws(() => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.member, "commons", null, f.clock.now, { cursor: first.nextCursor }), { code: "owner_required" });
+});

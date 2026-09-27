@@ -3843,7 +3843,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "needs-attention" && req.method === "GET") {
         // #662: owner-only rollup of everything awaiting an owner decision.
-        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence));
+        return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence, Date.now(), { cursor: url.searchParams.get("cursor") }));
       }
       if (route === "jev-shadow" && req.method === "GET") {
         // Jev-harness shadow-review surface (docs/JEV-GATES.md): owner-only,
