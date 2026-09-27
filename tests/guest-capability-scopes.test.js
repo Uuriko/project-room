@@ -112,9 +112,14 @@ test("owner changes a live guest capability and re-redeem does not widen it", as
   const change = await request("/api/rooms/commons/guest-invites-upgrade", { method: "POST",
     data: { memberId: chat.member.id, tier: "read_only" } });
   assert.equal(change.status, 200);
-  assert.equal((await request("/api/rooms/commons", { token: chat.token })).status, 200);
-  denied(await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
-    data: { id: "after-downgrade", type: "message.posted", data: { messageId: "after-downgrade", body: "no" } } }));
+  assert.equal((await request("/api/rooms/commons", { token: chat.token })).status, 401, "old scope bearer is revoked on change");
+  assert.equal((await request("/api/rooms/commons/commands", { method: "POST", token: chat.token,
+    data: { id: "after-downgrade", type: "message.posted", data: { messageId: "after-downgrade", body: "no" } } })).status, 401);
+  assert.equal(store.guestInvites.guestTierOf(chat.member.id), "read_only");
+  const forbidden = await request("/api/rooms/commons/guest-invites-upgrade", { method: "POST",
+    data: { memberId: chat.member.id, tier: "observer" } });
+  assert.equal(forbidden.status, 409);
+  assert.equal(forbidden.body.error.code, "scope_transition_unavailable");
   assert.equal(store.guestInvites.guestTierOf(chat.member.id), "read_only");
 });
 

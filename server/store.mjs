@@ -66,7 +66,7 @@ import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { guestCapabilitySchema, guestCapabilities } from "./guest-capability-scopes.mjs";
+import { guestCapabilitySchema, guestCapabilityRollbackSchema, guestCapabilities } from "./guest-capability-scopes.mjs";
 import { GuestInvites, GUEST_INVITE_TIERS, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
@@ -1024,6 +1024,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
       this.db.exec(guestCapabilitySchema);
+      this.db.exec(guestCapabilityRollbackSchema);
       // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.

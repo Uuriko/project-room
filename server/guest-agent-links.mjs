@@ -10,9 +10,9 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 // Human share tokens stay 43 chars. Guest-agent tokens are a different shape so
 // they can never be redeemed through /api/share-links or #join/.
 export const GUEST_AGENT_TOKEN_PREFIX = "ga1.";
-export const GUEST_AGENT_TOKEN_PATTERN = /^ga1\.[A-Za-z0-9_-]{43}$/;
+export const GUEST_AGENT_TOKEN_PATTERN = /^(?:ga1|g2)\.[A-Za-z0-9_-]{43}$/;
 export const HUMAN_SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-export const ROOM_ACCESS_TOKEN_PATTERN = /^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/;
+export const ROOM_ACCESS_TOKEN_PATTERN = /^(?:[A-Za-z0-9_-]{43}|(?:ga1|g2)\.[A-Za-z0-9_-]{43})$/;
 export const GUEST_AGENT_HASH_PATH = "#agent-join/";
 export const HUMAN_SHARE_HASH_PATH = "#join/";
 export const GUEST_AGENT_KIND = "agent";

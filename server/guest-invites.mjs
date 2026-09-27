@@ -10,7 +10,7 @@
 // The ga1. token is never posted publicly. Storage is purely additive
 // (guest_invites + guest_members tables, IF NOT EXISTS, no schema version
 // bump), following the wake-queue / heartbeat additive pattern.
-import { guestCapabilities, guestCapabilitySchema } from "./guest-capability-scopes.mjs";
+import { guestCapabilities, guestCapabilitySchema, guestCapabilityRollbackSchema } from "./guest-capability-scopes.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
@@ -34,7 +34,7 @@ const hash = value => createHash("sha256").update(value).digest("hex");
 // Invite codes are public-safe: single-use, stored as a hash, and they
 // grant nothing by themselves. The credential (ga1.) is issued at redeem.
 export const GUEST_INVITE_CODE_PREFIX = "GX-";
-export const GUEST_INVITE_CODE_PATTERN = /^GX-[A-Za-z0-9_-]{32}$/;
+export const GUEST_INVITE_CODE_PATTERN = /^(?:GX|G2)-[A-Za-z0-9_-]{32}$/;
 export const GUEST_INVITE_HASH_PATH = "#agent-join/";
 export const GUEST_BADGE_SUFFIX = " (guest)";
 
@@ -196,8 +196,8 @@ export function guestInviteContract() {
   };
 }
 
-const newInviteCode = () => GUEST_INVITE_CODE_PREFIX + randomBytes(24).toString("base64url");
-const newGuestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+const newInviteCode = (scope = null) => (scope ? "G2-" : GUEST_INVITE_CODE_PREFIX) + randomBytes(24).toString("base64url");
+const newGuestToken = (scope = null) => (scope ? "g2." : GUEST_AGENT_TOKEN_PREFIX) + randomBytes(32).toString("base64url");
 
 function assertCardShape(card) {
   if (!card || Array.isArray(card) || typeof card !== "object") fail(422, "card_invalid", "Supply a signed agent card");
@@ -242,7 +242,15 @@ export class GuestInvites {
   }
 
   verifyCapabilitySchema(opts) {
-    return verifySchemaText(this.db, guestCapabilitySchema, "Guest capability")(opts);
+    const exists = verifySchemaText(this.db, guestCapabilitySchema, "Guest capability")(opts);
+    if (!exists) return false;
+    const guard = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='guest_scoped_credentials'").get();
+    if (!guard) throw new Error("Guest capability rollback guard missing");
+    const expectedNames = [...guestCapabilityRollbackSchema.matchAll(/CREATE TRIGGER IF NOT EXISTS ([a-z_]+)/g)].map(match => match[1]);
+    for (const name of expectedNames) {
+      if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name)) throw new Error("Guest capability rollback guard missing");
+    }
+    return true;
   }
 
   verifySelfServeSchema(opts) {
@@ -460,7 +468,7 @@ export class GuestInvites {
         return { ...this.issued(prior, roomId), duplicate: true };
       }
       if (this.db.prepare("SELECT count(*) n FROM guest_invites").get().n >= 5000) fail(409, "pilot_limit", "Invite retention limit reached");
-      const code = newInviteCode();
+      const code = newInviteCode(details.scope);
       const now = this.store.now();
       const inviteId = `gx-${hash(`${roomId}:${auth.member.id}:${requestId}`).slice(0, 24)}`;
       this.db.prepare(`INSERT INTO guest_invites(id, code_hash, room_id, tier, credential_ttl_ms, guest_label,
@@ -609,8 +617,12 @@ export class GuestInvites {
       // Burn the invite: single-use, bound to the identity that redeemed it.
       this.db.prepare("UPDATE guest_invites SET status='redeemed', redeemed_at=?, redeemed_by_identity_id=?, redeemed_member_id=? WHERE id=? AND status='active'")
         .run(this.store.now(), identity.identityId, memberId, row.id);
-      const token = newGuestToken();
+      // An owner may have restricted an existing seat since its prior pass.
+      // Every old observer pass must die before a narrower scope is returned.
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
+      const token = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
       this.store.guestAgentLinks.conflict(hash(token));
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(token), memberId);
       const expiresAt = this.store.now() + row.credential_ttl_ms;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, memberId, expiresAt);
@@ -975,9 +987,21 @@ export class GuestInvites {
         type: T.MEMBER_ACCESS_CHANGED,
         data: { memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: true },
       }, binding);
+      // A restricted transition invalidates every old credential. A fresh
+      // signed re-redemption is required; legacy contributor transitions
+      // retain their existing bearer behavior.
+      if (Object.hasOwn(guestCapabilities, tier) || Object.hasOwn(guestCapabilities, effectiveTier))
+        this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
       this.db.prepare("UPDATE guest_members SET tier=? WHERE member_id=? AND room_id=?").run(Object.hasOwn(guestCapabilities, tier) ? "observer" : tier, memberId, roomId);
       if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_capability_scopes(kind,id,scope) VALUES('member',?,?) ON CONFLICT(kind,id) DO UPDATE SET scope=excluded.scope").run(memberId, tier);
-      else this.db.prepare("DELETE FROM guest_capability_scopes WHERE kind='member' AND id=?").run(memberId);
+      else {
+        // Once a scoped pass exists, old writers must not be able to
+        // discard the guard and resurrect observer rights. Keep a fenced
+        // override and require a fresh design for explicit broadening.
+        if (this.db.prepare("SELECT 1 FROM guest_scoped_credentials WHERE member_id=?").get(memberId))
+          fail(409, "scope_transition_unavailable", "Restricted guest access cannot be broadened on this seat");
+        this.db.prepare("DELETE FROM guest_capability_scopes WHERE kind='member' AND id=?").run(memberId);
+      }
       return { memberId, tier, scopes: [...GUEST_INVITE_TIERS[tier]], unchanged: false };
     });
   }
@@ -996,8 +1020,11 @@ export class GuestInvites {
       if (!row || row.revoked !== 0 || row.expires_at <= this.store.now() || row.member_id !== member.id) {
         fail(410, "invite_unavailable", "This guest credential is not valid.");
       }
-      const token = newGuestToken();
+      const tier = this.guestTierOf(member.id);
+      if (Object.hasOwn(guestCapabilities, tier) && !guestToken.startsWith("g2.")) fail(403, "guest_scope_denied", "Redeem a new scoped guest invite");
+      const token = newGuestToken(Object.hasOwn(guestCapabilities, tier) ? tier : null);
       this.store.guestAgentLinks.conflict(hash(token));
+      if (Object.hasOwn(guestCapabilities, tier)) this.db.prepare("INSERT INTO guest_scoped_credentials(hash,member_id) VALUES(?,?)").run(hash(token), member.id);
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, member.id, row.expires_at);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(guestToken));

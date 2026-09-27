@@ -524,7 +524,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // RC-2026-09-18-012: rak_ presented API-key credentials ("rak_"+secret)
     // authenticate as the bound agent identity with its stored scopes; the
     // keyId form (shorter) never verifies and reads as 401 downstream.
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
+    const match = /^Bearer ([A-Za-z0-9_-]{43}|(?:ga1|g2)\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -4216,7 +4216,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // RC-2026-09-23-100: per-guest message token bucket (chat spam
         // mitigation). The per-request scope gate in RoomStore#command is
         // the authority boundary; this is volume control.
-        if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
+        if (typeof selected.token === "string" && (selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX) || selected.token.startsWith("g2."))) {
           rate(`guest-post:${rateHash(selected.token)}`, 120);
         }
         const command = await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES });
