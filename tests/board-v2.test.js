@@ -235,3 +235,93 @@ test("BoardV2Error carries status+code for the handler's typed envelope", () => 
   assert.equal(err.code, "claim_conflict");
   assert.deepEqual(err.fields, { holders: [] });
 });
+
+test("notes: append-only events queryable by lane/thread/severity", () => {
+  const { req } = setup();
+  // Post a note with thread and severity.
+  const posted = req("POST", "/notes", {
+    lane: "jill",
+    body: { thread: "sprint-7", body: "Milestone reached: board v2 prototype", severity: "milestone" },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.note.lane, "jill");
+  assert.equal(posted.body.note.thread, "sprint-7");
+  assert.equal(posted.body.note.severity, "milestone");
+  assert.equal(posted.body.watermark, 1);
+  // A second note from another lane, no thread.
+  req("POST", "/notes", { lane: "codex", body: { body: "Working on efficiency" } });
+  // Query by lane filters correctly.
+  const byLane = req("GET", "/notes", { query: { lane: "jill" } });
+  assert.equal(byLane.body.notes.length, 1);
+  assert.equal(byLane.body.notes[0].thread, "sprint-7");
+  // Query by thread.
+  const byThread = req("GET", "/notes", { query: { thread: "sprint-7" } });
+  assert.equal(byThread.body.notes.length, 1);
+  // Invalid severity is 422, not silently stored.
+  const bad = req("POST", "/notes", { lane: "jill", body: { body: "x", severity: "urgent" } });
+  assert.equal(bad.status, 422);
+  assert.equal(bad.body.error.code, "invalid_severity");
+});
+
+test("findings: severity enum + required fields enforced at write time", () => {
+  const { req } = setup();
+  const posted = req("POST", "/findings", {
+    lane: "instinct",
+    body: {
+      severity: "high",
+      title: "Invite revocation bypass",
+      evidence: ["test output", "code review"],
+      recommendation: "Gate revoke() on autonomy tier",
+    },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.finding.severity, "high");
+  assert.equal(posted.body.finding.title, "Invite revocation bypass");
+  assert.deepEqual(posted.body.finding.evidence, ["test output", "code review"]);
+  // Missing severity is 422.
+  const noSev = req("POST", "/findings", {
+    lane: "instinct",
+    body: { title: "x", recommendation: "y" },
+  });
+  assert.equal(noSev.status, 422);
+  assert.equal(noSev.body.error.code, "invalid_severity");
+  // Invalid severity value is 422.
+  const badSev = req("POST", "/findings", {
+    lane: "instinct",
+    body: { severity: "catastrophic", title: "x", recommendation: "y" },
+  });
+  assert.equal(badSev.status, 422);
+  // Query by severity filters.
+  req("POST", "/findings", {
+    lane: "jill",
+    body: { severity: "low", title: "Minor", recommendation: "Note it" },
+  });
+  const high = req("GET", "/findings", { query: { severity: "high" } });
+  assert.equal(high.body.findings.length, 1);
+  assert.equal(high.body.findings[0].lane, "instinct");
+});
+
+test("decisions: decider authority recorded, superseding supported", () => {
+  const { req } = setup();
+  const posted = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Merge queue enabled", reversible: true },
+  });
+  assert.equal(posted.status, 201);
+  assert.equal(posted.body.decision.decider, "john");
+  assert.equal(posted.body.decision.scope, "room");
+  assert.equal(posted.body.decision.reversible, true);
+  // A superseding decision links to the prior one.
+  const v2 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Merge queue enabled with strict mode", supersedes: "merge-queue-v1" },
+  });
+  assert.equal(v2.body.decision.supersedes, "merge-queue-v1");
+  // Missing scope is 422.
+  const noScope = req("POST", "/decisions", { lane: "john", body: { statement: "x" } });
+  assert.equal(noScope.status, 422);
+  assert.equal(noScope.body.error.code, "invalid_scope");
+  // Query by decider.
+  const byDecider = req("GET", "/decisions", { query: { decider: "john" } });
+  assert.equal(byDecider.body.decisions.length, 2);
+});
