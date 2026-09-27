@@ -404,9 +404,9 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
   const created = rooms.create(owner.secret, {
     roomId: "scope-den", title: "Scope den", purpose: "File visibility scope", kind: "personal", displayName: "Scope owner"
   });
-  for (const ident of [peer, third]) {
+  for (const [ident, displayName] of [[peer, "Scope peer"], [third, "Scope third"]]) {
     store.identities.link(owner.secret, created.roomId, {
-      identityId: ident.identityId, displayName: "Scope member", permissions: []
+      identityId: ident.identityId, displayName, permissions: []
     });
     // #953: new agent members default to t1_readonly; members need write access for message.posted
     setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
