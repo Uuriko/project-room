@@ -298,7 +298,15 @@ export const unfencedAdditiveTables = Object.freeze([
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,
   // never room content and never a grant.
-  "human_push_subscriptions"
+  "human_push_subscriptions",
+  // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
+  // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to them,
+  // and the module verifies its own schema on open.
+  "board_vtwo_claims",
+  "board_vtwo_events",
+  "board_vtwo_mirror",
+  "board_vtwo_idempotency"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

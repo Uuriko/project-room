@@ -75,7 +75,7 @@ Design constraints (from the BOARD-1 brief):
 ## 3. Data model
 
 ```sql
-CREATE TABLE IF NOT EXISTS board_v2_claims (
+CREATE TABLE IF NOT EXISTS board_vtwo_claims (
   task_id     TEXT PRIMARY KEY,          -- RC-YYYY-MM-DD-NNN, validated
   lane        TEXT NOT NULL,             -- [A-Za-z0-9_-]+, validated
   files       TEXT NOT NULL,             -- JSON array of normalized paths
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS board_v2_claims (
   receipts    TEXT NOT NULL DEFAULT '[]' -- JSON array of {seq,at,sha,pr}
 );
 
-CREATE TABLE IF NOT EXISTS board_v2_events (
+CREATE TABLE IF NOT EXISTS board_vtwo_events (
   seq       INTEGER PRIMARY KEY AUTOINCREMENT,  -- THE watermark
   at        TEXT NOT NULL,
   kind      TEXT NOT NULL,   -- claim|heartbeat|release|receipt|mirror_rotate|seal
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS board_v2_events (
   mirror_comment INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS board_v2_mirror (
+CREATE TABLE IF NOT EXISTS board_vtwo_mirror (
   id             INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton
   current_issue  INTEGER NOT NULL,
   issues         TEXT NOT NULL DEFAULT '[]'
@@ -110,9 +110,27 @@ CREATE TABLE IF NOT EXISTS board_v2_mirror (
 );
 ```
 
-**The watermark is `board_v2_events.seq`** — a single monotonic integer
+**The watermark is `board_vtwo_events.seq`** — a single monotonic integer
 owned by the room. It never resets, never depends on GitHub, and survives
 rotation by construction.
+
+### 3a. Retention policy
+
+**Events are retained indefinitely.** The `board_vtwo_events` table is append-only;
+no events are deleted. Rationale:
+
+- The event log is the audit trail — deletions would break accountability.
+- Storage cost is minimal (events are small JSON; even 1M events is ~1GB).
+- The `seal` event kind (defined but not yet implemented) will mark rotation
+  boundaries for future archival if needed.
+
+**Future work:** If the events table grows beyond practical limits, implement
+archival (not deletion): move events older than N days to cold storage,
+keeping the seq numbers stable. The `since_seq` cursor API already supports
+this — archived events are simply not returned, but the watermark continues.
+
+**Idempotency cache:** The `board_vtwo_idempotency` table is bounded (1000 entries,
+24h TTL). Old entries expire automatically; this is not the audit trail.
 
 ## 4. API contract (served by `server/http.mjs` when wired)
 
@@ -132,7 +150,7 @@ body MUST equal the authenticated lane (`403 lane_mismatch`). Writes pass
 | `GET /notes` | `?lane=&thread=&severity=&since_seq=&limit=` | `{watermark, notes: [...]}` — the note stream, separate from board rows |
 | `POST /findings` | `{claim_ref?, pr_ref?, severity, title, evidence[], recommendation}` | verified finding; `severity` ∈ {low, medium, high, critical}; immutable once written; returns `{seq, finding}` |
 | `GET /findings` | `?lane=&severity=&since_seq=&limit=` | `{watermark, findings: [...]}` |
-| `POST /decisions` | `{scope, statement, reversible?, supersedes?}` | room decision with named authority (`decider` = auth lane); returns `{seq, decision}` |
+| `POST /decisions` | `{scope, statement, reversible?, supersedes?}` | room decision with named authority (`decider` = auth lane); `supersedes` must be a valid decision `seq` (integer) referencing an existing decision, or omitted; returns `{seq, decision}` |
 | `GET /decisions` | `?decider=&scope=&since_seq=&limit=` | `{watermark, decisions: [...]}` |
 | `GET /mirror-map` | `?issue=&comment_id=` → `{seq}`; `?since_seq=` → `[{seq, issue, comment_id}]` | watermark translation for migration |
 | `GET /health` | — | `{seq, live_claims, notes, findings, decisions, mirror: {...}}` |
@@ -166,7 +184,7 @@ Today room-watch's cursor is "max GitHub comment id seen" — rotation to a
 new issue would orphan it. Board v2 makes the cursor rotation-proof:
 
 1. **One cursor: `seq`.** Every mutation (claim, heartbeat, release,
-   receipt, mirror rotation itself) appends one row to `board_v2_events`
+   receipt, mirror rotation itself) appends one row to `board_vtwo_events`
    and returns its `seq`. Polling `GET /claims?since_seq=N` returns only
    newer events plus the new watermark. Rotation adds events; it never
    renumbers them.
@@ -202,7 +220,7 @@ three:
    `<!-- board-v2-mirror seq=<seq> prev=<N> -->` — via the GitHub API,
    posts a seal comment on the old issue
    (`<!-- board-v2-seal seq=<seq> next=<M> -->`), and commits a
-   `mirror_rotate` board event updating `board_v2_mirror.current_issue`.
+   `mirror_rotate` board event updating `board_vtwo_mirror.current_issue`.
 3. **Discover.** Consumers never hardcode an issue number: the current
    mirror issue is served by `GET /health` (`mirror.current_issue`) and
    announced as a board event. New consumers start at the current issue;

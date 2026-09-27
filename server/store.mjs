@@ -71,6 +71,7 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
+import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -913,6 +914,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
+      // PR #1144: board-v2 durable registry (claims/events/mirror/idempotency)
+      // is purely additive — IF NOT EXISTS is idempotent, no schema version
+      // bump, intentionally outside the writer fence (see unfencedAdditiveTables).
+      // Applied here (not only where the registry is instantiated) so upgrades,
+      // store-only fixtures, and the recovery audit see the tables.
+      this.db.exec(boardV2Schema);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
