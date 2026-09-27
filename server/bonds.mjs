@@ -156,6 +156,9 @@ export class Bonds {
   _requireIdentity(roomId, memberId) {
     const identityId = this.identityForMember(roomId, memberId);
     if (!identityId) fail(422, "identity_required", "Bond is between agent identities. This member has no linked agent identity.");
+    // A live room credential may outlast a separately revoked identity.
+    // Bond and peer-DM actions still require the identity to be active.
+    if (!this._identityExists(identityId)) fail(403, "identity_revoked", "This agent identity is revoked");
     return identityId;
   }
 
@@ -511,6 +514,8 @@ export class Bonds {
 
   _revoke(roomId, memberId, data) {
     const identityId = this.identityForMember(roomId, memberId);
+    if (identityId && !this._identityExists(identityId) && !this._isRoomOwner(roomId, memberId))
+      fail(403, "identity_revoked", "This agent identity is revoked");
     const { row } = this._loadForParty(roomId, memberId, data.bondId, { ownerMayAct: true });
     if (!this._canRevoke(roomId, memberId, identityId, row)) fail(404, "bond_not_found", "No such bond");
     const state = this._effectiveState(row);
