@@ -56,7 +56,7 @@ Rollback: the prior collector remains available in Git; no production schema or 
 
 ### A4. Stop losing claim metadata in the client
 
-Owner: reply_integration. Forward files and tags through the public JavaScript claim client where the server supports them. Preserve review policy and existing evidence/blob metadata on supported operations. The convenience create-if-missing flow must keep creation-only fields distinct from claim-time options.
+Owner: reply_integration. Forward files and tags through the public JavaScript claim client where the server supports them. Preserve review policy and existing evidence/blob metadata on supported operations. The convenience create-if-missing flow must keep creation-only fields distinct from claim-time options. Add SDK access to the existing review and lease-renewal routes, with distinct-member review and owner-only renewal exercised through real HTTP. No server permission policy changes are part of this parity work.
 
 Do not move the active claim authority yet. Do not turn advisory collisions into blocking errors in an unrelated SDK patch. Validate these changes through a real HTTP server and persisted/read-back claims so a request-shape-only mock cannot conceal dropped fields or server rejection.
 
