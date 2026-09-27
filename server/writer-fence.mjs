@@ -202,8 +202,6 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
-  // #890: independently additive scope overrides; old writers do not touch them.
-  "guest_capability_scopes",
   // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
   // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
   // request-ID idempotency records. Purely additive and intentionally NOT

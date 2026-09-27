@@ -66,8 +66,6 @@ function stampRoom(value, roomId) {
 function roomMessages(store, secret, roomId, args, memberId) {
   const after = args.after ?? 0;
   const limit = args.limit ?? 50;
-  const chatOnly = store.guestCapability(store.authenticate(secret, roomId)) === "chat_only";
-  if (chatOnly) return store.chatAfter(secret, roomId, after, limit);
   const page = store.eventsAfter(secret, roomId, after, limit);
   const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
     sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,

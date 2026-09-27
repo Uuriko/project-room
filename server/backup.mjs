@@ -3,7 +3,6 @@ import { chmodSync, mkdtempSync, realpathSync, statSync, writeFileSync } from "n
 import { join } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { GUEST_INVITE_TIERS } from "./guest-invites.mjs";
 
 // Fresh private destination only; never overwrite or restore into the live DB.
 export async function backupRoom(source, destinationDirectory) {
@@ -40,22 +39,6 @@ export async function backupRoom(source, destinationDirectory) {
 // reference and name every entry the restore made current-looking again.
 export function reconcileRestoredAuthority(restored, current) {
   const stale = [];
-  // A restored old seat can silently revive chat/write capability. Compare
-  // each effective tier, not just credentials and active membership.
-  const restoredSeats = restored.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='guest_members'").get();
-  const currentSeats = current.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='guest_members'").get();
-  if (restoredSeats && currentSeats) {
-    for (const seat of restored.db.prepare("SELECT member_id,room_id FROM guest_members").all()) {
-      const now = current.db.prepare("SELECT member_id FROM guest_members WHERE member_id=? AND room_id=?").get(seat.member_id, seat.room_id);
-      if (!now) continue; // Membership reconciliation below owns missing seats.
-      const oldTier = restored.guestInvites.guestTierOf(seat.member_id);
-      const newTier = current.guestInvites.guestTierOf(seat.member_id);
-      const oldScopes = oldTier ? (GUEST_INVITE_TIERS[oldTier] ?? []) : [];
-      const newScopes = newTier ? (GUEST_INVITE_TIERS[newTier] ?? []) : [];
-      if (oldScopes.some(scope => !newScopes.includes(scope))) stale.push({ kind: "guest_capability", id: `${seat.room_id}/${seat.member_id}`,
-        detail: `guest capability ${oldTier} was narrowed to ${newTier ?? "inactive"} after the backup` });
-    }
-  }
   const currentCredentials = new Map(current.db.prepare("SELECT hash, revoked FROM credentials").all().map(r => [r.hash, r.revoked]));
   for (const row of restored.db.prepare("SELECT hash, room_id, member_id, kind, revoked, expires_at FROM credentials").all()) {
     if (row.revoked) continue;

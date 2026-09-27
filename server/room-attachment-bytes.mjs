@@ -99,7 +99,6 @@ export class RoomAttachmentBytes {
   stage(token, roomId, { id, filename, mediaType, data } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
-      this.store.requireGuestWrite(auth);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
@@ -159,7 +158,6 @@ export class RoomAttachmentBytes {
   list(token, roomId) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
-      this.store.requireGuestRead(auth);
       this.expire(roomId, this.store.now());
       const messages = this.messageIndex(roomId);
       const memberId = auth.member.id;
@@ -175,7 +173,6 @@ export class RoomAttachmentBytes {
   get(token, roomId, id) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
-      this.store.requireGuestRead(auth);
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       this.expire(roomId, this.store.now());
       const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
@@ -197,7 +194,6 @@ export class RoomAttachmentBytes {
   discard(token, roomId, id) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
-      this.store.requireGuestWrite(auth);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
@@ -221,7 +217,6 @@ export class RoomAttachmentBytes {
   commit(token, roomId, { id, messageId } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
-      this.store.requireGuestWrite(auth);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
