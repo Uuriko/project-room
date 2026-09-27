@@ -269,6 +269,17 @@ gh_api() { # args... -> stdout JSON; dies on failure
 }
 
 fetch_comments() { # -> JSON array of all comments on the board issue
+  # Test-only escape hatch: when ROOM_BOARD_FIXTURE points at a JSON file
+  # holding a comments array, use it instead of the network. This keeps unit
+  # tests that drive board-reading verbs (e.g. `backlog pull`'s overlap
+  # guard) offline and fast; paginating the whole live board exceeds test
+  # spawn timeouts as the board grows. Never set in production or cron —
+  # live guards must always read the live board (fail closed).
+  if [ -n "${ROOM_BOARD_FIXTURE:-}" ]; then
+    [ -f "$ROOM_BOARD_FIXTURE" ] || die "ROOM_BOARD_FIXTURE not found: $ROOM_BOARD_FIXTURE"
+    cat "$ROOM_BOARD_FIXTURE"
+    return 0
+  fi
   gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100" 2>/dev/null \
     | jq -s 'add // []' \
     || die "failed to fetch board comments from $(board_addr)"
@@ -2024,8 +2035,17 @@ cmd_backlog() {
     # verb reports per-file lines; "(unclaimed)" means free. Only die if
     # some file has a real holder (a line not ending in "(unclaimed)").
     if type cmd_overlaps >/dev/null 2>&1; then
-      local ov
-      ov="$(cmd_overlaps --files "$files" 2>/dev/null || true)"
+      local ov state_tmp
+      # Build the board state once and hand it to the guard: without --state,
+      # cmd_overlaps rebuilds it with a full paginated board fetch itself.
+      # (Fetch failure keeps the old tolerance: empty result, pull proceeds.)
+      state_tmp="$(mktemp)"
+      if build_state > "$state_tmp" 2>/dev/null; then
+        ov="$(cmd_overlaps --state "$state_tmp" --files "$files" 2>/dev/null || true)"
+      else
+        ov=""
+      fi
+      rm -f "$state_tmp"
       if [ -n "$ov" ] && printf '%s' "$ov" | grep -v '(unclaimed)$' | grep -q .; then
         die "backlog pull: files held by a live claim:\n$ov"
       fi
