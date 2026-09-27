@@ -108,6 +108,27 @@ const initialJoinFragment = (() => {
   if (restored) { try { location.hash = restored.fragment; } catch { /* ignore */ } }
   return consumeJoinFragment();
 })();
+// Start a room: the door's main button opens /?start=room. The intent rides
+// sessionStorage through an OAuth round-trip in this tab, and after sign-in
+// the visitor lands inside their room instead of the Inbox.
+const START_ROOM_KEY = "pr-start-room";
+let startRoomIntent = (() => {
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.get("start") === "room") {
+      window.sessionStorage.setItem(START_ROOM_KEY, "1");
+      url.searchParams.delete("start");
+      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    }
+    return window.sessionStorage.getItem(START_ROOM_KEY) === "1";
+  } catch { return false; }
+})();
+function consumeStartRoomIntent() {
+  const wanted = startRoomIntent;
+  startRoomIntent = false;
+  try { window.sessionStorage.removeItem(START_ROOM_KEY); } catch { /* storage may be blocked */ }
+  return wanted;
+}
 // A Google/GitHub OAuth round-trip drops the #invite/ fragment (it never
 // reaches the server). Restore a stashed invitation one-shot when landing
 // without a room context, so the dialog re-opens after OAuth sign-in.
@@ -627,10 +648,24 @@ function showAccountWorkspace() {
     $(".connection-bar").hidden = true;
   }
   inboxUI.sync();
+  if (!state && startRoomIntent && !initialInvitationFragment && !initialJoinFragment && consumeStartRoomIntent()) {
+    openStartedRoom();
+    return;
+  }
   if (!state) {
     if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
     else inboxUI.open();
   }
+}
+async function openStartedRoom() {
+  const owned = accountClient.session;
+  const body = await ensureDefaultRoom();
+  if (accountClient.session !== owned || state) return;
+  const roomId = body?.room?.id;
+  if (!roomId) { inboxUI.open(); return; }
+  history.replaceState(null, "", roomHandoffLocation(roomId));
+  try { await client.restore(roomId); }
+  catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
   if (accountCheckFlight || !accountClient.session?.authenticated || signoutLoading || invitationIsCommitting() || leavingPage) return accountCheckFlight;
@@ -981,8 +1016,8 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   setFormStatus($("#auth-link-error"), "");
   const roomHint = $("#auth-room-hint");
   if (roomHint) {
-    roomHint.hidden = true;
-    roomHint.textContent = "";
+    roomHint.hidden = !startRoomIntent;
+    roomHint.textContent = startRoomIntent ? "Sign in to start your room. It’s free." : "";
   }
   if ($("#auth-kind-hint")) $("#auth-kind-hint").textContent = KEY_KIND_HINT;
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
