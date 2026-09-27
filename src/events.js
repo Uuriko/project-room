@@ -1458,6 +1458,12 @@ function acquireClaim(state, incoming) {
   if (!Array.isArray(incoming.data.paths) || incoming.data.paths.length === 0) throw new Error("Claim paths must be explicit");
   if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
   if (item.claim && claimIsActive(item.claim, incoming.at)) throw new Error("A current claim already exists");
+  // Warn, never block: record which other active claims in this room already
+  // hold one of these paths in the same repository. Live admission already
+  // refuses an overlap on the same ref (server/claim-scopes.mjs); this catches
+  // the cross-branch case, where two agents edit the same files on their own
+  // branches and only collide at merge.
+  const overlaps = claimOverlaps(state, item.id, incoming.data.repository, incoming.data.paths, incoming.at);
   item.claim = {
     holderId: incoming.actorId,
     repository: incoming.data.repository,
@@ -1465,7 +1471,8 @@ function acquireClaim(state, incoming) {
     paths: [...incoming.data.paths],
     acquiredAt: incoming.at,
     expiresAt: incoming.data.expiresAt,
-    status: "active"
+    status: "active",
+    ...(overlaps.length ? { overlaps } : {})
   };
   commitMutation(item, incoming);
 }
@@ -1683,6 +1690,28 @@ function retireApproval(item, incoming, reason) {
   if (item.decision?.decision !== "approved") return;
   item.decisionHistory.push({ ...item.decision, historical: true, invalidatedByEventId: incoming.id, invalidatedReason: reason });
   item.decision = null;
+}
+
+// Same path grammar as server/claim-scopes.mjs: a file, folder/** or **.
+const claimPath = value => {
+  const text = String(value).trim().replace(/^\.\//, "");
+  if (text === "**") return { path: "", subtree: true };
+  const subtree = text.endsWith("/**");
+  return { path: (subtree ? text.slice(0, -3) : text).replace(/\/+$/, ""), subtree };
+};
+const covers = (scope, other) => scope.path === other.path || (scope.subtree && (!scope.path || other.path.startsWith(`${scope.path}/`)));
+export function claimOverlaps(state, workItemId, repository, paths, at) {
+  const mine = paths.map(claimPath);
+  const repo = String(repository).trim().toLowerCase();
+  const found = [];
+  for (const other of Object.values(state.workItems ?? {})) {
+    if (other.id === workItemId || !other.claim || !claimIsActive(other.claim, at)) continue;
+    if (String(other.claim.repository).trim().toLowerCase() !== repo) continue;
+    const shared = other.claim.paths.filter(path => { const theirs = claimPath(path); return mine.some(own => covers(own, theirs) || covers(theirs, own)); });
+    if (shared.length) found.push({ workItemId: other.id, holderId: other.claim.holderId, paths: shared.slice(0, 16) });
+    if (found.length >= 10) break;
+  }
+  return found;
 }
 
 function claimIsActive(claim, at) {

@@ -2732,6 +2732,14 @@ function accessPreviewHtml(i) {
   const readers = roster.map(member => `${esc(member.displayName)}${member.kind === "agent" ? " (agent)" : ""}${referenced.has(member.id) ? " · on this task" : ""}`).join(", ");
   return `<section class="access-preview" id="${esc(id)}" data-access-panel="${esc(i.id)}" role="region" aria-labelledby="${esc(id)}-title"><h4 id="${esc(id)}-title">What this agent can access</h4><p class="form-hint">The one-task view an agent reads before it starts, evaluated ${esc(new Date(entry.evaluatedAt).toLocaleString())}. Read-only: opening it starts nothing and grants nothing. Organization allowlists are not available yet.</p><dl class="work-facts"><div><dt>Conversation</dt><dd>${conversationLine}</dd></div><div><dt>Evidence</dt><dd>${evidence}</dd></div><div><dt>Budget</dt><dd>${budget}</dd></div><div><dt>Who can read</dt><dd>Room-wide membership: ${roster.length} active ${roster.length === 1 ? "member" : "members"} share this view — ${readers}. This is not a task-level grant.</dd></div><div><dt>Not included</dt><dd data-access-omitted>${summary.omitted.map(entry => esc(humanize(entry))).join(", ")}</dd></div></dl></section>`;
 }
+// Claims record which other active claims already held the same paths when
+// they were taken (src/events.js claimOverlaps). Show them so both holders talk.
+const claimOverlapCount = i => i.claim?.status === "active" ? (i.claim.overlaps ?? []).length : 0;
+function claimOverlapHtml(i) {
+  if (!claimOverlapCount(i)) return "";
+  const rows = i.claim.overlaps.map(o => `<li>${esc(state?.workItems?.[o.workItemId]?.title ?? o.workItemId)} · ${esc(memberLabel(o.holderId))} · ${esc(o.paths.join(", "))}</li>`).join("");
+  return `<p class="claim-overlap">Already claimed by others. Talk before you both edit:</p><ul class="claim-overlap-list">${rows}</ul>`;
+}
 function workCard(i, now, drafts, messages = []) {
   const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
@@ -2745,7 +2753,7 @@ function workCard(i, now, drafts, messages = []) {
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p>${source ? `<p><a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-handoff-source:${esc(i.id)}">Open discussion</a></p>` : ""}<details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const attempts = attemptLedger(i);

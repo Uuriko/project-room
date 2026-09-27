@@ -168,6 +168,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .claim { margin-top: .75rem; color: var(--muted); font-size: .7rem; }
 .claim summary { cursor: pointer; color: var(--violet); }
 .claim p { margin: .35rem 0 0; overflow-wrap: anywhere; }
+.claim .claim-overlap { color: var(--amber); }
+.claim .claim-overlap-list { margin: .25rem 0 0; padding-left: 1rem; overflow-wrap: anywhere; }
 .work-actions { display: flex; flex-wrap: wrap; gap: .45rem; min-height: 2.6rem; align-items: center; margin-top: .9rem; }
 .work-begin-limit { margin: 0 0 .35rem; color: var(--muted); font-size: .78rem; }
 .work-more > summary { cursor: pointer; color: var(--muted); font-size: .78rem; font-weight: 600; }
