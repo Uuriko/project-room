@@ -49,11 +49,11 @@ async function get(origin, path, token) {
 
 // An agent member with work permissions, so the referral flow can prove it
 // lands strangers at the lower tier regardless of the inviter's own power.
-async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
-  const created = await post(origin, "/api/agent-identities", { displayName });
+async function enrollInviter(store, origin, ownerKey) {
+  const created = await post(origin, "/api/agent-identities", { displayName: "Inviter" });
   assert.equal(created.status, 201);
   store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName,
+    identityId: created.json.identityId, displayName: "Inviter",
     permissions: ["steer", "accept_work", "complete_work", "verify"],
   });
   return { identityId: created.json.identityId, secret: created.json.secret };
@@ -348,7 +348,7 @@ test("existing invite-code redemption still works alongside referral invites", a
 test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const t2 = await enrollInviter(store, origin, ownerKey);
-  const t1 = await enrollInviter(store, origin, ownerKey, "Readonly inviter");
+  const t1 = await enrollInviter(store, origin, ownerKey);
   demoteToReadonly(store.db, "commons", t1.identityId, { updatedBy: "owner" });
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });

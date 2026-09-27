@@ -66,6 +66,8 @@ test('integration: identity mint and room link enforce names at the write bounda
     'all-Cyrillic visual clone cannot be minted against an active global name');
   assert.equal(store.identities.create('COP').displayName, latin.displayName,
     'ordinary exact-name duplicates remain supported');
+  assert.throws(() => store.identities.create('ＣＯＰ'), { status: 422, code: 'invalid_identity' },
+    'fullwidth visual clone cannot bypass mint collision detection');
   const relay = store.identities.create('Relay');
   store.identities.link(ownerKey, 'commons', { identityId: relay.identityId, permissions: [] });
   const second = store.identities.create('Other');
