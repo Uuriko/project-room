@@ -605,7 +605,7 @@ function transferOwnership(state, incoming) {
 function addMember(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "kind", "permissions"]);
   const memberId = incoming.data.memberId;
-  if (state.members[memberId]) throw new Error("Member already exists");
+  if (Object.hasOwn(state.members, memberId)) throw new Error("Member already exists");
   const isBootstrapOwner = Object.keys(state.members).length === 0 && memberId === state.room.ownerId;
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) {
@@ -689,7 +689,7 @@ function joinMemberViaInvitation(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "role", "permissions", "invitedByMemberId", "invitationId", "rolePolicyVersion", "authorityPolicyVersion"]);
   const { memberId, invitedByMemberId, invitationId, role, permissions, rolePolicyVersion, authorityPolicyVersion } = incoming.data;
   if (incoming.actorId !== memberId) throw new Error("An invited member must join as themself");
-  if (state.members[memberId]) throw new Error("Member already exists");
+  if (Object.hasOwn(state.members, memberId)) throw new Error("Member already exists");
   requirePermission(state, invitedByMemberId, "manage_members");
   const rolePolicy = INVITATION_ROLE_POLICIES[rolePolicyVersion];
   const rolePermissions = rolePolicy && Object.hasOwn(rolePolicy, role) && rolePolicy[role];
