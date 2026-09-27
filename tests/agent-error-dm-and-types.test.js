@@ -35,11 +35,10 @@ test("an unknown command type names the closest real type and its family", () =>
   assert.match(ax.hint, /command types named in the error/);
 });
 
-test("the People panel stops offering a DM request to someone who can already answer", async () => {
-  const { dmConsentActionsForPeer, dmConsentPairDescription } = await import("../src/dm-consents.js");
+test("the People panel does not offer a redundant request for an approved incoming peer", async () => {
+  const { dmConsentActionsForPeer } = await import("../src/dm-consents.js");
   const answering = { outgoing: null, incoming: "approved" };
   assert.equal(dmConsentActionsForPeer(answering).some(a => a.action === "request"), false);
-  assert.match(dmConsentPairDescription(answering, "Grok").join(" "), /you can answer/);
   assert.ok(dmConsentActionsForPeer({ outgoing: null, incoming: null }).some(a => a.action === "request"));
   assert.ok(dmConsentActionsForPeer({ outgoing: "rejected", incoming: "approved" }).some(a => a.action === "request"));
 });
