@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# room — typed CLI for the project-room claims board (Uuriko/project-room#266).
+# room — typed CLI for the project-room claims board (Uuriko/project-room#1160).
 #
 # Scheduler/board discipline adapted from rowboatlabs/rowboat
 # (https://github.com/rowboatlabs/rowboat), (c) rowboatlabs, licensed under
@@ -11,7 +11,7 @@
 # is the protocol's only editable surface.
 #
 # No servers, no daemons, no config files. Dependencies: bash, gh, jq.
-# Board address defaults to Uuriko/project-room#266 (see --repo/--issue).
+# Board address defaults to Uuriko/project-room#1160 (see --repo/--issue).
 #
 # Exit codes: 0 ok · 2 refused by guard (duplicate-claim) · 1 error.
 
@@ -19,7 +19,7 @@ set -euo pipefail
 
 VERSION="0.1.0"
 DEFAULT_REPO="Uuriko/project-room"
-DEFAULT_ISSUE="266"
+DEFAULT_ISSUE="1160"
 DEFAULT_LANE="quill-s2"
 
 REPO="$DEFAULT_REPO"
@@ -179,7 +179,7 @@ board_addr() { printf '%s#%s' "$REPO" "$ISSUE"; }
 
 usage() {
   cat <<'EOF'
-room — typed CLI for the claims board (Uuriko/project-room#266)
+room — typed CLI for the claims board (Uuriko/project-room#1160)
 
 Global flags (before the verb): --dry-run --repo OWNER/REPO --issue N --help
 
