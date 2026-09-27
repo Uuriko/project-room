@@ -26,7 +26,6 @@ import { createDurableBoardV2 } from "./board-v2-sqlite.mjs";
 import {
   BoardV2Error,
   cleanTaskId, cleanLane, cleanPath, cleanFiles, cleanLease, cleanText,
-  rejectUnknown,
   LIVE_STATES, TERMINAL_STATES, MAX_REASON_CHARS, MAX_NOTE_CHARS,
   MAX_LIMIT, DEFAULT_LIMIT, iso,
 } from "./board-v2.mjs";
