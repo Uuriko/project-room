@@ -11,6 +11,10 @@
 //   node scripts/room-mutate.mjs --run M1,M7 [--jobs 4] [--workdir DIR]
 //   node scripts/room-mutate.mjs --run-all [--jobs 4] [--workdir DIR]
 //
+// Every run first executes the suite against an UNMUTATED overlay (baseline).
+// If the baseline fails, the tool exits 3 without attributing any kills —
+// a broken harness must never masquerade as mutant kills.
+//
 // For each mutant the tool:
 //   1. copies scripts/room into a scratch overlay (<workdir>/mut-<id>/),
 //      applies ONE exact-string replacement, and `bash -n` checks the result
@@ -129,12 +133,12 @@ const MUTANTS = [
     replacement: '[ "$hb_e" -ge "$strike_e" ] && hb_ok=1',
     notes: "a heartbeat simultaneous with the nudge counts as post-nudge." },
   { id: "M25", area: "sweep", expect: "kill",
-    anchor: 'select(.state == "working" and .lane != null and ((.terminal // false) | not))',
-    replacement: 'select(.state == "submitted" and .lane != null and ((.terminal // false) | not))',
-    notes: "sweep nudges submitted claims instead of working ones." },
+    anchor: 'select((.state == "working" or .state == "submitted") and .lane != null and ((.terminal // false) | not))',
+    replacement: 'select((.state == "submitted") and .lane != null and ((.terminal // false) | not))',
+    notes: "sweep nudges submitted claims only, never working ones." },
   { id: "M26", area: "sweep", expect: "kill",
-    anchor: 'select(.state == "working" and .lane != null and ((.terminal // false) | not))',
-    replacement: 'select(.state == "working" and .lane != null and ((.terminal // false)))',
+    anchor: 'select((.state == "working" or .state == "submitted") and .lane != null and ((.terminal // false) | not))',
+    replacement: 'select((.state == "working" or .state == "submitted") and .lane != null and ((.terminal // false)))',
     notes: "sweep nudges terminal (completed/cancelled/receipted) claims." },
   { id: "M27", area: "sweep", expect: "kill",
     anchor: 'if [ -z "$strike" ]; then',
@@ -201,6 +205,27 @@ function buildMutant(mut, workdir) {
   return { ok: true, dir };
 }
 
+// Baseline overlay: the UNMUTATED scripts/room plus the same test files,
+// stubs, and parity deps. The suite must pass here; if it does not, the
+// harness itself is broken and any kill/survive attribution is meaningless.
+// runSuite reports this structurally (exit 3) instead of letting mutants
+// be "killed" by harness errors.
+function buildBaseline(workdir) {
+  const dir = join(workdir, "mut-baseline");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(join(dir, "scripts"), { recursive: true });
+  fs.mkdirSync(join(dir, "tests"), { recursive: true });
+  fs.mkdirSync(join(dir, "server"), { recursive: true });
+  const baselinePath = join(dir, "scripts", "room");
+  fs.copyFileSync(roomSrc, baselinePath);
+  fs.chmodSync(baselinePath, 0o755);
+  for (const t of OVERLAY_TESTS) fs.copyFileSync(join(checkout, t), join(dir, t));
+  fs.copyFileSync(join(checkout, PARITY_FILE), join(dir, PARITY_FILE));
+  for (const p of PARITY_DEPS) fs.copyFileSync(join(checkout, p), join(dir, p));
+  for (const [p, body] of Object.entries(SERVER_STUBS)) fs.writeFileSync(join(dir, p), body);
+  return dir;
+}
+
 function runSuite(dir, tmpBase) {
   const testArgs = OVERLAY_TESTS.map((t) => join(dir, t));
   const r1 = sh("node", ["--test", "--test-reporter=tap", ...testArgs], {
@@ -264,6 +289,20 @@ async function main() {
     process.exit(1);
   }
   const results = [];
+  // Structural gate: the unmutated overlay must pass the full suite first.
+  // Without this, a broken harness (missing module, bad stub) would mark
+  // mutants "KILLED" for harness errors instead of genuine test failures.
+  const baselineDir = buildBaseline(workdir);
+  const baselineTmp = join(baselineDir, "work");
+  fs.mkdirSync(join(baselineTmp, "tmp"), { recursive: true });
+  const base = runSuite(baselineDir, baselineTmp);
+  fs.rmSync(baselineDir, { recursive: true, force: true });
+  if (base.killed) {
+    console.error("BASELINE FAILED — harness is broken, refusing to attribute kills:");
+    for (const f of base.failing) console.error(`  - ${f}`);
+    process.exit(3);
+  }
+  console.log(`baseline: unmutated overlay passes (suite exit ${base.rawStatus.join("/")})`);
   for (let i = 0; i < selected.length; i += jobs) {
     const batch = selected.slice(i, i + jobs);
     results.push(...await Promise.all(batch.map((m) => runOne(m, workdir))));

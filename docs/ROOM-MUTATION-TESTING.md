@@ -84,7 +84,8 @@ to the checkout copy):
 - **W2/W5**: sweep's `-gt` boundaries — nothing planned at exactly the
   expiry instant, or at exactly 14400s after strike-one.
 - **W1/W3/W4/W6/W7/W8/W9**: sweep plans strike-one for expired working
-  claims, ignores submitted/terminal claims, releases after the grace with
+  and submitted claims (submitted gained an expiry path 2026-09-26),
+  ignores terminal claims, releases after the grace with
   no heartbeat, spares claims with a post-nudge heartbeat, still releases
   when the heartbeat is exactly at the strike instant, and never
   double-nudges.
@@ -133,7 +134,7 @@ mutant, so the new file only pins boundaries they did not cover.
 | M22 | sweep | grace `-gt 14400` → `-ge 14400` | W5 (new) |
 | M23 | sweep | strike-two guard `hb_ok = 0` → `= 1` (inverted: fires only with heartbeat) | W6 (new) |
 | M24 | sweep | heartbeat-after-nudge `-gt` → `-ge` (simultaneous heartbeat counts) | W7 (new) |
-| M25 | sweep | selector `working` → `submitted` (nudges submitted claims) | W3 (new) |
+| M25 | sweep | selector `working or submitted` → `submitted` only (never nudges working) | W1 (new) |
 | M26 | sweep | selector drops the terminal exclusion (nudges completed/cancelled/receipted) | W8 (new) |
 | M27 | sweep | strike-empty branch flipped (`-z` → `-n`: double nudge) | W9 (new) |
 | M28 | parse | prose-terminal ref resolved from `$body` instead of `$rest` | room-board-grammar:70 |
@@ -155,6 +156,21 @@ the server-only imports the parity test never touches):
 - Every mutant was killed by at least one test; the per-mutant killer lists
   are in the campaign log (`.tmp/room-mutate/` during the run) and the
   expected-killer column of the catalog table above held for all 28.
+
+Re-run 2026-09-27 against the rebased base (`origin/main` 678c4b13): all 28
+anchors still occur exactly once; **28 killed, 0 survived, 0 errors** again.
+This run also exercised the new baseline gate — the unmutated overlay passes
+the full suite first (exit 0/0), so no kill can be attributed to a harness
+error. M7/M8 die on the genuine parity failure (mutated bash accepts
+`lease=0h`/`73h`, the real `server/claim-validate.mjs` rejects them).
+
+Final update 2026-09-27 (follow-up PR): `scripts/room` gained the
+submitted-state expiry lifecycle (PRs #1104–#1118: sweep now nominates
+expired `submitted` claims, not just `working`). W3 was updated to assert
+the new intended behavior (strike-one planned for expired submitted claims),
+M25/M26 anchors were refreshed to the new
+`select((.state == "working" or .state == "submitted") ...)` nomination, and
+the campaign re-run on the current base: **28 killed, 0 survived, 0 errors**.
 
 ### Incidental finding (not a mutant)
 
