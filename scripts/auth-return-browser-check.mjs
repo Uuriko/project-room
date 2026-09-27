@@ -119,8 +119,6 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   await room.waitFor();
   await room.click();
   await page.locator("#main").waitFor({ state: "visible" });
-  const guide = page.locator("#room-guide-dismiss");
-  if (await guide.isVisible()) await guide.click();
 
   const upload = page.waitForResponse(response => response.request().method() === "POST" && /\/api\/rooms\/[^/]+\/files$/.test(new URL(response.url()).pathname) && response.ok());
   await page.locator("#composer-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello from the composer") });

@@ -2984,8 +2984,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        if (action === "list_land_queue") store.requireGuestRead(auth);
-        else store.requireGuestWrite(auth);
         rate(`read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
@@ -3044,8 +3042,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        if (writing) store.requireGuestWrite(auth);
-        else store.requireGuestRead(auth);
         if (!writing) {
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
           rate(`read:${auth.credentialHash}`, 600);
@@ -3069,7 +3065,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|chat|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3244,10 +3240,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
-      // The common room funnel covers snapshot, files (separate gate above),
-      // SSE, auxiliary reads and non-command writes before route dispatch.
-      if (["GET", "HEAD"].includes(req.method)) store.requireGuestRead(auth, { chat: route === "chat" });
-      else if (route !== "commands" && route !== "guest-invites-disconnect" && route !== "member-deactivate") store.requireGuestWrite(auth);
       // RC-2026-09-19-070: DM privacy. A targeted message (message.posted
       // with data.toMemberId) is visible only to its sender and its addressed
       // member — the room owner is not exempt. The /events and /stream routes
@@ -4173,13 +4165,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "peer-dm-thread" && req.method === "GET") {
         return json(res, 200, store.bonds.readThread(roomId, auth.member.id, peerDmThreadId));
-      }
-      if (route === "chat" && req.method === "GET") {
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => !["after", "limit", "auth"].includes(key) || params.getAll(key).length !== 1))
-          reject(422, "invalid_cursor", "Choose a chat cursor and limit");
-        return json(res, 200, store.chatAfter(selected.token, roomId,
-          Number(params.get("after") || 0), Number(params.get("limit") || 50), fence));
       }
       if (route === "events" && req.method === "GET") {
         const params = url.searchParams;

@@ -302,22 +302,6 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
-  /api/rooms/{roomId}/chat:
-    get:
-      summary: Read chat-only messages and reactions
-      description: A narrow projection for chat-only guests. Work and room events are not returned.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
-        - name: after
-          in: query
-          schema: { type: integer, minimum: 0, default: 0 }
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
-      responses:
-        '200': { description: Chat messages and reactions, with a next cursor }
-        '403': { description: Access denied }
-        '422': { description: Invalid cursor }
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
@@ -9088,8 +9072,8 @@ paths:
         Owner by ID with `manage_members`: room Bearer <redacted>, or browser room or
         account session with CSRF. Minting stays account-bound (403
         account_session_required for an accountless owner). Body: `{
-        requestId, guestLabel, expectedOwnerRevision, tier? (observer
-        only), scope? (read_only | chat_only), credentialTtlMs? (default 72h,
+        requestId, guestLabel, expectedOwnerRevision, tier? (observer |
+        contributor, default observer), credentialTtlMs? (default 72h,
         1h-14d), redeemWindowMs? (default 24h, 1h-7d), roomId? }`. Returns
         the public-safe GX-… code once — it is shown only here, stored as a
         hash, and grants nothing by itself. 30 per address per minute. `GET`
@@ -9107,8 +9091,7 @@ paths:
                 requestId: { type: string }
                 guestLabel: { type: string }
                 expectedOwnerRevision: { type: integer }
-                tier: { type: string, enum: [observer] }
-                scope: { type: string, enum: [read_only, chat_only] }
+                tier: { type: string, enum: [observer, contributor] }
                 credentialTtlMs: { type: integer }
                 redeemWindowMs: { type: integer }
                 roomId: { type: string }
@@ -9203,8 +9186,8 @@ paths:
         Owner by ID with `manage_members`. Contributor is never granted at
         mint or redemption — it is always an explicit owner decision via
         this operation. Body is exactly `{ memberId, tier }` where tier is
-        `observer`, `contributor`, `read_only`, or `chat_only`. The tier change takes effect immediately
-        (read on every access) and is visible in the invite list. 30 per
+        `observer` or `contributor`. The tier change takes effect immediately
+        (read on every command) and is visible in the invite list. 30 per
         address per minute.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -9217,7 +9200,7 @@ paths:
               required: [memberId, tier]
               properties:
                 memberId: { type: string, description: "guest-agent-* member id" }
-                tier: { type: string, enum: [observer, contributor, read_only, chat_only] }
+                tier: { type: string, enum: [observer, contributor] }
       responses:
         '200': { description: "{ memberId, tier, unchanged }" }
         '403': { description: owner_required }

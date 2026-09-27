@@ -1074,9 +1074,9 @@ export class BountyEscrow {
     const resolvedTrack = track ?? (before !== null && after !== null ? trackOfStateTransition(before, after) : null);
     const row = this.db.prepare(
       `INSERT INTO bounty_events (room_id, at, type, bounty_id, actor_kind, actor_id, before_state, after_state, track, data)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .run(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, resolvedTrack, JSON.stringify(data));
-    return { seq: Number(row.lastInsertRowid), at, type, bountyId,
+       VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING seq`)
+      .get(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, resolvedTrack, JSON.stringify(data));
+    return { seq: Number(row.seq), at, type, bountyId,
       actor: actor ? { kind: actor.kind, id: actor.id } : null, before, after, track: resolvedTrack, data };
   }
 

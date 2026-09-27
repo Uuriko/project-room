@@ -7,6 +7,22 @@ import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-bounty-provision') {
+      this.store.agentPlugin.setDispatchKick(null); // Queue proof only; never send externally.
+      this.store.initialize(initialRoom());
+      const ownerKey = this.store.issueAccessKey('commons', 'owner');
+      const identity = this.store.identities.create('Bounty observer');
+      this.store.identities.link(ownerKey, 'commons', { identityId: identity.identityId, permissions: [] });
+      this.store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
+        url: 'https://observer.example.test/hooks', events: ['*'] });
+      return Response.json({ ownerKey });
+    }
+    if (url.pathname === '/__test-bounty-queue') {
+      this.store.agentPlugin.setDispatchKick(null);
+      return Response.json({ events: this.store.bountyEscrow.listEvents('commons'),
+        deliveries: this.store.db.prepare('SELECT event_id, state, attempts FROM agent_webhook_deliveries ORDER BY event_id').all() });
+    }
+
     if (url.pathname === '/__test-provision') {
       this.store.initialize(initialRoom());
       const account = this.store.createAccount('worker-mail-owner'); this.store.bindHumanAccount('commons', 'owner', account.id);

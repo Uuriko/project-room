@@ -233,7 +233,6 @@ const client = new RoomClient({
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
       void refreshRoomFiles();
-      showRoomGuide();
       void refreshDmConsents();
       void refreshFriendBonds();
       void refreshSavedIds();
@@ -354,7 +353,6 @@ const client = new RoomClient({
     // closed summary for the rest of the session.
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     for (const id of ["people-panel", "room-about"]) $(`#${id}`).open = true;
-    if ($("#room-guide")) $("#room-guide").hidden = true;
     agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
@@ -1089,10 +1087,6 @@ function setAuthKind(kind) {
   configureAuthPanel();
   focusSignin();
 }
-function dismissRoomGuide() {
-  if ($("#room-guide")) $("#room-guide").hidden = true;
-  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
-}
 function maybeShowGuestUpgradeHint() {
   // One-time hint for guests after their first message: surface the
   // account-upgrade path at the moment they've gotten value.
@@ -1119,17 +1113,6 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
-function showRoomGuide() {
-  const guide = $("#room-guide");
-  if (!guide) return;
-  try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
-  if (state?.messages?.length) { dismissRoomGuide(); return; }
-  // QA-UX 2026-09-19: the inbox sentence is noise for room-key members —
-  // they have no inbox (account sessions only). Hide it there.
-  const inboxNote = $("#room-guide-inbox");
-  if (inboxNote) inboxNote.hidden = !accountClient.session?.authenticated;
-  guide.hidden = false;
-}
 function syncComposerChrome() {
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
@@ -2994,7 +2977,6 @@ $("#invitation-accept").addEventListener("click", async () => {
     renderInvitation();
   }
 });
-$("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
 function focusSignin() {
   const keyVisible = !$("#signin-extra").hidden && $("#key-signin").open;
   const emailVisible = !$("#email-auth-step").hidden;
@@ -3314,7 +3296,6 @@ $("#message-form").addEventListener("submit", e => {
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
-    dismissRoomGuide();
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });

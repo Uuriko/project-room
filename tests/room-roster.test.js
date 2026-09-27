@@ -206,8 +206,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="access-key-reveal"/);
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
-  assert.match(html, /id="room-guide"/);
-  assert.match(html, /Your private messages are in <strong>Inbox<\/strong>/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
   assert.match(html, /id="room-tools"/);
@@ -257,7 +255,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /No completed results yet/);
-  assert.match(html, /to mention someone/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
   assert.match(app, /data-empty-invite/);
@@ -270,7 +267,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /mentionHtml/);
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /syncComposerChrome/);
-  assert.match(app, /dismissRoomGuide/);
   assert.match(app, /escapeChatAction, messageCluster/);
   assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
   assert.match(app, /replyAuthorToAddress/);
