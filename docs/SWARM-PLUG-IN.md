@@ -413,6 +413,14 @@ from execution Work Items and from the GitHub claims-board workflow below.
   are accepted only on the `done` transition; pointers do not upload evidence
   or verify its contents. Empty arrays explicitly clear completion metadata.
 
+- `reviewWorkItem(id, { note? })` records an attestation as the authenticated
+  caller. It cannot impersonate a reviewer or complete the work. The owner
+  separately completes with `reviewedBy` under the configured review policy.
+- `renewWorkItem(id, { progressMessageId, note?, leaseHours? })` renews the
+  caller's active claim using their own public progress message, posted after
+  the current lease began. A private, foreign, missing, or reused stale message
+  cannot renew it; another member cannot renew the owner's claim.
+
 The server validates declarations and enforces ownership and review policy.
 Invalid fields are sent for validation rather than silently discarded. Existing
 calls without these optional fields keep their behavior. This SDK parity change

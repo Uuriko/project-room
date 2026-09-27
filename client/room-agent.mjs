@@ -633,6 +633,15 @@ export class RoomAgentClient {
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
   }
+  reviewWorkItem(id, { note, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
+      { ...(note === undefined ? {} : { note }) }, signal);
+  }
+  renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
+      { progressMessageId, ...(note === undefined ? {} : { note }),
+        ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+  }
   releaseWorkItem(id, { note, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
       { ...(note === undefined ? {} : { note }) }, signal);
