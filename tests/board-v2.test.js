@@ -395,3 +395,93 @@ test("idempotency: keys are scoped per lane", () => {
   const notes = req("GET", "/notes", {});
   assert.equal(notes.body.notes.length, 2);
 });
+
+test("GET /events: returns unified event log with cursor pagination", () => {
+  const { req } = setup();
+  // Create a claim (seq 1), a note (seq 2), a finding (seq 3).
+  const c = req("POST", "/claims", { body: claimBody() });
+  assert.equal(c.status, 201);
+  const n = req("POST", "/notes", { lane: "jill", body: { body: "Test note" } });
+  assert.equal(n.status, 201);
+  const f = req("POST", "/findings", {
+    lane: "jill",
+    body: { severity: "high", title: "Test", recommendation: "Fix it" },
+  });
+  assert.equal(f.status, 201);
+
+  // GET /events should return all three in seq order.
+  const events = req("GET", "/events", {});
+  assert.equal(events.status, 200);
+  assert.equal(events.body.watermark, 3);
+  assert.equal(events.body.events.length, 3);
+  assert.equal(events.body.events[0].seq, 1);
+  assert.equal(events.body.events[0].kind, "claim");
+  assert.equal(events.body.events[1].seq, 2);
+  assert.equal(events.body.events[1].kind, "note");
+  assert.equal(events.body.events[2].seq, 3);
+  assert.equal(events.body.events[2].kind, "finding");
+  assert.equal(events.body.has_more, false);
+});
+
+test("GET /events: since_seq cursor filters correctly", () => {
+  const { req } = setup();
+  req("POST", "/claims", { body: claimBody() });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note 1" } });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note 2" } });
+
+  // since_seq=1 should return seq 2 and 3 only.
+  const events = req("GET", "/events", { query: { since_seq: "1" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 2);
+  assert.equal(events.body.events[0].seq, 2);
+  assert.equal(events.body.events[1].seq, 3);
+});
+
+test("GET /events: kind filter works", () => {
+  const { req } = setup();
+  req("POST", "/claims", { body: claimBody() });
+  req("POST", "/notes", { lane: "jill", body: { body: "Note" } });
+
+  const events = req("GET", "/events", { query: { kind: "note" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 1);
+  assert.equal(events.body.events[0].kind, "note");
+});
+
+test("GET /events: lane filter works", () => {
+  const { req } = setup();
+  req("POST", "/notes", { lane: "jill", body: { body: "Jill note" } });
+  req("POST", "/notes", { lane: "codex", body: { body: "Codex note" } });
+
+  const events = req("GET", "/events", { query: { lane: "codex" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 1);
+  assert.equal(events.body.events[0].lane, "codex");
+});
+
+test("GET /events: limit with has_more", () => {
+  const { req } = setup();
+  for (let i = 0; i < 5; i++) {
+    req("POST", "/notes", { lane: "jill", body: { body: `Note ${i}` } });
+  }
+
+  // limit=2 should return 2 events with has_more=true.
+  const events = req("GET", "/events", { query: { limit: "2" } });
+  assert.equal(events.status, 200);
+  assert.equal(events.body.events.length, 2);
+  assert.equal(events.body.has_more, true);
+  assert.equal(events.body.watermark, 5);
+});
+
+test("GET /events: rejects unknown query params", () => {
+  const { req } = setup();
+  const res = req("GET", "/events", { query: { bogus: "1" } });
+  assert.equal(res.status, 422);
+  assert.equal(res.body.error.code, "unknown_field");
+});
+
+test("GET /events: POST returns 405", () => {
+  const { req } = setup();
+  const res = req("POST", "/events", { body: {} });
+  assert.equal(res.status, 405);
+});
