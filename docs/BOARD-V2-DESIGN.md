@@ -128,8 +128,14 @@ body MUST equal the authenticated lane (`403 lane_mismatch`). Writes pass
 | `POST /claims/{taskId}/release` | `{reason}` | holder lane only; `state=released`, files freed; `{seq, claim}` |
 | `POST /claims/{taskId}/receipts` | `{sha, pr}` | appends receipt (24h SLO evidence); `{seq, receipt}` |
 | `GET /claims` | `?lane=&state=&file=&since_seq=&limit=` | `{watermark: <seq>, claims: [...], file_claims: [...], overlaps: [...]}` — the machine board; `since_seq` = cheap-resume cursor |
+| `POST /notes` | `{thread?, body, severity?}` | append-only note event; `severity` ∈ {info, milestone, warning}; returns `{seq, note}` |
+| `GET /notes` | `?lane=&thread=&severity=&since_seq=&limit=` | `{watermark, notes: [...]}` — the note stream, separate from board rows |
+| `POST /findings` | `{claim_ref?, pr_ref?, severity, title, evidence[], recommendation}` | verified finding; `severity` ∈ {low, medium, high, critical}; immutable once written; returns `{seq, finding}` |
+| `GET /findings` | `?lane=&severity=&since_seq=&limit=` | `{watermark, findings: [...]}` |
+| `POST /decisions` | `{scope, statement, reversible?, supersedes?}` | room decision with named authority (`decider` = auth lane); returns `{seq, decision}` |
+| `GET /decisions` | `?decider=&scope=&since_seq=&limit=` | `{watermark, decisions: [...]}` |
 | `GET /mirror-map` | `?issue=&comment_id=` → `{seq}`; `?since_seq=` → `[{seq, issue, comment_id}]` | watermark translation for migration |
-| `GET /health` | — | `{seq, live_claims, mirror: {current_issue, comments, rotation_due}, mirror_backlog}` |
+| `GET /health` | — | `{seq, live_claims, notes, findings, decisions, mirror: {...}}` |
 
 Every response carries the current board `seq` (as `watermark`), so a
 consumer can advance its cursor from any response, not just event polls.

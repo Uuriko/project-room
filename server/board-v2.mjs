@@ -122,6 +122,9 @@ export class BoardV2 {
     this._seq = 0;
     this._claims = new Map(); // task_id -> claim record
     this._mirror = new Map(); // seq -> { issue, comment_id }
+    this._notes = []; // append-only note events
+    this._findings = []; // append-only finding events
+    this._decisions = []; // append-only decision events
   }
 
   get seq() { return this._seq; }
@@ -244,6 +247,79 @@ export class BoardV2 {
     return { seq: event.seq, receipt };
   }
 
+  postNote({ lane, thread = null, body, severity = null }) {
+    const ln = cleanLane(lane);
+    const bd = cleanText(body, MAX_NOTE_CHARS, "invalid_body", "body");
+    let th = null;
+    if (thread !== null && thread !== undefined) {
+      th = cleanText(thread, 128, "invalid_thread", "thread");
+    }
+    let sev = null;
+    if (severity !== null && severity !== undefined) {
+      if (!["info", "milestone", "warning"].includes(severity)) {
+        fail(422, "invalid_severity", "severity must be info, milestone, or warning");
+      }
+      sev = severity;
+    }
+    const event = this._emit("note", null, ln, { thread: th, body: bd, severity: sev });
+    const note = { seq: event.seq, at: event.at, lane: ln, thread: th, body: bd, severity: sev };
+    this._notes.push(note);
+    return { seq: event.seq, note };
+  }
+
+  postFinding({ lane, claim_ref = null, pr_ref = null, severity, title, evidence = [], recommendation }) {
+    const ln = cleanLane(lane);
+    if (!["low", "medium", "high", "critical"].includes(severity)) {
+      fail(422, "invalid_severity", "severity must be low, medium, high, or critical");
+    }
+    const ti = cleanText(title, 200, "invalid_title", "title");
+    const rec = cleanText(recommendation, MAX_REASON_CHARS, "invalid_recommendation", "recommendation");
+    let cr = null;
+    if (claim_ref !== null && claim_ref !== undefined) cr = cleanTaskId(claim_ref);
+    let pr = null;
+    if (pr_ref !== null && pr_ref !== undefined) {
+      if (!(typeof pr_ref === "number" && Number.isInteger(pr_ref) && pr_ref > 0)) {
+        fail(422, "invalid_pr_ref", "pr_ref must be a positive integer");
+      }
+      pr = pr_ref;
+    }
+    if (!Array.isArray(evidence)) fail(422, "invalid_evidence", "evidence must be an array");
+    const ev = evidence.slice(0, 20).map(e => cleanText(e, 500, "invalid_evidence", "evidence item"));
+    const event = this._emit("finding", cr, ln, {
+      pr_ref: pr, severity, title: ti, evidence: ev, recommendation: rec,
+    });
+    const finding = {
+      seq: event.seq, at: event.at, lane: ln, claim_ref: cr, pr_ref: pr,
+      severity, title: ti, evidence: ev, recommendation: rec,
+    };
+    this._findings.push(finding);
+    return { seq: event.seq, finding };
+  }
+
+  postDecision({ decider, scope, statement, reversible = null, supersedes = null }) {
+    const dc = cleanLane(decider);
+    const sc = cleanText(scope, 128, "invalid_scope", "scope");
+    const st = cleanText(statement, MAX_REASON_CHARS, "invalid_statement", "statement");
+    let rev = null;
+    if (reversible !== null && reversible !== undefined) {
+      if (typeof reversible !== "boolean") fail(422, "invalid_reversible", "reversible must be a boolean");
+      rev = reversible;
+    }
+    let sup = null;
+    if (supersedes !== null && supersedes !== undefined) {
+      sup = cleanText(supersedes, 128, "invalid_supersedes", "supersedes");
+    }
+    const event = this._emit("decision", null, dc, {
+      scope: sc, statement: st, reversible: rev, supersedes: sup,
+    });
+    const decision = {
+      seq: event.seq, at: event.at, decider: dc, scope: sc,
+      statement: st, reversible: rev, supersedes: sup,
+    };
+    this._decisions.push(decision);
+    return { seq: event.seq, decision };
+  }
+
   readBoard({ lane = null, state = null, file = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
     const since = Number(since_seq) || 0;
     const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
@@ -283,6 +359,40 @@ export class BoardV2 {
     };
   }
 
+  readNotes({ lane = null, thread = null, severity = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let notes = [...this._notes];
+    if (lane !== null && lane !== undefined) notes = notes.filter(n => n.lane === cleanLane(lane));
+    if (thread !== null && thread !== undefined) notes = notes.filter(n => n.thread === thread);
+    if (severity !== null && severity !== undefined) notes = notes.filter(n => n.severity === severity);
+    if (since > 0) notes = notes.filter(n => n.seq > since);
+    notes.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, notes: notes.slice(0, lim) };
+  }
+
+  readFindings({ lane = null, severity = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let findings = [...this._findings];
+    if (lane !== null && lane !== undefined) findings = findings.filter(f => f.lane === cleanLane(lane));
+    if (severity !== null && severity !== undefined) findings = findings.filter(f => f.severity === severity);
+    if (since > 0) findings = findings.filter(f => f.seq > since);
+    findings.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, findings: findings.slice(0, lim) };
+  }
+
+  readDecisions({ decider = null, scope = null, since_seq = 0, limit = DEFAULT_LIMIT } = {}) {
+    const since = Number(since_seq) || 0;
+    const lim = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    let decisions = [...this._decisions];
+    if (decider !== null && decider !== undefined) decisions = decisions.filter(d => d.decider === cleanLane(decider));
+    if (scope !== null && scope !== undefined) decisions = decisions.filter(d => d.scope === scope);
+    if (since > 0) decisions = decisions.filter(d => d.seq > since);
+    decisions.sort((a, b) => a.seq - b.seq);
+    return { watermark: this._seq, decisions: decisions.slice(0, lim) };
+  }
+
   // --- mirror map: (issue, comment_id) <-> seq translation for migration ---
   recordMirror({ seq, issue, comment_id }) {
     const s = Number(seq);
@@ -310,7 +420,10 @@ export class BoardV2 {
 
   health() {
     const live = [...this._claims.values()].filter(c => LIVE_STATES.has(c.state)).length;
-    return { seq: this._seq, live_claims: live, mirror_entries: this._mirror.size };
+    return {
+      seq: this._seq, live_claims: live, mirror_entries: this._mirror.size,
+      notes: this._notes.length, findings: this._findings.length, decisions: this._decisions.length,
+    };
   }
 }
 
@@ -393,6 +506,57 @@ export function handleBoardV2Request(board, { method, path, query = {}, body = n
       const out = board.recordMirror(b);
       return { status: 201, body: { watermark: board.seq, ...out } };
     }
+    if (path === "/notes" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["thread", "body", "severity"], "note");
+      const authed = needLane();
+      if (b.body === undefined) fail(422, "invalid_body", "body must be a non-empty string");
+      const out = board.postNote({ lane: authed, thread: b.thread ?? null, body: b.body, severity: b.severity ?? null });
+      return { status: 201, body: { watermark: board.seq, ...out } };
+    }
+    if (path === "/notes" && method === "GET") {
+      rejectUnknown(query, ["lane", "thread", "severity", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readNotes(query) };
+    }
+    if (path === "/notes") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    if (path === "/findings" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["claim_ref", "pr_ref", "severity", "title", "evidence", "recommendation"], "finding");
+      const authed = needLane();
+      if (b.severity === undefined) fail(422, "invalid_severity", "severity is required");
+      if (b.title === undefined) fail(422, "invalid_title", "title must be a non-empty string");
+      if (b.recommendation === undefined) fail(422, "invalid_recommendation", "recommendation must be a non-empty string");
+      const out = board.postFinding({
+        lane: authed, claim_ref: b.claim_ref ?? null, pr_ref: b.pr_ref ?? null,
+        severity: b.severity, title: b.title, evidence: b.evidence ?? [], recommendation: b.recommendation,
+      });
+      return { status: 201, body: { watermark: board.seq, ...out } };
+    }
+    if (path === "/findings" && method === "GET") {
+      rejectUnknown(query, ["lane", "severity", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readFindings(query) };
+    }
+    if (path === "/findings") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
+    if (path === "/decisions" && method === "POST") {
+      const b = needBody();
+      rejectUnknown(b, ["scope", "statement", "reversible", "supersedes"], "decision");
+      const authed = needLane();
+      if (b.scope === undefined) fail(422, "invalid_scope", "scope must be a non-empty string");
+      if (b.statement === undefined) fail(422, "invalid_statement", "statement must be a non-empty string");
+      const out = board.postDecision({
+        decider: authed, scope: b.scope, statement: b.statement,
+        reversible: b.reversible ?? null, supersedes: b.supersedes ?? null,
+      });
+      return { status: 201, body: { watermark: board.seq, ...out } };
+    }
+    if (path === "/decisions" && method === "GET") {
+      rejectUnknown(query, ["decider", "scope", "since_seq", "limit"], "query");
+      return { status: 200, body: board.readDecisions(query) };
+    }
+    if (path === "/decisions") return { status: 405, body: { error: { code: "method_not_allowed", message: "Method not allowed" } } };
+
     if (path === "/health" && method === "GET") {
       return { status: 200, body: board.health() };
     }
