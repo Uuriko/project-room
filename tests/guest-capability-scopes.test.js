@@ -126,6 +126,9 @@ test("chat projection hides work drafts, other people's DMs, deleted bodies and 
     id: `post-${id}`, type: "message.posted", data: { messageId: id, ...data }
   });
   post("ordinary", { body: "PUBLIC-CANARY" });
+  store.command(owner, "commons", { id: "draft-work", type: "work.proposed", data: {
+    workItemId: "w-draft", title: "Draft work", definitionOfDone: "draft", accountableMemberId: "owner", mode: "read" } });
+  post("draft-hidden", { body: "DRAFT-CANARY", workItemId: "w-draft" });
   post("private", { body: "PRIVATE-CANARY", toMemberId: "owner" });
   post("erase-me", { body: "DELETED-CANARY" });
   post("reply-to-private", { body: "REPLY-CANARY", replyToId: "private" });
@@ -136,7 +139,7 @@ test("chat projection hides work drafts, other people's DMs, deleted bodies and 
   const page = await request("/api/rooms/commons/chat", { token: chat.token });
   assert.equal(page.status, 200);
   assert(page.body.messages.some(m => m.body === "PUBLIC-CANARY"));
-  for (const marker of ["PRIVATE-CANARY", "DELETED-CANARY", "REPLY-CANARY", "private", "erase-me", "reply-to-private"]) {
+  for (const marker of ["PRIVATE-CANARY", "DELETED-CANARY", "REPLY-CANARY", "DRAFT-CANARY", "private", "erase-me", "reply-to-private", "draft-hidden"]) {
     assert.equal(JSON.stringify(page.body.messages).includes(marker), false, marker);
   }
   assert.equal(page.body.messages.some(m => m.kind === "reaction"), false);
