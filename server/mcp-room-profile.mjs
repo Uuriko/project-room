@@ -645,7 +645,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           : validRoomArgs(name, args);
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
-      if (args.roomId) {
+      // room_create names a *future* room; it has no member to authenticate yet.
+      if (args.roomId && name !== "room_create") {
         const current = store.authenticate(secret, args.roomId);
         if (name !== "room_read_messages" && name !== "room_post_message" && name !== "room_react")
           store.requireGuestRead(current);
