@@ -239,6 +239,25 @@ export function validateReplyRead(result, { name, args, roomId }) {
       && current.answerBasis.expectedRequestRevision === request.revision && current.answerBasis.contextEventId === current.contextEventId
       && current.answerBasis.contextSequence === current.contextSequence);
     else assert(current.answerBasis === null);
+    if (Object.hasOwn(result, "responseHttpActions")) {
+      assert(Array.isArray(result.responseHttpActions) && result.responseHttpActions.length === (expected ? 2 : 0));
+      for (const [index, action] of result.responseHttpActions.entries()) {
+        assert(keys(action, ["method", "path", "command", "requiredInput", "instructions", "verify"])
+          && action.method === "POST" && action.path === `/api/rooms/${encodeURIComponent(roomId)}/commands`
+          && keys(action.command, ["id", "type", "data"]) && validId(action.command.id)
+          && Array.isArray(action.requiredInput) && action.requiredInput.length === 1 && action.requiredInput[0] === "command.data.body"
+          && typeof action.instructions === "string"
+          && keys(action.verify, ["method", "path"]) && action.verify.method === "GET"
+          && action.verify.path === `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(request.id)}`);
+        const command = buildReplyCommand({ roomId, memberId: result.viewerId }, "room_respond_to_request", {
+          requestId: action.command.id, responseToRequestId: request.id, ...current.answerBasis,
+          responseOutcome: ["answered", "declined"][index], toMemberId: request.requesterId, workItemId: request.workItemId, body: "pending caller input"
+        });
+        delete command.data.body;
+        assert(action.command.type === command.type && keys(action.command.data, Object.keys(command.data))
+          && Object.entries(command.data).every(([key, value]) => action.command.data[key] === value));
+      }
+    }
     if (Object.hasOwn(result, "responseActions")) {
       assert(Array.isArray(result.responseActions) && result.responseActions.length === (expected ? 2 : 0));
       for (const [index, action] of result.responseActions.entries()) {

@@ -637,14 +637,20 @@ test("HTTP response templates require completed current recipient context and st
   const path = list.nextReads[0].http.path;
   const initial = await get(path);
   assert.equal(initial.responseActions.length, 2);
-  assert.deepEqual((await get(path, f.keys.owner)).responseActions, []);
+  const requesterRead = await get(path, f.keys.owner);
+  assert.deepEqual(requesterRead.responseActions, []); assert.deepEqual(requesterRead.responseHttpActions, []);
   await f.client.replyAction("room_reply", { requestId: "guided-clarification", replyToId: id, body: "A new constraint" });
   const before = f.store.room("commons").sequence;
   const stale = initial.responseActions[0];
   await assert.rejects(f.client.replyAction(stale.tool, { ...stale.arguments, requestId: "guided-stale", body: "Old answer" }), { code: "command_rejected" });
+  const staleHttp = initial.responseHttpActions[0];
+  const staleCommand = structuredClone(staleHttp.command); staleCommand.data.body = "Old REST answer";
+  const refused = await fetch(f.origin + staleHttp.path, { method: staleHttp.method,
+    headers: { Authorization: `Bearer ${f.keys.producer}`, "Content-Type": "application/json" }, body: JSON.stringify(staleCommand) });
+  assert.equal(refused.status, 409);
   assert.equal(f.store.room("commons").sequence, before);
   const first = await get(path + "&limit=1");
-  assert.equal(first.page.hasMore, true); assert.deepEqual(first.responseActions, []);
+  assert.equal(first.page.hasMore, true); assert.deepEqual(first.responseActions, []); assert.deepEqual(first.responseHttpActions, []);
   const last = await get(path + "&limit=1&cursor=" + encodeURIComponent(first.page.nextCursor));
   assert.equal(last.responseActions.length, 2);
   const valid = { name: "room_read_request", args: { requestMessageId: id, limit: 1, cursor: first.page.nextCursor }, roomId: "commons" };
@@ -694,4 +700,39 @@ test("hosted discovery keeps room identity and distinguishes formal requests fro
   const receipt = await call(action.tool, { ...action.arguments, requestId: "hosted-answer", body: "A helpful answer" });
   const closed = await call(receipt.next.tool, receipt.next.arguments);
   assert.equal(closed.request.status, "answered"); assert.deepEqual(closed.responseActions, []);
+});
+
+
+test("a REST-only recipient follows the supplied command recipe and verifies its exact retried answer", async t => {
+  const f = await fixture(t), q = f.open("rest-recipe"), headers = { Authorization: `Bearer ${f.keys.producer}`, "Content-Type": "application/json" };
+  const list = await (await fetch(f.origin + "/api/rooms/commons/reply-requests", { headers })).json();
+  const readPath = list.nextReads[0].http.path;
+  const context = await (await fetch(f.origin + readPath, { headers })).json();
+  const selection = { name: "room_read_request", args: { requestMessageId: q.command.data.messageId }, roomId: "commons" };
+  validateReplyRead(context, selection);
+  for (const alter of [value => { value.responseHttpActions[0] = null; },
+    value => { value.responseHttpActions[0].path = "https://outside.invalid/commands"; },
+    value => { value.responseHttpActions[0].verify.path = "/api/rooms/other/reply-context?requestMessageId=unrelated"; },
+    value => { value.responseHttpActions[0].command.data.messageId = "forged"; },
+    value => { value.responseHttpActions[0].command.data.replyToId = null; },
+    value => { value.responseHttpActions[0].command.data.requestPolicyVersion = 1; },
+    value => { value.responseHttpActions[0].command.data.body = "Injected answer"; }]) {
+    const forged = structuredClone(context); alter(forged);
+    assert.throws(() => validateReplyRead(forged, selection), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(context); delete legacy.responseHttpActions; validateReplyRead(legacy, selection);
+  const recipe = context.responseHttpActions.find(action => action.command.data.responseOutcome === "answered");
+  assert.deepEqual(recipe.requiredInput, ["command.data.body"]);
+  assert.notEqual(recipe.command.id, q.command.data.messageId);
+  assert.equal(recipe.command.data.responseToRequestId, q.command.data.messageId);
+  const command = structuredClone(recipe.command); command.data.body = "REST answer without guessing protocol fields.";
+  const submit = () => fetch(f.origin + recipe.path, { method: recipe.method, headers, body: JSON.stringify(command) });
+  const sent = await submit(); assert.equal(sent.status, 201);
+  const receipt = await sent.json(), sequence = f.store.room("commons").sequence;
+  const retried = await submit(); assert.equal(retried.status, 200);
+  const duplicate = await retried.json(); assert.equal(duplicate.duplicate, true); assert.equal(duplicate.event.id, receipt.event.id);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  const final = await (await fetch(f.origin + recipe.verify.path, { headers })).json();
+  assert.equal(final.request.status, "answered"); assert.equal(final.request.responseMessageId, command.data.messageId);
+  assert.deepEqual(final.responseHttpActions, []);
 });

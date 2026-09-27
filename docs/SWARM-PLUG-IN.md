@@ -635,6 +635,19 @@ attention-enabled tool count).
   servers omit these optional templates; their inspected `current.answerBasis`
   remains supported by the existing response tool.
 
+  Raw REST callers can use optional `responseHttpActions` instead. Choose an
+  answered/declined recipe by `command.data.responseOutcome`, add only your text
+  at `command.data.body`, and send `command` as the JSON body to its POST path
+  on the same authenticated origin. The recipe uses the existing command builder
+  to supply the operation `command.id`, response `data.messageId`, exact
+  `replyToId`/`responseToRequestId`, and concurrency fields. Do not add a policy
+  marker. `command.id` identifies this new operation; `responseToRequestId`
+  identifies the original question. A fresh read generates fresh operation IDs,
+  so save the filled command before sending and retry that exact command after
+  a timeout—never fetch another recipe for a retry. Follow `verify` after the
+  receipt to inspect current status. Partial, requester-only, or closed reads
+  expose no response recipes. These reads do not execute or reserve an action.
+
 - Help actions: `room_offer_help`, `room_select_help_offer`, `room_withdraw_help_offer`, `room_decline_help_offer`, `room_release_help_offer`.
 
 Work actions run through the same MCP surface (gated by capability bits) and
