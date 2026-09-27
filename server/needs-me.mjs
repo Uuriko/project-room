@@ -266,6 +266,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
   for (const link of links) {
     if (link.archivedAt) continue;
+    if (store.guestCapability({ member: { id: link.memberId } }) === "chat_only") continue;
     let authority;
     try { authority = store.roomAuthority(link.roomId); }
     catch { continue; }
