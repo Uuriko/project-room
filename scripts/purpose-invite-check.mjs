@@ -2,7 +2,7 @@ import { clickChrome } from "./room-chrome.mjs";
 // W4-51 L3: invite for a purpose. An inviter can point an invitation link at the
 // question or result the guest is invited to help with; after joining, the room
 // opens on that item. The purpose travels only in the URL fragment (never sent to
-// the server), so nothing else in the private room is exported.
+// the server). It selects a destination; guest access still covers room history.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -11,6 +11,8 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 test("invite for a purpose: link opens the invited work item after join", { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -23,6 +25,15 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true });
   const origin = `http://127.0.0.1:${server.address().port}`, errors = [];
+
+  // A reported result can change before its invitation is redeemed. The link
+  // selects current work, never pins an old receipt or grants approval.
+  const currentWork = () => f.store.snapshot(f.keys.owner, "commons").state.workItems["test-handoff"];
+  const mutate = (type, data = {}) => f.store.command(f.keys.producer, "commons", { id: randomUUID(), type,
+    data: { workItemId: "test-handoff", expectedRevision: currentWork().revision, ...data } });
+  mutate(T.WORK_ACCEPTED);
+  mutate(T.WORK_COMPLETED, { summary: "Earlier agenda result", evidenceUrl: "https://example.invalid/agenda", evidenceVersion: "v1",
+    producerId: "producer", nextAction: "Review", signedEvidence: makeTestSigner(f.store)() });
 
   // 1. The inviter picks a purpose when creating the link.
   const inviterContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
@@ -44,20 +55,30 @@ test("invite for a purpose: link opens the invited work item after join", { time
   assert.ok(url.endsWith("/work/test-handoff"), `link carries the purpose fragment: ${url}`);
   await inviter.locator("#share-purpose-note").waitFor({ state: "visible" });
   assert.match(await inviter.locator("#share-purpose-note").textContent(), /Test: prepare an agenda/);
+  assert.match(await inviter.locator("#share-purpose-note").textContent(), /read the room and its history/i);
+  assert.doesNotMatch(await inviter.locator("#share-purpose-note").textContent(), /nothing else.*shared/i);
   await inviterContext.close();
+  mutate(T.WORK_BLOCKED, { reason: "The agenda needs updated dates", nextAction: "Correct dates" });
+  const reopenedWork = currentWork();
 
   // 2. The guest joins from that link and lands on the invited item.
   const guestContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(8000); guest.on("pageerror", error => errors.push(error.message));
   await guest.goto(url);
+  await guest.locator("#join-link-name").waitFor();
+  assert.equal(await guest.locator("#join-link-scope").isVisible(), true);
+  assert.match(await guest.locator("#join-link-scope").innerText(), /Read history and join the conversation/);
   await guest.locator("#join-link-name").fill("Purposeful guest");
   await guest.locator("#join-link-submit").click();
   await guest.locator("#main").waitFor({ state: "visible" });
   const card = guest.locator('[data-work-record-id="test-handoff"]');
   await card.waitFor();
   assert.equal(await card.locator(".work-details").evaluate(el => el.open), true, "invited item is opened for the guest");
-  assert.match(await guest.locator("#status").textContent(), /prepare an agenda/i);
+  assert.match(await guest.locator("#status").textContent(), /This invitation opens.*prepare an agenda/i);
+  assert.match(await card.innerText(), /The agenda needs updated dates/);
+  assert.match(await card.innerText(), /Earlier agenda result/);
+  assert.deepEqual(currentWork(), reopenedWork, "joining changes no assignment, result, approval or work revision");
   await guestContext.close();
 
   // 3. A stale purpose (item gone) never blocks the join: the room opens with a gentle note.
