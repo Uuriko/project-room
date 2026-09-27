@@ -1641,9 +1641,14 @@ closed_prs_json() {
 # $1 = state JSON, $2 = closed-PRs JSON -> validated task-ids, one per line
 validated_receipt_tasks() {
   local st="$1" prs="$2"
-  printf '%s' "$st" | jq -r --argjson prs "$prs" '
-    ([$prs[] | select(.merged_at != null)
-      | {sha: (.merge_commit_sha // ""), num: (.number | tostring)}]) as $merged
+  # 2026-09-27: Fix "Argument list too long" — pass PRs JSON via temp file
+  # with --slurpfile instead of --argjson (argv has size limits).
+  local prs_file
+  prs_file="$(mktemp)"
+  printf '%s' "$prs" > "$prs_file"
+  printf '%s' "$st" | jq -r --slurpfile prs "$prs_file" '
+    (($prs[0] | [.[] | select(.merged_at != null)
+      | {sha: (.merge_commit_sha // ""), num: (.number | tostring)}])) as $merged
     | [.prose_receipts[]
        | (.merged // "") as $m | (.pr // null) as $p | .task as $t
        | select(
@@ -1652,6 +1657,7 @@ validated_receipt_tasks() {
            or ($p != null
                and ([$merged[] | select(.num == ($p | tostring))] | length > 0)))]
     | unique | .[]'
+  rm -f "$prs_file"
 }
 
 deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable already landed
@@ -1814,7 +1820,14 @@ scan_task_rows() { # $1 = state JSON, $2 = comments JSON, $3 = cutoff epoch, $4 
               or ($b | test("```room-receipt")))
      | $tids[]]
     | unique | join("\n")')"
-  printf '%s' "$st" | jq -r --argjson cut "$cutoff" --arg closed "$closed" --arg receipted "$receipted" '
+  # 2026-09-27: Fix "Argument list too long" — pass closed/receipted via
+  # temp files with --rawfile instead of --arg (argv has size limits).
+  local closed_file receipted_file
+  closed_file="$(mktemp)"
+  receipted_file="$(mktemp)"
+  printf '%s' "$closed" > "$closed_file"
+  printf '%s' "$receipted" > "$receipted_file"
+  printf '%s' "$st" | jq -r --argjson cut "$cutoff" --rawfile closed "$closed_file" --rawfile receipted "$receipted_file" '
     ($closed | split("\n") | map(select(length > 0))) as $closed_ids
     # Only VALIDATED receipts (anchored to a real merged PR) cover a
     # task — a forged prose receipt no longer hides the flag.
@@ -1826,13 +1839,19 @@ scan_task_rows() { # $1 = state JSON, $2 = comments JSON, $3 = cutoff epoch, $4 
         | select((.task_id as $t | (($receipted | index($t)) | not)))
         | "TASK\t\(.task_id)\t\(.lane // "(none)")\tcompleted \(.last_at)\tclaim-comment \(.claim_id)"]
        | join("\n"))'
+  rm -f "$closed_file" "$receipted_file"
 }
 
 # 2026-09-26 (RC-2026-09-26-969): PR rows for receipts-scan.
 # $1 = closed-PRs JSON, $2 = receipted SHAs (space-joined), $3 = cutoff epoch.
 scan_pr_rows() {
   local prs="$1" rcpt_shas="$2" cutoff="$3"
-  printf '%s' "$prs" | jq -r --argjson cut "$cutoff" --arg shas "$rcpt_shas" '
+  # 2026-09-27: Fix "Argument list too long" — pass SHAs via temp file
+  # with --rawfile instead of --arg (argv has size limits).
+  local shas_file
+  shas_file="$(mktemp)"
+  printf '%s' "$rcpt_shas" > "$shas_file"
+  printf '%s' "$prs" | jq -r --argjson cut "$cutoff" --rawfile shas "$shas_file" '
     [($shas | split(" ") | map(select(length > 0))) as $have
      | .[]
      | select(.merged_at != null)
@@ -1842,6 +1861,7 @@ scan_pr_rows() {
      | ((.body // "") | ([capture("·[ \t]*claim:(?<t>[A-Za-z0-9_-]+)")] | .[0].t) // "-") as $ctid
      | "PR\t#\(.number)\tclaim \($ctid)\tmerged \(.merged_at)\tsha \($sha[0:7])"]
     | join("\n")'
+  rm -f "$shas_file"
 }
 
 # 2026-09-26 (RC-2026-09-26-969): merge SHAs already receipted on the board,

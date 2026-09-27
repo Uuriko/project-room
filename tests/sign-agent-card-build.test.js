@@ -32,3 +32,22 @@ test("available key signs the exact revision; unsigned output requires explicit 
   signAgentCard({ privateKey: null, card, outputPath, allowUnsigned: true });
   assert.match(readFileSync(outputPath, "utf8"), /AGENT_CARD_SIGNATURE = null/);
 });
+
+test("mismatched key: unsigned hatch covers it with the flag; fails closed without", t => {
+  const directory = mkdtempSync(join(tmpdir(), "card-build-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "signed.mjs"), key = generateKeyPair();
+  const card = { name: "Fixture", deployed: { revision: "mismatch-revision" } };
+  const wrongKey = generateKeyPair().privateKey;
+  writeFileSync(outputPath, "existing signature");
+  // Without the flag the mismatch still stops the release and leaves the file alone.
+  assert.throws(() => signAgentCard({ privateKey: wrongKey, publicKey: key.publicKey,
+    card, outputPath }), /does not verify/);
+  assert.equal(readFileSync(outputPath, "utf8"), "existing signature");
+  // With the flag the release proceeds unsigned — never with a wrong-key signature.
+  signAgentCard({ privateKey: wrongKey, publicKey: key.publicKey, card, outputPath, allowUnsigned: true });
+  const unsigned = readFileSync(outputPath, "utf8");
+  assert.match(unsigned, /AGENT_CARD_SIGNATURE = null/);
+  assert.match(unsigned, /AGENT_CARD_SIGNED_REVISION = null/);
+  assert.match(unsigned, /does not match the pinned public key/);
+});

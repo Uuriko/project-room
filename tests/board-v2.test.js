@@ -311,12 +311,20 @@ test("decisions: decider authority recorded, superseding supported", () => {
   assert.equal(posted.body.decision.decider, "john");
   assert.equal(posted.body.decision.scope, "room");
   assert.equal(posted.body.decision.reversible, true);
-  // A superseding decision links to the prior one.
+  const v1Seq = posted.body.seq;
+  // A superseding decision links to the prior one by seq.
   const v2 = req("POST", "/decisions", {
     lane: "john",
-    body: { scope: "room", statement: "Merge queue enabled with strict mode", supersedes: "merge-queue-v1" },
+    body: { scope: "room", statement: "Merge queue enabled with strict mode", supersedes: v1Seq },
   });
-  assert.equal(v2.body.decision.supersedes, "merge-queue-v1");
+  assert.equal(v2.body.decision.supersedes, v1Seq);
+  // Invalid supersedes (non-existent seq) is 422.
+  const badSup = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Bad", supersedes: 99999 },
+  });
+  assert.equal(badSup.status, 422);
+  assert.equal(badSup.body.error.code, "invalid_supersedes");
   // Missing scope is 422.
   const noScope = req("POST", "/decisions", { lane: "john", body: { statement: "x" } });
   assert.equal(noScope.status, 422);
@@ -484,4 +492,65 @@ test("GET /events: POST returns 405", () => {
   const { req } = setup();
   const res = req("POST", "/events", { body: {} });
   assert.equal(res.status, 405);
+});
+
+test("Phase 3.2: readBoard includes live decisions (supersede-chain resolved)", () => {
+  const { req } = setup();
+  // Create v1 decision
+  const v1 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Policy v1" },
+  });
+  assert.equal(v1.status, 201);
+  const v1Seq = v1.body.seq;
+  
+  // Create v2 that supersedes v1
+  const v2 = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "room", statement: "Policy v2", supersedes: v1Seq },
+  });
+  assert.equal(v2.status, 201);
+  
+  // readBoard should include only v2 (v1 is superseded)
+  const board = req("GET", "/board", {});
+  assert.equal(board.status, 200);
+  assert.ok(board.body.decisions);
+  assert.equal(board.body.decisions.length, 1);
+  assert.equal(board.body.decisions[0].seq, v2.body.seq);
+  assert.equal(board.body.decisions[0].statement, "Policy v2");
+});
+
+test("Phase 3.2: supersede chain A->B->C resolves to C only", () => {
+  const { req } = setup();
+  const a = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "A" },
+  });
+  const b = req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "B", supersedes: a.body.seq },
+  });
+  req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "test", statement: "C", supersedes: b.body.seq },
+  });
+  
+  const board = req("GET", "/board", {});
+  assert.equal(board.body.decisions.length, 1);
+  assert.equal(board.body.decisions[0].statement, "C");
+});
+
+test("Phase 3.2: independent decisions both appear", () => {
+  const { req } = setup();
+  req("POST", "/decisions", {
+    lane: "john",
+    body: { scope: "a", statement: "Decision A" },
+  });
+  req("POST", "/decisions", {
+    lane: "jane",
+    body: { scope: "b", statement: "Decision B" },
+  });
+  
+  const board = req("GET", "/board", {});
+  assert.equal(board.body.decisions.length, 2);
 });
