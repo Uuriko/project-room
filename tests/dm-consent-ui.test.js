@@ -24,6 +24,14 @@ test("handles mirror the server: trimmed displayName, id fallback", () => {
   assert.equal(dmConsentHandleOf({ id: "ghost", displayName: "   " }), "ghost");
 });
 
+test("an inherited peer id is not a DM participant", () => {
+  const members = { me: member("me", "Me") };
+  assert.equal(dmConsentPeerSummary([], members, "me", "toString"), null);
+  assert.deepEqual(incomingDmRequests([
+    idRow("toString", "me", "x", "Me", "pending", false)
+  ], members, "me"), []);
+  assert.equal(Object.hasOwn(members, "toString"), false);
+});
 test("peer summary maps outgoing/incoming directions; self and unknown are null", () => {
   const consents = [
     idRow("me", "bob", "Me", "Bob", "pending", true),

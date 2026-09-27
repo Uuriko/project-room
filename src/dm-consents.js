@@ -58,7 +58,8 @@ function rowDirection(row, selfId, peerId, peerHandle) {
 //   incoming — the peer's ability to DM me (I am the target)
 // Returns null for the member themselves or unknown peers.
 export function dmConsentPeerSummary(consents, members, selfId, peerId) {
-  const peer = members?.[peerId];
+  // A truthy map lookup treats toString as a peer and returns a DM card for nobody.
+  const peer = members && Object.hasOwn(members, peerId) ? members[peerId] : undefined;
   if (!peer || peerId === selfId) return null;
   const handle = dmConsentHandleOf(peer);
   let outgoing = null, incoming = null, incomingReason = "";
@@ -84,7 +85,8 @@ export function incomingDmRequests(consents, members, selfId) {
     // server-computed outgoing flag (true only for my own requests).
     if (tgtId ? tgtId !== selfId : row?.outgoing) continue;
     if (reqId && reqId === selfId) continue;
-    let requesterId = reqId && members?.[reqId] ? reqId : null;
+    // A truthy map lookup treats toString as a requester and keeps that id on the decide list.
+    let requesterId = reqId && members && Object.hasOwn(members, reqId) ? reqId : null;
     if (!requesterId && !reqId) requesterId = resolve(row?.requester);
     if (!requesterId) continue;
     out.push({ requesterId, requester: row.requester, reason: row.reason ?? "", at: row.createdAt ?? null });
