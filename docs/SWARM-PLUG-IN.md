@@ -626,6 +626,14 @@ attention-enabled tool count).
   without loading the full catalog. These are the same handlers, schemas and
   permissions as the full profile. Ordinary `room_reply` remains conversational.
 
+  `room_list_requests` is also advertised in hosted core, with incoming/open
+  defaults. The REST agent inbox and local/full hosted `room_read_inbox` always
+  include a `next` step named `list-open-requests`: follow its GET path or MCP
+  `nextRead` to find current open requests beyond the recent DM window. Hosted
+  pointers include `roomId`; local pointers use the configured room. The link is
+  discovery, not a pending count or an acknowledgement. The existing request
+  list remains bounded and participant-only; no additional inbox queue is created.
+
   `room_read_messages` and `room_read_inbox` mark formal requests with `requestKind: "reply"` and a
   `nextRead` pointer; ordinary directed chat has neither. Follow that pointer (or
   `room_list_requests.nextReads`) and finish every selected conversation page.

@@ -1,5 +1,5 @@
 import { installRoomLayout } from "./room-layout.js";
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
@@ -864,7 +864,18 @@ function setFormStatus(status, text, error = false) {
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
 }
+function composerOverLimit() { return $("#message-input").value.length > MAX_MESSAGE_BODY_CHARS; }
+function renderComposerLength() {
+  const input = $("#message-input"), over = composerOverLimit();
+  const limit = new Intl.NumberFormat("en-US").format(MAX_MESSAGE_BODY_CHARS);
+  const message = over ? `Message is too long. Shorten it to ${limit} characters or fewer; emoji may count as two. Your draft has not been shortened.` : "";
+  input.setCustomValidity(message);
+  if (over) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+  const status = $("#message-length-status");
+  status.hidden = !over; setFormStatus(status, message, over);
+}
 function renderComposerError() {
+  renderComposerLength();
   const text = drafts.get(composerKey()).error;
   const status = $("#composer-status");
   if (status.textContent !== text) status.textContent = text;
@@ -2256,7 +2267,8 @@ function syncRequestComposer() {
   select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
-  send.disabled = busy || requestReading || archived || Boolean(request && request.status !== "open" && !pendingMessage);
+  renderComposerLength();
+  send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
   input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
@@ -3267,6 +3279,7 @@ $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
+  if (composerOverLimit()) { renderComposerLength(); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
@@ -3508,7 +3521,7 @@ $("#reply-mention").addEventListener("click", () => {
   const input = $("#message-input");
   if (messageMentionsMember(input.value, author)) {
     input.value = removeMention(input.value, author);
-    saveComposer();
+    saveComposer(); syncRequestComposer();
     input.focus({ preventScroll: true });
   } else applyMentionMember(author);
   updateReply();
@@ -3624,7 +3637,7 @@ function applyEmoji(emoji) {
   if (!input || !found || !emoji) return;
   const next = insertEmoji(input.value, input.selectionStart, found.start, emoji);
   input.value = next.body;
-  hideEmoji(); saveComposer(); syncComposerChrome();
+  hideEmoji(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 function mentionChoices() {
@@ -3653,10 +3666,10 @@ function applyMentionMember(member) {
   input.value = next.body;
   // Mentions are text only: never change the DM recipient select here.
   // A message becomes a DM only when the sender explicitly picks a recipient.
-  hideMentions(); saveComposer(); syncComposerChrome();
+  hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); });
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
