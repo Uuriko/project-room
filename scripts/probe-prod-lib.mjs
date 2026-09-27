@@ -24,14 +24,28 @@ async function probe(base, path) {
     const response = await fetch(base + path, { redirect: "manual", signal: AbortSignal.timeout(15000) });
     const latencyMs = Math.round(performance.now() - started);
     let body = "";
-    try { body = (await response.text()).slice(0, 400); } catch {}
-    return { status: response.status, latencyMs, ok: response.status < 500, body };
+    try {
+      const chunks = []; let bytes = 0;
+      for await (const chunk of response.body) {
+        bytes += chunk.length;
+        if (bytes > 64 * 1024) break;
+        chunks.push(chunk);
+      }
+      if (bytes <= 64 * 1024) body = Buffer.concat(chunks).toString("utf8");
+    } catch {}
+    return { status: response.status, latencyMs, ok: response.status === 200, body };
   } catch (error) {
     return { status: 0, latencyMs: Math.round(performance.now() - started), ok: false, body: String(error?.cause?.code ?? error.message) };
   }
 }
 
 function classify(results) {
+  // These routes are public. A login challenge, redirect or malformed public
+  // response cannot prove health or identify a failing infrastructure layer.
+  if (results.some(r => (r.status > 0 && r.status < 500 && r.status !== 200)
+      || (r.status === 200 && !r.ok))) {
+    return { domain: "unverified", note: "Public observations were denied, redirected or invalid; application health is unverified, not evidence of a DO outage" };
+  }
   const byLabel = Object.fromEntries(results.map(r => [r.label, r]));
   const doBackedBad = results.filter(r => r.expect === "do").some(r => !r.ok);
   const canary = byLabel["jobs-canary"];
@@ -54,7 +68,17 @@ export async function probeProd(base) {
   for (const [label, path, expect] of MATRIX) {
     const r = await probe(base, path);
     let sourceRevision = null;
-    if (label === "version" && r.ok) { try { sourceRevision = JSON.parse(r.body).sourceRevision ?? null; } catch {} }
+    if (["version", "health", "jobs-canary"].includes(label) && r.ok) {
+      let value;
+      try { value = JSON.parse(r.body); } catch {}
+      r.ok = value?.status === "ok";
+      if (label === "version") {
+        sourceRevision = r.ok && typeof value.sourceRevision === "string" && /^[a-f0-9]{40}$/i.test(value.sourceRevision)
+          ? value.sourceRevision.toLowerCase() : null;
+        r.ok = Boolean(sourceRevision);
+      }
+      if (label === "jobs-canary") r.ok = r.ok && value.schema === "room.job-health/1" && Array.isArray(value.jobs);
+    }
     results.push({ label, path, expect, ...r, sourceRevision });
   }
   const verdict = classify(results);
