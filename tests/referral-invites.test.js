@@ -365,3 +365,19 @@ test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, an
   const okOwner = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
   assert.equal(okOwner.status, 201);
 });
+
+test("redeem rejects an inherited inviter id and mints nobody", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const inviter = await enrollInviter(store, origin, ownerKey);
+  const seed = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  assert.equal(seed.status, 201);
+  const beforeIdentities = store.db.prepare("SELECT count(*) n FROM agent_identities").get().n;
+  const beforeMembers = Object.keys(store.room("commons").state.members).length;
+  const crafted = craftToken(store, { inviter: "toString" });
+  const redeemed = await post(origin, "/api/referral-invites/redeem", { token: crafted.token, displayName: "Nobody" });
+  assert.equal(redeemed.status, 410);
+  assert.equal(redeemed.json?.error?.code, "invite_expired");
+  assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, beforeIdentities);
+  assert.equal(Object.keys(store.room("commons").state.members).length, beforeMembers);
+  assert.equal(Object.hasOwn(store.room("commons").state.members, "toString"), false);
+});
