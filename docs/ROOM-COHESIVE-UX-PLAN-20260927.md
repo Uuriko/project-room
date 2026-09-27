@@ -99,3 +99,11 @@ Measure: finding the latest result without full-history reading; correctly disti
 ## Explicit non-goals
 
 No new sidebar/dashboard, mandatory onboarding, automatic request closure, inferred permission grants, speculative SDK layer, TypeSafe purchase or inference rollout, GitHub replacement, or merge of all available agent branches. Existing auth, request, work and access semantics stay authoritative. Deferral is not completion: the release receipt will distinguish implemented work from this remaining roadmap.
+
+## Implementation checkpoint
+
+The initial delivery integrates request action clarity, the Your updates disclosure label, and Grok’s frozen owner-attention commit `86d90b15874355b6d943e797b0842731966b1b12` (author preserved). Independent local validation passed all 21 request/actions/assisted-work browser tests and all 8 owner-attention tests. Release and full CI are still pending at this checkpoint.
+
+The attention fix protects an action from informational items when the card exceeds 25 entries. It does not make all actions visible when actions themselves exceed 25. Grok explicitly deferred the omitted-action field; the existing total `itemCount` is retained, but the browser badge currently uses displayed items. Accurate overflow presentation and more-than-25-action coverage remain follow-up work.
+
+Static review confirmed the separate mention mismatch: `src/events.js` accepts 65,536 message characters while the mention resolver rejects more than 20,000. The candidate uses the shared constant and adds long-valid/oversized tests; it lacks an exact-limit assertion. Automated review blocked delegated runtime validation, so this candidate is excluded from this delivery.
