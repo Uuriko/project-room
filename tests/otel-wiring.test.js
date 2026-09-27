@@ -75,7 +75,30 @@ test("store.command emits delivery.log and delivery.fanout spans when telemetry 
   const fanout = findSpan(SPAN_NAMES.FANOUT);
   assert.equal(fanout.attributes[ATTR.ROOM_ID], "commons");
   assert.equal(fanout.attributes[ATTR.MESSAGE_ID], "otel-log-1");
+  // B1a: a successful fan-out records outcome=ok with OK status.
+  assert.equal(fanout.attributes[ATTR.OUTCOME], "ok");
+  assert.equal(fanout.toOtlp().status.code, 1, "expected OK status code on successful fan-out");
   assertNoBodiesLeak("the quick brown fox jumps");
+});
+
+test("store.command records delivery.fanout outcome=error when the webhook fan-out throws", t => {
+  const f = roomSetup(t); t.after(telemetry(true));
+  // The fan-out genuinely throws when its internals fail (DB, signing); this
+  // is the real failure mode the try/catch swallows. B1a regression: the
+  // span must not report "ok" afterwards.
+  f.store.agentPlugin.fanoutRoomEvent = () => { throw new Error("fan-out boom"); };
+  const result = f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId: "otel-fanout-err-1", body: "fanout failure stays private" } });
+  // The fan-out failure must never fail the command that triggered it.
+  assert.ok(result && typeof result.sequence === "number",
+    "expected store.command to return normally despite the fan-out failure");
+  const fanout = findSpan(SPAN_NAMES.FANOUT);
+  assert.ok(fanout, `expected delivery.fanout, got ${spanNames()}`);
+  assert.equal(fanout.attributes[ATTR.ROOM_ID], "commons");
+  assert.equal(fanout.attributes[ATTR.MESSAGE_ID], "otel-fanout-err-1");
+  assert.equal(fanout.attributes[ATTR.OUTCOME], "error");
+  assert.equal(fanout.toOtlp().status.code, 2, "expected ERROR status code on fan-out failure");
+  assertNoBodiesLeak("fanout failure stays private");
 });
 
 test("store.command emits no spans when telemetry is off", t => {
