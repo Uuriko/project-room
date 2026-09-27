@@ -158,6 +158,25 @@ test("claim lease expiring within 24h surfaces; distant leases stay quiet", t =>
   assert.match(items[0].detail, /2h/);
 });
 
+test("an action stays visible when informational claim leases fill the cap", t => {
+  const f = setup(t);
+  const expires = new Date(f.clock.now + 2 * 3600000).toISOString();
+  for (let n = 1; n <= 25; n++) {
+    const wid = proposeWork(f, `lease-${String(n).padStart(2, "0")}`, { mode: "write" });
+    f.send("agent", T.WORK_ACCEPTED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision });
+    f.send("agent", T.CLAIM_ACQUIRED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision,
+      repository: "repo", ref: "main", paths: [`path-${n}`], expiresAt: expires });
+  }
+  f.send("owner", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 });
+  const spendId = "lease-01";
+  f.send("agent", T.SESSION_STARTED, { workItemId: spendId, expectedRevision: f.store.room("commons").state.workItems[spendId].revision,
+    budget: { maxSpendCents: 4500 } });
+  const report = f.report();
+  assert.ok(report.itemCount > report.items.length, "the rollup is over the visible cap");
+  assert.ok(report.items.some(item => item.kind === "spend" && item.severity === "action"),
+    "a spend action is not dropped behind informational claim leases");
+});
+
 test("report carries the viewer echo the browser client requires (no session kill)", async t => {
   // Regression for the #744 Cloudflare browser failure: the rollup response
   // lacked viewerId/viewerAccountId/viewerAuthEpoch/viewerSessionBinding, so

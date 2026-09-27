@@ -25,6 +25,15 @@ const SPEND_HEADROOM_WARN_FRACTION = 0.2;
 // The card is a triage surface, not a full queue.
 const MAX_ITEMS = 25;
 
+// A full card keeps decisions ahead of informational leases. Under the cap,
+// insertion order stays so an owner still sees requests before later notes.
+function visibleAttention(items) {
+  if (items.length <= MAX_ITEMS) return items;
+  const actions = items.filter(item => item.severity === "action");
+  const rest = items.filter(item => item.severity !== "action");
+  return [...actions, ...rest].slice(0, MAX_ITEMS);
+}
+
 function requireOwner(store, auth, roomId) {
   // Mirrors the diagnostics-export owner gate on main.
   if (auth.member.kind !== "human" || auth.member.id !== store.room(roomId).state.room.ownerId
@@ -157,6 +166,6 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     viewerSessionRevision: auth.sessionRevision ?? null,
     evaluatedThrough: room.sequence,
     itemCount: items.length,
-    items: Object.freeze(items.slice(0, MAX_ITEMS)),
+    items: Object.freeze(visibleAttention(items)),
   });
 }
