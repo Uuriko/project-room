@@ -3166,6 +3166,10 @@ paths:
       description: >
         Authenticated members list board claims with optional lane/state/file
         filters. Responses are paginated on the board watermark.
+        The entire board/v2 route family is opt-in: authenticated requests
+        receive 503 board_v2_disabled unless ROOM_BOARD_V2_ENABLED=1.
+        The database-wide registry is not room-partitioned; hosted enablement
+        remains pending a separate multi-room authorization review.
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'

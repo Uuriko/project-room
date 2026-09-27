@@ -95,7 +95,7 @@ export function createDurableBoardV2(db, { now = () => Date.now() } = {}) {
   // Events
   const insertEvent = stmt(`INSERT INTO board_vtwo_events
     (at, kind, task_id, lane, payload, supersedes, idempotency_key)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING seq`);
   const selectEvent = stmt("SELECT * FROM board_vtwo_events WHERE seq = ?");
   const selectEvents = stmt("SELECT * FROM board_vtwo_events WHERE seq > ? ORDER BY seq ASC LIMIT ?");
   const selectEventsByKind = stmt("SELECT * FROM board_vtwo_events WHERE kind = ? AND seq > ? ORDER BY seq ASC LIMIT ?");
@@ -181,12 +181,12 @@ export function createDurableBoardV2(db, { now = () => Date.now() } = {}) {
     // --- events ---
     appendEvent({ kind, task_id, lane, payload, supersedes = null, idempotencyKey = null }) {
       const at = new Date(now()).toISOString();
-      const result = insertEvent.run(
+      const result = insertEvent.get(
         at, kind, task_id, lane,
         JSON.stringify(payload),
         supersedes, idempotencyKey
       );
-      const seq = Number(result.lastInsertRowid);
+      const seq = Number(result.seq);
       return { seq, at };
     },
 
