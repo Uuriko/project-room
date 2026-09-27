@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-27T02:58:38Z · board: Uuriko/project-room#266 · watermark: 5852118616 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
+<!-- generated: 2026-09-27T03:28:08Z · board: Uuriko/project-room#266 · watermark: 5852292898 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=2cb3e37e18572625d4dff48c3f4f97d3e2919aee1a5778ace7234dfd1ab08790 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -38,17 +38,17 @@ ROOM-HEALTH.md | quill-s2 | RC-2026-09-16-005 | submitted
 ROOM-STATE.md | quill-s2 | RC-2026-09-16-004 | submitted
 client/agent-connection.mjs | quill | RC-2026-09-19-082 | submitted
 client/room-agent.mjs | quill | RC-2026-09-18-033 | submitted
-cloudflare/http.check.mjs | (none) | RC-2026-09-23-105 | submitted
-cloudflare/wrangler.jsonc | (none) | RC-2026-09-23-105 | submitted
+cloudflare/http.check.mjs | jill | RC-2026-09-23-105 | working
+cloudflare/wrangler.jsonc | jill | RC-2026-09-23-105 | working
 connectors/muse.md | quill | RC-2026-09-19-079 | submitted
 dasha-lobby-worker.mjs | swarm-sync | RC-2026 | submitted
-deploy/agent-card-key.mjs | (none) | RC-2026-09-23-105 | submitted
-deploy/agent-card-signed.mjs | (none) | RC-2026-09-23-105 | submitted
-deploy/agent-discovery.mjs | (none) | RC-2026-09-23-105 | submitted
+deploy/agent-card-key.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-signed.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-23-105 | working
 deploy/agent-discovery.mjs | (none) | RC-2026-09-24-010 | submitted
 docs/ADMIN-GUIDE.md | (none) | RC-2026-09-24-206 | submitted
 docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only) | (none) | RC-2026-09-18-006 | submitted
-docs/AGENT-CARD-CUSTODY.md | (none) | RC-2026-09-23-105 | submitted
+docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/BOARD-ROTATION-READINESS.md | jill | RC-2026-09-26-1113 | submitted
 docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
@@ -78,7 +78,7 @@ index.html | quill | RC-2026-09-19-068 | working
 index.html | quill | RC-2026-09-19-088 | submitted
 scripts/browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/calm-return-browser-check.mjs | quill | RC-2026-09-19-068 | working
-scripts/candidate-runtime-fixture.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/candidate-runtime-fixture.mjs | jill | RC-2026-09-23-105 | working
 scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-18-011 | submitted
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
@@ -98,10 +98,10 @@ scripts/rotation-rehearse.sh | jill | RC-2026-09-26-1113 | submitted
 scripts/route-docs-check.mjs | quill | RC-2026-09-19-081 | submitted
 scripts/runtime-package.mjs | (none) | RC-2026-09-18-017 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-23-102 | working
-scripts/runtime-package.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/runtime-package.mjs | jill | RC-2026-09-23-105 | working
 scripts/runtime-package.mjs | (none) | RC-2026-09-24-110 | submitted
 scripts/runtime-package.mjs | grokbot | RC-2026-09-25-910 | submitted
-scripts/sign-agent-card.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/sign-agent-card.mjs | jill | RC-2026-09-23-105 | working
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
 server/account-login-methods.mjs | quill | RC-2026-09-19-073 | submitted
@@ -200,9 +200,9 @@ src/share-links.js | (none) | RC-2026-09-19-054 | submitted
 tests/access-requests.test.js | (none) | RC-2026-09-18-022 | submitted
 tests/account-management.test.js | quill | RC-2026-09-19-078 | submitted
 tests/agent-autonomy-client.test.js | quill | RC-2026-09-18-033 | submitted
-tests/agent-card-wellknown.test.js | (none) | RC-2026-09-23-105 | submitted
+tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-connections-atomic.test.js | (none) | RC-2026-09-24-201 | submitted
-tests/agent-discovery.test.js | (none) | RC-2026-09-23-105 | submitted
+tests/agent-discovery.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-discovery.test.js | (none) | RC-2026-09-24-010 | submitted
 tests/agent-heartbeat-view.test.js | grokbot | RC-2026-09-25-910 | submitted
 tests/agent-identities.test.js | (none) | RC-2026-09-18-018 | submitted
@@ -269,7 +269,7 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 
 ## overlap-warnings
 file | lanes | task-ids
-deploy/agent-discovery.mjs |  | RC-2026-09-23-105, RC-2026-09-24-010
+deploy/agent-discovery.mjs | , jill | RC-2026-09-23-105, RC-2026-09-24-010
 docs/ROOM-PROTOCOL.md | , quill-s2 | RC-2026-09-17-001, RC-2026-09-18-004
 docs/ROOM-WATCH.md | quill-s2 | RC-2026-09-16-004, RC-2026-09-16-005
 docs/openapi.yaml | , jill, quill | RC-2026-09-18-017, RC-2026-09-19-068, RC-2026-09-23-102, RC-2026-09-24-110, RC-2026-09-24-206
@@ -290,7 +290,7 @@ server/writer-fence.mjs | , jill | RC-2026-09-23-102, RC-2026-09-24-206
 src/app.js | quill | RC-2026-09-19-068, RC-2026-09-19-072, RC-2026-09-19-080, RC-2026-09-19-083, RC-2026-09-19-085, RC-2026-09-19-088
 src/auth-signin-ui.js | quill | RC-2026-09-19-077, RC-2026-09-19-088
 src/events.js | , jillian | RC-2026-09-18-017, RC-2026-09-25-943
-tests/agent-discovery.test.js |  | RC-2026-09-23-105, RC-2026-09-24-010
+tests/agent-discovery.test.js | , jill | RC-2026-09-23-105, RC-2026-09-24-010
 tests/agent-identities.test.js | , quill | RC-2026-09-18-018, RC-2026-09-19-086
 tests/agent-plugin-manifest.test.js |  | RC-2026-09-18-009, RC-2026-09-18-019
 tests/bounty-disputes.test.js |  | RC-2026-09-17-026, RC-2026-09-18-003
@@ -309,6 +309,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5852285858
 RC-2026-09-26-1112 | decad6ae1e69d93a636d61710f0b58438f313465 | 5851920830
 RC-2026-09-26-965 | 789ea50f3bacbd706fcf6c435a1c6a976d5b7ad5 | 5851833442
 RC-2026-09-26-1112 | 85511597ae457063b0e05a91f1966ca605306d92 | 5851385117
@@ -318,7 +319,6 @@ RC-2026-09-26-1113 | none | 5851016106
 BOARD-1 | none | 5850934864
 RC-2026-09-26-1115 | cfec84d105f65159bf6a551fb990e5e1876a63dc | 5850811061
 RC-2026-09-26-1115 | PR #1108 open — head 5adf2436 fully green (test/contract/lint/browser/cloudflare), merge pending | 5850802780
-RC-2026-09-26-1110 | ca1a174cb76c446062178aa5e339e5a4393ad418 | 5850416896
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -328,17 +328,17 @@ ROOM-HEALTH.md | quill-s2 | RC-2026-09-16-005 | submitted
 ROOM-STATE.md | quill-s2 | RC-2026-09-16-004 | submitted
 client/agent-connection.mjs | quill | RC-2026-09-19-082 | submitted
 client/room-agent.mjs | quill | RC-2026-09-18-033 | submitted
-cloudflare/http.check.mjs | (none) | RC-2026-09-23-105 | submitted
-cloudflare/wrangler.jsonc | (none) | RC-2026-09-23-105 | submitted
+cloudflare/http.check.mjs | jill | RC-2026-09-23-105 | working
+cloudflare/wrangler.jsonc | jill | RC-2026-09-23-105 | working
 connectors/muse.md | quill | RC-2026-09-19-079 | submitted
 dasha-lobby-worker.mjs | swarm-sync | RC-2026 | submitted
-deploy/agent-card-key.mjs | (none) | RC-2026-09-23-105 | submitted
-deploy/agent-card-signed.mjs | (none) | RC-2026-09-23-105 | submitted
-deploy/agent-discovery.mjs | (none) | RC-2026-09-23-105 | submitted
+deploy/agent-card-key.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-card-signed.mjs | jill | RC-2026-09-23-105 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-23-105 | working
 deploy/agent-discovery.mjs | (none) | RC-2026-09-24-010 | submitted
 docs/ADMIN-GUIDE.md | (none) | RC-2026-09-24-206 | submitted
 docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only) | (none) | RC-2026-09-18-006 | submitted
-docs/AGENT-CARD-CUSTODY.md | (none) | RC-2026-09-23-105 | submitted
+docs/AGENT-CARD-CUSTODY.md | jill | RC-2026-09-23-105 | working
 docs/AGENT-QUICKSTART.md | quill | RC-2026-09-18-033 | submitted
 docs/BOARD-ROTATION-READINESS.md | jill | RC-2026-09-26-1113 | submitted
 docs/BOARD-V2-DESIGN.md | jill | RC-2026-09-26-1114 | submitted
@@ -368,7 +368,7 @@ index.html | quill | RC-2026-09-19-068 | working
 index.html | quill | RC-2026-09-19-088 | submitted
 scripts/browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/calm-return-browser-check.mjs | quill | RC-2026-09-19-068 | working
-scripts/candidate-runtime-fixture.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/candidate-runtime-fixture.mjs | jill | RC-2026-09-23-105 | working
 scripts/candidate-runtime-fixture.mjs (collab paths only) | (none) | RC-2026-09-18-011 | submitted
 scripts/credit-question-browser-check.mjs | quill | RC-2026-09-19-068 | working
 scripts/deploy-live.py | jill | RC-2026-09-26-1132 | submitted
@@ -388,10 +388,10 @@ scripts/rotation-rehearse.sh | jill | RC-2026-09-26-1113 | submitted
 scripts/route-docs-check.mjs | quill | RC-2026-09-19-081 | submitted
 scripts/runtime-package.mjs | (none) | RC-2026-09-18-017 | submitted
 scripts/runtime-package.mjs | jill | RC-2026-09-23-102 | working
-scripts/runtime-package.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/runtime-package.mjs | jill | RC-2026-09-23-105 | working
 scripts/runtime-package.mjs | (none) | RC-2026-09-24-110 | submitted
 scripts/runtime-package.mjs | grokbot | RC-2026-09-25-910 | submitted
-scripts/sign-agent-card.mjs | (none) | RC-2026-09-23-105 | submitted
+scripts/sign-agent-card.mjs | jill | RC-2026-09-23-105 | working
 server/access-requests.mjs | (none) | RC-2026-09-18-022 | submitted
 server/access-requests.mjs | quill | RC-2026-09-19-071 | submitted
 server/account-login-methods.mjs | quill | RC-2026-09-19-073 | submitted
@@ -490,9 +490,9 @@ src/share-links.js | (none) | RC-2026-09-19-054 | submitted
 tests/access-requests.test.js | (none) | RC-2026-09-18-022 | submitted
 tests/account-management.test.js | quill | RC-2026-09-19-078 | submitted
 tests/agent-autonomy-client.test.js | quill | RC-2026-09-18-033 | submitted
-tests/agent-card-wellknown.test.js | (none) | RC-2026-09-23-105 | submitted
+tests/agent-card-wellknown.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-connections-atomic.test.js | (none) | RC-2026-09-24-201 | submitted
-tests/agent-discovery.test.js | (none) | RC-2026-09-23-105 | submitted
+tests/agent-discovery.test.js | jill | RC-2026-09-23-105 | working
 tests/agent-discovery.test.js | (none) | RC-2026-09-24-010 | submitted
 tests/agent-heartbeat-view.test.js | grokbot | RC-2026-09-25-910 | submitted
 tests/agent-identities.test.js | (none) | RC-2026-09-18-018 | submitted
@@ -559,5 +559,5 @@ tests/web-fetch.test.js (new) | jill | RC-2026-09-23-102 | working
 … +63 more
 
 ## signals
-board_comments=2241 threshold=1500 rotation_due=yes watcher=active open_claims=73 prose_open=3 unfenced_prose=73 files_claimed=181 overlap_files=28 watermark=5852118616
+board_comments=2262 threshold=1500 rotation_due=yes watcher=active open_claims=73 prose_open=3 unfenced_prose=73 files_claimed=181 overlap_files=28 watermark=5852292898
 
