@@ -1,19 +1,68 @@
-import { workContextMarkdown, RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { workContextMarkdown, RoomAgentClient, RoomClientError, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { createInterface } from "node:readline";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
-const readStdin = () => new Promise((resolve, reject) => {  let text = ""; process.stdin.setEncoding("utf8");
-  process.stdin.on("data", chunk => text += chunk);
-  process.stdin.on("end", () => resolve(text));
+const readStdin = () => new Promise((resolve, reject) => {
+  if (process.stdin.readableEnded) return resolve("");
+  const chunks = [];
+  process.stdin.on("data", chunk => chunks.push(Buffer.from(chunk)));
+  process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
   process.stdin.on("error", reject);
+  process.stdin.resume();
 });
 
 const isJSONObject = text => {
   try { const value = JSON.parse(text); return !!value && typeof value === "object" && !Array.isArray(value); }
   catch { return false; }
 };
+
+function parseSayArgs(words) {
+  const body = [];
+  let toMemberId, replyToId, fromStdin = false;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (word === "--stdin") {
+      if (fromStdin) return null;
+      fromStdin = true;
+      continue;
+    }
+    if (word === "--to" || word === "--reply-to") {
+      const value = words[++i];
+      if (value === undefined || value.startsWith("--") || !validId(value)) return null;
+      if (word === "--to") {
+        if (toMemberId !== undefined) return null;
+        toMemberId = value;
+      } else {
+        if (replyToId !== undefined) return null;
+        replyToId = value;
+      }
+    } else if (typeof word !== "string" || word.startsWith("--") || !word.trim()) return null;
+    else body.push(word);
+  }
+  if (fromStdin) return body.length === 0 ? { toMemberId, replyToId, words: null, fromStdin: true } : null;
+  if (body.length === 0 || body.join(" ").length > MAX_MESSAGE_BODY_CHARS) return null;
+  return { toMemberId, replyToId, words: body, fromStdin: false };
+}
+
+function parseOutsideAgentArgs(words) {
+  if (words.length === 0) return { action: "list" };
+  const [sub, ...rest] = words;
+  if (sub !== "introduce") return null;
+  const flags = {};
+  for (let i = 0; i < rest.length; i += 2) {
+    const name = rest[i], value = rest[i + 1];
+    if (!["--ref", "--name", "--origin", "--reach", "--note"].includes(name) || value === undefined || value.startsWith("--") || Object.hasOwn(flags, name)) return null;
+    flags[name] = value;
+  }
+  if (!flags["--ref"] || !flags["--name"] || !flags["--origin"]) return null;
+  return { action: "introduce", input: {
+    externalRef: flags["--ref"], displayName: flags["--name"], origin: flags["--origin"],
+    ...(flags["--reach"] === undefined ? {} : { reach: flags["--reach"] }),
+    ...(flags["--note"] === undefined ? {} : { note: flags["--note"] })
+  } };
+}
 
 // Pre-redemption consent screen for redeem-invite: show the invite's room,
 // granted permissions and expiry BEFORE anything is created, and get an
@@ -228,7 +277,7 @@ if (action === "join") {
 } else if (action === "account-link") {
   const { accountLinkMain } = await import("./bootstrap-agent-room.mjs");
   await accountLinkMain(process.argv.slice(3));
-} else if (action === "--help") {
+} else if (action === "--help" || action === "-h" || action === "help") {
   console.log(`Agent connection (Node 24.19+):
   node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
@@ -242,7 +291,8 @@ if (action === "join") {
   node scripts/agent-inbox.mjs presence
   node scripts/agent-inbox.mjs capabilities [QUERY]
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
-  node scripts/agent-inbox.mjs say [--to MEMBER_ID] MESSAGE...
+  node scripts/agent-inbox.mjs say [--to MEMBER_ID] [--reply-to MESSAGE_ID] [--stdin] MESSAGE...
+  node scripts/agent-inbox.mjs outside-agents [introduce --ref REF --name NAME --origin ORIGIN [--reach REACH] [--note TEXT]]
   node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
   node scripts/agent-inbox.mjs export > room.jsonl
   cat room.jsonl | node scripts/agent-inbox.mjs import-history
@@ -308,8 +358,7 @@ Never put a key in a prompt, URL or command argument. No AI or work is started.
 Check reads identity metadata only; work reads one task with source excluded by
 default. Search returns up to 25 compact current-work matches; --needs-me narrows
 them to handoffs addressed to you. Refine the query if truncated. No messages or
-external evidence files are searched. Next shows current work handoffs addressed to you; it does not start work
-or include reply requests. Orient reads broader private room context. A read does not narrow the key's
+external evidence files are searched. Next shows current work handoffs addressed to you and open reply requests addressed to you; it does not start work. Orient reads broader private room context. A read does not narrow the key's
 permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`);
 } else {
   try {
@@ -341,28 +390,25 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     // work-claim / work-complete / work-release flags (RC-2026-09-18-041).
     const workActionOptions = ["work-claim", "work-complete", "work-release"].includes(action)
       ? parseWorkActionFlags(action, extra) : null;
-    // say accepts an optional --to MEMBER_ID first; the remaining words are
-    // the message body. With --to the message is a targeted DM.
-    const sayArgs = action === "say"
-      ? (checkpoint === "--to"
-        ? { toMemberId: extra[0], words: extra.slice(1) }
-        : { words: [checkpoint, ...extra] })
-      : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys"].includes(action)
+    // say accepts optional --to MEMBER_ID and --reply-to MESSAGE_ID in either
+    // order. Remaining words are the body. --to targets a DM. --reply-to
+    // threads the post under an existing message.
+    const sayArgs = action === "say" ? parseSayArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
+    const outsideArgs = action === "outside-agents" ? parseOutsideAgentArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys", "outside-agents"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
       || (action === "advertise" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.every(cap => typeof cap === "string" && cap.trim() && cap.length <= 80) || [checkpoint, ...extra].length > 30))
-      || (action === "say" && (sayArgs.toMemberId !== undefined && !validId(sayArgs.toMemberId)
-        || sayArgs.words.length === 0 || sayArgs.words.some(word => typeof word !== "string" || !word.trim())
-        || sayArgs.words.join(" ").length > MAX_MESSAGE_BODY_CHARS))
+      || (action === "say" && sayArgs === null)
+      || (action === "outside-agents" && outsideArgs === null)
       || (action === "status" && (checkpoint === undefined || [checkpoint, ...extra].join(" ").length > 140))
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers", "--brief"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants"].includes(action) ? false
+        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants", "outside-agents"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : action === "context" ? extra.length > 0 || (checkpoint !== undefined && !/^[a-f0-9]{64}$/.test(checkpoint))
@@ -407,8 +453,10 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
       : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
       : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
-      : action === "say" ? await client.say(sayArgs.words.join(" "),
-        sayArgs.toMemberId === undefined ? {} : { toMemberId: sayArgs.toMemberId })
+      : action === "outside-agents" ? outsideArgs.action === "list" ? await client.outsideAgents() : await client.recordOutsideAgent(outsideArgs.input)
+      : action === "say" ? await client.say(sayArgs.fromStdin ? await readStdin() : sayArgs.words.join(" "), {
+        ...(sayArgs.toMemberId === undefined ? {} : { toMemberId: sayArgs.toMemberId }),
+        ...(sayArgs.replyToId === undefined ? {} : { replyToId: sayArgs.replyToId }) })
       : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
       : action === "export" ? { ndjson: await client.exportRoom() }
       : action === "import-history" ? await client.importRoom(await readStdin())
@@ -470,7 +518,11 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     else if (result !== undefined) console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
-    console.error(JSON.stringify(connectionDiagnostic(error)));
+    const outsideRefusal = action === "outside-agents" && error instanceof RoomClientError
+      && ["outside_agent_changed", "invalid_outside_agent", "outside_agent_not_found", "agent_readonly"].includes(error.code);
+    console.error(JSON.stringify(outsideRefusal
+      ? { type: "outside_agent_error", code: error.code, message: error.message }
+      : connectionDiagnostic(error)));
     process.exitCode = 1;
   }
 }

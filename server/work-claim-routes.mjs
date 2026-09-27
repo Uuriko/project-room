@@ -17,8 +17,8 @@
 // policies requires a recorded attestation from the named reviewer —
 // naming a reviewer who never attested is rejected (QA-Sec 2026-09-19).
 //
-// Persistence is the later slice: items live in a per-process, per-room
-// in-memory registry (createWorkClaimRegistry). Lease expiry is evaluated
+// Production uses the store-owned SQLite registry. The in-memory registry
+// remains a pure-test fixture only. Lease expiry is evaluated
 // on every request, so reads never show stale claims and expired claims
 // auto-release with a stamped history entry even if nobody calls /sweep.
 // Per-room lease/policy defaults are configured through the registry
@@ -37,7 +37,9 @@ import {
   renewWork, roomWorkClaimConfig, isReceiptTag, ClaimError, REVIEW_POLICIES,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
+import { findClaimCollisions } from "./claim-collisions.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -67,6 +69,18 @@ export function createWorkClaimRegistry() {
   };
 }
 
+// Active claims in this room that declare files the given claim also
+// declares. Returns [{ file, heldBy: [{ id, owner }] }] sorted by file.
+const WARN_STATES = ["claimed", "in_progress", "blocked"];
+export function fileWarningsFor(items, claimed) {
+  if (!Array.isArray(claimed.files) || claimed.files.length === 0) return [];
+  const active = items.filter(item => WARN_STATES.includes(item.state) && Array.isArray(item.files) && item.files.length > 0);
+  const owners = new Map(active.map(item => [item.id, item.owner]));
+  return findClaimCollisions(active.map(item => ({ id: item.id, lane: item.owner ?? undefined, status: item.state, files: item.files })))
+    .filter(collision => collision.claims.includes(claimed.id))
+    .map(collision => ({ file: collision.file, heldBy: collision.claims.filter(id => id !== claimed.id).map(id => ({ id, owner: owners.get(id) ?? null })) }));
+}
+
 const defaultRegistry = createWorkClaimRegistry();
 export const workClaimRegistry = defaultRegistry;
 
@@ -92,8 +106,10 @@ function sweepRoom(registry, roomId, nowMs) {
   const entry = registry.list(roomId);
   const swept = releaseExpired(entry, nowMs);
   const released = [];
+  // releaseExpired returns a normalized copy of every item, expired or not,
+  // so compare states: only a claim that actually lapsed counts as swept.
   swept.forEach((item, index) => {
-    if (item !== entry[index]) { registry.set(roomId, item); released.push(item.id); }
+    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") { registry.set(roomId, item); released.push(item.id); }
   });
   return released;
 }
@@ -178,8 +194,26 @@ const cursorDecode = (reject, value) => {
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
-export async function handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry = defaultRegistry }) {
+// Consume the body before opening SQLite's synchronous transaction. The read,
+// state transition and write then share one transaction; send the response only
+// after commit, so a storage refusal cannot be reported as a successful claim.
+export async function handleWorkClaims(options) {
+  const { req, res, helpers, reauthorize } = options;
+  const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
+  const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  const run = () => handleWorkClaimsCore({ ...options, registry,
+    auth: reauthorize ? reauthorize() : options.auth,
+    helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
+  });
+  const result = registry.transaction ? registry.transaction(run) : run();
+  return helpers.json(res, result.status, result.value);
+}
+
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry }) {
   const { json, reject, body } = helpers;
+  if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
+    db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+    actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   const nowMs = Date.now();
   const sweptIds = sweepRoom(registry, roomId, nowMs);
   const caller = auth.member.id;
@@ -232,7 +266,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     });
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     return json(res, 200, { roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString() });
   }
@@ -265,12 +299,12 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, { roomId, query: q, duplicates });
   }
   if (workClaimRoute === "create" && req.method === "POST") {
-    const data = await body(req);
-    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?}");
+    const data = body(req);
+    if (!shape(data, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?}");
     const id = claimIdOf(reject, data.id);
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
-    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags }, { now: nowMs }));
+    const item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files }, { now: nowMs }));
     registry.set(roomId, item);
     return json(res, 201, item);
   }
@@ -278,16 +312,18 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, load(claimIdOf(reject, workClaimId)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
-    const data = await body(req);
-    if (!shape(data, { optional: ["note", "leaseHours"] })) invalidInput(reject, "{note?, leaseHours?}");
+    const data = body(req);
+    if (!shape(data, { optional: ["note", "leaseHours", "files"] })) invalidInput(reject, "{note?, leaseHours?, files?}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
-    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: data.leaseHours ?? undefined, room: roomLike, now: nowMs }));
+    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: data.leaseHours ?? undefined, files: data.files, room: roomLike, now: nowMs }));
     registry.set(roomId, claimed);
-    return json(res, 200, claimed);
+    // Warn, never block: tell the claimant which declared files other
+    // active claims already hold, so the lanes talk before both edit them.
+    return json(res, 200, { ...claimed, fileWarnings: fileWarningsFor(registry.list(roomId), claimed) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
     const item = load(claimIdOf(reject, workClaimId));
@@ -360,7 +396,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     // QA-Sec 2026-09-19: the attestation endpoint. Any room member records
     // their own review of an active claim; the attestation is bound to the
     // caller's authenticated member id — it can never name someone else.
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const attested = runPure(reject, () => attestWork(item, caller, { note: data.note, now: nowMs }));
@@ -368,7 +404,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, attested);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
@@ -377,7 +413,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
@@ -390,7 +426,7 @@ export async function handleWorkClaims({ req, res, url, store, roomId, auth, wor
     // citing their own public progress message, posted in this room after
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
-    const data = await body(req);
+    const data = body(req);
     if (!shape(data, { required: ["progressMessageId"], optional: ["note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);

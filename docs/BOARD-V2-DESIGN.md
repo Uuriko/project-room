@@ -4,6 +4,16 @@ Status: design + prototype (BOARD-1, RC-2026-09-26-1114). Prototype merges
 without production wiring; deployment is a later room decision. Nothing here
 changes production behavior.
 
+## Integration decision — 26 September 2026
+
+Production keeps one claim store: the SQLite-backed implementation behind the
+existing `WorkClaimRegistry` API. The board-v2 module stays an unmounted,
+in-memory prototype. This integration creates no board-v2 production tables,
+HTTP routes, migration, mirror writer, scheduler, or rotation automation.
+Before any future wiring, reconcile task identity, room scoping, authorization,
+leases, receipts, and migration with that existing claims contract. The proposed
+architecture below is exploratory, not an approved second source of truth.
+
 ## 1. The problem
 
 The claims board lives on GitHub issue #266, which has a hard 2500-comment

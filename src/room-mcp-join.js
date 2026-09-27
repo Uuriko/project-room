@@ -57,6 +57,8 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "webhook_subscribe",
   "webhook_list",
   "webhook_unsubscribe",
+  "room_list_outside_agents",
+  "room_introduce_outside_agent",
   "room_read_result",
   "room_read_board",
   "room_read_work",

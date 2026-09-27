@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { BountyEscrow, canonicalLane, toMillis, normalizeActor } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, bountyEscrowSchema, canonicalLane, convergeBountyDeployedSchema, toMillis, normalizeActor } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
@@ -428,13 +428,32 @@ test("unresolved disputes default to RELEASE after 14 days via permissionless fi
 test("idempotency keys replay the original response without re-executing", () => {
   const { escrow } = makeEscrow();
   const first = escrow.idemExecute(ROOM, "k-1", "bounty.post", 201, () =>
-    escrow.postBounty(ROOM, { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(3_600_000) }));
+    escrow.postBounty(ROOM, { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(3_600_000) }), { callerLane: JILL });
   assert.equal(first.replayed, false);
-  const replay = escrow.idemExecute(ROOM, "k-1", "bounty.post", 201, () => { throw new Error("must not re-execute"); });
+  const replay = escrow.idemExecute(ROOM, "k-1", "bounty.post", 201, () => { throw new Error("must not re-execute"); }, { callerLane: JILL });
   assert.equal(replay.replayed, true);
   assert.equal(replay.status, 201);
   assert.equal(replay.body.bounty.bountyId, first.body.bounty.bountyId);
   assert.equal(escrow.listBounties(ROOM).length, 1); // posted exactly once
+  expectConserved(escrow);
+});
+
+test("a deployed idempotency table converges and does not return another member's body", () => {
+  const legacy = bountyEscrowSchema.replace("    scope_key TEXT,\n    caller_lane TEXT,\n    version INTEGER,\n    request_hash TEXT,\n", "").replace("PRIMARY KEY(room_id, scope_key)", "PRIMARY KEY(room_id, idem_key)").replace(/  CREATE INDEX IF NOT EXISTS bounty_idempotency_scope[^;]+;\n/, "");
+  const db = new DatabaseSync(":memory:");
+  db.exec(legacy);
+  db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at) VALUES (?,?,?,?,?,?)")
+    .run(ROOM, "legacy-key", "bounty.post", 201, JSON.stringify({ secret: "legacy-body" }), "2026-09-26T00:00:00.000Z");
+  convergeBountyDeployedSchema(db);
+  const { escrow } = makeEscrow(db);
+  assert.doesNotThrow(() => escrow.verifySchema());
+  const first = escrow.idemExecute(ROOM, "shared-key", "bounty.post", 201, () => ({ secret: "jill-body" }), { callerLane: JILL });
+  assert.equal(first.replayed, false);
+  assert.equal(escrow.idemExecute(ROOM, "shared-key", "bounty.post", 201, () => ({ secret: "codex-body" }), { callerLane: CODEX }).body.secret, "codex-body");
+  const replay = escrow.idemExecute(ROOM, "shared-key", "bounty.post", 201, () => { throw new Error("must not re-execute"); }, { callerLane: JILL });
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.body.secret, "jill-body");
+  expectCode(() => escrow.idemExecute(ROOM, "legacy-key", "bounty.post", 201, () => { throw new Error("must not re-execute"); }, { callerLane: JILL }), "idempotency_actor_mismatch");
   expectConserved(escrow);
 });
 

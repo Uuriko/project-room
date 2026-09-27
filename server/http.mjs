@@ -1,7 +1,9 @@
+import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailSync } from './gmail-sync.mjs';
 import { GmailActions } from './gmail-actions.mjs';
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths } from "../deploy/public-assets.mjs";
+import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -26,7 +28,7 @@ import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix } from "../deploy/agent-discovery.mjs";
-import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForInviteRedeem } from "./discoverability.mjs";
+import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 // RC-2026-09-24-202: the skills catalog doc object (frozen singleton in
@@ -164,7 +166,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   magicLinkMailer = null,
   githubAuth = null,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined }) {
+  // Human browser push stays off until VAPID keys are present. Node reads
+  // process.env; the Worker passes its bindings as `push` so a secret never
+  // has to live in the source tree.
+  if (store?.humanPush) store.humanPush.configure({
+    vapid: push === undefined ? vapidFromEnv(globalThis.process?.env ?? {}) : push
+  });
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
@@ -2931,7 +2939,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
-        return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
+        const record = accessRequests.status(pathId(accessStatusMatch[1]), identityId);
+        // The poll read is the requester's only window on the decision. Return
+        // the status with the continuation for that status, so an approved
+        // requester learns where the room read lives (mirrors the filing
+        // response teaching the poll path).
+        return json(res, 200, {
+          ...record,
+          next: nextActionsForAccessRequestStatus({
+            requestId: record.requestId, identityId, roomId: record.roomId,
+            status: record.status, decisionWindowDays: REQUEST_TTL_MS / 86400000
+          })
+        });
       }
       if (accessStatusMatch && req.method === "POST") {
         rate(`access-request-cancel:${remoteAddress}`, 20);
@@ -3046,7 +3065,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3285,7 +3304,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
-          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null, helpers: { json, reject, body } });
+          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+            protectWrite(req, current, selected.bearer);
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
+              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       // Work claims (task RC-2026-09-18-041): room-scoped claim registry
       // routes share the credential, fence and rate-limit checks above; the
@@ -3304,7 +3335,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
-          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, helpers: { json, reject, body } });
+          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // room-scoped bounty lifecycle and derived-balance credit routes share
@@ -3333,7 +3374,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
-          identity: identityMatch ? identityMatch[2] : null, helpers: { json, reject, body } });
+          identity: identityMatch ? identityMatch[2] : null,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
+              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
       }
       if (route === "thread" && req.method === "GET") {
         // RC-2026-09-19-070: a DM thread root is invisible to non-participants
@@ -3373,6 +3425,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           snapshot.state = nextState;
         }
         return json(res, 200, snapshot);
+      }
+      if (route === "outside-agents") {
+        const network = new OutsideAgents(store);
+        if (req.method === "GET") {
+          if ([...url.searchParams.keys()].some(key => key !== "auth")) reject(422, "invalid_outside_agent", "This read takes no query filters");
+          return json(res, 200, network.list(selected.token, roomId, fence));
+        }
+        if (req.method === "POST") {
+          const data = await body(req);
+          const allowed = { introduce: ["externalRef", "displayName", "origin", "reach", "note"], knows: ["fromRef", "toRef"], link: ["externalRef", "memberId"] };
+          if (!data || Array.isArray(data) || !Object.hasOwn(allowed, data.action) || Object.keys(data).some(key => key !== "action" && !allowed[data.action].includes(key)))
+            reject(422, "invalid_outside_agent", "Choose introduce, knows or link with public fields only");
+          const { action, ...input } = data;
+          const method = action === "introduce" ? "record" : action;
+          return json(res, 200, network[method](selected.token, roomId, input, fence));
+        }
+        reject(405, "method_not_allowed", "Use GET or POST");
       }
       if (route === "request-runs") {
         if (req.method === "GET") return json(res, 200, store.requestRuns.list(selected.token, roomId, fence));
@@ -3626,7 +3695,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Invalid discussion selection");
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
           cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
@@ -3805,6 +3874,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
+      }
+      // Human browser push. One fixed default (mentions and DMs). GET returns
+      // the VAPID public key when delivery is configured. POST stores the
+      // browser subscription. There is no preference body.
+      if (route === "human-push" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
+        return json(res, 200, store.humanPush.status(selected.token, roomId, fence));
+      }
+      if (route === "human-push" && req.method === "POST") {
+        return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
+      }
+      if (route === "human-push" && req.method === "DELETE") {
+        return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named

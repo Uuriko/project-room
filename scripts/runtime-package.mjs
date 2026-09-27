@@ -14,7 +14,7 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = [inboxAssets[0], "join.html", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
+export const publicAssets = [inboxAssets[0], "join.html", "push-sw.js", inboxAssets[1], "src/room-layout.js", ...inboxAssets.slice(2, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/join.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/emoji.js", "src/emoji-catalog.js", "connectors/muse.md"];
 const assetsFor = (schema, inbox, sendUI = false, setupUI = false, gmailUI = false, layoutUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets.filter(path => (setupUI || path !== "src/account-setup-ui.js") && (gmailUI || path !== "src/gmail-ui.js") && (layoutUI || path !== "src/room-layout.js")) : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
@@ -25,6 +25,7 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // Historical v8 packages predate these files. Literal-import closure below makes
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
+optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
@@ -53,6 +54,9 @@ optional.push("server/inbox-stitch-store.mjs"); // hash-only stitch graph (impor
 optional.push("server/inbox-spam.mjs"); // spam/phishing flagging (imported by server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/thread-mutes.mjs"); // per-thread mutes (imported by server/store.mjs; pure, no imports of its own)
+optional.push("server/human-push.mjs"); // human browser push, mentions and DMs (imported by server/store.mjs)
+optional.push("server/push-subscriptions.mjs", "server/web-push.mjs"); // browser push delivery (imported by server/human-push.mjs and cloudflare/room.mjs)
+optional.push("src/human-push.js", "src/human-push-display.js", "push-sw.js"); // human push button, lock-screen text, and service worker
 optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiring (imported by server/inbox.mjs; pure, imports inbox-spam.mjs and notify-prefs.mjs)
 optional.push("server/spam-shadow.mjs"); // shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs; pure, imports inbox-spam.mjs)
 optional.push("server/spam-quarantine-journal.mjs"); // spam-guard quarantine journal (imported by server/store.mjs; imports ServiceError from store.mjs)
@@ -97,6 +101,7 @@ optional.push("server/needs-me.mjs"); // cross-room room_needs_me (imported by s
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
 optional.push("server/agent-identities.mjs");
+optional.push("server/display-name-guard.mjs"); // Identity mint/link guard is part of the runtime import closure.
 optional.push("server/agent-invites.mjs");
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("server/referral-invites.mjs"); // Signed agent-carried referral invites (imported by server/store.mjs and server/http.mjs)
@@ -152,6 +157,8 @@ optional.push("server/inbox-collab-store.mjs"); // Lane C: collab sub-store (imp
 optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (imported by server/http.mjs; created by the collab worker, may be absent here)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs; pure, imports ../src/events.js only)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
+optional.push("server/work-claim-sqlite.mjs");
+optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-duplicates.mjs"); // jill 2026-09-24: pure work-claim duplicate detection (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escrowed-bounty ledger + lifecycle (imported by server/bounty-escrow-routes.mjs)
@@ -175,6 +182,7 @@ optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispa
 optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
+optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/mentions.mjs"); // RC-2026-09-18-051: mention parser (imported by server/store.mjs for wake-on-mention; pure, no imports)

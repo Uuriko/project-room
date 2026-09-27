@@ -113,6 +113,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .emoji-glyph { font-size: 1.25rem; }
 .composer > label { display: block; margin-bottom: .45rem; }
 .form-hint { margin: .45rem 0 0; color: #748093; font-size: .69rem; }
+#human-push-button { margin-top: .45rem; }
 .check input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--blue); }
 /* "Also send to channel" sits above the composer row, thread views only. */
 .also-send-toggle { display: flex; align-items: center; gap: .5rem; margin: 0 0 .45rem; min-height: 32px; }
@@ -1457,14 +1458,18 @@ summary { overflow-wrap: anywhere; }
 .land-badge { font-size: .68rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem; }
 
 /* Welcome starts with two methods; the selected email form replaces them. */
-.auth-panel .auth-intro { margin: -.75rem 0 1.5rem; color: var(--muted); }
+.app-shell:has(#auth-panel:not([hidden])) .topbar .brand { visibility: hidden; }
+.app-shell:has(#auth-panel:not([hidden])):has(#connection-status[data-state="signed-out"]) > .topbar:has(#session-menu.empty) { display: none; }
+.auth-panel #auth-title { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: clamp(1.5rem, 5vw, 1.9rem); font-weight: 400; letter-spacing: .09em; }
 .signin-methods { display: grid; gap: .75rem; }
 .signin-methods .button { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; line-height: 1.4; padding: .75rem 1rem; margin: 0; }
 .signin-methods #google-signin { font-size: 1rem; padding: .75rem 1rem; margin: 0; }
-#email-auth-step > .text-button { margin-bottom: .75rem; }
+#email-auth-step { position: relative; }
+#email-auth-step #email-auth-panel { margin-top: 0; }
+#email-auth-back { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0; padding: .6rem; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
 #auth-panel > #signin-more { margin-top: 1rem; }
 .join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
 .join-agent[open] > summary { margin-bottom: .75rem; }
 
-.auth-panel .auth-email-title { margin: 0; font-size: 1.15rem; }
+.auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }

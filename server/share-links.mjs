@@ -4,6 +4,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 import { ServiceError } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
@@ -205,6 +206,9 @@ export class ShareLinks {
     }
     return this.store.transaction(() => {
       const auth = this.administrator(token, roomId, binding), tokenHash = hash(linkToken);
+      // Creating share links is a membership write: the read-only autonomy
+      // tier applies even for delegated-admin agents (issue #996).
+      enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "share_link_create", fail });
       const fingerprint = hash(JSON.stringify([tokenHash, expiresAt, maxJoins, expectedMemberRevision]));
       // Agent issuers have no account: idempotency keys on the member instead.
       // (SQLite UNIQUE treats NULLs as distinct, so the partial unique index

@@ -22,6 +22,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -260,6 +261,9 @@ export class AccessRequests {
   decide(token, roomId, requestId, { decision, permissions, note } = {}, expectedSessionBinding = null) {
     if (!DECISIONS.includes(decision)) fail(422, "invalid_request", "decision must be 'approve' or 'deny'");
     const { auth, authority } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
+    // Deciding access requests is a membership write: the read-only autonomy
+    // tier applies even when the agent holds manage_members (issue #996).
+    enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "access_decide", fail });
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");

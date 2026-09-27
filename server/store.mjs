@@ -38,6 +38,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
+import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
@@ -81,6 +82,7 @@ import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attent
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
+import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -661,9 +663,10 @@ const workSessionsNext = (roomId, sessions) => {
 function agentWakeTargets(state, senderMemberId, data) {
   const members = state?.members ?? {};
   const targets = new Map();
-  const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
   const body = typeof data?.body === "string" ? data.body : "";
-  for (const memberId of resolveMentionTargetsInText(agents, {}, body, senderMemberId)) {
+  for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
+    if (members[memberId]?.kind !== "agent") continue;
+    if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
@@ -711,6 +714,7 @@ export class RoomStore {
     this.moderation = new Moderation(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
+    this.workClaims = createDurableWorkClaimRegistry(this.db, { transaction: fn => this.transaction(fn) });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -723,6 +727,7 @@ export class RoomStore {
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
+    this.humanPush = new HumanPush(this); // Human browser push (mentions and DMs).
     this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard, commit).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
@@ -769,6 +774,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
+        this.workClaims.verifySchema({ allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
         this.verifyHelpHistory();
@@ -947,6 +953,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
       // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
       this.db.exec(nextActionsSchema);
+      this.workClaims.verifySchema({ allowAbsent: true });
+      this.db.exec(workClaimSchema);
+      this.workClaims.verifySchema();
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
@@ -1014,6 +1023,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence. DDL matches the
       // attention slice's table so the two converge on merge.
       this.db.exec(threadMutesSchema);
+      // Human browser push subscriptions. Purely additive side table (no
+      // events, no projection impact): IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence.
+      this.db.exec(humanPushSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -3503,6 +3516,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
+        this.humanPush.notifyPosted({
+          roomId, state, senderMemberId: auth.member.id,
+          body: command.data.body, toMemberId: command.data.toMemberId,
+          messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
+        });
       }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
         // Same agent.wake path as room mentions: queue a signal, then journal
@@ -3727,6 +3745,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
+      if (data.toMemberId && data.toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
   }
@@ -3792,6 +3811,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
+      const messageRow = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?").get(roomId, messageEventId);
+      const messageEvent = messageRow ? JSON.parse(messageRow.body) : null;
+      if (messageEvent?.type !== T.MESSAGE_POSTED || (messageEvent.data?.toMemberId && messageEvent.data.toMemberId !== auth.member.id && messageEvent.actorId !== auth.member.id)) {
+        fail(404, "mention_not_found", "No mention found for this message");
+      }
       const mine = this.db.prepare(
         "SELECT state FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
       ).get(roomId, messageEventId, auth.member.id);
@@ -3829,13 +3853,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
       const rows = this.db.prepare(
-        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state,
-                created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
-         FROM mention_states
-         WHERE room_id=? AND mentioned_member_id=?
-           AND (? IS NULL OR state=?) AND (? IS NULL OR created_at>=?)
-         ORDER BY created_at DESC LIMIT 200`
-      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after));
+        `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
+                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=?
+           AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
+           AND json_extract(e.body,'$.type')='message.posted'
+           AND (COALESCE(json_extract(e.body,'$.data.toMemberId'),'')=''
+             OR ((json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
+               AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
+         ORDER BY m.created_at DESC LIMIT 200`
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
       const members = this.room(roomId).state.members ?? {};
       return {
         roomId, memberId: target,

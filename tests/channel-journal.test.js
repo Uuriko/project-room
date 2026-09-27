@@ -169,3 +169,33 @@ test("schema: a v34 file from before the journal opens read-only and gains the t
   f.store = new RoomStore(f.filename);
   assert.equal(f.store.channelUpdates.verifySchema(), true);
 });
+
+test("acknowledging 100 channel updates imports every row when SQL rejects more than 100 binds", t => {
+  const f = fixture(t);
+  const importIds = Array.from({ length: 100 }, (_, i) => 8000 + i);
+  const failIds = Array.from({ length: 100 }, (_, i) => 9000 + i);
+  f.store.channelUpdates.record(f.auth.account.id, f.connectionId, [...importIds, ...failIds].map(id => f.message(id)), { backlog: 500 });
+  const db = f.store.db, prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  t.after(() => { db.prepare = prepare; });
+  assert.equal(f.store.channelUpdates.imported(f.auth.account.id, f.connectionId, importIds), 100);
+  assert.equal(f.rows().filter(row => importIds.includes(row.update_id) && row.status === "imported").length, 100);
+  const failed = f.store.channelUpdates.failed(f.auth.account.id, f.connectionId, failIds, "importer_unavailable");
+  assert.equal(failed.attempted, 100);
+  assert.equal(failed.exhausted, 0);
+  assert.equal(f.rows().filter(row => failIds.includes(row.update_id) && row.status === "pending" && row.attempts === 1).length, 100);
+});

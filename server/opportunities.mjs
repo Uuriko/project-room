@@ -191,13 +191,15 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
   }
 
   if (roomIds.length) {
-    const placeholders = roomIds.map(() => "?").join(",");
+    // One deadline bind, then filter to listed rooms. An IN list binds one
+    // variable per room; Durable Object SQL allows 100 binds and the public
+    // directory is not capped at 99 rooms.
+    const listed = new Set(roomIds);
     const bountyRows = db.prepare(`
         SELECT bounty_id, room_id, title, criteria, amount_millis, state, deadline_ms, label, created_at
         FROM bounty_records
-        WHERE room_id IN (${placeholders})
-          AND state IN ('proposed','funded')
-          AND deadline_ms > ?`).all(...roomIds, now);
+        WHERE state IN ('proposed','funded')
+          AND deadline_ms > ?`).all(now).filter(row => listed.has(row.room_id));
     for (const row of bountyRows) {
       const roomTitle = titles.get(row.room_id);
       if (!roomTitle) continue;

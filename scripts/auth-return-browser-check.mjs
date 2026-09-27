@@ -40,7 +40,7 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   page.on("pageerror", error => errors.push(error.message));
   page.on("dialog", dialog => dialog.accept());
   const email = `return-${Date.now()}@example.invalid`;
-  const password = "fixture-password-return-1";
+  const password = "tenletters"; // Backend minimum: ten characters, no complexity rule.
 
   await page.goto(origin + "/");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
@@ -69,6 +69,10 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   await page.locator("#email-signin").click();
   assert.equal(await page.locator("#google-signin").isVisible(), false);
   assert.equal(await page.locator("#email-signin").isVisible(), false);
+  assert.equal(await page.locator("#guest-entry").isVisible(), false);
+  assert.equal(await page.locator("#join-agent").isVisible(), false);
+  assert.equal(await page.locator("#signin-more").isVisible(), false);
+  assert.equal(await page.getByRole("button", { name: "Back to sign-in methods" }).isVisible(), true);
   await page.locator('#email-auth-panel input[name=email]').fill(email);
   await page.locator('#email-auth-panel input[name=password]').fill('discard-on-back');
   await page.locator('#email-auth-back').click();
@@ -78,12 +82,35 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   assert.equal(await page.locator('#email-auth-panel input[name=password]').inputValue(), '');
   await page.locator('#email-auth-panel [data-password-mode="signup"]').click();
   assert.equal(await page.evaluate(() => document.activeElement.name), 'email');
-  assert.match(await page.locator('#email-auth-panel').innerText(), /at least 12 characters/);
+  assert.doesNotMatch(await page.locator('#email-auth-panel').innerText(), /characters|at least/i, 'signup starts without password rules');
   const passwordInput = page.locator("#email-auth-panel input[name=password]");
   await passwordInput.waitFor();
   assert.equal(await passwordInput.getAttribute("autocomplete"), "new-password");
   assert.equal(await passwordInput.getAttribute("value"), null);
   await page.locator("#email-auth-panel input[name=email]").fill(email);
+  const assertCompactHeading = async () => {
+    const back = await page.locator("#email-auth-back").boundingBox();
+    const heading = await page.locator(".auth-email-title").boundingBox();
+    assert.ok(back.width >= 44 && back.height >= 44, "Back retains a usable target");
+    assert.ok(heading.x >= back.x + back.width, "heading does not overlap Back");
+    assert.ok(Math.abs((back.y + back.height / 2) - (heading.y + heading.height / 2)) <= 1, "Back and heading share a row");
+  };
+  await assertCompactHeading();
+  await page.screenshot({ path: "test-results/signin-email-signup.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertCompactHeading();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await page.locator("#email-auth-panel button[type=submit]").isVisible(), true);
+  await page.screenshot({ path: "test-results/signin-email-signup-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await passwordInput.fill("short");
+  await page.locator("#email-auth-panel button[type=submit]").click();
+  await page.locator('#email-auth-panel [data-signin-status]').filter({ hasText: '10–256 characters' }).waitFor();
+  assert.equal(await page.locator("#auth-panel").isVisible(), true);
+  await passwordInput.fill("a".repeat(257));
+  await page.locator("#email-auth-panel button[type=submit]").click();
+  assert.match(await page.locator('#email-auth-panel [data-signin-status]').innerText(), /10–256 characters/);
+  assert.equal(await passwordInput.getAttribute("aria-invalid"), "true");
   await passwordInput.fill(password);
   await page.locator("#email-auth-panel button[type=submit]").click();
   await dismissSetup(page);
@@ -130,6 +157,11 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   assert.equal(await signInPassword.getAttribute("autocomplete"), "current-password");
   assert.equal(await signInPassword.inputValue(), "");
   await page.locator("#email-auth-panel input[name=email]").fill(email);
+  await signInPassword.fill("short");
+  const deniedLogin = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login" && response.request().method() === "POST");
+  await page.locator("#email-auth-panel button[type=submit]").click();
+  assert.equal((await deniedLogin).status(), 401, "short login passwords reach the server, which decides credentials");
+  await page.locator('#email-auth-panel button[type=submit]:enabled').waitFor();
   await signInPassword.fill(password);
   await page.locator("#email-auth-panel button[type=submit]").click();
   await page.locator("#main").waitFor({ state: "visible" });

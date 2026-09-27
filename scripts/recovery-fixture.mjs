@@ -7,6 +7,7 @@ import { textVersion } from "../server/text-results.mjs";
 import { createEmailEnvelope } from "../server/email-envelope.mjs";
 import { prepareGraphReplyDraft } from "../server/graph-reply-draft.mjs";
 import { issueSignedEvidence, contentHashOf } from "../server/signed-evidence.mjs";
+import { createWork, claimWork } from "../server/work-claims.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 export function createRecoveryFixture(filename) {
@@ -259,6 +260,8 @@ export function createRecoveryFixture(filename) {
       '[{"seq":1,"at":0,"type":"claim_flaked"},{"seq":2,"at":0,"type":"dispute_lost"}]')`)
       .run(new Date(now).toISOString(), first.bountyId);
   }
+  store.workClaims.configure("commons", { defaultLeaseHours: 6 });
+  store.workClaims.set("commons", claimWork(createWork({ id: "recovery-claim", title: "Restore an active claim", files: ["synthetic/recovery.mjs"] }, { now }), "owner", { now, leaseHours: 6 }));
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,

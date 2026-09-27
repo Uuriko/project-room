@@ -457,6 +457,20 @@ test("trigger: @mention of an offline agent POSTs message.posted", async t => {
   assert.ok(!("body" in bodies[0]), "pointer-only: no message body in the push");
 });
 
+test("trigger: short-name wakes use the full roster and never notify a third party about a DM", async t => {
+  const { f, transport, command } = await triggerFixture(t);
+  f.store.dmConsents.request("commons", "owner", "guest", "test fixture");
+  f.store.dmConsents.decide("commons", "guest", "owner", "approve");
+  command("message.posted", { messageId: "private-prefix", body: "@Push please check", toMemberId: "guest" });
+  assert.deepEqual(await flushedBodies(f, transport), [], "private message must not wake an unrelated agent");
+  command("member.added", { memberId: "human-push", displayName: "Push Human", kind: "human", permissions: [] });
+  command("message.posted", { messageId: "ambiguous-prefix", body: "@Push please check" });
+  assert.deepEqual(await flushedBodies(f, transport), [], "human name collision makes the agent prefix ambiguous");
+  command("message.posted", { messageId: "exact-push", body: "@Push Agent please check" });
+  const bodies = await flushedBodies(f, transport);
+  assert.deepEqual(bodies.map(body => body.id), ["exact-push"]);
+});
+
 test("trigger: room DM to an offline agent POSTs dm.posted", async t => {
   const { f, transport, command } = await triggerFixture(t);
   // Consent-bound DMs: the owner's DM to pushagent needs approval first.
