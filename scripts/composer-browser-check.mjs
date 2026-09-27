@@ -166,6 +166,27 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
+    // A live membership change must never turn a private draft into a public post.
+    await page.locator("#message-to-select").selectOption("maya", { force: true });
+    await input.fill("Private draft retained while Maya is unavailable");
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: "maya", expectedMemberRevision: 0, permissions: [], active: false });
+    await page.waitForFunction(() => document.querySelector('#message-to-select option[value="maya"]')?.disabled);
+    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    const beforeUnavailableSend = store.room("commons").sequence;
+    const privateRequest = page.waitForRequest(request => request.url().endsWith("/commands") && request.method() === "POST");
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    assert.equal((await privateRequest).postDataJSON().data.toMemberId, "maya");
+    await waitForFailure();
+    assert.equal(await input.inputValue(), "Private draft retained while Maya is unavailable");
+    assert.equal(store.room("commons").sequence, beforeUnavailableSend, "unavailable private recipient creates no public or private message");
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: "maya", expectedMemberRevision: 1, permissions: [], active: true });
+    await page.waitForFunction(() => document.querySelector('#message-to-select option[value="maya"]')?.disabled === false);
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    await waitForSaved();
+    const recoveredPrivate = store.room("commons").state.messages.filter(message => message.body === "Private draft retained while Maya is unavailable");
+    assert.equal(recoveredPrivate.length, 1); assert.equal(recoveredPrivate[0].toMemberId, "maya");
+    await page.locator("#message-to-select").selectOption("", { force: true });
+
     await input.fill("A separate room draft");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
