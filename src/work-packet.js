@@ -243,7 +243,7 @@ export function resumeMarkdown(resume) {
   if (resume.continuity) lines.push(`Worker: ${resume.continuity.label}${resume.continuity.lastUpdate ? ` (last update ${resume.continuity.lastUpdate})` : ""}.`, resume.continuity.next ?? "");
   if (resume.reportedProgress) lines.push("Recorded progress: " + resume.reportedProgress);
   if (resume.handoff) lines.push(resume.handoff.open ? "Handoff: awaiting owner triage" : "Previous handoff (closed)",
-    "Completed at handoff: " + resume.handoff.doneSummary, "Suggested continuation: " + resume.handoff.nextAction,
+    "Completed at handoff: " + resume.handoff.doneSummary, (resume.handoff.open ? "Suggested continuation: " : "Historical handoff suggestion: ") + resume.handoff.nextAction,
     "Reason for handoff: " + resume.handoff.limitReason);
   if (resume.handoff?.haltAll) lines.push("A stop was requested in this handoff. Confirm current authorization before resuming; this record does not confirm external processes stopped.");
   if (resume.blocker) lines.push("Blocker: " + resume.blocker.reason, "Needed next: " + resume.blocker.nextAction);
@@ -252,7 +252,7 @@ export function resumeMarkdown(resume) {
     if (resume.result.checksClaimed) lines.push("Checks reported by producer: " + JSON.stringify(resume.result.checksClaimed));
     lines.push(resume.result.verification ? `Recorded review: ${resume.result.verification.result} — ${resume.result.verification.summary}` : "No review recorded for this exact result.");
     lines.push(resume.result.decision ? `Recorded decision: ${resume.result.decision.decision} — ${resume.result.decision.reason}` : "No decision recorded for this exact result.");
-    if (resume.result.nextAction) lines.push("Result follow-up: " + resume.result.nextAction);
+    if (resume.result.nextAction) lines.push("Producer follow-up recorded with this result (historical suggestion, not the current required step): " + resume.result.nextAction);
   }
   if (resume.claim !== "none") lines.push(`Write reservation: ${resume.claim}. Confirm live scope before changes; a reservation is not external permission.`);
   if (resume.requires.independentVerification) lines.push("Independent verification required.");
