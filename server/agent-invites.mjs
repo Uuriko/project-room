@@ -353,6 +353,9 @@ export class AgentInvites {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    // Revoking invites is a membership write: the read-only autonomy tier
+    // applies even when the agent holds a manage_members grant (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_revoke", fail });
     if (typeof id !== "string" || !INVITE_ID_PATTERN.test(id)) fail(422, "invalid_invite", "inviteId is required");
     return this.store.transaction(() => {
       const rows = this.db.prepare(`SELECT code_hash FROM agent_invite_codes
