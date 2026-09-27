@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,11 +11,11 @@ import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { AccountClient } from "../src/client.js";
 
-function fixture(t) {
+function fixture(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "room-share-contract-")), filename = join(directory, "room.sqlite");
   let now = Date.now();
-  const store = new RoomStore(filename, { now: () => now }); store.initialize(initialRoom());
-  const ownerKey = store.issueAccessKey("commons", "owner");
+  const store = new RoomStore(filename, { now: () => now }); store.initialize(initialRoom("commons", ownerId));
+  const ownerKey = store.issueAccessKey("commons", ownerId);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const linkToken = randomBytes(32).toString("base64url");
   const details = { requestId: randomUUID(), linkToken, expiresAt: now + 3600000, maxJoins: 2, expectedMemberRevision: 0 };
@@ -573,17 +573,46 @@ test("closed-link preview only admits a bound active member without creating or 
   assert.throws(() => f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding), { code: 'link_unavailable' });
 });
 
-// A truthy map lookup treats toString as the issuer. view() then crashes in
-// permissions.includes instead of reporting that the link lost authority.
-test("an inherited issuer name reports authority_changed instead of crashing the link view", t => {
-  const directory = mkdtempSync(join(tmpdir(), "room-share-inherited-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
-  store.initialize(initialRoom());
-  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const row = {
-    id: "link-inherited", room_id: "commons", issuer_member_id: "toString",
-    issuer_account_id: "acct", issuer_member_revision: 1, issuer_auth_epoch: 1,
-    revoked_at: null, expires_at: store.now() + 3600000, max_joins: 1, created_at: store.now()
-  };
-  assert.equal(store.shareLinks.view(row).status, "authority_changed");
+test("persisted links with inherited or missing issuers fail public preview without consuming access", async t => {
+  const f = fixture(t), admitted = f.guest("Existing guest").accept();
+  // Materialize an inconsistent trusted ledger row with a real account FK.
+  // Normal minting derives the issuer from authentication, not request input.
+  const original = f.store.db.prepare("SELECT * FROM share_links WHERE id=?").get(f.result.link.id);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const before = f.store.room("commons"), guest = f.guest();
+  const slotBefore = f.store.accountSessionSlot(guest.slot.token);
+  const count = table => f.store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
+  const tables = ["accounts", "share_link_joins", "membership_invitations"];
+  const counts = tables.map(count);
+  for (const issuer of ["toString", "missing-issuer"]) {
+    const linkToken = randomBytes(32).toString("base64url");
+    const row = { ...original, id: randomUUID(), request_id: randomUUID(), issuer_member_id: issuer,
+      issuer_account_id: admitted.session.account.id, issuer_auth_epoch: 1,
+      token_hash: createHash("sha256").update(linkToken).digest("hex") };
+    const columns = Object.keys(row);
+    f.store.db.prepare(`INSERT INTO share_links(${columns.join(",")}) VALUES(${columns.map(() => "?").join(",")})`).run(...Object.values(row));
+    const response = await fetch(`${origin}/api/share-links/preview`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ linkToken }) });
+    assert.equal(response.status, 410);
+    const body = await response.json();
+    assert.equal(body.error.code, "link_unavailable");
+    for (const privateValue of [issuer, admitted.session.account.id, linkToken]) assert.equal(JSON.stringify(body).includes(privateValue), false);
+    assert.throws(() => f.store.shareLinks.join(guest.slot.token, linkToken, { displayName: "Denied guest", redemptionId: guest.redemptionId,
+      expectedSessionRevision: slotBefore.sessionRevision, expectedSessionBinding: slotBefore.sessionBinding }), { code: "link_unavailable" });
+    assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links.find(link => link.id === row.id).status, "authority_changed");
+    assert.deepEqual(tables.map(count), counts);
+    assert.deepEqual(f.store.room("commons"), before);
+    assert.deepEqual(f.store.accountSessionSlot(guest.slot.token), slotBefore);
+  }
+});
+
+test("an actual enrolled toString issuer retains shared invitation authority", t => {
+  const f = fixture(t, "toString");
+  assert.equal(f.store.shareLinks.preview(f.linkToken).link.status, "active");
+  const joined = f.guest("Legitimate guest").accept();
+  assert.equal(joined.session.member.active, true);
+  assert.deepEqual(joined.session.member.permissions, []);
+  assert.equal(f.store.shareLinks.preview(f.linkToken).link.remainingJoins, 1);
 });
