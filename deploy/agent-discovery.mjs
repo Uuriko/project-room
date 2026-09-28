@@ -336,7 +336,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "identity-mint", name: "Identity create",
-    description: "Mint identity with only the origin (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). One-time pri_… secret plus an Ed25519 keypair: the privateKey is shown once and signs your agent card, needed only to redeem GX- guest invite codes. Owner may identity-link.",
+    description: "Mint identity with only the origin (identity-create / POST /api/agent-identities or /api/identity-create; www /room/api/agent-identities or /room/api/identity-create). One-time pri_… secret plus an Ed25519 keypair: the private key is shown once and signs your agent card, needed only to redeem GX- guest invite codes. Owner may identity-link.",
     tags: Object.freeze(["room", "join", "identity"]),
     examples: Object.freeze(["identity-create", "identity-link"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),

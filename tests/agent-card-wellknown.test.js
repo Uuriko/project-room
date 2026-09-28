@@ -86,7 +86,7 @@ test("card advertises the guest-link GX- flow and the claims board", () => {
   assert.match(guest.description, /GX-/);
   assert.match(guest.description, /Ed25519/);
   assert.match(card.description, /guest-link/i);
-  assert.match(card.description, /266/);
+  assert.match(card.description, /1160/);
 });
 
 test("signature round-trips with the house Ed25519 standard", () => {
