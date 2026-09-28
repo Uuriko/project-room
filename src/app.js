@@ -174,7 +174,7 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
-let requestRuns = {}, requestRunsReading = false;
+let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
@@ -321,6 +321,8 @@ const client = new RoomClient({
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
     landQueueUI?.reset();
+    $("#room-more").open = false;
+    $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
     if (!keepAccount) {
       clearPrivateWorkspace({ preservePending: leavingPage });
@@ -430,8 +432,16 @@ const briefView = new ReturnBrief(client, {
 // normal reset lifecycle; an import completing after reset cannot activate one.
 function lazyDisclosure({ panel, load, install, onError }) {
   let view = null, flight = null, generation = 0;
+  const disclosed = () => {
+    if (!panel.open) return false;
+    for (let ancestor = panel.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.tagName === "DIALOG" && !ancestor.open) return false;
+      if (ancestor.tagName === "DETAILS" && !ancestor.open) return false;
+    }
+    return true;
+  };
   async function sync() {
-    if (!panel.open) return;
+    if (!disclosed()) return;
     if (view) { view.sync(); return; }
     if (flight) return;
     const epoch = generation;
@@ -439,11 +449,11 @@ function lazyDisclosure({ panel, load, install, onError }) {
     flight = pending;
     try {
       const module = await pending;
-      if (epoch !== generation || !panel.open) return;
+      if (epoch !== generation || !disclosed()) return;
       view = install(module);
       view.sync();
     } catch (error) {
-      if (epoch === generation && panel.open) onError(error);
+      if (epoch === generation && disclosed()) onError(error);
     } finally {
       if (flight === pending) flight = null;
     }
@@ -1808,7 +1818,7 @@ function render() {
   }
   syncComposerChrome();
   syncChannelChrome();
-  renderMessages();
+  syncTimelineWork();
   syncRequestComposer();
   renderRoomOverview();
   renderSpendAllowance();
@@ -1816,7 +1826,12 @@ function render() {
   syncRoomHealth();
   syncRoomTrust();
   $("#event-count").textContent = `${client.sequence}`;
-  renderReturnBrief();
+  renderReturnBrief({ timelineRendered: true });
+  setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
+  renderRecordPanel();
+}
+function renderRecordPanel() {
+  if (!state || !$("#settings-dialog").open || !$("#record-panel").open) return;
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
@@ -1826,6 +1841,7 @@ function render() {
     `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
+$("#record-panel").addEventListener("toggle", renderRecordPanel);
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
 // share the timeline of the selected channel; work cards follow the channel of
 // their proposal message (the main channel when there is none).
@@ -1967,9 +1983,14 @@ function renderMessages() {
   messages.forEach((message, index) => {
     const node = previous.get(message.id) || document.createElement("li");
     const cluster = messageCluster(messages, index);
-    node.id = recordDomId("message", message.id); node.dataset.key = message.id; node.dataset.messageRecordId = message.id;
+    const domId = recordDomId("message", message.id);
+    if (node.id !== domId) node.id = domId;
+    if (node.dataset.key !== message.id) node.dataset.key = message.id;
+    if (node.dataset.messageRecordId !== message.id) node.dataset.messageRecordId = message.id;
     const muted = isMutedBy(state, session?.member?.id, message.authorId);
-    node.className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`; node.tabIndex = -1;
+    const className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`;
+    if (node.className !== className) node.className = className;
+    if (node.getAttribute("tabindex") !== "-1") node.tabIndex = -1;
     const html = messageContent(message, cluster, message.id === unreadAnchorId || message.id === horizonAnchorId);
     if (node._content !== html) {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
@@ -2281,8 +2302,13 @@ function requestRunLabel(id) {
   return ({ working: "Agent working", result_ready: "Result saved · delivery pending",
     needs_attention: "Host needs attention · original attempt retained", unknown: "Host connection lost · original attempt retained" })[status] ?? "";
 }
-async function refreshRequestRuns() {
-  if (!state || !session || requestRunsReading || document.hidden || !Object.keys(state.replyRequests ?? {}).length) return;
+async function refreshRequestRuns({ force = false } = {}) {
+  if (!state || !session || requestRunsReading || document.hidden) return;
+  const openIds = Object.values(state.replyRequests ?? {}).filter(request => request.status === "open").map(request => request.id).sort();
+  if (!openIds.length) { requestRuns = {}; requestRunsReadKey = ""; return; }
+  const key = JSON.stringify([client.generation, state.room.id, session.member.id, openIds]);
+  if (!force && key === requestRunsReadKey) return;
+  requestRunsReadKey = key;
   requestRunsReading = true;
   const generation = client.generation, roomId = state.room.id, viewerId = session.member.id;
   try {
@@ -2293,8 +2319,10 @@ async function refreshRequestRuns() {
   finally { requestRunsReading = false; }
   if (generation !== client.generation) return;
   for (const node of document.querySelectorAll("[data-request-run]")) node.textContent = requestRunLabel(node.dataset.requestRun);
+  // A request arriving during the read still gets its initial status promptly.
+  void refreshRequestRuns();
 }
-setInterval(() => { void refreshRequestRuns(); }, 10000);
+setInterval(() => { void refreshRequestRuns({ force: true }); }, 10000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
   if (!request) {
@@ -4038,6 +4066,10 @@ function roomActionEntries() {
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
     { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", always: true },
+    { id: "landing", label: "Landing queue", words: "land merge pull request review queue", always: true },
+    { id: "referrals", label: "Referrals", words: "referral invite share link leaderboard", always: true },
+    { id: "permissions", label: "Room permissions", words: "trust cross owner collaboration wake", always: true },
+    { id: "settings", label: "Settings", words: "advanced configuration", always: true },
     { id: "usage", label: "Usage", words: "spend seats sessions caps limits budget headroom", always: true }
   ].filter(entry => {
     if (entry.always) return true;
@@ -4102,6 +4134,10 @@ function chooseRoomAction(id) {
   if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
   if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
+  if (id === "landing") { openSettings("land-queue-panel"); return; }
+  if (id === "referrals") { openSettings("referral-panel"); return; }
+  if (id === "permissions") { openSettings("room-permissions"); return; }
+  if (id === "settings") { openSettings(); return; }
   if (id === "usage") { openSettings("usage-panel"); return; }
   if (id === "instructions") { openSettings("room-about"); $("#room-instructions-open").click(); return; }
   if (id === "search" || id === "mentions" || id === "pinned-search") {
@@ -4601,7 +4637,7 @@ function renderReports(reports) {
 $("#reports-section").addEventListener("toggle", () => { if ($("#reports-section").open) syncReports(); });
 // Reports append no room event, so a new one does not move the stream; the owner can ask again.
 $("#report-refresh").addEventListener("click", () => { reportsSequence = -1; syncReports(); });
-// Room Trust: one header toggle, shown to the owner when the room has more
+// Room Trust: a settings control, shown to the owner when the room has more
 // than one member-owner. On (the default) allows cross-owner assign and wake.
 // Off is the kill-switch. Same-owner work is never gated here.
 let roomTrustBusy = false;
@@ -4614,7 +4650,7 @@ function syncRoomTrust() {
   if (!show) return;
   const enabled = roomTrust(state).enabled;
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
-  button.textContent = enabled ? "Trust" : "Trust off";
+  button.textContent = enabled ? "Cross-owner collaboration on" : "Cross-owner collaboration off";
   button.title = enabled
     ? "Trust is on. Members may assign and wake agents across owners. Turn off to block that."
     : "Trust is off. Cross-owner assign and wake are blocked. Turn on to allow them again.";
@@ -4880,8 +4916,13 @@ function openSettings(panelId) {
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
-    if (panel) { panel.open = true; (panelId === "results-panel" ? $("#room-results-list") : panel.querySelector("summary"))?.focus({ preventScroll: true }); }
+    if (panel) {
+      for (let ancestor = panel.parentElement; ancestor && ancestor !== dialog; ancestor = ancestor.parentElement) {
+        if (ancestor.tagName === "DETAILS") ancestor.open = true;
+      }
+      panel.open = true; (panelId === "results-panel" ? $("#room-results-list") : panel.querySelector("summary"))?.focus({ preventScroll: true }); }
   }
+  renderRecordPanel();
 }
 function openCatchUp() {
   const dialog = $("#catchup-dialog");
@@ -6140,7 +6181,7 @@ $("#contribution-open").addEventListener("click", () => {
   if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
   else revealWork(step.id);
 });
-function renderReturnBrief() {
+function renderReturnBrief({ timelineRendered = false } = {}) {
   clearTimeout(returnClock); returnClock = null;
   const now = Date.now();
   const owned = state && session && client.session === session && client.generation === roomGeneration && client.ownsAccountSession();
@@ -6158,7 +6199,7 @@ function renderReturnBrief() {
     // Work destinations and catch-up use the same clock, even without new events.
     renderSearch(now);
     const items = Object.values(state.workItems);
-    syncTimelineWork();
+    if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
     renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>');
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
@@ -6344,13 +6385,40 @@ document.addEventListener("keydown", event => {
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#sidebar-toggle").focus();
 });
+// Native disclosure keeps secondary navigation out of the default chat surface.
+// Focus the visible summary before opening a modal, so closing it never returns
+// focus to a button that became hidden inside the collapsed disclosure.
+const roomMore = $("#room-more");
+function closeRoomMore(restoreFocus = false) {
+  roomMore.open = false;
+  if (restoreFocus) roomMore.querySelector("summary").focus({ preventScroll: true });
+}
+roomMore.addEventListener("click", event => {
+  if (event.target.closest("button:not(:disabled)")) closeRoomMore(true);
+}, true);
+roomMore.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !roomMore.open) return;
+  event.preventDefault(); event.stopPropagation(); closeRoomMore(true);
+});
+document.addEventListener("click", event => {
+  if (roomMore.open && !roomMore.contains(event.target)) closeRoomMore();
+});
+function closeSecondaryBoards() {
+  $("#land-queue-panel").open = false;
+  $("#referral-panel").open = false;
+}
+$("#settings-dialog").addEventListener("close", closeSecondaryBoards);
+$("#settings-dialog").addEventListener("cancel", closeSecondaryBoards);
+$("#advanced-room-tools").addEventListener("toggle", event => {
+  if (!event.currentTarget.open) closeSecondaryBoards();
+});
 $("#topbar-settings").addEventListener("click", () => openSettings());
 $("#room-results-open").addEventListener("click", () => {
   if (!state || !session || busy) return;
   selectWorkView("results");
 });
 $("#catchup-close").addEventListener("click", () => $("#catchup-dialog").close());
-$("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
+$("#settings-close").addEventListener("click", () => { closeSecondaryBoards(); $("#settings-dialog").close(); });
 $("#topbar-search-toggle").addEventListener("click", () => {
   const form = $("#search-form"), show = form.hidden;
   form.hidden = !show;

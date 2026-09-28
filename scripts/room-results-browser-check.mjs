@@ -34,7 +34,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
-  const open = async () => { await p.locator("#topbar-settings").click(); await p.locator("#results-panel > summary").click(); };
+  const open = async () => { await clickChrome(p, "#topbar-settings"); await p.locator("#results-panel > summary").click(); };
   const read = () => row("native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {

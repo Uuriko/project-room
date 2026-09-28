@@ -71,7 +71,7 @@ for (const touch of [false, true]) {
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
     assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
-    await guest.locator('#topbar-settings').click();
+    await clickChrome(guest, '#topbar-settings');
     assert.match(await guest.locator('#room-results-list').textContent(), /No completed results yet/);
     await guest.locator('#settings-close').click();
     if (touch) assert.equal(await guest.locator('#message-input').evaluate(input => input.getBoundingClientRect().bottom <= innerHeight), true, 'new mobile guest can see the composer without scrolling');

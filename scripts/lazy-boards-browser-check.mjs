@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openSettings, closeSettings } from "./room-chrome.mjs";
 
 // Authoring gate: real-browser transport/lifecycle contract. Eager loading
 // wastes entry requests; a late import after sign-out must not read room data.
@@ -43,6 +43,7 @@ test("secondary boards load on disclosure, once, without delaying ordinary chat"
   await enter();
   await page.locator("#message-input").fill("Chat is ready before secondary boards");
   assert.equal(requests.some(path => /(?:referral-board|land-queue-board)\.js$|\/list_land_queue$|\/referrals$/.test(path)), false);
+  await openSettings(page, "advanced-room-tools");
   for (const [panel, endpoint, counter] of [
     ["land-queue", "/list_land_queue", "land-queue-count"],
     ["referral", "/referrals", "referral-count"]
@@ -57,6 +58,9 @@ test("secondary boards load on disclosure, once, without delaying ordinary chat"
     await page.locator(`#${panel}-panel > summary`).click();
     assert.equal(requests.filter(path => path.endsWith(endpoint)).length, count);
   }
+  await closeSettings(page);
+  assert.equal(await page.locator("#land-queue-panel").evaluate(node => node.open), false);
+  assert.equal(await page.locator("#referral-panel").evaluate(node => node.open), false);
   assert.equal(await page.locator("#message-input").inputValue(), "Chat is ready before secondary boards");
 });
 
@@ -69,8 +73,10 @@ test("sign-out cancels activation of a delayed secondary-board import", { timeou
     await route.continue();
   });
   await enter();
+  await openSettings(page, "advanced-room-tools");
   await page.locator("#land-queue-panel > summary").click();
   await held;
+  await closeSettings(page);
   await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   const finished = page.waitForResponse(r => r.url().endsWith("/land-queue-board.js"));
@@ -91,8 +97,10 @@ test("late referral data cannot repaint a signed-out workspace", { timeout: 3000
     await route.fulfill({ response });
   });
   await enter();
+  await openSettings(page, "advanced-room-tools");
   await page.locator("#referral-panel > summary").click();
   await held;
+  await closeSettings(page);
   await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   // A visible sentinel makes even an empty stale response's repaint observable.

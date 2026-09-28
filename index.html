@@ -291,45 +291,24 @@
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>
           </details>
-          <details id="land-queue-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Landing</span><span id="land-queue-count" class="count-chip"></span></summary>
-            <div id="land-queue-list" class="land-queue-list"></div>
-          </details>
-          <details id="referral-panel" class="sidebar-panel">
-            <summary class="sidebar-label"><span>Referrals</span><span id="referral-count" class="count-chip"></span></summary>
-            <div id="referral-board" class="referral-board">
-              <div class="referral-mine">
-                <button id="referral-link-button" class="button secondary" type="button">My referral link</button>
-                <p id="referral-link-result" class="form-hint" hidden></p>
-              </div>
-              <div id="referral-my-list" class="referral-list" hidden>
-                <h4>My referrals</h4>
-                <ul id="referral-my-items"></ul>
-              </div>
-              <div id="referral-leaderboard-wrap" class="referral-list" hidden>
-                <h4>Leaderboard</h4>
-                <ol id="referral-leaderboard"></ol>
-              </div>
-              <div id="referral-recent-wrap" class="referral-list" hidden>
-                <h4>Recent joins</h4>
-                <ul id="referral-recent"></ul>
-              </div>
-            </div>
-          </details>
           <div id="sidebar-tools" class="sidebar-tools"><button id="room-results-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" hidden>Results</button></div>
         </aside>
 
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
             <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-            <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2><button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button></div></div>
+            <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <details id="room-more" class="room-more"><summary class="topbar-button">More</summary>
+                <div class="room-more-actions">
               <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
-              <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Later <span id="later-count" class="count-chip" hidden></span></button>
+              <button id="topbar-later" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="later-dialog" title="Later (g then l)">Saved for later <span id="later-count" class="count-chip" hidden></span></button>
               <button id="room-actions-open" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Find an action <kbd aria-hidden="true">&#8984;K</kbd></button>
-              <button id="topbar-settings" class="icon-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--bg)"/><circle cx="15" cy="17" r="2.5" fill="var(--bg)"/></svg></button>
+              <button id="topbar-settings" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="settings-dialog">Settings</button>
+                </div>
+              </details>
             </div>
           </header>
           <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
@@ -516,6 +495,37 @@
           <details id="create-room-details" class="create-room-details">
             <summary>Create Room</summary>
             <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room. If you joined with a room key, sign in to your account first.</p>
+          </details>
+          <details id="room-permissions"><summary>Permissions</summary>
+            <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
+            <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>
+          </details>
+          <details id="advanced-room-tools"><summary>Advanced</summary>
+          <details id="land-queue-panel" class="sidebar-panel">
+            <summary class="sidebar-label"><span>Landing</span><span id="land-queue-count" class="count-chip"></span></summary>
+            <div id="land-queue-list" class="land-queue-list"></div>
+          </details>
+          <details id="referral-panel" class="sidebar-panel">
+            <summary class="sidebar-label"><span>Referrals</span><span id="referral-count" class="count-chip"></span></summary>
+            <div id="referral-board" class="referral-board">
+              <div class="referral-mine">
+                <button id="referral-link-button" class="button secondary" type="button">My referral link</button>
+                <p id="referral-link-result" class="form-hint" hidden></p>
+              </div>
+              <div id="referral-my-list" class="referral-list" hidden>
+                <h4>My referrals</h4>
+                <ul id="referral-my-items"></ul>
+              </div>
+              <div id="referral-leaderboard-wrap" class="referral-list" hidden>
+                <h4>Leaderboard</h4>
+                <ol id="referral-leaderboard"></ol>
+              </div>
+              <div id="referral-recent-wrap" class="referral-list" hidden>
+                <h4>Recent joins</h4>
+                <ul id="referral-recent"></ul>
+              </div>
+            </div>
+          </details>
           </details>
           <details id="room-tools" class="room-tools"><summary>Suggestions and automations</summary>
             <div id="recipe-strip" class="recipe-strip" hidden></div>

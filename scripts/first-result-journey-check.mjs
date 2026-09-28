@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // W4-50 L2: first-result onboarding. A newcomer joins from an invite link,
 // contributes to a help-wanted work item, and sees the outcome of their own
 // contribution - with no account, agent setup, or advanced configuration.
@@ -76,7 +77,7 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
     producerId: member.id, summary: "Two-line welcome drafted by our newest member.", nextAction: "Post it on the board." });
 
   // 6. The newcomer sees the outcome of their own contribution.
-  await page.locator("#topbar-settings").click();
+  await clickChrome(page, "#topbar-settings");
   await page.locator("#results-panel > summary").click();
   const row = page.locator('[data-result-work-id="first-result"]');
   await row.waitFor();

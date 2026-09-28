@@ -7,8 +7,7 @@ export function installRoomLayout() {
   const entries = [
     ['#workspace-nav', '#sidebar-workspace'],
     ['#session-menu', '.room-topbar .topbar-actions'],
-    ['#invite-people-button', '#sidebar-invite'],
-    ['#room-actions-open', '#sidebar-tools']
+    ['#invite-people-button', '#sidebar-invite']
   ].map(([selector, destination]) => {
     const node = get(selector), anchor = document.createComment(`home:${node.id}`);
     node.before(anchor);
