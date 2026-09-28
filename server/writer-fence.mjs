@@ -312,7 +312,18 @@ export const unfencedAdditiveTables = Object.freeze([
   "board_vtwo_claims",
   "board_vtwo_events",
   "board_vtwo_mirror",
-  "board_vtwo_idempotency"
+  "board_vtwo_idempotency",
+  // emissary_drops + emissary_invite_attribution + emissary_idempotency +
+  // emissary_journal (Emissary growth layer Slice 2, RC-2026-09-28-2873):
+  // lure-generation ledgers (drop artifacts, invite attribution with
+  // token-hash only, idempotency records, generation journal). Purely
+  // additive and intentionally NOT fenced — older writers have no code
+  // path to them, and server/emissary-lure.mjs verifies its own schema
+  // lazily on first use.
+  "emissary_drops",
+  "emissary_invite_attribution",
+  "emissary_idempotency",
+  "emissary_journal"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

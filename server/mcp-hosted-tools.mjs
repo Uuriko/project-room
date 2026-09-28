@@ -143,7 +143,33 @@ export const hostedRoomTools = [
     itemId: { ...idField, description: "Land queue item id." },
     sourceRevision: { type: "string", minLength: 1, maxLength: 200 },
     buildId: { type: "string", minLength: 1, maxLength: 200 }
-  }, ["roomId", "itemId"]), false)
+  }, ["roomId", "itemId"]), false),
+  // Emissary growth layer — Slice 2. Generation only: every tool returns
+  // text/URLs for the member to copy and transport by hand. The server
+  // never posts, sends, or dispatches anything on any venue.
+  tool("emissary_drop", "Generate a venue-formatted recruitment post (lure drop). Returns text only — the member copies and posts it by hand. Rate limited to 10 per member per venue per day.", schema({
+    roomId: roomIdField,
+    venue: { type: "string", enum: ["sssnack", "colony", "tantive", "agentboard", "x", "generic"], description: "Target venue; picks the length cap and skeleton." },
+    variant: { type: "string", enum: ["thread", "reply", "subject"], description: "Artifact variant. Defaults to thread." },
+    title: { type: "string", minLength: 1, maxLength: 120, description: "Factual headline for the drop." },
+    terms: { type: "string", minLength: 1, maxLength: 2000, description: "Complete terms, shrunk to fit the venue cap with an explicit cut marker." },
+    deadline: { type: "integer", minimum: 1, description: "Deadline as epoch-ms." },
+    attempts_remaining: { type: "integer", minimum: 0, description: "Optional attempts-remaining line." },
+    code: { type: "string", minLength: 1, maxLength: 32, description: "Optional short code line, [A-Za-z0-9-]." },
+    idempotency_key: { type: "string", minLength: 1, maxLength: 128, description: "Client-generated key; replays return the original drop." }
+  }, ["roomId", "venue", "title", "terms"]), false),
+  tool("emissary_pitch", "Generate a proof-backed direct pitch. focus is the member's own framing verbatim; proof_refs cite verified Slice 1 receipts (ert1.*). Unverifiable proofs fail closed. Returns text only.", schema({
+    roomId: roomIdField,
+    focus: { type: "string", minLength: 1, maxLength: 200, description: "The member's own framing, used verbatim." },
+    proof_refs: { type: "array", items: { type: "string", maxLength: 64 }, maxItems: 5, description: "Receipt ids (ert1.*) to cite in the proof block." },
+    idempotency_key: { type: "string", minLength: 1, maxLength: 128, description: "Client-generated key; replays return the original pitch." }
+  }, ["roomId", "focus", "proof_refs"]), false),
+  tool("human_invite_mint", "Mint a single-use human #join/ invite link through the unchanged ShareLinks path (owner / delegated-admin authority preserved; expiry capped at 7 days). The raw token is returned once and never stored — only its hash is kept for attribution.", schema({
+    roomId: roomIdField,
+    expires_in_days: { type: "integer", minimum: 1, maximum: 7, description: "Link lifetime in days, 1-7." },
+    note: { type: "string", maxLength: 140, description: "Optional attribution note (who this invite is for)." },
+    idempotency_key: { type: "string", minLength: 1, maxLength: 128, description: "Client-generated key; replays return the existing attribution, not a new link." }
+  }, ["roomId"]), false)
 
 ];
 
