@@ -231,7 +231,8 @@ test('work destination follows its proposal channel', { timeout: 20000 }, async 
   const f = await setup(t), { page } = f;
   f.send(T.CHANNEL_CREATED, { channelId: 'design', name: 'design' });
   const receipt = f.send(T.MESSAGE_POSTED, { messageId: 'design-draft', channelId: 'design', workItemId: 'test-handoff', packetId: 'manual-packet', basisRevision: 0, body: 'A draft in the design channel.' });
-  await page.locator(`[data-event-record-id="${receipt.event.id}"]`).waitFor({ state: 'attached' });
+  // History is rendered on demand; wait for this receipt's snapshot before navigating.
+  await page.waitForFunction(sequence => Number(document.querySelector('#event-count').textContent) >= sequence, receipt.sequence);
   await page.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
   await f.card.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#conversation-title').textContent(), '# design');
@@ -242,8 +243,8 @@ for (const mobile of [false, true]) test(`draft choices ${mobile ? 'mobile' : 'd
   const f = await setup(t, { mobile, humanWork: true }), { page } = f;
   f.send(T.WORK_ACCEPTED, { workItemId: 'human-handoff', expectedRevision: 0 });
   for (const id of ['draft-one', 'draft-two']) {
-    const receipt = f.send(T.MESSAGE_POSTED, { messageId: id, workItemId: 'human-handoff', packetId: 'manual-packet', basisRevision: 1, body: 'Proposal ' + id }, 'guest');
-    await page.locator(`[data-event-record-id="${receipt.event.id}"]`).waitFor({ state: 'attached' });
+    f.send(T.MESSAGE_POSTED, { messageId: id, workItemId: 'human-handoff', packetId: 'manual-packet', basisRevision: 1, body: 'Proposal ' + id }, 'guest');
+    await page.locator(`[data-message-record-id="${id}"]`).waitFor({ state: 'visible' });
   }
   await page.locator('#message-input').fill('Keep my unsent note');
   await page.locator('#topbar-catchup').click();
