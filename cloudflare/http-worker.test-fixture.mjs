@@ -7,6 +7,12 @@ import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/__test-emissary-receipt' && request.method === 'POST') {
+      const { roomId } = await request.json();
+      return Response.json(this.store.emissaryReceipts.record(roomId, {
+        kind: 'jury', payload: { summary: 'Synthetic review completed' }
+      }));
+    }
     if (url.pathname === '/__test-bounty-provision') {
       this.store.agentPlugin.setDispatchKick(null); // Queue proof only; never send externally.
       this.store.initialize(initialRoom());

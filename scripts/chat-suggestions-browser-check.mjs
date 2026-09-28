@@ -56,6 +56,7 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
 
 test("an unanswered question offers Ask @Agent, which only prefills the mention", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  f.store.command(f.keys.owner, "commons", { id: "quiet-channel", type: T.CHANNEL_CREATED, data: { channelId: "quiet", name: "quiet" } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   t.after(async () => {
@@ -78,6 +79,10 @@ test("an unanswered question offers Ask @Agent, which only prefills the mention"
   const ask = box.locator("[data-suggest-agent]");
   await ask.waitFor();
   assert.match(await ask.textContent(), /^Ask @/);
+  await page.locator('#channel-list [data-channel="quiet"]').click();
+  assert.equal(await box.locator("[data-suggest-agent]").count(), 0, "a different channel must not retain the previous question's agent suggestion");
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ask.waitFor();
   const before = f.store.snapshot(f.keys.owner, "commons").state.messages.length;
   await ask.click();
   assert.match(await page.locator("#message-input").inputValue(), /^@\S.* $/);

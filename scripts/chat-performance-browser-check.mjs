@@ -56,9 +56,9 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   await page.locator('[data-message-record-id="ordinary-arrival"]').waitFor();
   await page.waitForTimeout(200);
   const cost = await page.evaluate(() => ({
-    stableRetained: chatCost.stable === document.querySelector('[data-message-record-id="history-0"]'),
-    mutations: chatCost.mutations,
-    hiddenLogMutations: chatCost.hiddenLogMutations
+    stableRetained: globalThis.chatCost.stable === document.querySelector('[data-message-record-id="history-0"]'),
+    mutations: globalThis.chatCost.mutations,
+    hiddenLogMutations: globalThis.chatCost.hiddenLogMutations
   }));
   assert.deepEqual(cost, { stableRetained: true, mutations: 0, hiddenLogMutations: 0 });
   assert.equal(runReads, before, 'unrelated chat must not re-read run state');

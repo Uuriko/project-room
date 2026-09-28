@@ -103,7 +103,6 @@ for (const mobile of [false, true]) {
     const unreadTarget = page.locator('[data-message-record-id="mention-owner"]');
     await unreadTarget.locator(".message-more > summary").click();
     await unreadTarget.locator('[data-message-action="mark-unread"]').click();
-    const divider = page.locator('.chat-divider.unread', { hasText: "New messages" });
     // Another unread divider may already exist before the asynchronous horizon
     // write finishes. Wait for this action's specific message, not that old one.
     await unreadTarget.locator('.chat-divider.unread', { hasText: "New messages" }).waitFor({ state: "visible" });
@@ -174,7 +173,6 @@ for (const mobile of [false, true]) {
     const target = page.locator('[data-message-record-id="mention-owner"]');
     await target.focus();
     await page.keyboard.press("u");
-    const divider = page.locator('.chat-divider.unread', { hasText: "New messages" });
     await divider.first().waitFor({ state: "visible" });
 
     // The room-actions palette lists Activity and Later entries (desktop:

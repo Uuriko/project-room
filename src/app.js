@@ -1832,7 +1832,7 @@ function render() {
   renderRecordPanel();
 }
 function renderRecordPanel() {
-  if (!state || !$("#settings-dialog").open || !$("#record-panel").open) return;
+  if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
@@ -1941,6 +1941,7 @@ $("#chat-suggestions")?.addEventListener("click", e => {
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
+  if (!sameView) syncChatSuggestions();
   // The read-horizon anchor is recomputed when the view changes (room vs
   // thread, channel switch); a cached horizon applies synchronously, a miss
   // fetches and re-renders.
