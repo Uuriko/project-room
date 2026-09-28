@@ -34,7 +34,7 @@ import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChi
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
-import { chatSuggestions } from "./chat-suggestions.js";
+import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -1873,14 +1873,22 @@ function renderChannels() {
 // One-tap replies and a task nudge under the latest message in view
 // (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
 const dismissedSuggestions = new Set();
+let askAgentTimer = null;
 function syncChatSuggestions() {
   const box = $("#chat-suggestions");
   if (!box) return;
   const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
     : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const latest = messages.at(-1);
+  // "Ask @Agent" is for the channel view: a thread already has its own replies.
+  const ask = latest && !currentThreadId
+    ? { members: state.members, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
   const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
-    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions }) : null;
+    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions, ask }) : null;
+  // A question can cross the wait while nothing else changes, so check again then.
+  clearTimeout(askAgentTimer);
+  const waitLeft = ask && !offer?.agent ? Date.parse(latest.createdAt) + ASK_AGENT_AFTER_MS - ask.now : NaN;
+  if (waitLeft > 0) askAgentTimer = setTimeout(syncChatSuggestions, waitLeft + 50);
   const signature = offer ? JSON.stringify(offer) : "";
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
@@ -1888,12 +1896,22 @@ function syncChatSuggestions() {
   if (!offer) { box.replaceChildren(); return; }
   box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}">${esc(choice)}</button>`).join("")
     + (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
+    + (offer.agent ? `<button type="button" class="suggestion-chip suggestion-agent" data-suggest-agent="${esc(offer.agent.name)}" data-suggest-agent-for="${esc(offer.messageId)}">Ask @${esc(offer.agent.name)}</button>` : "")
     + `<button type="button" class="suggestion-dismiss" data-suggest-dismiss="${esc(offer.messageId)}" aria-label="Hide suggestions" title="Hide">×</button>`;
 }
 $("#chat-suggestions")?.addEventListener("click", e => {
   const reply = e.target.closest("[data-suggest-reply]"), task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
   if (dismiss) { dismissedSuggestions.add(dismiss.dataset.suggestDismiss); syncChatSuggestions(); $("#message-input").focus(); return; }
   if (task) { dismissedSuggestions.add(task.dataset.suggestTask); syncChatSuggestions(); openWork(task.dataset.suggestTask); return; }
+  const agent = e.target.closest("[data-suggest-agent]");
+  if (agent) {
+    // Prefill the mention only; the person writes the rest and sends it.
+    const input = $("#message-input");
+    if (!input.value.trim()) { input.value = `@${agent.dataset.suggestAgent} `; input.dispatchEvent(new Event("input", { bubbles: true })); }
+    dismissedSuggestions.add(agent.dataset.suggestAgentFor); syncChatSuggestions();
+    input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    return;
+  }
   if (!reply || busy || !state) return;
   const input = $("#message-input");
   // A chip only fills a message the person hasn't started, then sends it
