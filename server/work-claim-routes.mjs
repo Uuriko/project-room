@@ -456,5 +456,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     registry.set(roomId, renewed);
     return json(res, 200, renewed);
   }
-  reject(405, "method_not_allowed", "Method not allowed");
+  // RFC 9110: a 405 names the resource's valid methods. The route table above
+  // is the source of truth; an unknown route has no meaningful Allow value.
+  const WORK_CLAIM_METHODS = {
+    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", create: "POST",
+    read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
+    reassign: "POST", renew: "POST",
+  };
+  const allowedMethod = WORK_CLAIM_METHODS[workClaimRoute];
+  reject(405, "method_not_allowed", "Method not allowed",
+    allowedMethod ? { Allow: allowedMethod } : undefined);
 }
