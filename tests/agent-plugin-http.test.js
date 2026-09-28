@@ -9,6 +9,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { validatePluginManifest, WELL_KNOWN_PATH } from "../server/agent-plugin-manifest.mjs";
 import { generateKeyPair, signCard, signKeyRotation, verifyCardSignature } from "../server/agent-card-signing.mjs";
+import { signPayload } from "../server/agent-webhook-subscriptions.mjs";
 
 async function startServer(t, f, options = {}) {
   const server = createRoomServer({ store: f.store, ...options });
@@ -383,7 +384,7 @@ test("directory search filters query and capability", async t => {
   assert.deepEqual(byCap.agents.map(a => a.agentId), ["searchable-two"]);
 });
 
-test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t => {
+test("subscribe/list/unsubscribe roundtrip; signing secret never returned (sentinel only)", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("hook-agent");
@@ -397,11 +398,16 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   assert.match(sub.subscriptionId, /^[A-Za-z0-9_-]{1,64}$/);
   assert.equal(sub.agentId, identity.identityId);
   assert.deepEqual(sub.events, ["message.posted", "work.completed"]);
-  assert.ok(typeof sub.secret === "string" && sub.secret.length >= 16, "server-generated signing secret shown once");
+  // RC-2026-09-27-2729: the raw signing secret is never returned — not
+  // even once. The 201 carries the opaque sentinel instead.
+  assert.ok(!("secret" in sub), "no raw signing secret in the 201 body");
+  assert.equal(sub.secretRef, `pr_sentinel_${sub.subscriptionId}`, "sentinel handle on the view");
   // RC-2026-09-18-039: the 201 names the secret's job and the debugging path.
-  assert.deepEqual(sub.next.map(n => n.action), ["store-secret", "verify-deliveries", "check-journal"]);
-  assert.ok(sub.next[0].description.includes("exactly once"));
-  assert.ok(sub.next[2].path.includes(`/api/agent-webhooks/${sub.subscriptionId}/deliveries`));
+  assert.deepEqual(sub.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
+  assert.equal(sub.next[0].method, "POST");
+  assert.ok(sub.next[0].path.endsWith(`/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`),
+    "verify-deliveries points at the server-side verification endpoint");
+  assert.ok(sub.next[1].path.includes(`/api/agent-webhooks/${sub.subscriptionId}/deliveries`));
   assert.equal(sub.deliveries, 0);
 
   // A caller-supplied secret is never echoed back.
@@ -409,8 +415,7 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   const supplied = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/other", events: ["*"], secret: ownSecret }, identity.secret)).json();
   assert.ok(!("secret" in supplied), "caller-supplied secret is not echoed");
-  // RC-2026-09-18-039: with a caller-supplied secret there is nothing to store,
-  // so next[] skips store-secret.
+  assert.equal(supplied.secretRef, `pr_sentinel_${supplied.subscriptionId}`);
   assert.deepEqual(supplied.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
 
   const listed = await (await get(origin, "/api/agent-webhooks", identity.secret)).json();
@@ -418,15 +423,70 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   // RC-2026-09-18-047: the list teaches subscribe + journal.
   assert.deepEqual(listed.next.map(n => n.action), ["check-journal", "check-journal"]);
   assert.ok(listed.next[0].path.includes(`/api/agent-webhooks/${listed.subscriptions[0].subscriptionId}/deliveries`));
-  assert.ok(!JSON.stringify(listed).includes(sub.secret), "signing secrets never appear in listings");
+  // Raw values persist server-side for dispatch signing but never appear
+  // in any agent-reachable response.
   const row = f.store.db.prepare("SELECT secret FROM agent_webhook_subs WHERE subscription_id=?").get(sub.subscriptionId);
-  assert.equal(row.secret, sub.secret, "the signing secret persists for delivery signing");
+  assert.ok(typeof row.secret === "string" && row.secret.length >= 16,
+    "the server-generated signing secret persists for delivery signing");
+  assert.ok(!JSON.stringify(sub).includes(row.secret), "generated secret absent from the 201 body");
+  assert.ok(!JSON.stringify(listed).includes(row.secret), "generated secret absent from listings");
+  const ownRow = f.store.db.prepare("SELECT secret FROM agent_webhook_subs WHERE subscription_id=?").get(supplied.subscriptionId);
+  assert.equal(ownRow.secret, ownSecret, "the caller-supplied secret persists for delivery signing");
+  assert.ok(!JSON.stringify(supplied).includes(ownSecret), "caller-supplied secret absent from the 201 body");
 
   const unsubscribed = await del(origin, `/api/agent-webhooks/${sub.subscriptionId}`, identity.secret);
   assert.equal(unsubscribed.status, 200);
   assert.deepEqual(await unsubscribed.json(), { subscriptionId: sub.subscriptionId, unsubscribed: true });
   assert.deepEqual((await (await get(origin, "/api/agent-webhooks", identity.secret)).json()).subscriptions.map(s => s.subscriptionId),
     [supplied.subscriptionId]);
+});
+
+test("verify-delivery verifies HMAC server-side; cross-identity reads 404", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("hook-verify");
+  const other = f.store.identities.create("hook-verify-other");
+
+  // The test plays the agent: it supplies the secret at subscribe (the
+  // supply path), but from here on it holds only the sentinel and the
+  // inbound payload — it asks the room to verify.
+  const ownSecret = "verify-path-signing-secret-01";
+  const sub = await (await post(origin, "/api/agent-webhooks",
+    { url: "https://hooks.example.test/verify", events: ["message.posted"], secret: ownSecret },
+    identity.secret)).json();
+  assert.equal(sub.secretRef, `pr_sentinel_${sub.subscriptionId}`);
+  assert.ok(!("secret" in sub), "no raw secret in the 201");
+  const row = f.store.db.prepare("SELECT secret FROM agent_webhook_subs WHERE subscription_id=?").get(sub.subscriptionId);
+  assert.equal(row.secret, ownSecret, "the secret persists server-side for signing");
+
+  // A genuine inbound delivery, signed the way the room signs it.
+  const genuine = {
+    eventType: "message.posted",
+    data: { threadId: "t-9" },
+    signature: signPayload(ownSecret, { eventType: "message.posted", data: { threadId: "t-9" } }),
+  };
+  const good = await (await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`, genuine, identity.secret)).json();
+  assert.deepEqual(good, { subscriptionId: sub.subscriptionId, valid: true });
+
+  const tampered = await (await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`,
+    { ...genuine, data: { threadId: "t-evil" } }, identity.secret)).json();
+  assert.deepEqual(tampered, { subscriptionId: sub.subscriptionId, valid: false });
+
+  const forged = await (await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`,
+    { ...genuine, signature: "0".repeat(64) }, identity.secret)).json();
+  assert.deepEqual(forged, { subscriptionId: sub.subscriptionId, valid: false });
+
+  // Verify responses never carry the raw secret.
+  assert.ok(!JSON.stringify(good).includes(ownSecret));
+  assert.ok(!JSON.stringify(tampered).includes(ownSecret));
+
+  // Another identity's subscription reads as 404 (no oracle); unknown
+  // subscriptions 404 too; malformed bodies 422; unauthenticated 401.
+  assert.equal(await errorCode(await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`, genuine, other.secret)), "unknown_subscription");
+  assert.equal(await errorCode(await post(origin, "/api/agent-webhooks/sub_missing/verify-delivery", genuine, identity.secret)), "unknown_subscription");
+  assert.equal((await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`, { eventType: "message.posted" }, identity.secret)).status, 422);
+  assert.equal((await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`, { eventType: "message.posted", data: {}, signature: "" }, identity.secret)).status, 422);
+  assert.equal((await post(origin, `/api/agent-webhooks/${sub.subscriptionId}/verify-delivery`, genuine)).status, 401);
 });
 
 test("delivery journal is readable by the owning identity; cross-identity reads 404", async t => {

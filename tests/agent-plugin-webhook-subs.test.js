@@ -85,10 +85,15 @@ test("buildDelivery signs payloads; journal records attempts", t => {
   assert.ok(Object.isFrozen(delivery) && Object.isFrozen(delivery.data));
   assert.ok(delivery.signature && delivery.signature.length === 64);
 
-  // the agent verifies the delivery with its own secret
-  assert.ok(verifySignature(SECRET, delivery.signature, { eventType: "message.posted", data: { threadId: "t1" } }));
-  assert.ok(!verifySignature(SECRET, delivery.signature, { eventType: "message.posted", data: { threadId: "t2" } }));
-  assert.ok(!verifySignature("wrong-secret-0123456789", delivery.signature, { eventType: "message.posted", data: { threadId: "t1" } }));
+  // RC-2026-09-27-2729: the agent holds only the sentinel, so delivery
+  // verification runs server-side through the same trusted boundary.
+  assert.equal(subs.verifyDelivery("sub_one",
+    { eventType: "message.posted", data: { threadId: "t1" }, signature: delivery.signature }), true);
+  assert.equal(subs.verifyDelivery("sub_one",
+    { eventType: "message.posted", data: { threadId: "t2" }, signature: delivery.signature }), false);
+  assert.equal(subs.verifyDelivery("sub_one",
+    { eventType: "message.posted", data: { threadId: "t1" },
+      signature: signPayload("wrong-secret-0123456789", { eventType: "message.posted", data: { threadId: "t1" } }) }), false);
 
   const r1 = subs.recordAttempt(delivery.deliveryId, { ok: true });
   assert.equal(r1.state, "delivered");

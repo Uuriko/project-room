@@ -203,14 +203,24 @@ test("webhook subscribe list and unsubscribe stay on this identity", async t => 
   const generated = await call(origin, "webhook.subscribe", {
     url: "https://hooks.example.test/other", events: ["*"]
   }, owner.secret);
-  assert.equal(typeof generated.value.secret, "string");
-  assert.ok(generated.value.secret.length >= 16);
+  assert.equal(generated.body.error, undefined);
+  // RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never leaves
+  // the server — not even once. The tool carries only the `secretRef`
+  // sentinel; no `secret` field exists on the response at all.
+  assert.equal("secret" in generated.value, false);
+  assert.equal(typeof generated.value.secretRef, "string");
+  assert.ok(generated.value.secretRef.startsWith("pr_sentinel_"));
+  assert.ok(generated.value.secretRef.endsWith(generated.value.subscriptionId));
   assert.equal(generated.raw.includes(owner.secret), false);
-  const shown = generated.value.secret;
+  const shown = generated.value.secretRef;
 
   const listed = await call(origin, "webhook.list", {}, owner.secret);
   assert.equal(listed.value.subscriptions.length, 2);
-  assert.equal(listed.raw.includes(shown), false);
+  for (const sub of listed.value.subscriptions) {
+    assert.equal("secret" in sub, false);
+    assert.equal(typeof sub.secretRef, "string");
+    assert.ok(sub.secretRef.startsWith("pr_sentinel_"));
+  }
   assert.equal(listed.raw.includes(callerSecret), false);
   const otherList = await call(origin, "webhook.list", {}, other.secret);
   assert.deepEqual(otherList.value.subscriptions, []);

@@ -10,8 +10,10 @@
 // presenting a valid room-member credential additionally reveals
 // room-visibility cards.
 //
-// Secrets are shown exactly once (at issue, rotate, and server-generated
-// webhook-secret subscribe); list outputs never include them. Pure-module
+// Secrets are shown exactly once (at issue and rotate); webhook signing
+// secrets are never returned at all (RC-2026-09-27-2729, UFO-steal slice
+// 2: agents hold only the `secretRef` sentinel and verify deliveries
+// server-side). List outputs never include them. Pure-module
 // validation errors surface as 422 (404 for unknown/not-found codes);
 // cross-identity access reads as 404, never an oracle.
 //
@@ -45,6 +47,7 @@ const requiredScope = name => {
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
 const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
+const VERIFY_DELIVERY_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/verify-delivery$/;
 const CARD_ROUTE = /^\/api\/agent-directory\/cards\/([A-Za-z0-9_-]{1,120})$/;
 const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
 // RC-2026-09-24-202: public skill card per identity (opt-in via publish:true).
@@ -378,7 +381,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // and where to debug deliveries.
     const next = subscriptions.length === 0
       ? [Object.freeze({ action: "subscribe", method: "POST", path: "/api/agent-webhooks",
-          description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once in the 201." })]
+          description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)." })]
       : subscriptions.slice(0, 3).map(s => Object.freeze({ action: "check-journal", method: "GET",
           path: `/api/agent-webhooks/${encodeURIComponent(s.subscriptionId)}/deliveries`,
           description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters are redriven at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive.` }));
@@ -403,33 +406,29 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     }
     if (data.secret !== undefined && data.secret !== null && typeof data.secret !== "string")
       reject(422, "invalid_subscription_request", "secret must be a string when given");
-    const { subscription, secretShownOnce } = store.agentPlugin.subscribeWebhook({
+    const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: auth.identityId,
       url: data.url,
       events: data.events,
       secret: data.secret ?? null,
     });
-    // A server-generated signing secret is shown exactly once here; a
-    // caller-supplied one is never echoed back. RC-2026-09-18-039: the
-    // response names the secret's job — store it now, verify HMAC on
-    // inbound deliveries, and check the journal for failures.
-    const subscribeNext = (subscriptionId, hasSecret) => {
-      const steps = [
-        Object.freeze({ action: "verify-deliveries", description:
-          "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret." }),
-        Object.freeze({ action: "check-journal", method: "GET",
-          path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
-          description: "Read the per-subscription delivery journal: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters redrive at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive; the delivery rate is at GET /api/agent-webhooks/metrics." }),
-      ];
-      if (hasSecret) {
-        steps.unshift(Object.freeze({ action: "store-secret",
-          description: "Store this signing secret NOW — it is shown exactly once and never returned again. Losing it means recreating the subscription." }));
-      }
-      return Object.freeze(steps);
-    };
-    const responseBody = secretShownOnce
-      ? { ...subscription, secret: secretShownOnce, next: subscribeNext(subscription.subscriptionId, true) }
-      : { ...subscription, next: subscribeNext(subscription.subscriptionId, false) };
+    // RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never
+    // leaves the server — not even once. The 201 carries the subscription
+    // view with a `secretRef` sentinel (an opaque handle the agent keeps);
+    // the agent holds no raw token. Inbound deliveries are verified
+    // server-side (verify-delivery below), and the journal carries
+    // delivery states for debugging. RC-2026-09-18-039: the response names
+    // the secret's job — keep the sentinel, verify via the endpoint, check
+    // the journal for failures.
+    const subscribeNext = subscriptionId => Object.freeze([
+      Object.freeze({ action: "verify-deliveries", method: "POST",
+        path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/verify-delivery`,
+        description: "Verify inbound deliveries server-side: POST { eventType, data, signature } — the room checks the HMAC with the signing secret and answers { valid }. The secret itself is never returned; keep this subscription's secretRef sentinel." }),
+      Object.freeze({ action: "check-journal", method: "GET",
+        path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
+        description: "Read the per-subscription delivery journal: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters redrive at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive; the delivery rate is at GET /api/agent-webhooks/metrics." }),
+    ]);
+    const responseBody = { ...subscription, next: subscribeNext(subscription.subscriptionId) };
     return json(res, 201, responseBody);
   });
 
@@ -447,6 +446,33 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     return json(res, 200, { subscriptionId,
       deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
+  });
+
+  // RC-2026-09-27-2729 (UFO-steal slice 2): server-side delivery
+  // verification. The agent holds only the `secretRef` sentinel, never
+  // the raw signing secret, so it cannot verify HMAC itself — it POSTs
+  // the inbound payload and signature here and the room checks them at
+  // the single trusted boundary (sentinel -> real secret), answering
+  // { valid }. Cross-identity reads 404 like the journal.
+  const verifyDelivery = translate(async (req, res, { remoteAddress, subscriptionId }) => {
+    rate(`agent-webhook-verify:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    const data = await body(req);
+    if (!(data && exact(data, ["eventType", "data", "signature"])))
+      reject(422, "invalid_verify_request", "eventType, data, and signature are the accepted fields");
+    if (typeof data.eventType !== "string" || data.eventType.length === 0)
+      reject(422, "invalid_verify_request", "eventType must be a non-empty string");
+    if (data.data === null || typeof data.data !== "object")
+      reject(422, "invalid_verify_request", "data must be an object");
+    if (typeof data.signature !== "string" || data.signature.length === 0)
+      reject(422, "invalid_verify_request", "signature must be a non-empty string");
+    return json(res, 200, store.agentPlugin.verifyWebhookDelivery({
+      identityId: auth.identityId,
+      subscriptionId,
+      eventType: data.eventType,
+      data: data.data,
+      signature: data.signature,
+    }));
   });
 
   // RC-2026-09-19-064: signed dispatch surface. Deliveries are signed with
@@ -734,6 +760,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
     const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
     if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
+    const verifyDeliveryMatch = method === "POST" ? VERIFY_DELIVERY_ROUTE.exec(pathname) : null;
+    if (verifyDeliveryMatch) { await verifyDelivery(req, res, { remoteAddress, subscriptionId: verifyDeliveryMatch[1] }); return true; }
     // RC-2026-09-19-064: signed dispatch surface (fixed paths before the
     // subscription-id regexes so they cannot shadow each other).
     if (pathname === "/api/agent-webhooks/deliveries" && method === "GET") { await deliveryLog(req, res, { url }); return true; }
