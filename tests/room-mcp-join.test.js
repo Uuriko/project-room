@@ -98,3 +98,15 @@ test("Demigod door GET /room/mcp is the pasteable join surface", async () => {
   assert.match(html, /Join with code/);
   assert.match(html, /ABC-DEF-GHJ/);
 });
+
+test("public join tool descriptions say read-only and disclaim the join", () => {
+  // ED1 (2026-09-28 QA): the room_join_* names promise an action the tools do
+  // not perform. Names are frozen (live clients); the served descriptions are
+  // the honest signal, so this pins them at the tools/list boundary.
+  const listed = handleMcpJoinRpc({ jsonrpc: "2.0", id: 7, method: "tools/list" }, { mcpUrl: ROOM_MCP_PUBLIC_URL });
+  const descriptions = Object.fromEntries(listed.result.tools.map(tool => [tool.name, tool.description]));
+  for (const name of ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"]) {
+    assert.match(descriptions[name], /read-only/i, `${name} must say it is read-only`);
+    assert.match(descriptions[name], /does not (join|enroll|install|connect)/i, `${name} must disclaim performing the join`);
+  }
+});
