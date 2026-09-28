@@ -93,6 +93,10 @@ export const SAFE_ENTROPY_TOKENS = [
   "$SCRATCH/fb-repo/fallback/jill-20260926T214500Z.md",
   "$SCRATCH/fb-repo/fallback/codex-20260926T214700Z.md",
   "https://api.github.com/repos/Uuriko/project-room/issues/266/comments?per_page=100&page=$",
+  // Well-known PUBLIC token contract addresses — the USDC rail's asset
+  // allowlist (server/usdc-payouts.mjs). World-readable on-chain; grant nothing.
+  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC on Solana
 ];
 
 // Directories scanned: source code where a real secret could hide.
