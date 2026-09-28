@@ -18,10 +18,11 @@
 //   can successfully invoke stays listed. The carve-outs below encode
 //   the exact write subsets call time still permits, verified against
 //   the denial code paths (see comments).
-// - Grant edges (slice 1) plug in here: capability.requiresGrant +
-//   agent.grants. Today no capability declares requiresGrant, so the
-//   seam is inert — but the predicate is already the single place
-//   where both the catalog and future grants decide visibility.
+// - Grant edges (slice 1, RC-2026-09-27-2728) plug in here:
+//   capability.requiresGrant + agent.grants, resolved fresh per request
+//   by resolveCatalogAgent from the live grant table. No capability
+//   declares requiresGrant yet, so the predicate half stays quiet until
+//   a capability opts in — but the descriptor half is live.
 //
 // Agent descriptor shape (built per request by resolveCatalogAgent;
 // plain data, no store handles):
@@ -35,13 +36,14 @@
 //       isOwner,                       // ownership implies full authority
 //       active,
 //     }],
-//     grants: [],                      // slice-1 seam: capability grant edges
+//     grants: [],                      // slice-1 live edges, resolved fresh per request by resolveCatalogAgent
 //   }
 // Capability descriptor shape: the MCP tool definition ({ name,
 // annotations.readOnlyHint }) or { name, readOnly }.
 
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { resolveGrants } from "./grants.mjs"; // UFO-steal slice 1: live grant edges feed the catalog seam
 
 // Write tools a guest agent may still invoke. The store.command guest
 // gate (server/store.mjs) admits MESSAGE_POSTED chat posts — but drafts
@@ -79,8 +81,10 @@ export function capabilityVisibleTo(agent, capability) {
   if (!agent || agent.kind === "human") return true;
   if (!capabilityIsWrite(capability)) return true;
   // Slice-1 seam: grant edges refine tiers. A capability that declares
-  // a required grant is withheld unless the agent holds that grant
-  // edge. Inert today: no capability declares requiresGrant.
+  // a required grant is withheld unless the agent holds that grant edge.
+  // agent.grants is populated live by resolveCatalogAgent from the grant
+  // table (RC-2026-09-27-2728); no capability declares requiresGrant yet,
+  // so this half stays quiet until a capability opts in.
   const requiresGrant = capability?.requiresGrant;
   if (requiresGrant !== undefined && requiresGrant !== null) {
     return (agent.grants ?? []).includes(requiresGrant);
@@ -143,5 +147,21 @@ export function resolveCatalogAgent(store, identity) {
       });
     }
   }
-  return { kind: "agent", identityId, memberships, grants: [] };
+  // UFO-steal slice 1 (RC-2026-09-27-2728): the catalog seam. Live grant
+  // edges, resolved fresh per request like the tier rows above — a grant
+  // issued mid-serve shows up in the next listing, a revocation drops out.
+  // Guests can never hold edges (server/grants.mjs refuses issuance), so
+  // they are skipped explicitly. Throws nothing: on any failure the
+  // descriptor degrades to no grants (withholding, never refusing).
+  const grants = new Set();
+  if (store?.db) {
+    const nowMs = Date.now();
+    for (const m of memberships) {
+      if (m.isGuest) continue;
+      try {
+        for (const edge of resolveGrants(store.db, m.roomId, m.memberId, nowMs)) grants.add(edge.capability);
+      } catch { /* degrade to no grants for this membership */ }
+    }
+  }
+  return { kind: "agent", identityId, memberships, grants: [...grants] };
 }

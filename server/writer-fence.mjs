@@ -276,6 +276,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // intentionally NOT fenced — older writers have no code path to it, and
   // the module verifies its own schema on open. Rows never grant permission.
   "land_queue",
+  // agent_capability_grants (UFO-steal slice 1, RC-2026-09-27-2728:
+  // per-agent capability grant edges). One row per (room, agent,
+  // capability); revocation stamps revoked_at, expiry is lazy/fail-closed.
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to it, and server/grants.mjs verifies its own schema on open.
+  "agent_capability_grants",
   // referral_invite_keys + referral_invites + referral_chain_members
   // (signed agent-carried referral invites): per-room Ed25519 signing keys
   // (private half never leaves the database), the private mint/redeem/

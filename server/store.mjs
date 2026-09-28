@@ -22,6 +22,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -905,6 +906,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
       // slice 1/3 agent_operator_controls table (module removed).
       ensureAutonomyTiersSchema(this.db);
+      // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant
+      // edges — purely additive table, IF NOT EXISTS is idempotent, no
+      // schema version bump.
+      ensureGrantsSchema(this.db);
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
