@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T20:29:04Z · board: Uuriko/project-room#1160 · watermark: 5877759918 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=beb50c3bdeb3d0981b1dd83434a2d356f6bab8cede73fd983810fad6b7fdea3c -->
+<!-- generated: 2026-09-28T20:58:24Z · board: Uuriko/project-room#1160 · watermark: 5878394680 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=e57bbdcff0b6ebc9e8c0c2a58f65cdc5d36ae726fb30929459b778b144aaf016 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,7 +28,7 @@ RC-2026-09-28-2876 | jillianai | working | 2026-09-28T21:47:51Z | server/work-co
 RC-2026-09-28-2877 | jillianai | working | 2026-09-28T21:47:51Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-28T21:47:52Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +3 more
+… +2 more
 
 ## file-claims
 file | lane | task-id | state
@@ -42,7 +42,6 @@ docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
 docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-2961 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
-scripts/room | jill | RC-2026-09-28-3110 | working
 scripts/runtime-package.mjs | jill | RC-2026-09-28-2873 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2880 | working
@@ -128,7 +127,6 @@ tests/room-activation-pack.test.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2879 | submitted
-tests/room-sweep-suppressions.test.js | jill | RC-2026-09-28-3110 | working
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875 | working
@@ -178,7 +176,6 @@ RC-2026-09-28-2878 | jillianai | working | 2026-09-28T21:47:52Z | server/dm-even
 RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-28T21:47:54Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2961 | jill | working | 2026-09-29T01:29:33Z | deploy/agent-discovery.mjs, docs/SWARM-PLUG-IN.md, docs/GUEST-AGENT-LINKS.md, AGENTS.md, tests/agent-access-requests-http.test.js
-RC-2026-09-28-3110 | jill | working | 2026-09-29T02:19:43Z | scripts/room, tests/room-sweep-suppressions.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -189,16 +186,16 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-28-3200 | none | 5878394680
+unknown | none | 5878393447
+RC-2026-09-28-3151 | none | 5878291527
+RC-2026-09-28-3150 | none | 5878290741
+unknown | none | 5878259746
+unknown | none | 5878259344
+RC-2026-09-28-3110 | 035cd0e994939fe7436c2f9607eb5d7ec4116cb8 | 5878148822
 RC-2026-09-28-2981 | 07596e2f4 | 5877651005
 RC-2026-09-28-2973 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877337208
 RC-2026-09-28-2972 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877336767
-RC-2026-09-28-2971 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877336220
-RC-2026-09-28-2905 | 96c2a0a44 | 5875798626
-unknown | 85783c2081eaa39e7436989505a319ee12b4ac86 | 5869046049
-RC-2026-09-28-2902 | 13052eb23d3efe1c127dd9d1d3043ef1449edbea | 5866242339
-RC-2026-09-28-2901 | none | 5865869469
-unknown | none | 5865335154
-RC-2026-09-27-2743 | none | 5865296561
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -208,5 +205,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=244 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=68 overlap_files=16 watermark=5877759918
+board_comments=262 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=66 overlap_files=16 watermark=5878394680
 
