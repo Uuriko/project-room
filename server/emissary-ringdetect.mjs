@@ -104,7 +104,6 @@ export function clusterEntities(nodes, { minSize = 2 } = {}) {
   if (!Array.isArray(nodes)) fail("emissary_ring_bad_nodes", "nodes must be an array");
   const uf = unionFind(nodes);
   const attrOwners = new Map(); // "attr:value" -> first owner id
-  const links = new Map(); // root -> Set("attr:value")
   for (const node of nodes) {
     const attrs = isPlainObject(node.attributes) ? node.attributes : {};
     for (const attr of CLUSTER_ATTRS) {
