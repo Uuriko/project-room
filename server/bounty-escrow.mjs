@@ -62,6 +62,22 @@ import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
+import { encodeRow, decodeRow } from "./persisted-row.mjs";
+
+// Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
+// Fields mirror the dispute record shape built by createDisputes in
+// bounty-disputes.mjs; unknown fields are dropped on read and missing fields
+// take these defaults, so rows written by older code (plain JSON body, no
+// envelope) still hydrate after refactors.
+export const BOUNTY_DISPUTE_ROW_KIND = "bounty-dispute";
+const DISPUTE_FIELDS = ["disputeId", "bountyId", "bountyAmount", "kind", "bondSnapshot",
+  "maxDisputeCost", "state", "tier", "raisedBy", "reason", "evidence", "decider",
+  "challengedBy", "escalations", "recordedCost", "forfeitedBond", "resolution",
+  "unavailable", "notified"];
+const DISPUTE_DEFAULTS = { kind: "economic", bondSnapshot: null, maxDisputeCost: 0,
+  state: "opened", tier: 0, raisedBy: null, reason: null, evidence: [],
+  decider: null, challengedBy: null, escalations: [], recordedCost: 0,
+  forfeitedBond: 0, resolution: null, unavailable: null, notified: false };
 
 export const GENESIS_LANES = Object.freeze([
   "id:agent/jill", "id:agent/instinct", "id:agent/grokbot", "id:agent/codex",
@@ -875,7 +891,11 @@ export class BountyEscrow {
       const records = new Map();
       try {
         for (const row of this.db.prepare("SELECT dispute_id, body FROM bounty_disputes").all())
-          records.set(row.dispute_id, JSON.parse(row.body));
+          // Replay-safe hydration: enveloped rows unwrap, legacy rows (plain
+          // JSON body, no envelope) load with unknown fields dropped and
+          // missing fields defaulted. Never throws on old rows.
+          records.set(row.dispute_id, decodeRow(row.body,
+            { kind: BOUNTY_DISPUTE_ROW_KIND, fields: DISPUTE_FIELDS, defaults: DISPUTE_DEFAULTS }));
       } catch { /* read-only on a pre-escrow database: no disputes yet */ }
       this._disputeRecords = records;
       this._disputes = createDisputes({ store: records, onDisputeFinalized: packet => this._onDisputeFinalized(packet) });
@@ -2154,7 +2174,7 @@ export class BountyEscrow {
     const at = isoNow(this.nowMs());
     this.db.prepare(`INSERT INTO bounty_disputes (dispute_id, room_id, body, updated_at) VALUES (?,?,?,?)
       ON CONFLICT(dispute_id) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at`)
-      .run(dispute.disputeId, roomId, JSON.stringify(dispute), at);
+      .run(dispute.disputeId, roomId, JSON.stringify(encodeRow(BOUNTY_DISPUTE_ROW_KIND, dispute)), at);
   }
 
   // Arbitrator cards are drawn from CURRENT room membership — never a
