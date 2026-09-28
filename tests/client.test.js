@@ -27,6 +27,20 @@ test("browser refresh negotiates offers without claiming support on an older res
   assert.equal(requests.length, 1); assert.equal(requests[0].options.headers["X-Project-Room-Offer-Context"], "1");
   assert.equal(seen[0].offerContextVersion, undefined);
 });
+test("bounded conversation reads preserve selection and reject a late response after signout", async () => {
+  const pending = deferred(), requests = [];
+  const payload = { ...snapshot(4), conversationVersion: 1, mode: "replace", limit: 3,
+    messageId: "root", messages: [{ id: "root", body: "current root" }], nextCursor: null, checkpoint: null };
+  const client = new RoomClient({ fetcher: async url => { requests.push(url); return response(await pending.promise); } });
+  client.session = identity();
+  const read = client.conversation({ limit: 3, messageId: "root" });
+  assert.match(requests[0], /conversation\?limit=3&messageId=root/);
+  client.endAccess(); pending.resolve(payload);
+  await assert.rejects(read, /identity changed/);
+  client.session = identity();
+  assert.equal((await client.conversation({ limit: 3, messageId: "root" })).messages[0].body, "current root");
+  await assert.rejects(client.conversation({ limit: 3, messageId: "other" }), /could not be confirmed/);
+});
 test("failed command leaves retry object unchanged and never reports a receipt", async () => {
   const client = new RoomClient({ fetcher: async () => response({ error: { message: "Stale revision" } }, 409) });
   client.session = identity();
