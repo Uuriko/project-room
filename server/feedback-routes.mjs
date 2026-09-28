@@ -54,7 +54,9 @@ const STATUS_FOR_CODE = {
 
 // Per-lane filing throttle: 10 filings/hour. The room funnel already applies
 // its 60/min write limit; this is the additional economic throttle so a
-// single lane cannot spray the triage queue at machine speed.
+// single lane cannot spray the triage queue at machine speed. The submit
+// route keys the lane on the room (`${roomId}:${lane}`), so the budget is
+// per room, not global.
 export function createSubmitLimiter({ capacity = 10, refillPerHour = 10, now } = {}) {
   const clock = now ?? (() => Date.now());
   const buckets = new Map();
@@ -72,8 +74,15 @@ export function createSubmitLimiter({ capacity = 10, refillPerHour = 10, now } =
   };
 }
 
-// Process-level singletons (see the durability note above).
-const defaultStore = createFeedbackStore();
+// Process-level per-room stores (see the durability note above). Feedback
+// IDs and list reads are room-keyed: one room can never see another room's
+// filings. Tests inject their own feedbackStore and bypass this entirely.
+const roomStores = new Map();
+function storeForRoom(roomId) {
+  let fb = roomStores.get(roomId);
+  if (!fb) { fb = createFeedbackStore(); roomStores.set(roomId, fb); }
+  return fb;
+}
 const defaultLimiter = createSubmitLimiter();
 
 const readMethod = method => method === "GET" || method === "HEAD";
@@ -96,7 +105,7 @@ export function handleFeedbackCore({ req, res, store, roomId, auth, feedbackRout
 function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
   feedbackStore, limiter, helpers }) {
   const { json, reject, body } = helpers;
-  const fb = feedbackStore ?? defaultStore;
+  const fb = feedbackStore ?? storeForRoom(roomId);
   const lim = limiter ?? defaultLimiter;
   const lane = auth?.member?.id;
   if (typeof lane !== "string" || !LANE_RE.test(lane)) {
@@ -118,7 +127,9 @@ function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, fe
 
   if (feedbackRoute === "submit") {
     if (req.method !== "POST") reject(405, "method_not_allowed", "Use POST to file feedback");
-    if (!lim.check(lane)) {
+    // Room-keyed: a lane's 10/hour budget is per room, so filing in one
+    // room never starves another.
+    if (!lim.check(`${roomId}:${lane}`)) {
       reject(429, "rate_limited", "Too many feedback filings. Slow down — each filing should carry a real repro.");
     }
     // The member's lane is authoritative; a body-claimed lane that disagrees

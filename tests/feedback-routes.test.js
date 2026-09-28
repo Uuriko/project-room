@@ -206,6 +206,29 @@ test("unknown route → 404", () => {
   assert.equal(e.status, 404);
 });
 
+test("rooms are isolated: one room cannot see another's feedback", () => {
+  // No injected store — this exercises the real per-room store path.
+  // Unique room ids keep the module-global map hermetic across tests.
+  call({ method: "POST", route: "submit", data: goodFiling(), roomId: "iso-room-a" });
+  const b = call({ method: "GET", route: "list", roomId: "iso-room-b" }).result;
+  assert.equal(b.status, 200);
+  assert.deepEqual(b.value.clusters, []);
+  const a = call({ method: "GET", route: "list", roomId: "iso-room-a" }).result;
+  assert.equal(a.value.clusters.length, 1);
+  assert.equal(a.value.roomId, "iso-room-a");
+});
+
+test("rate-limit budget is per room: filing in one room never starves another", () => {
+  const limiter = createSubmitLimiter({ capacity: 1, refillPerHour: 0 });
+  call({ method: "POST", route: "submit", data: goodFiling(), roomId: "rl-room-a", limiter });
+  // Same lane, different room: fresh budget.
+  call({ method: "POST", route: "submit", data: goodFiling(), roomId: "rl-room-b", limiter });
+  // Same lane, same room again: exhausted.
+  const e = callErr({ method: "POST", route: "submit", data: goodFiling(), roomId: "rl-room-a", limiter });
+  assert.equal(e.status, 429);
+  assert.equal(e.code, "rate_limited");
+});
+
 test("triage with a bad verdict → 422 invalid_verdict", () => {
   const fb = createFeedbackStore();
   const id = call({ method: "POST", route: "submit", data: goodFiling(), feedbackStore: fb }).result.value.feedback_id;

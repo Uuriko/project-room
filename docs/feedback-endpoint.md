@@ -208,9 +208,11 @@ Today:
 ## 6. Open items (documented, not blocking)
 
 - **Durable persistence.** The store is process-level today
-  (pure, injected clock, caller-owned state). Feedback drains into
-  the claims board via triage promotion, so restart loss is bounded —
-  but durable SQLite persistence is the next slice.
+  (pure, injected clock, caller-owned state), one store per room —
+  rooms are isolated from each other, but all state is lost on
+  restart. Feedback drains into the claims board via triage
+  promotion, so restart loss is bounded — but durable SQLite
+  persistence is the next slice.
 - **Sybil-resistant admission tiers** for filing rights (beyond the
   junk-rate suspension): what earns the right to file in an
   adversarial room, and what throttles a fresh lane.
