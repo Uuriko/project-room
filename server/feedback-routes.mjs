@@ -81,6 +81,21 @@ const readMethod = method => method === "GET" || method === "HEAD";
 export function handleFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
   feedbackStore, limiter, helpers }) {
   const { json, reject, body } = helpers;
+  try {
+    return dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
+      feedbackStore, limiter, helpers });
+  } catch (e) {
+    // Domain errors carry a machine code, never an HTTP status — the
+    // mapping lives here so no internal detail leaks and every route
+    // shares one stable code→status table.
+    if (e instanceof FeedbackError) reject(STATUS_FOR_CODE[e.code] ?? 500, e.code, e.message);
+    throw e;
+  }
+}
+
+function dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
+  feedbackStore, limiter, helpers }) {
+  const { json, reject, body } = helpers;
   const fb = feedbackStore ?? defaultStore;
   const lim = limiter ?? defaultLimiter;
   const lane = auth?.member?.id;
@@ -188,9 +203,10 @@ export function handleFeedbackCore({ req, res, store, roomId, auth, feedbackRout
 }
 
 export async function handleFeedback(options) {
-  const { req, res, helpers } = options;
+  const { req, res, helpers, reauthorize } = options;
   const requestData = readMethod(req.method) ? undefined : await helpers.body(req);
   const run = () => handleFeedbackCore({ ...options,
+    auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value, head) => ({ status, value, head }) },
   });
   const result = run();

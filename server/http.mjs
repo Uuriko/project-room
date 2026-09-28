@@ -17,6 +17,7 @@ import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectS
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
@@ -1198,6 +1199,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scopes_supported: [...OAUTH_SCOPES],
           token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
         });
+      }
+      // GET /.well-known/feedback — /feedback standard discovery metadata.
+      // Mirrors docs/feedback-endpoint.md §7: version, intake URL template,
+      // accepted severities, identity requirements, rate limit, triage SLA,
+      // verdict enum, and the verdict polling URL template. Plain JSON, no
+      // signature: the standard's discovery card is advisory, not
+      // attestable (it states the room's policy; the room's signed agent
+      // card is the attestable surface). Unaauthenticated like the other
+      // well-known metadata on this door.
+      if (url.pathname === "/.well-known/feedback" && ["GET", "HEAD"].includes(req.method)) {
+        const origin = expectedOrigin();
+        return json(res, 200, {
+          feedback_version: "1",
+          intake: { url_template: `${origin}/api/rooms/{roomId}/feedback`, method: "POST" },
+          severities: ["bug", "perf", "missing-feature", "docs"],
+          identity: { required: "authenticated room member", lane: "member id", guests: "read-only" },
+          rate_limit: { filings_per_lane_per_hour: 10 },
+          triage_sla: "reviewers aim for a first verdict within 24 hours of filing",
+          verdict_enum: ["real", "junk", "user-error"],
+          verdict_polling: { url_template: `${origin}/api/rooms/{roomId}/feedback/{feedback_id}`, method: "GET" },
+        }, req.method === "HEAD");
       }
       // GET /oauth/authorize — validate the request and show the consent screen.
       // The user must be logged in (account session cookie); otherwise redirect
@@ -3177,6 +3199,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
+      // Agent /feedback endpoint (structured bug/feature reports): every
+      // route template below is documented in docs/openapi.yaml — the
+      // route-docs gate extracts these literals from this file. The literal
+      // segments (queue, notifications) are tested before the {id} template
+      // so they are never mistaken for a feedback id (each regex is
+      // anchored, so this is belt-and-braces).
+      const feedbackBaseMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback$/.exec(url.pathname);
+      const feedbackQueueMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/queue$/.exec(url.pathname);
+      const feedbackNotificationsMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/notifications$/.exec(url.pathname);
+      const feedbackItemMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})$/.exec(url.pathname);
+      const feedbackTriageMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/triage$/.exec(url.pathname);
+      const feedbackAppealMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/appeal$/.exec(url.pathname);
+      const feedbackAppealDecisionMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/appeal\/decision$/.exec(url.pathname);
+      const feedbackOutcomeMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/outcome$/.exec(url.pathname);
+      const feedbackMatch = feedbackBaseMatch ?? feedbackQueueMatch ?? feedbackNotificationsMatch
+        ?? feedbackAppealDecisionMatch ?? feedbackTriageMatch ?? feedbackAppealMatch
+        ?? feedbackOutcomeMatch ?? feedbackItemMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file. The
@@ -3244,13 +3283,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !bountyMatch && !creditsMatch && !boardV2Match
+        && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? bountyMatch ?? creditsMatch ?? boardV2Match
+        ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
@@ -3323,7 +3362,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // their approved history access. Same code and copy as the store
       // gate, so clients see one stable denial either way.
       if (auth.member && isGuestAgentMemberId(auth.member.id)
-        && (collabMatch || workClaimMatch || bountyMatch || creditsMatch)
+        && (collabMatch || workClaimMatch || feedbackMatch || bountyMatch || creditsMatch)
         && !["GET", "HEAD"].includes(req.method)) {
         reject(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -3386,6 +3425,39 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
+      }
+      // Agent /feedback endpoint (task RC-2026-09-27-2745): structured
+      // bug/feature reports with a Mark-staked triage economy, feeding the
+      // claims board via severity-routed promotion. Shares the room funnel
+      // above (credential, fence, rate-limit, API-key scopes); non-GET
+      // routes enforce the caller's autonomy tier inside the handler. Guests
+      // may read but never write, per the guest policy (they stay out of
+      // claims-board participation; filing feedback is participation). The
+      // literal segments (queue, notifications) resolve before the {id}
+      // template so they are never mistaken for a feedback id (each regex
+      // is anchored, so this is belt-and-braces).
+      if (feedbackMatch) {
+        const feedbackRoute = feedbackQueueMatch ? "queue"
+          : feedbackNotificationsMatch ? "notifications"
+          : feedbackAppealDecisionMatch ? "appeal-decision"
+          : feedbackTriageMatch ? "triage"
+          : feedbackAppealMatch ? "appeal"
+          : feedbackOutcomeMatch ? "outcome"
+          : feedbackBaseMatch ? (["GET", "HEAD"].includes(req.method) ? "list" : "submit")
+          : "read";
+        const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
+        return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
+          feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
           reauthorize: () => {
             const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
               : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
