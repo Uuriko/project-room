@@ -36,6 +36,7 @@ import {
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools } from "./mcp-discovery.mjs";
+import { resolveCatalogAgent } from "./capability-visibility.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -625,7 +626,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (selection.error === "profile") {
       return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { profile: "must be core or full" } });
     }
-    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
+    // Withheld, never refused (RC-2026-09-27-2731): the listing is filtered
+    // by THIS identity's per-room standing (fresh tier rows, never
+    // cached). Denied capabilities are absent from the catalog; the
+    // tools/call path below keeps its own authorization checks as
+    // defense in depth.
+    const agent = resolveCatalogAgent(store, identity);
+    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases, agent), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
   }
   if (message.method === "tools/call") {
     const called = message.params?.name;
