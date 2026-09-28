@@ -318,7 +318,13 @@ export const unfencedAdditiveTables = Object.freeze([
   "board_vtwo_claims",
   "board_vtwo_events",
   "board_vtwo_mirror",
-  "board_vtwo_idempotency"
+  "board_vtwo_idempotency",
+  // external_identities + external_receipts (Emissary slice 1a,
+  // RC-2026-09-27-2860): external identity graph + receipt index. Purely
+  // additive and intentionally NOT fenced — older writers have no code path
+  // to them, and the modules verify their own schema on open (IF NOT EXISTS).
+  "external_identities",
+  "external_receipts"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
