@@ -27,7 +27,15 @@ revision; otherwise the card is served unsigned in a development checkout. Relea
 now stop when the private key is unavailable or does not match the pinned public
 key. The signer preserves the previous generated file on failure. Local unsigned
 builds require the explicit `node scripts/sign-agent-card.mjs --allow-unsigned`;
-the Worker deploy configuration never passes that option. CI bundle validation
+the Worker deploy configuration never passes that option. `--allow-unsigned`
+writes the explicit opt-in into `deploy/agent-card-signed.mjs` as
+`AGENT_CARD_UNSIGNED_REASON`; an unsigned card with a null reason is the
+silent build default, and the boot gate (`server/boot-config.mjs`,
+`validateCriticalConfig()`, called from `server.mjs`) refuses to boot
+production with an unsigned card — with or without the opt-in — and fails
+loud in dev with a member-facing message naming the fix. The served unsigned
+card is marked `signed: false` (plus `unsignedReason` when the opt-in was
+recorded) so members can see the degraded state. CI bundle validation
 uses `scripts/worker-ci-build.mjs`, which creates a temporary configuration with
 the explicit unsigned option and always invokes Wrangler with `--dry-run`.
 It accepts no deployment arguments and leaves the real configuration unchanged.

@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed } from "../scripts/runtime-package.mjs";
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
@@ -19,7 +20,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ repository, commit, destination });
+  let receipt = createRuntimePackage({ repository, commit, destination });
   for (const name of ["LICENSE", "NOTICE", "THIRD_PARTY.md"]) {
     assert.deepEqual(readFileSync(join(destination, name)),
       execFileSync("git", ["show", `${commit}:${name}`], { cwd: repository }),
@@ -73,6 +74,26 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.equal(await buildAssets(pathToFileURL(assets + "/")), committedAssets.length);
   for (const path of committedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const committedFixture = await frozenRecoveryFixture(repository, destination, commit);
+  // The fail-loud boot gate (server/boot-config.mjs) refuses a production boot
+  // with an unsigned card. This synthetic package is built from an unsigned dev
+  // tree, so fixture-sign the packaged card for the packaged revision (the
+  // candidate's version.mjs is unstamped, so packaged deployedInfo().revision
+  // is "dev") and update the manifest hash. A real production build goes
+  // through scripts/sign-agent-card.mjs, which fails closed without the key.
+  {
+    const signedPath = "deploy/agent-card-signed.mjs";
+    const module = `// Fixture-signed by tests/runtime-package.test.js for the packaged\n// production boot probe — not a real signature (see scripts/sign-agent-card.mjs).\nexport const AGENT_CARD_SIGNATURE = "fixture-signature";\nexport const AGENT_CARD_SIGNED_REVISION = "dev";\nexport const AGENT_CARD_UNSIGNED_REASON = null;\nexport const AGENT_CARD_JWS_SIGNATURES = null;\n`;
+    writeFileSync(join(destination, signedPath), module);
+    const manifestPath = join(destination, "runtime-manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const entry = manifest.files.find(file => file.path === signedPath);
+    entry.bytes = Buffer.byteLength(module);
+    entry.sha256 = createHash("sha256").update(module, "utf8").digest("hex");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+  // Re-baseline: the boot/data probes below must not mutate the package
+  // relative to this fixture-signed state.
+  receipt = verifyRuntimePackage(destination);
   const { auditRecovery } = await import(pathToFileURL(join(destination, "server/recovery.mjs")));
   const f = committedFixture(join(directory, "fixture.sqlite"));
   try {

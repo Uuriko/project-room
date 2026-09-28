@@ -6,8 +6,15 @@
 // state, reverted after deploy) when the private key is present;
 // deploy/agent-discovery.mjs only attaches the envelope and the JWS array
 // when the signature covers exactly the served build's revision.
+//
+// AGENT_CARD_UNSIGNED_REASON records whether the unsigned state was an
+// EXPLICIT opt-in (scripts/sign-agent-card.mjs --allow-unsigned writes the
+// reason here) or the silent build default (null). The boot gate
+// (server/boot-config.mjs) fails loud when this is null: an unsigned card
+// must be a deliberate, recorded choice, never an accident.
 export const AGENT_CARD_SIGNATURE = null;
 export const AGENT_CARD_SIGNED_REVISION = null;
+export const AGENT_CARD_UNSIGNED_REASON = null;
 // A2A v1.0 §8.4 JWS AgentCardSignature array (RC-2026-09-27-2715): null when
 // unsigned, otherwise [{ protected, signature }] computed over the card plus
 // the legacy envelope above (the JWS payload excludes only `signatures`).

@@ -3,7 +3,7 @@
 import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
-import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
+import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "../server/governance.mjs";
 
@@ -248,6 +248,33 @@ export function agentJwksJson() {
   }, null, 2) + "\n";
 }
 
+// Signature state of the served agent card, for the boot gate
+// (server/boot-config.mjs) and for member-facing honesty: an unsigned card
+// must be a deliberate, recorded choice (AGENT_CARD_UNSIGNED_REASON set by
+// scripts/sign-agent-card.mjs --allow-unsigned), never the silent build
+// default. `signed` is true only when the signature covers exactly this
+// build's revision; the revision gate lives in agentCard() below.
+export function agentCardSignatureState() {
+  const revisionMatch = typeof AGENT_CARD_SIGNED_REVISION === "string" && AGENT_CARD_SIGNED_REVISION.length > 0
+    && AGENT_CARD_SIGNED_REVISION === deployedInfo().revision;
+  const signed = Boolean(AGENT_CARD_SIGNATURE) && revisionMatch;
+  return {
+    signed,
+    signedRevision: signed ? AGENT_CARD_SIGNED_REVISION : null,
+    unsignedReason: signed ? null : (typeof AGENT_CARD_UNSIGNED_REASON === "string" ? AGENT_CARD_UNSIGNED_REASON : null),
+  };
+}
+
+// Mark an unsigned card explicitly so members fetching
+// /.well-known/agent-card.json can see the degraded state instead of
+// silently missing the signature fields. Signed cards are untouched: their
+// byte contract with verifiers must not move.
+export function markUnsignedCard(card, reason) {
+  card.signed = false;
+  if (typeof reason === "string" && reason.length > 0) card.unsignedReason = reason;
+  return card;
+}
+
 // Attach the signature envelope to a card object (mutates and returns it).
 // Shared by agentCard() (serve time) and scripts/sign-agent-card.mjs (build
 // time), so the JWS payload the signer computes is byte-identical to what
@@ -428,7 +455,10 @@ export function agentCard() {
   // Build-time Ed25519 signature (RC-2026-09-23-105) plus the A2A v1.0 JWS
   // signatures[] array (RC-2026-09-27-2715). Both attach only when the
   // signature covers exactly this build's card bytes; otherwise the card is
-  // served unsigned (no signature fields at all).
+  // served unsigned — and, since an unsigned card must never be the silent
+  // default (RC-2026-09-27-2732), it is marked signed:false (with the
+  // recorded --allow-unsigned reason when one exists) so members can see
+  // the degraded state.
   // House-envelope verifiers recompute canonicalCardBytes({
   // agentId: signatureAgentId, card }) with server/agent-card-signing.mjs and
   // check cardSignature against publicKey. The house signature covers name,
@@ -446,6 +476,8 @@ export function agentCard() {
       jwsSignatures: AGENT_CARD_JWS_SIGNATURES,
       revision: AGENT_CARD_SIGNED_REVISION,
     });
+  } else {
+    markUnsignedCard(card, agentCardSignatureState().unsignedReason);
   }
   return card;
 }

@@ -228,6 +228,7 @@ optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-ada
 optional.push("server/receipts-page.mjs", "server/receipts-data.mjs"); // public run-receipts page + generated board snapshot (imported by server/http.mjs)
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
+optional.push("server/boot-config.mjs"); // imported by server.mjs: fail-loud critical-config boot gate (RC-2026-09-27-2732)
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
 optional.push("server/open-questions.mjs"); // F1: open-questions radar read (imported by server/http.mjs)
