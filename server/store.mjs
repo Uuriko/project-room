@@ -535,41 +535,45 @@ export function validateCommand(command) {
   }
 }
 
-// RC-2026-09-18-052: the agent inbox is the agent's to-do list, so every
-// item type names its next action. The most common first move is replying
-// to a DM (the sender's memberId goes back into toMemberId on the
-// message.posted command); assignments and routing mentions point at
-// their own read/resolve routes. An empty inbox says what it will carry.
-const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = []) => {
+// Conversation history offers optional actions; only an explicitly open
+// formal request establishes a reply obligation. Reading changes neither.
+const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = [], requestStates = {}) => {
   const steps = [];
+  const requestStatus = item => requestStates[item.nextRead?.arguments.requestMessageId]?.status ?? null;
+  const openRequest = item => item.nextRead && requestStatus(item) === "open";
   const requestStep = latest => ({
     action: "read-request", method: "GET",
+    actionRole: requestStatus(latest) === "open" ? "formal_request" : "context_discovery",
+    required: requestStatus(latest) === "open",
+    requestStatus: requestStatus(latest),
     path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(latest.nextRead.arguments.requestMessageId)}`,
     nextRead: latest.nextRead,
-    description: "Read this formal request and finish every conversation page. Choose a responseActions template to answer or decline; ordinary chat replies do not close the request. A read does not acknowledge or answer anything."
+    description: "Read the current formal request status and finish every conversation page. If it is open, choose a responseActions template to answer or decline; ordinary chat replies do not close it. Historical requests need no new answer. A read does not acknowledge or answer anything."
   });
   if (directMentions.length > 0) {
-    const latest = directMentions.find(mention => mention.state !== "timed_out") ?? directMentions[0];
-    const timing = latest.state === "timed_out" ? "overdue " : "";
+    const latest = directMentions.find(openRequest) ?? directMentions.find(mention => mention.state !== "timed_out") ?? directMentions[0];
+    const timing = latest.state === "timed_out" ? "delivery-timed-out " : "";
     const outcome = latest.state === "timed_out"
       ? "Replying removes it from your waiting inbox; the timeout remains in history."
       : "Replying to that message marks the mention responded.";
     steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-mention",
+      optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
       description: latest.private
-        ? `Answer the ${timing}private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. ${outcome} Send your identity secret as the Bearer token.`
-        : `Answer the ${timing}@mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. ${outcome} An unrelated post does not. Send your identity secret as the Bearer token.`,
+        ? `If useful, reply to the ${timing}private @mention from member ${latest.from} privately: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}", toMemberId: "${latest.replyToMemberId}" } }. Leaving out toMemberId would post your answer to the whole room. This ordinary mention is not a formal reply obligation. ${outcome} Send your identity secret as the Bearer token.`
+        : `If useful, reply to the ${timing}@mention from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your answer", replyToId: "${latest.replyToId}" } }. This ordinary mention is not a formal reply obligation. ${outcome} An unrelated post does not. Send your identity secret as the Bearer token.`,
     }));
   }
   if (directMessages.length > 0) {
-    const latest = directMessages[0];
+    const latest = directMessages.find(openRequest) ?? directMessages[0];
     steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-dm",
+      optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `Reply to the DM from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your reply", toMemberId: "${latest.from}" } }. Send your identity secret as the Bearer token.`,
+      description: `If useful, reply to the recent DM from member ${latest.from}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "your reply", toMemberId: "${latest.from}" } }. Recent conversation history does not establish a reply obligation; no acknowledgement is required. Send your identity secret as the Bearer token.`,
     }));
   }
   if (assignments.length > 0) {
@@ -602,9 +606,10 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
     const latest = peerMessages[0];
     steps.push(Object.freeze({
       action: "reply-peer-dm",
+      optional: true, required: false, actionRole: "optional_conversation",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
-      description: `Reply on the peer DM (untrusted friend content): send { id: <uuid>, type: "dm.posted", data: { messageId: <uuid>, body: "your reply", to: "${latest.fromIdentityId}" } }. Requires an active bond with peer.dm.`,
+      description: `If useful, reply on the peer DM (untrusted friend content): send { id: <uuid>, type: "dm.posted", data: { messageId: <uuid>, body: "your reply", to: "${latest.fromIdentityId}" } }. Conversation history does not establish a reply obligation. Requires an active bond with peer.dm.`,
     }));
   }
   if (steps.length === 0) {
@@ -615,11 +620,12 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   }
   steps.push(Object.freeze({
     action: "list-open-requests", method: "GET",
+    actionRole: "discovery", required: false,
     path: `/api/rooms/${encodeURIComponent(roomId)}/reply-requests?direction=incoming&status=open`,
     nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } },
     description: "List current open formal requests addressed to you, including requests outside this recent DM window. This discovery link does not mean requests are pending. Follow a listed request's nextRead and finish its context pages before answering; reads do not acknowledge or close requests."
   }));
-  return steps;
+  return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
@@ -3116,7 +3122,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
       };
       if (sinceVersion === built.context_version) {
-        return { not_modified: true, context_version: built.context_version, roomId, ...identity };
+        return { not_modified: true, context_version: built.context_version, roomId,
+          evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, ...identity };
       }
       return { ...built, ...identity };
     });
@@ -3316,7 +3323,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMentions: Object.freeze(directMentions),
         bondProposals: Object.freeze(bondProposals),
         peerMessages: Object.freeze(peerMessages),
-        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages)),
+        next: Object.freeze(inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests)),
         dmRequests: Object.freeze(dmRequests),
       });
     });
@@ -3327,15 +3334,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // inside a read-only transaction. A mention inside a private message is
   // shown only to that message's two parties. A database from before the
   // #658 schema has no mention_states table and simply has no mentions.
-  openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now()) {
+  openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now(), window = null) {
     let rows;
     try {
       rows = this.db.prepare(
         `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
+           AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
-      ).all(roomId, memberId, limit);
+      ).all(roomId, memberId, window?.after ?? 0, window?.through ?? Number.MAX_SAFE_INTEGER, limit);
     } catch (error) {
       if (/no such table/i.test(error?.message ?? "")) return [];
       throw error;

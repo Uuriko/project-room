@@ -8,6 +8,9 @@
 // since is a sequence number (applied per room) or the previous cursor
 // { rooms: { roomId: seq }, land: { roomId: updatedAt } }. Land-queue
 // changes do not advance the room sequence, so they use updated_at.
+// Pass cursor back unchanged while hasMore is true, even for an empty page.
+// Continuation adds roomAfter, landIds (timestamp tie breakers), and an optional
+// numeric floor. Reading discovers items; it never acknowledges or resolves them.
 
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
@@ -15,6 +18,7 @@ import { nextWorkStep } from "../src/workflow.js";
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
 const MAX_ITEMS = 100;
+const MENTION_WINDOW = 100;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -52,7 +56,16 @@ export function parseNeedsMeSince(since) {
     const rooms = integerMap(wrapped ? since.rooms ?? {} : since);
     const land = integerMap(wrapped ? since.land ?? {} : {});
     if (!rooms || !land) fail(422, "invalid_cursor", "since must be a sequence number or a cursor object");
-    return { provided: true, number: null, rooms, land };
+    const landIds = wrapped ? since.landIds ?? {} : {};
+    const roomAfter = wrapped ? since.roomAfter ?? "" : "";
+    const floor = wrapped ? since.floor ?? null : null;
+    if (!landIds || typeof landIds !== "object" || Array.isArray(landIds)
+      || Object.entries(landIds).some(([key, value]) => key.length > 128 || typeof value !== "string" || value.length > 256)
+      || typeof roomAfter !== "string" || roomAfter.length > 128
+      || (floor !== null && (!Number.isSafeInteger(floor) || floor < 0))) {
+      fail(422, "invalid_cursor", "Invalid continuation cursor");
+    }
+    return { provided: true, number: floor, rooms, land, landIds, roomAfter };
   }
   fail(422, "invalid_cursor", "since must be a sequence number or a cursor object");
 }
@@ -78,14 +91,14 @@ function push(items, item) {
   items.push(item);
 }
 
-function mentionsOf(store, roomId, memberId, after) {
+function mentionsOf(store, roomId, memberId, after, through) {
   let rows;
-  try { rows = store.openDirectMentions(roomId, memberId, MAX_PER_KIND); }
+  try { rows = store.openDirectMentions(roomId, memberId, MENTION_WINDOW, store.now(), { after, through }); }
   catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return [];
     throw error;
   }
-  return rows.filter(row => row.sequence > after).slice(0, MAX_PER_KIND).map(row => ({
+  return rows.filter(row => row.sequence > after).sort((a, b) => a.sequence - b.sequence).slice(0, MAX_PER_KIND + 1).map(row => ({
     kind: "mention",
     roomId,
     seq: row.sequence,
@@ -107,7 +120,6 @@ function directAsksOf(store, roomId, memberId, after, state) {
     .filter(request => request?.recipientId === memberId && request.status === "open");
   const items = [];
   for (const request of requests) {
-    if (items.length >= MAX_PER_KIND) break;
     const seq = eventSeq(store, roomId, request.openingEventId);
     if (seq == null || seq <= after) continue;
     items.push({
@@ -119,13 +131,12 @@ function directAsksOf(store, roomId, memberId, after, state) {
       next: { tool: "room_read_request", arguments: { roomId, requestMessageId: request.id } }
     });
   }
-  return items;
+  return items.sort((a, b) => a.seq - b.seq).slice(0, MAX_PER_KIND + 1);
 }
 
 function handoffsOf(store, roomId, memberId, after, state) {
   const items = [];
   for (const item of Object.values(state.workItems ?? {})) {
-    if (items.length >= MAX_PER_KIND) break;
     const handoff = item?.handoff;
     if (!handoff?.open) continue;
     const addressed = handoff.triageMemberId === memberId
@@ -142,7 +153,7 @@ function handoffsOf(store, roomId, memberId, after, state) {
       next: { tool: "room_read_work", arguments: { roomId, workItemId: item.id } }
     });
   }
-  return items;
+  return items.sort((a, b) => a.seq - b.seq).slice(0, MAX_PER_KIND + 1);
 }
 
 function roomDmsOf(store, roomId, memberId, after) {
@@ -150,8 +161,8 @@ function roomDmsOf(store, roomId, memberId, after) {
     `SELECT sequence, body FROM events
      WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
        AND json_extract(body,'$.data.toMemberId')=?
-     ORDER BY sequence DESC LIMIT ?`
-  ).all(roomId, after, memberId, MAX_PER_KIND);
+     ORDER BY sequence ASC LIMIT ?`
+  ).all(roomId, after, memberId, MAX_PER_KIND + 1);
   return rows.map(row => {
     const event = JSON.parse(row.body);
     const messageId = event.data?.messageId ?? event.id;
@@ -177,8 +188,8 @@ function peerDmsOf(store, roomId, identityId, after) {
      FROM peer_dm_messages m
      JOIN events e ON e.room_id=m.room_id AND e.id=m.event_id
      WHERE m.to_identity_id=? AND m.room_id=? AND e.sequence>?
-     ORDER BY e.sequence DESC LIMIT ?`
-  ).all(identityId, roomId, after, MAX_PER_KIND);
+     ORDER BY e.sequence ASC LIMIT ?`
+  ).all(identityId, roomId, after, MAX_PER_KIND + 1);
   return rows.map(row => ({
     kind: "dm",
     roomId,
@@ -194,7 +205,6 @@ function bondRequestsOf(store, roomId, pending, after) {
   const mine = pending.filter(row => row.roomHint === roomId);
   const items = [];
   for (const bond of mine) {
-    if (items.length >= MAX_PER_KIND) break;
     const seq = store.db.prepare(
       `SELECT sequence FROM events
        WHERE room_id=? AND json_extract(body,'$.type')='bond.proposed'
@@ -211,19 +221,19 @@ function bondRequestsOf(store, roomId, pending, after) {
       next: { tool: "bond_accept", arguments: { roomId, bondId: bond.bondId } }
     });
   }
-  return items;
+  return items.sort((a, b) => a.seq - b.seq).slice(0, MAX_PER_KIND + 1);
 }
 
-function landChangesOf(store, roomId, memberId, after) {
+function landChangesOf(store, roomId, memberId, after, afterId) {
   let rows;
   try {
     rows = store.db.prepare(
       `SELECT item_id, repo, pr_number, updated_at, title, checks_state
        FROM land_queue
-       WHERE room_id=? AND claimant_member_id=? AND updated_at>?
+       WHERE room_id=? AND claimant_member_id=? AND (updated_at>? OR (updated_at=? AND item_id>?))
          AND (observed=1 OR updated_at>created_at)
-       ORDER BY updated_at DESC LIMIT ?`
-    ).all(roomId, memberId, after, MAX_PER_KIND);
+       ORDER BY updated_at ASC, item_id ASC LIMIT ?`
+    ).all(roomId, memberId, after, after, afterId ?? "\uffff", MAX_PER_KIND + 1);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return [];
     throw error;
@@ -238,66 +248,91 @@ function landChangesOf(store, roomId, memberId, after) {
   }));
 }
 
-function landCursor(store, roomId, memberId) {
+function mentionHorizon(store, roomId, memberId, after, through) {
   try {
-    return store.db.prepare(
-      "SELECT MAX(updated_at) AS n FROM land_queue WHERE room_id=? AND claimant_member_id=?"
-    ).get(roomId, memberId)?.n ?? 0;
+    const rows = store.db.prepare(
+      `SELECT e.sequence FROM mention_states m
+       JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+       WHERE m.room_id=? AND m.mentioned_member_id=? AND e.sequence>? AND e.sequence<=?
+         AND m.state IN ('delivered','acknowledged','timed_out')
+       ORDER BY e.sequence LIMIT ?`
+    ).all(roomId, memberId, after, through, MENTION_WINDOW + 1);
+    return rows.length > MENTION_WINDOW ? rows[MENTION_WINDOW - 1].sequence : through;
   } catch (error) {
-    if (/no such table/i.test(error?.message ?? "")) return 0;
+    if (/no such table/i.test(error?.message ?? "")) return through;
     throw error;
   }
 }
 
+// The cursor acknowledges discovery, not completion. Only advance through
+// sequence groups returned in full; multiple attention kinds may share an event.
 export function collectNeedsMe(store, secret, { since } = {}) {
   const identity = store.identities.resolveGlobalIdentitySecret(secret);
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
   const links = store.db.prepare(
-    `SELECT l.room_id AS roomId, l.member_id AS memberId, r.sequence AS sequence, r.archived_at AS archivedAt
+    `SELECT l.room_id AS roomId, l.member_id AS memberId, r.archived_at AS archivedAt
      FROM identity_links l JOIN rooms r ON r.id=l.room_id
-     WHERE l.identity_id=?
-     ORDER BY l.room_id
-     LIMIT ?`
-  ).all(identity.identityId, MAX_ROOMS);
+     WHERE l.identity_id=? AND l.room_id>?
+     ORDER BY l.room_id LIMIT ?`
+  ).all(identity.identityId, parsed.roomAfter ?? "", MAX_ROOMS + 1);
   const items = [];
-  const rooms = {};
-  const land = {};
+  const rooms = { ...parsed.rooms };
+  const land = { ...parsed.land };
+  const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
-  for (const link of links) {
-    if (link.archivedAt) continue;
-    let authority;
-    try { authority = store.roomAuthority(link.roomId); }
-    catch { continue; }
+  let roomAfter = parsed.roomAfter ?? "";
+  let hasMore = links.length > MAX_ROOMS;
+  for (const link of links.slice(0, MAX_ROOMS)) {
+    if (link.archivedAt) { roomAfter = link.roomId; continue; }
+    // Do not silently acknowledge a room whose authority/projection failed.
+    const authority = store.roomAuthority(link.roomId);
     const member = authority.members?.[link.memberId];
-    if (!member || member.active === false) continue;
+    if (!member || member.active === false) { roomAfter = link.roomId; continue; }
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
-    rooms[link.roomId] = authority.sequence;
-    land[link.roomId] = landCursor(store, link.roomId, link.memberId);
-    const moved = authority.sequence > after;
-    if (moved) {
-      let state = null;
-      const projection = () => {
-        if (!state) state = store.room(link.roomId).state;
-        return state;
-      };
-      for (const item of mentionsOf(store, link.roomId, link.memberId, after)) push(items, item);
-      for (const item of roomDmsOf(store, link.roomId, link.memberId, after)) push(items, item);
-      for (const item of peerDmsOf(store, link.roomId, identity.identityId, after)) push(items, item);
-      for (const item of bondRequestsOf(store, link.roomId, pendingBonds, after)) push(items, item);
-      try {
-        for (const item of directAsksOf(store, link.roomId, link.memberId, after, projection())) push(items, item);
-        for (const item of handoffsOf(store, link.roomId, link.memberId, after, projection())) push(items, item);
-      } catch { /* a corrupt projection skips asks and handoffs for this room */ }
+    let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
+    let candidates = [];
+    if (authority.sequence > after) {
+      const state = store.room(link.roomId).state;
+      const kinds = [
+        mentionsOf(store, link.roomId, link.memberId, after, through),
+        roomDmsOf(store, link.roomId, link.memberId, after),
+        peerDmsOf(store, link.roomId, identity.identityId, after),
+        bondRequestsOf(store, link.roomId, pendingBonds, after),
+        directAsksOf(store, link.roomId, link.memberId, after, state),
+        handoffsOf(store, link.roomId, link.memberId, after, state)
+      ];
+      for (const kind of kinds) {
+        if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
+        for (const item of kind) push(candidates, item);
+      }
+      candidates = candidates.filter(item => item.seq <= through).sort((a, b) => a.seq - b.seq);
+      const remaining = MAX_ITEMS - items.length;
+      if (candidates.length > remaining) {
+        through = Math.min(through, candidates[remaining].seq - 1);
+        candidates = candidates.filter(item => item.seq <= through);
+      }
+      items.push(...candidates);
     }
-    for (const item of landChangesOf(store, link.roomId, link.memberId, landAfter)) push(items, item);
+    rooms[link.roomId] = through;
+    const changes = landChangesOf(store, link.roomId, link.memberId, landAfter, landIds[link.roomId]);
+    const selected = changes.slice(0, Math.min(MAX_PER_KIND, MAX_ITEMS - items.length));
+    items.push(...selected);
+    if (selected.length) {
+      const last = selected.at(-1);
+      land[link.roomId] = last.seq;
+      landIds[link.roomId] = last.id;
+    } else if (!changes.length) {
+      land[link.roomId] = landAfter;
+    }
+    const pending = through < authority.sequence || selected.length < changes.length;
+    if (pending) { hasMore = true; break; }
+    roomAfter = link.roomId;
+    if (items.length === MAX_ITEMS && link !== links.at(-1)) { hasMore = true; break; }
   }
-  items.sort((a, b) => a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : b.seq - a.seq);
-  return {
-    identityId: identity.identityId,
-    items: items.slice(0, MAX_ITEMS),
-    cursor: { rooms, land },
-    untrusted: true
-  };
+  // Retain the old rooms/land shape and extend it only for continuation/ties.
+  const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
+  items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
+  return { identityId: identity.identityId, items, cursor, hasMore, untrusted: true };
 }

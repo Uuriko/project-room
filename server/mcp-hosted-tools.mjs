@@ -22,7 +22,7 @@ const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCO
 export const hostedRoomTools = [
   tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
-    since: { description: "Previous cursor: a sequence number, or { rooms, land } from the last room_needs_me result." }
+    since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
@@ -37,7 +37,7 @@ export const hostedRoomTools = [
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }), false),
   tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
-  tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when unchanged. Does not mark caught up or grant permission.", schema({
+  tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when structural context is unchanged; always consume fresh cursors. Does not mark caught up or grant permission.", schema({
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }
   }, ["roomId"])),
