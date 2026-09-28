@@ -87,6 +87,8 @@ import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
+import { EmissaryGraph, emissaryGraphSchema } from "./emissary-graph.mjs"; // Emissary slice 1a: external identity graph.
+import { EmissaryReceipts, emissaryReceiptSchema } from "./emissary-receipts.mjs"; // Emissary slice 1a: external receipt index.
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
@@ -726,6 +728,8 @@ export class RoomStore {
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
+    this.emissaryGraph = new EmissaryGraph(this); // Emissary slice 1a: external identity graph (tracking only).
+    this.emissaryReceipts = new EmissaryReceipts(this); // Emissary slice 1a: external receipt index.
     this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
@@ -865,7 +869,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${accountLoginMethodsSchema}
       ${agentInviteSchema}
       ${referralInviteSchema}
-      ${referralSchema}`);
+      ${referralSchema}
+      ${emissaryGraphSchema}
+      ${emissaryReceiptSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -972,6 +978,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // no migration, no fence impact; referrals are only written by the join
       // paths, and the table holds no credential data.
       this.db.exec(referralSchema);
+      // Emissary slice 1a (RC-2026-09-27-2860): external identity graph +
+      // receipt index — purely additive, IF NOT EXISTS is idempotent, no
+      // schema version bump. Tracking only: no capabilities, no money.
+      this.db.exec(emissaryGraphSchema);
+      this.db.exec(emissaryReceiptSchema);
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);
