@@ -103,6 +103,7 @@ optional.push("server/needs-me.mjs"); // cross-room room_needs_me (imported by s
 optional.push("server/land-queue.mjs"); // per-room pull-request land queue (imported by server/store.mjs)
 optional.push("server/mcp-full-profile.mjs"); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
 optional.push("server/agent-identities.mjs");
+optional.push("server/owner-delegates.mjs"); // Owner-delegate authority (imported by server/store.mjs; delegate flag consumed by server/guest-agent-links.mjs, server/guest-invites.mjs, server/agent-invites.mjs, server/access-review.mjs, server/agent-connections.mjs)
 optional.push("server/display-name-guard.mjs"); // Identity mint/link guard is part of the runtime import closure.
 optional.push("server/agent-invites.mjs");
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
@@ -159,11 +160,15 @@ optional.push("server/inbox-agent-routing.mjs"); // Lane C: pure @agent routing 
 optional.push("server/inbox-collab-store.mjs"); // Lane C: collab sub-store (imported by server/store.mjs; created by the collab worker, may be absent here)
 optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (imported by server/http.mjs; created by the collab worker, may be absent here)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs; pure, imports ../src/events.js only)
+optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
+optional.push("server/feedback-store.mjs"); // RC-2026-09-27-2745: pure /feedback state machine + Mark-staked triage economy (imported by server/feedback-routes.mjs; imports ./feedback-scrub.mjs)
+optional.push("server/feedback-scrub.mjs"); // RC-2026-09-27-2745: secret scrubbing at feedback intake (imported by server/feedback-store.mjs; pure, no imports)
+optional.push("server/feedback-routes.mjs"); // RC-2026-09-27-2745: /feedback HTTP routes (imported by server/http.mjs)
 optional.push("server/work-duplicates.mjs"); // jill 2026-09-24: pure work-claim duplicate detection (imported by server/work-claim-routes.mjs; pure, no imports)
 optional.push("server/bounty-escrow.mjs"); // agent work exchange slice 1: escrowed-bounty ledger + lifecycle (imported by server/bounty-escrow-routes.mjs)
 optional.push("server/bounty-escrow-routes.mjs"); // agent work exchange slice 1: bounty/credit HTTP routes (imported by server/http.mjs)
@@ -176,6 +181,7 @@ optional.push("server/agent-rooms.mjs"); // agent room ownership service (import
 optional.push("server/agent-api-keys.mjs"); // Lane D: scoped agent API-key issuance (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/agent-card-signing.mjs"); // RC-2026-09-18-014: Ed25519 card signing/verification (imported by server/agent-directory.mjs; pure, node:crypto only)
 optional.push("server/agent-key-registry.mjs"); // Integration map slice 9: agent public-key registry (imported by server/store.mjs and server/agent-identities.mjs)
+optional.push("server/emissary-graph.mjs", "server/emissary-receipts.mjs"); // Emissary slice 1a (RC-2026-09-27-2860): external identity graph + receipt index (imported by server/store.mjs)
 optional.push("server/signed-evidence.mjs"); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs; pure, imports bounty-receipts.mjs + agent-card-signing.mjs)
 optional.push("server/agent-directory.mjs"); // Lane D: agent card directory (imported by server/agent-plugin-store.mjs; imports agent-card-signing.mjs)
 optional.push("server/agent-plugin-manifest.mjs"); // Lane D: plug-in manifest builder/validator (imported by server/agent-plugin-store.mjs and server/agent-plugin-routes.mjs; pure, no imports)

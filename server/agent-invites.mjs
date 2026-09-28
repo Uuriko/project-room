@@ -150,9 +150,11 @@ export class AgentInvites {
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
   create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
+    // Owner delegates (server/owner-delegates.mjs) arrive via
+    // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
+    if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     // Minting invites is a membership write: the read-only autonomy tier
     // applies even when the agent holds an invite grant (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_create", fail });
@@ -177,9 +179,9 @@ export class AgentInvites {
     }
     // Non-owner issuers: manage_members may only grant bits they hold;
     // invite_member-only may grant the standing agent-safe set.
-    const issuer = authority.members[auth.member.id];
+    const issuer = auth.delegate ? auth.member : authority.members[auth.member.id];
     if (!issuer || issuer.active === false) fail(403, "access_denied", "Active membership required");
-    if (auth.member.id !== authority.ownerId) {
+    if (!auth.delegate && auth.member.id !== authority.ownerId) {
       const admin = issuer.permissions.includes("manage_members");
       if (admin && permissions.some(p => !issuer.permissions.includes(p))) {
         fail(403, "invite_scope_exceeded", "A membership administrator cannot grant authority they do not hold");

@@ -37,6 +37,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "membership_delegation_grants",
   "membership_delegation_journal",
   "membership_delegation_pending",
+  // owner_delegate_grants + owner_delegate_journal (owner-granted
+  // owner-delegation for agent identities, server/owner-delegates.mjs):
+  // purely additive and intentionally NOT fenced — older writers have no
+  // code path to them, and the owner-only grant rule is the integrity gate.
+  "owner_delegate_grants",
+  "owner_delegate_journal",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path
@@ -312,7 +318,13 @@ export const unfencedAdditiveTables = Object.freeze([
   "board_vtwo_claims",
   "board_vtwo_events",
   "board_vtwo_mirror",
-  "board_vtwo_idempotency"
+  "board_vtwo_idempotency",
+  // external_identities + external_receipts (Emissary slice 1a,
+  // RC-2026-09-27-2860): external identity graph + receipt index. Purely
+  // additive and intentionally NOT fenced — older writers have no code path
+  // to them, and the modules verify their own schema on open (IF NOT EXISTS).
+  "external_identities",
+  "external_receipts"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

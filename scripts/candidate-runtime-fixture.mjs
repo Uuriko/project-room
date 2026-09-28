@@ -75,6 +75,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
   paths.add('server/access-review.mjs');
+  paths.add('server/owner-delegates.mjs'); // Owner-delegate authority (imported by server/store.mjs; delegate flag consumed by server/access-review.mjs, server/guest-invites.mjs, server/guest-agent-links.mjs, server/agent-invites.mjs, server/agent-connections.mjs, server/http.mjs)
   paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
   paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
