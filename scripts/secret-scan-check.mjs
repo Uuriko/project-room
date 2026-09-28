@@ -70,6 +70,10 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
+  /0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913/, // well-known PUBLIC USDC contract on Base —
+    // the rail's asset allowlist (server/usdc-payouts.mjs). On-chain and world-readable; grants nothing.
+  /EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/, // well-known PUBLIC USDC mint on Solana —
+    // same: world-readable token address, not a credential.
 ];
 
 // Directories scanned: source code where a real secret could hide.
