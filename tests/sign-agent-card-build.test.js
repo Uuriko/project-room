@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { signAgentCard } from "../scripts/sign-agent-card.mjs";
 import { generateKeyPair, verifyCardSignature, verifyCardJws } from "../server/agent-card-signing.mjs";
 import { AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
+import { markUnsignedCard } from "../deploy/agent-discovery.mjs";
 
 test("missing or wrong keys stop a release without overwriting its signature", t => {
   const directory = mkdtempSync(join(tmpdir(), "card-build-"));
@@ -58,7 +59,10 @@ test("signed build writes an A2A v1.0 JWS covering the served envelope", async t
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const outputPath = join(directory, "signed.mjs"), key = generateKeyPair();
   const card = { name: "Fixture", deployed: { revision: "jws-revision" } };
-  signAgentCard({ privateKey: key.privateKey, publicKey: key.publicKey, agentId: "project-room", card, outputPath });
+  // A new revision (or a previously explicit unsigned build) enters the signer
+  // with unsigned status. The newly served signed card has neither status field.
+  const unsignedCard = markUnsignedCard({ ...card }, "Previous build explicitly unsigned");
+  signAgentCard({ privateKey: key.privateKey, publicKey: key.publicKey, agentId: "project-room", card: unsignedCard, outputPath });
   const signed = await import(pathToFileURL(outputPath));
   // The JWS array is written alongside the house signature.
   assert.ok(Array.isArray(signed.AGENT_CARD_JWS_SIGNATURES), "JWS signatures array written");

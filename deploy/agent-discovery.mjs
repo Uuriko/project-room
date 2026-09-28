@@ -286,6 +286,10 @@ export function markUnsignedCard(card, reason) {
 // attaches under the revision gate; the A2A v1.0 `signatures` array attaches
 // only when a non-empty JWS array is present — unsigned cards carry neither.
 export function attachCardSignatureEnvelope(card, { signature, jwsSignatures, revision }) {
+  // A fresh build may start from a card marked unsigned for the prior revision.
+  // Those transient fields are absent from the signed card served after build.
+  delete card.signed;
+  delete card.unsignedReason;
   card.keyId = AGENT_CARD_KEY_ID;
   card.signatureAgentId = AGENT_CARD_AGENT_ID;
   card.publicKey = AGENT_CARD_PUBLIC_KEY;
