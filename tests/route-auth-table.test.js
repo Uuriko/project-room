@@ -14,6 +14,10 @@ const MUTATING_ROOM_ROUTES = [
   "identity-links", "agent-invites", "import", "commands", "cursor", "work-sessions", "pins",
   "reminders", "reports", "agent-connections", "guest-agent-links", "share-links",
   "share-links-cancel", "invitations", "agent-pause", "spend-allowance",
+  // Board v2 (RC-2026-09-27-2720): every mutation under the durable claims board.
+  "board/v2/claims", "board/v2/claims/some-task/heartbeat", "board/v2/claims/some-task/release",
+  "board/v2/claims/some-task/receipts", "board/v2/notes", "board/v2/findings",
+  "board/v2/decisions", "board/v2/mirror-map",
 ];
 const REVOKE_ROUTE = "invitations/some-invitation/revoke";
 

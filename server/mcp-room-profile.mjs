@@ -9,6 +9,7 @@
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -35,6 +36,7 @@ import {
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools } from "./mcp-discovery.mjs";
+import { resolveCatalogAgent } from "./capability-visibility.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -291,17 +293,30 @@ function listWork(store, secret, args) {
     ...workRecord(item, now),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
+  const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
+  const replyRequests = replyListing?.requests.map(request => ({
+    id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
+    nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+  })) ?? null;
   return {
     roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence, focus,
     member: member ? { id: member.id, kind: member.kind, permissions: [...member.permissions] } : null,
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
-    work
+    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   };
 }
 
 async function callLandTool(store, secret, name, args) {
   const auth = store.authenticate(secret, args.roomId);
+  // add/remove/report are room writes; the read-only tier applies to them
+  // exactly as it does to command-backed writes (issue #993).
+  if (name !== "list_land_queue") {
+    enforceAutonomyTierForAction({
+      db: store.db, roomId: args.roomId, state: store.room(args.roomId).state, actor: auth.member, action: name,
+      fail: (status, code, message) => { throw new ServiceError(status, code, message); },
+    });
+  }
   const memberId = auth.member.id;
   if (name === "list_land_queue") return store.landQueue.list(args.roomId, memberId);
   if (name === "add_land_item") {
@@ -459,7 +474,7 @@ function webhookListBody(subscriptions) {
   const next = subscriptions.length === 0
     ? [{
       action: "subscribe", method: "POST", path: "/api/agent-webhooks",
-      description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once."
+      description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)."
     }]
     : subscriptions.slice(0, 3).map(subscription => ({
       action: "check-journal", method: "GET",
@@ -469,11 +484,15 @@ function webhookListBody(subscriptions) {
   return { subscriptions, next };
 }
 
-function webhookSubscribeBody(subscription, secretShownOnce) {
+// RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never leaves
+// the server — not even once. The subscription view carries the opaque
+// `secretRef` sentinel; inbound deliveries are verified server-side.
+function webhookSubscribeBody(subscription) {
   const steps = [
     {
-      action: "verify-deliveries",
-      description: "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret."
+      action: "verify-deliveries", method: "POST",
+      path: `/api/agent-webhooks/${encodeURIComponent(subscription.subscriptionId)}/verify-delivery`,
+      description: "Verify inbound deliveries server-side: POST { eventType, data, signature } — the room checks the HMAC with the signing secret and answers { valid }. The secret itself is never returned; keep this subscription's secretRef sentinel."
     },
     {
       action: "check-journal", method: "GET",
@@ -481,15 +500,7 @@ function webhookSubscribeBody(subscription, secretShownOnce) {
       description: "The delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks."
     }
   ];
-  if (secretShownOnce) {
-    steps.unshift({
-      action: "store-secret",
-      description: "Store this signing secret now. It is shown once and is not returned again."
-    });
-  }
-  return secretShownOnce
-    ? { ...subscription, secret: secretShownOnce, next: steps }
-    : { ...subscription, next: steps };
+  return { ...subscription, next: steps };
 }
 
 function wakeFailure(error) {
@@ -525,10 +536,10 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.wakeQueue.resume(secret, args.roomId, request, null, { memberId: args.memberId ?? null });
   }
   if (name === "webhook_subscribe") {
-    const { subscription, secretShownOnce } = store.agentPlugin.subscribeWebhook({
+    const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
     });
-    return webhookSubscribeBody(subscription, secretShownOnce);
+    return webhookSubscribeBody(subscription);
   }
   if (name === "webhook_list") return webhookListBody(store.agentPlugin.listWebhooks(agentId));
   if (name === "webhook_unsubscribe") {
@@ -611,7 +622,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (selection.error === "profile") {
       return mcpCallError(requestId, { reason: "invalid_arguments", tool: "tools/list", invalid: { profile: "must be core or full" } });
     }
-    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
+    // Withheld, never refused (RC-2026-09-27-2731): the listing is filtered
+    // by THIS identity's per-room standing (fresh tier rows, never
+    // cached). Denied capabilities are absent from the catalog; the
+    // tools/call path below keeps its own authorization checks as
+    // defense in depth.
+    const agent = resolveCatalogAgent(store, identity);
+    return { jsonrpc: "2.0", id: requestId, result: { profile: selection.profile, tools: listedMcpTools(selection.profile, selection.aliases, agent), _meta: { discovery: MCP_DISCOVERY_BLOCK } } };
   }
   if (message.method === "tools/call") {
     const called = message.params?.name;
@@ -629,7 +646,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (!accepted) return argumentFailure(requestId, name, args, selected.inputSchema);
     try {
       if (isHostedStdioTool(name)) {
-        const outcome = callHostedStdioTool(store, secret, name, args);
+        const outcome = await callHostedStdioTool(store, secret, name, args);
         return { jsonrpc: "2.0", id: requestId, result: toolResult(outcome.value, outcome.isError) };
       }
       if (INBOX_TOOLS.some(entry => entry.name === name)) {

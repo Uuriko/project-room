@@ -38,6 +38,8 @@ import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSi
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
@@ -236,6 +238,15 @@ export class ReferralInvites {
     // The inviter must still be an active member: outstanding tokens die
     // with a removed inviter, the same posture as one-time invite codes.
     const room = this.store.room(roomId);
+    // Minting referral invites is a membership write: the read-only
+    // autonomy tier applies even for active agent members (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: room.state, actor: auth.member, action: "referral_invite_mint", fail });
+    // Guests may read and chat but may not admit new members. Referral mint
+    // bypasses store.command (it authenticates directly), so the RoomStore
+    // guest scope gate never runs here — enforce the same denial explicitly.
+    // Mirrors RC-2026-09-23-100.
+    if (isGuestAgentMemberId(auth.member.id))
+      fail(403, "guest_scope_denied", "Guest members cannot mint referral invites");
     refuseArchivedWrite(room.state);
     if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
 
@@ -364,9 +375,12 @@ export class ReferralInvites {
     if (this.now() >= expiresAt) rejectAndFail(410, "invite_expired", "That invite has expired", "expired");
     if (depth > maxDepth) rejectAndFail(409, "referral_depth_exceeded", "That invite is past the chain depth limit", "depth_exceeded");
     const preRoom = this.store.room(roomId);
-    // The inviter must still be an active member at redeem time; a removed
-    // inviter's outstanding tokens stop working.
-    if (preRoom.state.members[ledger.inviter_member_id]?.active === false) {
+    // A truthy map lookup treats toString as an active inviter, so redeem
+    // continues and mints an identity for an inviter who never joined.
+    const inviterId = ledger.inviter_member_id;
+    const members = preRoom.state.members;
+    const inviter = members && Object.hasOwn(members, inviterId) ? members[inviterId] : undefined;
+    if (!inviter || inviter.active === false) {
       rejectAndFail(410, "invite_expired", "That invite is no longer valid", "inviter_inactive");
     }
 

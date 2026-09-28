@@ -7,6 +7,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
 import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { vapidFromEnv } from '../server/push-subscriptions.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
@@ -22,8 +23,29 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/
 import { routeInboundEmail, emailRoutingLimits, emailRoutingRejections, connectionAddresses, routingKey } from '../server/email-routing-inbound.mjs';
 import { emailConnection } from '../server/email-envelope.mjs';
 import { isEmailProfile } from '../server/channel-connection.mjs';
-import { scheduledRetentionTick } from '../server/retention-run.mjs';
+import { runLiveStoreRetention } from '../server/retention-run.mjs';
 import { HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs } from './job-heartbeat.mjs';
+import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
+
+// The DO transport may erase the original error type. Report availability,
+// without exposing backend details or claiming that a mutation rolled back.
+function roomUnavailableResponse(request) {
+  const pathname = new URL(request.url).pathname;
+  const api = pathname.startsWith('/api/') || pathname.startsWith('/room/api/') || pathname === '/mcp' || pathname === '/room/mcp';
+  const read = request.method === 'GET' || request.method === 'HEAD';
+  const message = 'Project Room is temporarily unavailable. ' + (read
+    ? 'Please try again in 30 seconds.'
+    : 'The request outcome could not be confirmed. Check its status before repeating it.');
+  return new Response(request.method === 'HEAD' ? null : api
+    ? JSON.stringify({ error: { code: 'room_unavailable', message } }) : message + '\n', {
+    status: 503,
+    headers: {
+      'Content-Type': api ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store', 'Retry-After': '30',
+      'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow'
+    }
+  });
+}
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -66,6 +88,8 @@ export class ProjectRoom extends DurableObject {
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
+      boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
@@ -96,7 +120,11 @@ export class ProjectRoom extends DurableObject {
     });
     this.handler = httpServerHandler(this.server);
   }
-  fetch(request) { return this.paused ? maintenanceResponse(request) : this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+  async fetch(request) {
+    if (this.paused) return maintenanceResponse(request);
+    try { return await this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+    finally { this.ctx.waitUntil(this.store.humanPush.flush()); }
+  }
 
   async syncGmailMailboxes() {
     if (this.paused) return { completed: 0 };
@@ -161,15 +189,12 @@ export class ProjectRoom extends DurableObject {
     this.store.landQueue.configure({ env: this.env });
     return this.store.landQueue.refreshDue();
   }
-  // Records an analytics/audit retention plan. The tick passes no live rows
-  // and no deleter, so a config flag cannot delete production room data.
+  // Scans only disposable web-fetch/research logs. The deletion flag is
+  // explicit; authoritative room and security audit journals are excluded.
   planRetention() {
     if (this.paused) return { dryRun: true, deleted: 0, skipped: "paused" };
-    return scheduledRetentionTick({
-      env: this.env,
-      now: new Date().toISOString(),
-      record: plan => { this.lastRetentionPlan = plan; }
-    });
+    return runLiveStoreRetention({ store: this.store, env: this.env,
+      now: new Date().toISOString(), record: plan => { this.lastRetentionPlan = plan; } });
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
@@ -206,6 +231,22 @@ export default {
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
     if (url.origin !== roomOrigin(env).origin) return new Response('Unexpected host', { status: 403 });
+    // Storage/DO-independent version signal: answered entirely from module
+    // scope and env, never touching the Durable Object, so deploy
+    // verification stays available when the DO is down (2026-09-25 outage:
+    // /api/version 1101'd with everything else, hiding what was deployed).
+    // The durable-object id is derived with idFromName - it names the object
+    // this Worker WOULD route to, which is what a door-split check compares;
+    // it says nothing about room health. Placed before the maintenance gate
+    // and the visitor-address guard so plain monitors always get an answer.
+    if ((url.pathname === '/api/version/worker' || url.pathname === '/api/version/worker/') && (request.method === 'GET' || request.method === 'HEAD')) {
+      const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? { deployment: env.ROOM_DEPLOYMENT } : {};
+      const body = JSON.stringify({
+        status: 'ok', servedBy: 'worker', sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deployment,
+        durableObject: { name: 'invite-only-pilot', id: env.ROOM.idFromName('invite-only-pilot').toString() }
+      });
+      return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+    }
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return maintenanceResponse(request);
     // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
     // job is stale or failing, so a plain status check catches dead crons.
@@ -223,7 +264,15 @@ export default {
     headers.set('X-Room-Visitor-IP', address);
     headers.delete('X-Real-IP');
     headers.delete('X-Forwarded-For');
-    const response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+    let response;
+    try {
+      response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));
+    } catch {
+      // DO construction can fail before its fetch handler exists. Contain that
+      // failure here; never retry a request whose write outcome may be unknown.
+      console.error('[room] request failed at Durable Object boundary');
+      return roomUnavailableResponse(request);
+    }
     const authFailure = response.headers.get('X-Room-Auth-Failure');
     if (authFailure && /^[a-z][a-z0-9_]{0,63}$/.test(authFailure)) console.warn(`room authentication failed: ${authFailure}; ${response.headers.get("X-Room-Auth-Diagnostic") || ""}`);
     return response;

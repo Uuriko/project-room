@@ -1,3 +1,4 @@
+import { canonicalJson } from "../src/audit-receipts.mjs";
 // Escrowed bounties, slice 1 (agent work exchange).
 //
 // A valueless-credit ledger for bounties between the room's agent lanes.
@@ -61,6 +62,22 @@ import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
+import { encodeRow, decodeRow } from "./persisted-row.mjs";
+
+// Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
+// Fields mirror the dispute record shape built by createDisputes in
+// bounty-disputes.mjs; unknown fields are dropped on read and missing fields
+// take these defaults, so rows written by older code (plain JSON body, no
+// envelope) still hydrate after refactors.
+export const BOUNTY_DISPUTE_ROW_KIND = "bounty-dispute";
+const DISPUTE_FIELDS = ["disputeId", "bountyId", "bountyAmount", "kind", "bondSnapshot",
+  "maxDisputeCost", "state", "tier", "raisedBy", "reason", "evidence", "decider",
+  "challengedBy", "escalations", "recordedCost", "forfeitedBond", "resolution",
+  "unavailable", "notified"];
+const DISPUTE_DEFAULTS = { kind: "economic", bondSnapshot: null, maxDisputeCost: 0,
+  state: "opened", tier: 0, raisedBy: null, reason: null, evidence: [],
+  decider: null, challengedBy: null, escalations: [], recordedCost: 0,
+  forfeitedBond: 0, resolution: null, unavailable: null, notified: false };
 
 export const GENESIS_LANES = Object.freeze([
   "id:agent/jill", "id:agent/instinct", "id:agent/grokbot", "id:agent/codex",
@@ -265,8 +282,13 @@ export const bountyEscrowSchema = `
     status INTEGER NOT NULL,
     response TEXT NOT NULL CHECK(json_valid(response)),
     created_at TEXT NOT NULL,
-    PRIMARY KEY(room_id, idem_key)
+    scope_key TEXT,
+    caller_lane TEXT,
+    version INTEGER,
+    request_hash TEXT,
+    PRIMARY KEY(room_id, scope_key)
   );
+  CREATE INDEX IF NOT EXISTS bounty_idempotency_scope ON bounty_idempotency(room_id, scope_key) WHERE version = 2;
   CREATE TABLE IF NOT EXISTS bounty_watchers (
     room_id TEXT NOT NULL,
     bounty_id TEXT NOT NULL,
@@ -416,7 +438,7 @@ export function convergeBountyDeployedSchema(db) {
   // 2. Rebuild tables whose stored DDL drifted (row-preserving), then
   // recreate that table's indexes (ALTER TABLE ... RENAME drops them — the
   // slice-1-era rebuild lost them).
-  for (const table of ["bounty_journal", "bounty_records", "bounty_events"]) {
+  for (const table of ["bounty_journal", "bounty_records", "bounty_events", "bounty_idempotency"]) {
     const actual = tableExists(table)?.sql;
     if (!actual) continue; // Fresh database: created above.
     if (normalize(actual) === expectedTables.get(table).norm) continue; // Already converged.
@@ -869,7 +891,11 @@ export class BountyEscrow {
       const records = new Map();
       try {
         for (const row of this.db.prepare("SELECT dispute_id, body FROM bounty_disputes").all())
-          records.set(row.dispute_id, JSON.parse(row.body));
+          // Replay-safe hydration: enveloped rows unwrap, legacy rows (plain
+          // JSON body, no envelope) load with unknown fields dropped and
+          // missing fields defaulted. Never throws on old rows.
+          records.set(row.dispute_id, decodeRow(row.body,
+            { kind: BOUNTY_DISPUTE_ROW_KIND, fields: DISPUTE_FIELDS, defaults: DISPUTE_DEFAULTS }));
       } catch { /* read-only on a pre-escrow database: no disputes yet */ }
       this._disputeRecords = records;
       this._disputes = createDisputes({ store: records, onDisputeFinalized: packet => this._onDisputeFinalized(packet) });
@@ -1068,9 +1094,9 @@ export class BountyEscrow {
     const resolvedTrack = track ?? (before !== null && after !== null ? trackOfStateTransition(before, after) : null);
     const row = this.db.prepare(
       `INSERT INTO bounty_events (room_id, at, type, bounty_id, actor_kind, actor_id, before_state, after_state, track, data)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`)
-      .run(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, resolvedTrack, JSON.stringify(data));
-    return { seq: Number(row.lastInsertRowid), at, type, bountyId,
+       VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING seq`)
+      .get(roomId, at, type, bountyId, actor?.kind ?? null, actor?.id ?? null, before, after, resolvedTrack, JSON.stringify(data));
+    return { seq: Number(row.seq), at, type, bountyId,
       actor: actor ? { kind: actor.kind, id: actor.id } : null, before, after, track: resolvedTrack, data };
   }
 
@@ -1559,7 +1585,11 @@ export class BountyEscrow {
       .all(roomId, lane, now - FLAKE_DECAY_MS);
     if (decayed.length > 0) {
       const ids = decayed.map(r => r.rowid);
-      this.db.prepare(`UPDATE bounty_flakes SET decayed_journaled=1 WHERE rowid IN (${ids.map(() => "?").join(",")})`).run(...ids);
+      // One rowid per statement. An IN list binds one variable per strike, and
+      // Durable Object SQL allows 100; a long-lived lane can have more than that
+      // waiting to journal, which used to throw and block the claim.
+      const mark = this.db.prepare("UPDATE bounty_flakes SET decayed_journaled=1 WHERE rowid=?");
+      for (const id of ids) mark.run(id);
       this._event(roomId, "flake.decayed",
         { actor: RULE_ACTOR, data: { lane, strikesDecayed: ids.length } });
     }
@@ -2107,7 +2137,7 @@ export class BountyEscrow {
       this._saveBounty(bounty);
       // 4. The immutable settlement record: failed, worker 0, escrow to poster.
       const { settlement } = this._recordSettlement(bounty, { kind: "failed", workerMillis: 0,
-        refundMillis: bounty.amountMillis, reason: `verification rejected by ${lane}: ${reason}`, actor: act });
+        refundMillis: bounty.amountMillis, reason, actor: act });
       return { bounty: this._getBounty(roomId, bountyId), settlement, alreadySettled: false, flake,
         receipt: { kind: "reject", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId],
           at, actor: act, event: rejectEvent, ...this._signed(movement) } };
@@ -2144,7 +2174,7 @@ export class BountyEscrow {
     const at = isoNow(this.nowMs());
     this.db.prepare(`INSERT INTO bounty_disputes (dispute_id, room_id, body, updated_at) VALUES (?,?,?,?)
       ON CONFLICT(dispute_id) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at`)
-      .run(dispute.disputeId, roomId, JSON.stringify(dispute), at);
+      .run(dispute.disputeId, roomId, JSON.stringify(encodeRow(BOUNTY_DISPUTE_ROW_KIND, dispute)), at);
   }
 
   // Arbitrator cards are drawn from CURRENT room membership — never a
@@ -2791,9 +2821,17 @@ export class BountyEscrow {
       // every movement the account touched, so before/after show the real
       // source and destination accounts.
       const lotIds = [...new Set(own.map(r => r.lot_id).filter(id => id !== null && id !== undefined))];
-      const full = lotIds.length === 0 ? [] : this.db.prepare(
-        `SELECT * FROM bounty_journal WHERE room_id=? AND lot_id IN (${lotIds.map(() => "?").join(",")}) ORDER BY seq`)
-        .all(roomId, ...lotIds);
+      // Durable Object SQL allows 100 binds. room_id plus one variable per lot
+      // exceeds that once a lane has 100 movements, and credit history then 500s.
+      const full = [];
+      const chunkSize = 90;
+      for (let i = 0; i < lotIds.length; i += chunkSize) {
+        const chunk = lotIds.slice(i, i + chunkSize);
+        full.push(...this.db.prepare(
+          `SELECT * FROM bounty_journal WHERE room_id=? AND lot_id IN (${chunk.map(() => "?").join(",")}) ORDER BY seq`
+        ).all(roomId, ...chunk));
+      }
+      full.sort((a, b) => a.seq - b.seq || String(a.entry_id).localeCompare(String(b.entry_id)));
       const singles = own.filter(r => r.lot_id === null || r.lot_id === undefined);
       const groups = new Map();
       for (const r of full) {
@@ -2897,16 +2935,36 @@ export class BountyEscrow {
   // --- idempotency ----------------------------------------------------------------------
   // All mutating routes are idempotent on a client-supplied key: a replayed
   // key returns the original status + body without re-executing.
-  idemExecute(roomId, key, route, status, thunk) {
+  idemExecute(roomId, key, route, status, thunk, scope = {}) {
     if (key === null || key === undefined) return { replayed: false, status, body: thunk() };
     check(typeof key === "string" && key.length >= 1 && key.length <= 128, "invalid_input", "idempotency key must be 1..128 characters");
+    // Scope the replay to (caller, route, bounty, key). The original
+    // (room, key) key let any member replay another member's response: an
+    // agent that builds keys predictably (claim-<bountyId>) could be
+    // squatted by a second member reusing the same key on a different
+    // bounty, getting a 200 whose body was the first member's receipt. That
+    // is a correctness bug (their work never ran) and a cross-member leak.
+    const callerLane = scope.callerLane ?? null;
+    const requestHash = scope.payload === undefined ? null : sha256(canonicalJson(scope.payload));
+    const bountyId = scope.bountyId ?? null;
+    const scopeKey = "v2:" + sha256([callerLane ?? "", route ?? "", bountyId ?? "", key].join("\u0000"));
     return this.store.transaction(() => {
       this._ensure();
-      const existing = this.db.prepare("SELECT status, response FROM bounty_idempotency WHERE room_id=? AND idem_key=?").get(roomId, key);
-      if (existing) return { replayed: true, status: existing.status, body: JSON.parse(existing.response) };
+      // Historical room-wide receipts cannot safely identify a caller. Refuse
+      // both disclosure and re-execution; an operator must reconcile this key.
+      if (this.db.prepare("SELECT 1 FROM bounty_idempotency WHERE room_id=? AND idem_key=? AND version IS NULL LIMIT 1").get(roomId, key))
+        fail("idempotency_actor_mismatch", "Legacy idempotency key requires reconciliation");
+      // version=2 excludes legacy (room, key) rows, which predate the scope
+      // and whose key cannot be trusted to name one member's operation.
+      const existing = this.db.prepare(
+        "SELECT status, response, request_hash FROM bounty_idempotency WHERE room_id=? AND scope_key=? AND version=2").get(roomId, scopeKey);
+      if (existing) {
+        if (existing.request_hash !== requestHash) fail("idempotency_key_reused", "Idempotency key was already used with different input");
+        return { replayed: true, status: existing.status, body: JSON.parse(existing.response) };
+      }
       const body = thunk();
-      this.db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at) VALUES (?,?,?,?,?,?)")
-        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs()));
+      this.db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at, scope_key, caller_lane, version, request_hash) VALUES (?,?,?,?,?,?,?,?,2,?)")
+        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs()), scopeKey, callerLane, requestHash);
       return { replayed: false, status, body };
     });
   }

@@ -4,6 +4,8 @@
 // its own draft), routing, and handoffs — plus restart persistence, room
 // scoping, and the typed error codes.
 import test from "node:test";
+import { request as httpRequest } from "node:http";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -451,6 +453,121 @@ test("envelopes: typed delegation lifecycle, checks, sweep, and metrics", async 
   assert.deepEqual(swept.swept, { expired: [], escalated: [] });
 });
 
+test("envelopes: create retries survive lost responses, lifecycle changes and restart without duplicates", async t => {
+  const f = setup(t); await f.serve();
+  let now = Date.now(); f.store.now = () => now;
+  const base = "/api/rooms/commons/collab/envelopes", deadline = now + 60000;
+  const fields = {
+    requestId: "handoff-retry-1", to: agentIdOf(f), objective: "Review the patch",
+    inputs: [{ kind: "note", ref: "Patch context" }],
+    authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] }, expiresAt: new Date(deadline).toISOString() },
+    expectedOutput: { kind: "report", description: "Review findings" },
+    acceptanceTest: { checks: [{ kind: "manual_review", reviewer: agentIdOf(f) }] },
+    termination: { expiresAt: new Date(deadline).toISOString(), onExpiry: "release" }
+  };
+  // Discard the committed creation response: the caller cannot know its ID.
+  const lost = await post(f, base, f.humanKey, fields);
+  assert.equal(lost.status, 201); await lost.body.cancel();
+  const retry = await post(f, base, f.humanKey, fields);
+  assert.equal(retry.status, 200);
+  const receipt = await retry.json();
+  assert.equal(receipt.duplicate, true);
+  const { envelopeId } = receipt;
+  assert.equal((await (await get(f, base, f.humanKey)).json()).envelopes.length, 1);
+  assert.equal((await post(f, `${base}/${envelopeId}/transition`, f.agent.secret, { status: "accepted" })).status, 200);
+  await f.reopen(); f.store.now = () => now;
+  now = deadline + 1;
+  const resumed = await (await post(f, base, f.humanKey, fields)).json();
+  assert.equal(resumed.duplicate, true);
+  assert.equal(resumed.envelopeId, envelopeId);
+  assert.equal(resumed.status, "accepted");
+  assert.equal(resumed.createdAt, receipt.createdAt);
+  assert.equal(resumed.history.length, 2);
+  await post(f, `${base}/sweep`, f.humanKey, {});
+  const expired = await (await post(f, base, f.humanKey, fields)).json();
+  assert.equal(expired.status, "expired");
+  assert.equal(expired.duplicate, true);
+  const conflict = await post(f, base, f.humanKey, { ...fields, objective: "Different patch" });
+  assert.equal(conflict.status, 409);
+  assert.equal(await codeOf(conflict), "envelope_request_conflict");
+  assert.deepEqual((await (await get(f, base, f.humanKey)).json()).envelopes[0],
+    Object.fromEntries(Object.entries(expired).filter(([key]) => key !== "duplicate")));
+
+  now = deadline - 1;
+  const concurrentFields = { ...fields, requestId: "concurrent-create" };
+  const responses = await Promise.all(Array.from({ length: 4 }, () => post(f, base, f.humanKey, concurrentFields)));
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 200, 200, 201]);
+  const receipts = await Promise.all(responses.map(response => response.json()));
+  assert.equal(new Set(receipts.map(row => row.envelopeId)).size, 1);
+  assert.equal(receipts.filter(row => row.duplicate === false).length, 1);
+  // JSON property order is immaterial; normalized optional defaults are stable.
+  const reordered = Object.fromEntries(Object.entries({ ...concurrentFields, provenance: { chain: [] } }).reverse());
+  assert.equal((await post(f, base, f.humanKey, reordered)).status, 200);
+  const otherActor = await post(f, base, f.agent2.secret, concurrentFields);
+  assert.equal(otherActor.status, 201);
+  assert.notEqual((await otherActor.json()).envelopeId, receipts[0].envelopeId);
+  f.store.initialize(initialRoom("other-room"));
+  const otherKey = f.store.issueAccessKey("other-room", "owner");
+  const otherRoom = await post(f, "/api/rooms/other-room/collab/envelopes", otherKey, concurrentFields);
+  assert.equal(otherRoom.status, 201);
+  assert.notEqual((await otherRoom.json()).envelopeId, receipts[0].envelopeId);
+  const { requestId: _requestId, ...legacy } = fields;
+  const legacyReceipts = [];
+  for (let i = 0; i < 2; i++) {
+    const response = await post(f, base, f.humanKey, legacy);
+    assert.equal(response.status, 201); legacyReceipts.push(await response.json());
+  }
+  assert.notEqual(legacyReceipts[0].envelopeId, legacyReceipts[1].envelopeId);
+  assert.equal(Object.hasOwn(legacyReceipts[0], "duplicate"), false);
+  for (const requestId of [null, "", 7, "bad id", "a".repeat(129)]) {
+    assert.equal((await post(f, base, f.humanKey, { ...fields, requestId })).status, 422);
+  }
+});
+
+// HTTP is the primary regression boundary: configured deadlines must be
+// enforced without relying on a separately invoked maintenance sweep.
+test("envelopes: configured expiry blocks late acceptance/completion but allows cleanup", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab/envelopes", initial = Date.now();
+  let now = initial; f.store.now = () => now;
+  const deadline = initial + 60000, later = deadline + 60000;
+  for (const humanRecipient of [false, true]) {
+    const sender = humanRecipient ? f.agent.secret : f.humanKey;
+    const recipient = humanRecipient ? f.humanKey : f.agent.secret;
+    for (const expires of ["authority", "termination"]) {
+      for (const status of ["accepted", "completed"]) {
+        for (const offset of [-1, 0, 1]) {
+          now = initial;
+          const created = await post(f, base, sender, {
+            to: humanRecipient ? "owner" : agentIdOf(f), objective: "Review this handoff",
+            inputs: [{ kind: "note", ref: "Current work context" }],
+            authority: { permissions: ["accept_work"], scope: { rooms: ["commons"] },
+              expiresAt: new Date(expires === "authority" ? deadline : later).toISOString() },
+            expectedOutput: { kind: "report", description: "A reviewed result" },
+            acceptanceTest: { checks: [{ kind: "manual_review", reviewer: humanRecipient ? "owner" : agentIdOf(f) }] },
+            termination: { expiresAt: new Date(expires === "termination" ? deadline : later).toISOString(), onExpiry: "release" }
+          });
+          assert.equal(created.status, 201);
+          const { envelopeId } = await created.json();
+          const transition = (value, token = recipient) => post(f, `${base}/${envelopeId}/transition`, token, value);
+          if (status === "completed") assert.equal((await transition({ status: "accepted" })).status, 200);
+          const before = f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId);
+          now = deadline + offset;
+          const response = await transition({ status, ...(status === "completed" ? { checksPassed: ["manual_review"] } : {}) });
+          const label = `${humanRecipient ? "human" : "agent"} ${status} at ${expires} deadline ${offset}`;
+          assert.equal(response.status, offset < 0 ? 200 : 409, label);
+          if (offset < 0) { assert.equal((await response.json()).envelope.status, status); continue; }
+          assert.equal(await codeOf(response), "envelope_expired", label);
+          assert.deepEqual(f.store.handoffEnvelopes.list("commons").find(row => row.envelopeId === envelopeId), before,
+            "late transition leaves the journal unchanged for explicit cleanup");
+          const cleanup = status === "accepted" ? "cancelled" : "escalated";
+          assert.equal((await transition({ status: cleanup }, sender)).status, 200, "sender can still clean up expired work");
+        }
+      }
+    }
+  }
+});
+
 test("restart persistence: every journal replays from SQLite", async t => {
   const f = setup(t); await f.serve();
   const base = "/api/rooms/commons/collab";
@@ -520,4 +637,39 @@ test("room scoping: collab data never crosses rooms", async t => {
   // A commons member cannot reach the den's collab routes at all.
   const forbidden = await get(f, `${den}/assignments`, f.humanKey);
   assert.ok([401, 403].includes(forbidden.status), `expected 401/403, got ${forbidden.status}`);
+});
+
+for (const scenario of ["revoked credential", "demoted agent"]) test(`collab refuses ${scenario} during body upload without a note`, { timeout: 10000 }, async t => {
+  const f = setup(t); await f.serve();
+  const token = f.store.issueAccessKey("commons", agentIdOf(f));
+  const data = JSON.stringify({ threadId: "slow-upload", body: "must not be written" });
+  let observed;
+  const authenticated = new Promise(resolve => { observed = resolve; });
+  const original = f.store.authenticate.bind(f.store);
+  f.store.authenticate = (...args) => {
+    const result = original(...args);
+    if (args[0] === token) { f.store.authenticate = original; observed(); }
+    return result;
+  };
+  t.after(() => { f.store.authenticate = original; });
+  let upload;
+  const response = new Promise((resolve, reject) => {
+    upload = httpRequest(new URL("/api/rooms/commons/collab/notes", f.origin), { method: "POST", headers: {
+      authorization: `Bearer ${token}`, "content-type": "application/json", "content-length": Buffer.byteLength(data)
+    } }, res => {
+      let value = ""; res.setEncoding("utf8"); res.on("data", part => { value += part; });
+      res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(value) }));
+    });
+    upload.on("error", reject);
+  });
+  t.after(() => upload.destroy());
+  upload.write(data.slice(0, 1));
+  await authenticated;
+  if (scenario === "revoked credential") f.store.revoke(token);
+  else setTier(f.store.db, "commons", agentIdOf(f), "t1_readonly");
+  upload.end(data.slice(1));
+  const result = await response;
+  assert.equal(result.status, scenario === "revoked credential" ? 401 : 403);
+  assert.equal(result.body.error.code, scenario === "revoked credential" ? "unauthenticated" : "agent_readonly");
+  assert.deepEqual(f.store.collab.listThreadNotes("commons", "slow-upload"), []);
 });

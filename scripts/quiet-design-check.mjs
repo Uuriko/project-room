@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +32,7 @@ for (const touch of [false, true]) {
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
-    assert.equal(await page.locator("#composer-options").count(), 0, "composer has no Options disclosure");
+    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
     // C3 rest state, before any screenshot (Chromium 151 captures reset touch
@@ -65,7 +66,7 @@ for (const touch of [false, true]) {
     await page.screenshot({ path: `test-results/quiet-${label}-room.png`, fullPage: true });
 
     // Review settings are secondary, but their defaults and required reviewer are visible.
-    await page.locator("#new-work-button").click();
+    await openComposerOptions(page); await page.locator("#new-work-button").click();
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.matches(":modal")), true);
     assert.equal(await page.evaluate(() => document.activeElement.id), "work-title-input");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
@@ -82,8 +83,8 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#verifier-select").isDisabled(), true);
     assert.match(await page.locator("#work-options-summary").textContent(), /Evidence only/);
     await page.keyboard.press("Escape");
-    await page.waitForFunction(() => document.activeElement.id === "new-work-button");
-    await page.locator("#new-work-button").click();
+    await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
+    await openComposerOptions(page); await page.locator("#new-work-button").click();
     assert.equal(await page.locator("#require-verification").isChecked(), true);
     assert.equal(await page.locator("#require-decision").isChecked(), true);
     await page.locator("#cancel-work-button").click();
@@ -130,7 +131,7 @@ for (const touch of [false, true]) {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);
-    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
     assert.deepEqual(errors, []);
   });

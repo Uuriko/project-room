@@ -1,26 +1,35 @@
 // Secret-scan CI gate (H005 wiring). Scans the repo tree for accidentally
 // committed secrets using server/secret-scan.mjs. Fails the build on any
 // finding. Pure, dependency-free; runs in the contract job via check.mjs.
+//
+// The config (ALLOWLIST, SKIP_FILES, ...) is exported so the PR diff gate
+// (scripts/secret-scan-diff.mjs) and its tests reuse the exact same rules.
+// The tree walk below only runs when this file is executed directly.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { scanText } from "../server/secret-scan.mjs";
 
 // Directories never scanned (vendored code, build output, local scratch).
-const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "runlogs-tmp", "dist"]);
+export const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "runlogs-tmp", "dist"]);
 // File extensions worth scanning. Secrets live in text; skip binaries/images.
-const SCAN_EXT = /\.(mjs|js|cjs|json|yaml|yml|toml|md|txt|html|css|env|example|sh)$/i;
+export const SCAN_EXT = /\.(mjs|js|cjs|json|yaml|yml|toml|md|txt|html|css|env|example|sh)$/i;
 // File paths never scanned (lockfiles carry hashes, not secrets).
 // Fixture/check scripts and READMEs use placeholder secrets (verified 2026-09-16).
 // Pinned, reproducibly bundled sanitize-html dependencies contain HTML entity tables,
 // base64 alphabets and parser messages, not credentials (build-gmail-sanitizer.mjs).
-const SKIP_FILES = [/server\/vendor\/gmail-html-sanitizer\.mjs$/, /package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
+export const SKIP_FILES = [/server\/vendor\/gmail-html-sanitizer\.mjs$/, /package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
   /-fixture\.mjs$/, /-check\.mjs$/, /README\.md$/];
 // Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
 // and variable assignments (not hardcoded values).
 export const ALLOWLIST = [
-  /AKIA[0-9A-Z]{16}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
-  /gh[op]_[A-Za-z0-9]{36}/, // scanner's own GitHub pattern doc
-  /xox[baprs]-[A-Za-z0-9-]+/, // scanner's own Slack pattern doc
+  // The scanner's own documented patterns (server/secret-scan.mjs): match the
+  // literal regex text (`AKIA[0-9A-Z]{16}` etc.) only. A looser entry here
+  // would match real secret-shaped values too and silently disable the
+  // aws-access-key / github-token / slack-token rules on every scanned line.
+  /AKIA\[0-9A-Z\]\{16\}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
+  /gh\[op\]_\[A-Za-z0-9\]\{36\}/, // scanner's own GitHub pattern doc
+  /xox\[baprs\]-\[A-Za-z0-9-\]\+/, // scanner's own Slack pattern doc
   /<redacted>/i, // explicit redaction marker
   /DASHA_API_KEY=<redacted>/, // documented placeholder (scripts/dasha-bridge.mjs)
   /example\.com/, // documentation URLs
@@ -70,16 +79,30 @@ export const ALLOWLIST = [
     // The private Ed25519 seed is never in the repo (deploy host key file / env only).
   /"sha(?:Full|Url)?":\s*"([0-9a-f]{40}|https:\/\/github\.com\/Uuriko\/project-room\/commit\/[0-9a-f]{40})"/, // receipts-data.mjs: git merge-commit SHAs from public
     // upstream history (verified via `gh api`), not secrets — 40-char hex is the git SHA-1 shape.
-  /0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913/, // well-known PUBLIC USDC contract on Base —
-    // the rail's asset allowlist (server/usdc-payouts.mjs). On-chain and world-readable; grants nothing.
-  /EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/, // well-known PUBLIC USDC mint on Solana —
-    // same: world-readable token address, not a credential.
+
+];
+
+
+// Exact non-secret tokens only. Unlike the line allowlist, these suppress
+// entropy noise without skipping credential-pattern checks or adjacent tokens.
+export const SAFE_ENTROPY_TOKENS = [
+  "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",
+  "REHEARSAL_SCRATCH:-$HOME/workspace/rotation-rehearsal",
+  "ROTATION_CUTOVER:-$HOME/workspace/pr-board2/scripts/rotation-cutover.sh",
+  "repos/$REPO/issues/$OLD_ISSUE/comments?per_page=100",
+  "$SCRATCH/fb-repo/fallback/jill-20260926T214500Z.md",
+  "$SCRATCH/fb-repo/fallback/codex-20260926T214700Z.md",
+  "https://api.github.com/repos/Uuriko/project-room/issues/266/comments?per_page=100&page=$",
+  // Well-known PUBLIC token contract addresses — the USDC rail's asset
+  // allowlist (server/usdc-payouts.mjs). World-readable on-chain; grant nothing.
+  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC on Solana
 ];
 
 // Directories scanned: source code where a real secret could hide.
 // research/ and docs/ are prose with quoted examples; tests/ use fixtures.
-const SCAN_DIRS = ["server", "src", "scripts", "client", "cloudflare", "deploy", "lanes", "specs"];
-const SCAN_ROOT_FILES = true; // *.mjs in repo root (server.mjs etc.)
+export const SCAN_DIRS = ["server", "src", "scripts", "client", "cloudflare", "deploy", "lanes", "specs"];
+export const SCAN_ROOT_FILES = true; // *.mjs in repo root (server.mjs etc.)
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -93,35 +116,47 @@ function walk(dir, out = []) {
 }
 
 const root = new URL("..", import.meta.url).pathname;
-const files = [];
-for (const dir of SCAN_DIRS) {
-  try { files.push(...walk(join(root, dir))); } catch { /* dir may not exist */ }
-}
-if (SCAN_ROOT_FILES) {
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (entry.isFile() && SCAN_EXT.test(entry.name)) files.push(join(root, entry.name));
-  }
-}
-const filtered = files.filter(f => {
-  if (SKIP_FILES.some(re => re.test(f))) return false;
-  // Skip this gate's own allowlist doc lines by scanning everything anyway;
-  // the ALLOWLIST above handles known-safe matches.
-  try { return statSync(f).size <= 2 * 1024 * 1024; } catch { return false; }
-});
 
-let total = 0;
-for (const file of filtered) {
-  let text;
-  try { text = readFileSync(file, "utf8"); } catch { continue; }
-  const findings = scanText(text, { allowlist: ALLOWLIST });
-  for (const f of findings) {
-    console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
-    total++;
+function runTreeScan() {
+  const files = [];
+  for (const dir of SCAN_DIRS) {
+    try { files.push(...walk(join(root, dir))); } catch { /* dir may not exist */ }
   }
+  if (SCAN_ROOT_FILES) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isFile() && SCAN_EXT.test(entry.name)) files.push(join(root, entry.name));
+    }
+  }
+  const filtered = files.filter(f => {
+    if (SKIP_FILES.some(re => re.test(f))) return false;
+    // Skip this gate's own allowlist doc lines by scanning everything anyway;
+    // the ALLOWLIST above handles known-safe matches.
+    try { return statSync(f).size <= 2 * 1024 * 1024; } catch { return false; }
+  });
+
+  let total = 0;
+  for (const file of filtered) {
+    let text;
+    try { text = readFileSync(file, "utf8"); } catch { continue; }
+    const findings = scanText(text, { allowlist: ALLOWLIST, safeEntropyTokens: SAFE_ENTROPY_TOKENS });
+    for (const f of findings) {
+      console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
+      total++;
+    }
+  }
+
+  if (total > 0) {
+    console.error(`\nsecret-scan: FAIL — ${total} finding(s). Remove the secret or add an allowlist entry with justification.`);
+    process.exit(1);
+  }
+  console.log(`secret-scan: ok — ${files.length} files scanned, no findings.`);
 }
 
-if (total > 0) {
-  console.error(`\nsecret-scan: FAIL — ${total} finding(s). Remove the secret or add an allowlist entry with justification.`);
-  process.exit(1);
-}
-console.log(`secret-scan: ok — ${files.length} files scanned, no findings.`);
+// Only run the tree scan when executed directly (check.mjs spawns this
+// file); importing it (diff gate, tests) gets the config without side
+// effects.
+const invokedAsCli =
+  process.argv[1] === fileURLToPath(import.meta.url) ||
+  (process.argv[1] ?? "").endsWith("/secret-scan-check.mjs") ||
+  (process.argv[1] ?? "").endsWith("\\secret-scan-check.mjs");
+if (invokedAsCli) runTreeScan();

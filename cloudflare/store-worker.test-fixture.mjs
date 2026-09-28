@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
+import { createWork, claimWork } from '../server/work-claims.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { DurableDatabase, durableStorage } from './storage.mjs';
@@ -12,6 +13,7 @@ import { auditRecovery } from '../server/recovery.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
+import { generateVapidKeys } from '../server/web-push.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -35,8 +37,86 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/bounty-receipts' || path === '/bounty-receipts-resume') {
+      const room = 'bounty-worker', escrow = store.bountyEscrow;
+      if (path === '/bounty-receipts') store.initialize(initialRoom(room));
+      const receipts = [];
+      for (const key of ['draft-one', 'draft-two']) {
+        const result = escrow.idemExecute(room, key, 'bounty.post', 201, () => {
+          assert.equal(path, '/bounty-receipts', 'restart must replay the stored result');
+          return escrow.postBounty(room, { poster: 'owner', title: key, criteria: 'Synthetic draft only',
+            amount: 1, deadline: new Date(Date.now() + 3600000).toISOString() });
+        }, { callerLane: 'owner' });
+        assert.equal(result.replayed, path === '/bounty-receipts-resume');
+        assert.equal(result.body.bounty.state, 'proposed');
+        const event = result.body.receipt.event;
+        assert.equal(Number.isSafeInteger(event.seq), true, 'draft receipt must carry its persisted event sequence');
+        receipts.push(event);
+        const retry = escrow.idemExecute(room, key, 'bounty.post', 201, () => assert.fail('retry must not create another draft'), { callerLane: 'owner' });
+        assert.equal(retry.replayed, true);
+        assert.deepEqual(retry.body, result.body);
+      }
+      assert.notEqual(receipts[0].seq, receipts[1].seq);
+      const feed = escrow.listEvents(room);
+      assert.equal(feed[0].type, 'genesis.issued');
+      assert.deepEqual(feed.slice(1), receipts);
+      assert.equal(escrow.listBounties(room).length, 2);
+      return Response.json({ sequences: receipts.map(event => event.seq), drafts: 2 });
+    }
+    if (path === '/delegation') {
+      store.initialize(initialRoom('delegation-worker'));
+      const owner = store.issueAccessKey('delegation-worker', 'owner');
+      const { identityId } = store.identities.create('Worker Delegate');
+      store.identities.link(owner, 'delegation-worker', { identityId, permissions: [] });
+      store.delegation.grant(owner, 'delegation-worker', { identityId });
+      store.delegation.revoke(owner, 'delegation-worker', { identityId });
+      store.delegation.grant(owner, 'delegation-worker', { identityId });
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 3, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), true);
+      return Response.json({ owner, identityId });
+    }
+    if (path === '/delegation-resume') {
+      const { owner, identityId } = await request.json();
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 3, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), true);
+      store.delegation.revoke(owner, 'delegation-worker', { identityId });
+      assert.deepEqual(store.delegationJournal.verify(), { entries: 4, absent: false });
+      assert.equal(store.delegation.hasGrant('delegation-worker', identityId), false);
+      return Response.json({ recovered: true, entries: 4, active: false });
+    }
+    if (path === '/human-push') {
+      store.initialize(initialRoom('push-worker'));
+      const owner = store.issueAccessKey('push-worker', 'owner');
+      const post = (id, body) => store.command(owner, 'push-worker', { id, type: T.MESSAGE_POSTED, data: { messageId: id, body } });
+      store.command(owner, 'push-worker', { id: 'add-reader', type: T.MEMBER_ADDED,
+        data: { memberId: 'reader', displayName: 'Reader', kind: 'human', permissions: [] } });
+      const reader = store.issueAccessKey('push-worker', 'reader');
+      const calls = [];
+      store.humanPush.configure({ fetchImpl: async (url, init) => { calls.push({ url, init }); return new Response(null, { status: 201 }); } });
+      post('push-off', '@Reader off'); await store.humanPush.flush();
+      assert.equal(calls.length, 0);
+      const keys = await generateVapidKeys();
+      store.humanPush.configure({ vapid: { ...keys, subject: 'mailto:fixture@example.test' } });
+      store.humanPush.save(reader, 'push-worker', { endpoint: 'https://fcm.googleapis.com/fcm/send/fixture',
+        keys: { p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' } });
+      post('push-on', '@Reader private fixture text'); await store.humanPush.flush();
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].init.redirect, 'error');
+      assert.ok(calls[0].init.body.byteLength > 86);
+      assert.equal(new TextDecoder().decode(calls[0].init.body).includes('private fixture text'), false);
+      assert.throws(() => store.transaction(() => { post('push-rollback', '@Reader rollback'); throw new Error('rollback'); }), /rollback/);
+      await store.humanPush.flush(); assert.equal(calls.length, 1);
+      assert.equal(store.humanPush.inflight.size, 0);
+      return Response.json({ defaultOff: true, encrypted: true, rollbackSuppressed: true });
+    }
     if (path === '/scenario') {
       store.initialize(initialRoom());
+      store.workClaims.transaction(() => {
+        store.workClaims.configure('commons', { defaultLeaseHours: 6 });
+        store.workClaims.set('commons', claimWork(createWork({ id: 'durable-worker-claim', title: 'Retain ownership' }), 'owner', { leaseHours: 6 }));
+      });
+      assert.throws(() => store.workClaims.transaction(() => { store.workClaims.set('commons', createWork({ id: 'rollback-worker-claim', title: 'Never committed' })); throw new Error('claim rollback'); }), /claim rollback/);
+      assert.equal(store.workClaims.get('commons', 'rollback-worker-claim'), null);
       const owner = store.issueAccessKey('commons', 'owner');
       const linkToken = randomBytes(32).toString('base64url');
       const link = store.shareLinks.create(owner, 'commons', { requestId: randomUUID(), linkToken,
@@ -163,6 +243,9 @@ export class StoreTestRoom {
         email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared, replyPlan, replyDispatch } });
     }
     if (path === '/resume') {
+      assert.equal(store.workClaims.get('commons', 'durable-worker-claim').owner, 'owner');
+      assert.equal(store.workClaims.configFor('commons').defaultLeaseHours, 6);
+      assert.equal(store.workClaims.get('commons', 'rollback-worker-claim'), null);
       const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
       checkNarrowAuthentication(store, credentials);
       for (const guest of guests) {

@@ -42,9 +42,11 @@ export const notConfiguredTelegram = () => telegramConfig({});
 // Strip a token out of any text before it reaches a log or a response.
 export const redactTelegram = text => String(text).replace(/(bot)?\d{5,12}:[A-Za-z0-9_-]{30,64}/g, (_, prefix) => (prefix ?? "") + "<redacted>");
 
-// Per-connection live facts that no journal records yet: the last webhook
-// delivery and the last send result. In process memory only; the B20 journal
-// can replace `record`/`snapshot` with durable rows behind the same methods.
+// Per-connection live facts that no journal recorded: the last webhook
+// delivery and the last send result. In process memory only; DurableTelegramLiveStatus
+// (server/channel-live-status.mjs) is the durable replacement behind the same
+// received()/sent()/snapshot() methods, and createRoomServer uses it whenever
+// the store is available.
 export class TelegramLiveStatus {
   #rows = new Map();
   #key(accountId, connectionId) { return JSON.stringify([accountId, connectionId]); }

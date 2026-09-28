@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -43,7 +44,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   seedRecipes(f);
   await page.locator('[data-work-record-id="recipe-duplicate"]').waitFor();
   const before = f.snapshot();
-  await page.locator("#new-work-button").click();
+  await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   const field = page.locator("#work-recipe-field"), select = page.locator("#work-recipe-select");
   assert.equal(await field.isVisible(), true);
@@ -75,7 +76,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   for (const key of ["sourceMessageId", "claim", "receipt", "verification", "decision", "blocker"]) assert.equal(fresh[key], null);
   assert.deepEqual(after.state.workItems["recipe-newer"], before.state.workItems["recipe-newer"]);
   // The new item joins the recipe list on the next blank open.
-  await page.locator("#new-work-button").click();
+  await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   const reopened = await select.locator("option").evaluateAll(nodes => nodes.map(n => n.value));
   assert.equal(reopened.includes(fresh.id), true);
@@ -90,7 +91,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   assert.equal(await page.locator("#work-title-input").inputValue(), "Weekly source review");
   await page.keyboard.press("Escape"); await page.locator("#new-work-form").waitFor({ state: "hidden" });
   mkdirSync("test-results", { recursive: true });
-  await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" });
+  await openComposerOptions(page); await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" });
   await select.selectOption("recipe-duplicate");
   await page.screenshot({ path: "test-results/recipes-desktop.png", fullPage: true });
   assert.deepEqual(f.errors, []);
@@ -100,7 +101,7 @@ test("recipes mobile: picker stays inside the dialog without horizontal overflow
   const f = await setup(t, { width: 390, height: 844 }), { page } = f;
   seedRecipes(f);
   await page.locator('[data-work-record-id="recipe-duplicate"]').waitFor();
-  await page.locator("#new-work-button").click();
+  await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   assert.equal(await page.locator("#work-recipe-field").isVisible(), true);
   await page.locator("#work-recipe-select").selectOption("recipe-newer");

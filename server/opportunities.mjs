@@ -11,10 +11,10 @@
 //      with status "open" and a live expiry) on non-terminal work;
 //   2. bounties in proposed/funded state with a live deadline.
 //
-// Room-level opt-in reuses the #605 public directory: only rooms their owner
-// flagged discoverable appear, and archived rooms never do. Posting work or
-// funding a bounty in a listed room is itself the opt-in for that item —
-// there is no separate feed toggle to forget.
+// Room-level discovery requires directory discoverability and an independent
+// owner-controlled opportunity-feed flag. Existing listed rooms default to
+// feed-on; an owner can hide work and bounties from the feed without unlisting
+// the room or altering either underlying record. Archived rooms never appear.
 //
 // Sanitization is a strict field-by-field rebuild — never a passthrough.
 // The module takes the RoomStore (db handle) and is shaped like
@@ -86,7 +86,7 @@ const parseSince = value => {
 
 const TERMINAL_WORK_STATES = new Set(["completed", "superseded"]);
 
-// Rooms whose owner opted into public discovery and which are not archived.
+// Listed, feed-enabled, non-archived rooms only.
 function listedRoomIds(db, roomId) {
   if (roomId != null) {
     if (typeof roomId !== "string" || !roomId || roomId.length > 128) fail(422, "invalid_room", "room must be a room id");
@@ -94,14 +94,14 @@ function listedRoomIds(db, roomId) {
         SELECT s.room_id AS roomId
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
-        WHERE s.discoverable = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
+        WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
     return row ? [row.roomId] : [];
   }
   return db.prepare(`
       SELECT s.room_id AS roomId
       FROM room_directory_settings s
       JOIN rooms r ON r.id = s.room_id
-      WHERE s.discoverable = 1 AND r.archived_at IS NULL
+      WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL
       ORDER BY s.room_id ASC`).all().map(r => r.roomId);
 }
 
@@ -172,12 +172,16 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
 
   const roomIds = listedRoomIds(db, roomId);
   const opportunities = [];
+  // The feed needs both work and bounty titles. Parse each listed room once
+  // rather than reading and JSON-parsing its projection again for bounties.
+  const titles = new Map();
 
   for (const id of roomIds) {
     const projection = roomProjection(db, id);
     if (!projection) continue; // silently skip unusable rooms, like the directory listing
     const roomTitle = cleanText(projection?.room?.title, 200);
     if (!roomTitle) continue;
+    titles.set(id, roomTitle);
     const workItems = projection.workItems && typeof projection.workItems === "object" ? Object.values(projection.workItems) : [];
     for (const item of workItems) {
       if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
@@ -187,17 +191,15 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
   }
 
   if (roomIds.length) {
-    const placeholders = roomIds.map(() => "?").join(",");
+    // One deadline bind, then filter to listed rooms. An IN list binds one
+    // variable per room; Durable Object SQL allows 100 binds and the public
+    // directory is not capped at 99 rooms.
+    const listed = new Set(roomIds);
     const bountyRows = db.prepare(`
         SELECT bounty_id, room_id, title, criteria, amount_millis, state, deadline_ms, label, created_at
         FROM bounty_records
-        WHERE room_id IN (${placeholders})
-          AND state IN ('proposed','funded')
-          AND deadline_ms > ?`).all(...roomIds, now);
-    const titles = new Map(roomIds.map(id => {
-      const projection = roomProjection(db, id);
-      return [id, cleanText(projection?.room?.title, 200)];
-    }));
+        WHERE state IN ('proposed','funded')
+          AND deadline_ms > ?`).all(now).filter(row => listed.has(row.room_id));
     for (const row of bountyRows) {
       const roomTitle = titles.get(row.room_id);
       if (!roomTitle) continue;

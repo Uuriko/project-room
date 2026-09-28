@@ -20,6 +20,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const owner = store.issueAccessKey("commons", "owner");
     const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
+    send(T.MEMBER_ADDED, { memberId: "nova", displayName: "Nova", kind: "agent", permissions: [] });
     // Consent-bound DMs: the owner addresses maya in this flow.
     store.dmConsents.request("commons", "owner", "maya", "browser test");
     store.dmConsents.decide("commons", "maya", "owner", "approve");
@@ -49,6 +50,105 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
+
+    // Paste must retain overflow rather than silently send a truncated message.
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+    const overflow = "x".repeat(65537), lengthStatus = page.locator("#message-length-status");
+    await page.evaluate(text => navigator.clipboard.writeText(text), overflow);
+    await input.focus(); await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    assert.ok(await input.inputValue() === overflow, "clipboard paste retains every UTF-16 unit");
+    assert.equal(await input.getAttribute("aria-invalid"), "true");
+    assert.match(await lengthStatus.innerText(), /65,536/);
+    await lengthStatus.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/composer-overflow-${label}.png` });
+    const beforeOverflow = store.room("commons").sequence;
+    await input.press("Enter");
+    assert.equal(store.room("commons").sequence, beforeOverflow);
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.ok(await input.inputValue() === overflow, "reload retains the complete overflow draft");
+    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), true);
+    await input.fill("😀".repeat(32768) + "x");
+    assert.equal(await input.getAttribute("aria-invalid"), "true", "astral emoji count as two UTF-16 units");
+    await input.fill("😀".repeat(32768));
+    assert.equal(await lengthStatus.isVisible(), false);
+    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
+    await input.fill("x".repeat(65531) + " :fire");
+    assert.equal(await input.getAttribute("aria-invalid"), "true");
+    await page.locator('#emoji-list [data-emoji="🔥"]').click();
+    assert.equal((await input.inputValue()).length, 65535);
+    assert.equal(await input.getAttribute("aria-invalid"), null, "picker replacement clears the derived overflow error");
+    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
+    const longValid = "a".repeat(4001);
+    await input.fill(longValid);
+    assert.equal(await lengthStatus.isVisible(), false, "ordinary valid text stays quiet");
+    await page.route("**/api/rooms/commons/commands", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Try later" } }) }));
+    await input.press("Enter");
+    await page.waitForFunction(() => document.querySelector("#composer-status").classList.contains("error") && !document.querySelector("#message-input").disabled);
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.equal(await input.inputValue(), longValid, "failed long send survives reload");
+    await input.press("Enter");
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+    assert.equal(store.room("commons").state.messages.filter(message => message.body === longValid).length, 1);
+
+    await input.scrollIntoViewIfNeeded();
+    const inputBounds = await input.boundingBox();
+    assert.ok(inputBounds.y >= 0 && inputBounds.y + inputBounds.height <= viewport.height, "composer remains reachable after a long message");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "long text does not widen the viewport");
+    await page.screenshot({ path: `test-results/composer-options-${process.env.ROOM_COMPOSER_SCREENSHOT_STAGE || "after"}-${label}.png` });
+    console.log(`composer ${label} visible buttons: ${await page.locator('#message-form button:visible').count()}`);
+    const optionsDisclosure = page.locator("#composer-options");
+    assert.equal(await page.locator("#new-work-button").isVisible(), false, "secondary work creation is disclosed on demand");
+    await page.locator("#composer-options > summary").focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await optionsDisclosure.evaluate(node => node.open), true);
+    assert.equal(await page.locator("#new-work-button").isVisible(), true);
+    await page.screenshot({ path: `test-results/composer-options-open-${label}.png` });
+    await page.keyboard.press("Escape");
+    assert.equal(await optionsDisclosure.evaluate(node => node.open), false);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "composer-options-toggle");
+
+    await page.locator("#composer-options > summary").click();
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#composer-attach").click();
+    const chooser = await chooserPromise;
+    assert.equal(await optionsDisclosure.evaluate(node => node.open), false);
+    await chooser.setFiles({ name: "options-note.txt", mimeType: "text/plain", buffer: Buffer.from("Disposable attachment") });
+    await page.locator("#composer-attachments .file-chip").getByText("options-note.txt", { exact: true }).waitFor();
+    await input.fill("Keep this attached draft");
+    await page.locator("#composer-options > summary").click();
+    await page.locator("#conversation-title").click();
+    assert.equal(await optionsDisclosure.evaluate(node => node.open), false);
+    assert.equal(await input.inputValue(), "Keep this attached draft");
+    assert.equal(await page.locator("#composer-attachments .file-chip").isVisible(), true);
+    await page.getByRole("button", { name: "Remove options-note.txt", exact: true }).click();
+    await input.fill("");
+
+    // An explicit agent request stays discoverable without making ordinary Send a request.
+    const recipient = page.locator("#message-to-select"), requestButton = page.locator("#request-reply");
+    await recipient.selectOption("nova", { force: true });
+    assert.equal(await requestButton.isVisible(), true);
+    assert.equal(await requestButton.evaluate(node => node.parentElement.id), "composer-toolbar");
+    await input.fill("Ordinary chat to Nova");
+    await page.locator('#message-form button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+    const ordinary = store.room("commons").state.messages.find(message => message.body === "Ordinary chat to Nova");
+    assert.equal(ordinary.toMemberId, "nova");
+    assert.equal(Object.hasOwn(store.room("commons").state.replyRequests ?? {}, ordinary.id), false);
+    await requestButton.click();
+    assert.equal(await page.locator("#request-mode-bar").isVisible(), true);
+    assert.equal(await requestButton.isVisible(), false);
+    await page.locator("#request-exit").click();
+    await recipient.selectOption("", { force: true });
+    assert.equal(await requestButton.isVisible(), false);
+    assert.equal(await requestButton.evaluate(node => node.parentElement.className), "composer-options-panel");
+    await recipient.selectOption("owner", { force: true });
+    assert.equal(await requestButton.isVisible(), false);
+    await recipient.selectOption("nova", { force: true });
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: "nova", expectedMemberRevision: 0, permissions: [], active: false });
+    await page.waitForFunction(() => document.querySelector('#message-to-select option[value="nova"]')?.disabled);
+    assert.equal(await requestButton.isVisible(), false);
+    await recipient.selectOption("", { force: true });
 
     // @-mention autocomplete is a real listbox: rows are options, the textarea points at the active one.
     const mentionList = page.locator("#mention-list");
@@ -161,10 +261,36 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
     await page.locator("#thread-back").click();
     assert.match(await input.getAttribute("placeholder"), /Message #/);
-    assert.equal(await page.locator("#composer-options").count(), 0);
+    assert.equal(await page.locator("#composer-options").count(), 1);
     assert.equal(await page.locator("#remember-drafts").count(), 0);
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
+
+    // A live membership change must never turn a private draft into a public post.
+    await page.locator("#message-to-select").selectOption("maya", { force: true });
+    await input.fill("Private draft retained while Maya is unavailable");
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: "maya", expectedMemberRevision: 0, permissions: [], active: false });
+    await page.waitForFunction(() => document.querySelector('#message-to-select option[value="maya"]')?.disabled);
+    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    await page.locator("#composer-options > summary").click();
+    await page.locator("#conversation-title").click();
+    assert.equal(await optionsDisclosure.evaluate(node => node.open), false, "clicking outside closes only the options");
+    assert.equal(await input.inputValue(), "Private draft retained while Maya is unavailable");
+    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    const beforeUnavailableSend = store.room("commons").sequence;
+    const privateRequest = page.waitForRequest(request => request.url().endsWith("/commands") && request.method() === "POST");
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    assert.equal((await privateRequest).postDataJSON().data.toMemberId, "maya");
+    await waitForFailure();
+    assert.equal(await input.inputValue(), "Private draft retained while Maya is unavailable");
+    assert.equal(store.room("commons").sequence, beforeUnavailableSend, "unavailable private recipient creates no public or private message");
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: "maya", expectedMemberRevision: 1, permissions: [], active: true });
+    await page.waitForFunction(() => document.querySelector('#message-to-select option[value="maya"]')?.disabled === false);
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    await waitForSaved();
+    const recoveredPrivate = store.room("commons").state.messages.filter(message => message.body === "Private draft retained while Maya is unavailable");
+    assert.equal(recoveredPrivate.length, 1); assert.equal(recoveredPrivate[0].toMemberId, "maya");
+    await page.locator("#message-to-select").selectOption("", { force: true });
 
     await input.fill("A separate room draft");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();

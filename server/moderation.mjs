@@ -16,6 +16,8 @@
 import { randomUUID } from "node:crypto";
 import { validId, isMutedBy } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -70,6 +72,18 @@ export class Moderation {
   report(token, roomId, request, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      // Filing a report is a write: the read-only autonomy tier applies even
+      // though reports never pass through store.command() (issue #997).
+      enforceAutonomyTierForAction({
+        db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member,
+        action: "moderation_report", fail,
+      });
+      // Guests may read and chat but may not file moderation reports.
+      // report() authenticates directly and bypasses store.command, so the
+      // RoomStore guest scope gate never runs here — enforce the same denial
+      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+      if (isGuestAgentMemberId(auth.member.id))
+        fail(403, "guest_scope_denied", "Guest members cannot file moderation reports");
       if (!request || Array.isArray(request) || typeof request !== "object" || Object.keys(request).length !== 2
         || !Object.hasOwn(request, "messageId") || !Object.hasOwn(request, "reason")) fail(422, "invalid_report", "Supply one message id and a short reason");
       if (!validId(request.messageId)) fail(422, "invalid_report", "Supply one message id and a short reason");

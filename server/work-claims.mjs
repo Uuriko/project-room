@@ -66,6 +66,23 @@ const tagsOf = value => {
     "each tag must be 1..32 characters matching [A-Za-z0-9_-]"));
   return Object.freeze([...value]);
 };
+// Files a claim will touch (RC claim-files): repo-relative paths, normalized
+// the same way server/claim-collisions.mjs normalizes them so overlap checks
+// compare like with like. Optional; an empty list means "not declared".
+const MAX_CLAIM_FILES = 64;
+const filesOf = value => {
+  check(Array.isArray(value), "files must be an array");
+  check(value.length <= MAX_CLAIM_FILES, `files must list at most ${MAX_CLAIM_FILES} paths`);
+  const normalized = value.map(path => {
+    check(typeof path === "string" && path.trim().length > 0 && path.length <= 512, "each file must be a 1..512 character path");
+    let p = path.trim().replace(/\/+/g, "/");
+    while (p.startsWith("./")) p = p.slice(2);
+    while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    check(p.length > 0 && p !== "." && !p.startsWith("/") && !p.split("/").includes(".."), "each file must be a repo-relative path");
+    return p;
+  });
+  return Object.freeze([...new Set(normalized)].sort());
+};
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
   check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
@@ -118,12 +135,13 @@ const workOf = value => {
   const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
   const tags = value.tags === undefined || value.tags === null ? Object.freeze([]) : tagsOf(value.tags);
   const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
+  const files = value.files === undefined || value.files === null ? Object.freeze([]) : filesOf(value.files);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
-    tags, blobs };
+    tags, files, blobs };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -150,7 +168,7 @@ const leaseHoursOf = value => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags } = {}, { now } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files } = {}, { now } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -159,18 +177,20 @@ export function createWork({ id, title, reviewPolicy, note, tags } = {}, { now }
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
+    files: files === undefined || files === null ? Object.freeze([]) : filesOf(files),
     blobs: Object.freeze([]) };
   return withHistory(item, atMs, "system", "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
   const wanted = leaseHoursOf(leaseHours);
   const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+    files: files === undefined || files === null ? item.files : filesOf(files),
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",

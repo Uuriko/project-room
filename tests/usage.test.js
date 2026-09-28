@@ -54,8 +54,9 @@ test("agents are never counted as human seats; identities are counted separately
   cmd(ownerKey, T.MEMBER_ACCESS_CHANGED, { memberId: "bot-b", expectedMemberRevision: botB.revision, permissions: botB.permissions, active: false });
   const after = await usage();
   assert.deepEqual(after.body.members, { humans: 2, agents: 2, inactive: 1, agentIdentities: 1 });
-  // Caps count every member record the store counts, active or not.
-  assert.equal(after.body.caps.members.used, 5);
+  // Only active members occupy admission seats; inactive history remains in the summary.
+  assert.equal(after.body.caps.members.used, 4);
+  assert.equal(after.body.caps.members.remaining, PILOT_LIMITS.membersPerRoom - 4);
 });
 
 test("caps match the store's pilot limits and headroom is what the store still accepts", async t => {

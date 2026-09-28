@@ -394,3 +394,38 @@ test("M2: a room owner cannot revoke a bond formed in another room", async t => 
   assert.equal(home.status, 201);
   assert.equal(home.body.event.type, "bond.revoked");
 });
+
+test('L4: revoked linked identity cannot use residual room key for bond or peer DM actions', async t => {
+  const { origin, roomId, owner, friend, command, fixture } = await roomOf(t);
+  const proposed = await jsonOf(await command(owner.secret, 'bond.propose', {
+    to: friend.identityId, scopes: ['peer.dm']
+  }));
+  assert.equal(proposed.status, 201);
+  const bondId = proposed.body.event.data.bondId;
+  assert.equal((await command(friend.secret, 'bond.accept', { bondId })).status, 201);
+  const friendKey = fixture.store.issueAccessKey(roomId, friend.identityId);
+  assert.equal((await command(friendKey, 'dm.posted', {
+    to: owner.identityId, messageId: randomUUID(), body: 'before revocation'
+  })).status, 201);
+  fixture.store.identities.revoke(friend.identityId, friend.secret);
+  // Identity secret is dead already. Simulate a residual room access key in
+  // a mixed-credential deployment: no identity operation may use it.
+  for (const [type, data] of [
+    ['bond.propose', { to: owner.identityId }],
+    ['bond.revoke', { bondId }],
+    ['dm.posted', { to: owner.identityId, messageId: randomUUID(), body: 'blocked' }]
+  ]) {
+    const denied = await jsonOf(await command(friendKey, type, data));
+    assert.equal(denied.status, 403, type);
+    assert.equal(denied.body.error.code, 'identity_revoked', type);
+  }
+  // The other party and the room owner (through a separate active identity) retain
+  // their own read/revoke capability; no private message was written.
+  const thread = await jsonOf(await get(origin, `/api/rooms/${roomId}/peer-dms`, owner.secret));
+  assert.equal(thread.status, 200);
+  const history = await jsonOf(await get(origin, `/api/rooms/${roomId}/peer-dms/${encodeURIComponent(thread.body.threads[0].threadId)}`, owner.secret));
+  assert.deepEqual(history.body.messages.map(m => m.body), ['before revocation']);
+  const ownerRevoke = await jsonOf(await command(owner.secret, 'bond.revoke', { bondId }));
+  assert.equal(ownerRevoke.status, 201, 'active room owner may still revoke its own room bond');
+  assert.equal(ownerRevoke.body.event.type, 'bond.revoked');
+});

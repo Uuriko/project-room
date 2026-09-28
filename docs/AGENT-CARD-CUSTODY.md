@@ -27,7 +27,15 @@ revision; otherwise the card is served unsigned in a development checkout. Relea
 now stop when the private key is unavailable or does not match the pinned public
 key. The signer preserves the previous generated file on failure. Local unsigned
 builds require the explicit `node scripts/sign-agent-card.mjs --allow-unsigned`;
-the Worker deploy configuration never passes that option. CI bundle validation
+the Worker deploy configuration never passes that option. `--allow-unsigned`
+writes the explicit opt-in into `deploy/agent-card-signed.mjs` as
+`AGENT_CARD_UNSIGNED_REASON`; an unsigned card with a null reason is the
+silent build default, and the boot gate (`server/boot-config.mjs`,
+`validateCriticalConfig()`, called from `server.mjs`) refuses to boot
+production with an unsigned card — with or without the opt-in — and fails
+loud in dev with a member-facing message naming the fix. The served unsigned
+card is marked `signed: false` (plus `unsignedReason` when the opt-in was
+recorded) so members can see the degraded state. CI bundle validation
 uses `scripts/worker-ci-build.mjs`, which creates a temporary configuration with
 the explicit unsigned option and always invokes Wrangler with `--dry-run`.
 It accepts no deployment arguments and leaves the real configuration unchanged.
@@ -55,6 +63,29 @@ update `deploy/agent-card-key.mjs` (new key id + public key) and re-sign.
 
 Losing the old key is recovered out-of-band via the room owner's credential —
 never by self-assertion.
+
+## A2A v1.0 JWS signatures (RC-2026-09-27-2715)
+
+Alongside the house envelope above, a signed card also carries an A2A v1.0
+§8.4 `signatures` array: one JWS (RFC 7515) object `{ protected, signature }`
+with `alg: "EdDSA"` (the same Ed25519 key), `typ: "JOSE"`, `kid` = the key id
+above, and `jku` = `https://room.trydemigod.com/.well-known/jwks.json`. The
+JWS signs the whole card plus the legacy envelope (payload = JCS/RFC 8785
+over the card minus `signatures`); the key-discovery document is served at
+`/.well-known/jwks.json` from the committed pinned public key. Both
+signatures are minted by `scripts/sign-agent-card.mjs` at build time under
+the same revision gate — an unsigned card carries neither. Verification (any
+agent, offline):
+
+```js
+import { verifyCardJws } from "<room>/server/agent-card-signing.mjs";
+// card = the fetched card JSON (with its `signatures` array)
+for (const jws of card.signatures ?? []) {
+  verifyCardJws({ card, publicKey: card.publicKey, jws });
+} // true = genuine; or resolve the key via the JWS `kid`/`jku` instead
+```
+
+No new key material and no new custody: the JWS reuses this same Ed25519 key.
 
 ## Recovery
 

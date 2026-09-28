@@ -32,6 +32,9 @@ try {
   store.agentConnections.apply(session.token, "commons", { action: "create", requestId: randomUUID(), memberId: "agent-a", displayName: "Agent",
     access: "contribute", keyHash: createHash("sha256").update(randomBytes(32).toString("base64url")).digest("hex"),
     expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  const delegate = store.identities.create("Rehearsal delegate");
+  store.identities.link(owner, "commons", { identityId: delegate.identityId, permissions: ["steer"] });
+  store.delegation.grant(owner, "commons", { identityId: delegate.identityId });
   send(T.MESSAGE_POSTED, { messageId: randomUUID(), body: "history before the backup" });
 
   const backupResult = await backupRoom(filename, backupDest);
@@ -41,6 +44,7 @@ try {
   assert.ok(watermark.backedUpAt <= Date.now());
 
   // The live timeline moves on: every one of those grants is withdrawn.
+  store.delegation.revoke(owner, "commons", { identityId: delegate.identityId });
   store.revoke(guestKey);
   const guest = store.room("commons").state.members.guest;
   send(T.MEMBER_ACCESS_CHANGED, { memberId: "guest", expectedMemberRevision: guest.revision, permissions: [], active: false });
@@ -62,9 +66,10 @@ try {
       credential: restored.db.prepare("SELECT revoked FROM credentials WHERE revoked=0 AND kind='access'").all().length >= 2,
       link: restored.db.prepare("SELECT revoked_at FROM share_links WHERE id=?").get(link.id).revoked_at === null,
       member: restored.room("commons").state.members.guest.active === true,
+      delegation: restored.delegation.hasGrant("commons", delegate.identityId),
       connection: restored.db.prepare("SELECT status FROM agent_connections WHERE member_id='agent-a'").get().status === "issued"
     };
-    assert.deepEqual(resurrected, { credential: true, link: true, member: true, connection: true },
+    assert.deepEqual(resurrected, { credential: true, link: true, member: true, delegation: true, connection: true },
       "restore silently resurrects withdrawn authority - this is the hazard B5 guards");
 
     const report = reconcileRestoredAuthority(restored, store);
@@ -81,9 +86,11 @@ try {
     for (const row of byKind.member) assert.match(row.detail, /deactivated after the backup/);
     assert.equal(byKind.agent_connection?.length, 1, "disconnected agent connection named");
     assert.match(byKind.agent_connection[0].detail, /disconnected after the backup/);
-    assert.equal(report.stale.length, 6, "no other stale authority in a clean rehearsal");
+    assert.equal(byKind.membership_delegation?.length, 1, "revoked delegation named");
+    assert.match(byKind.membership_delegation[0].detail, /revoked after the backup/);
+    assert.equal(report.stale.length, 7, "no other stale authority in a clean rehearsal");
     assert.equal(report.checked.credentials, restored.db.prepare("SELECT count(*) AS n FROM credentials").get().n);
-    assert.deepEqual({ ...report.checked, credentials: 0 }, { credentials: 0, shareLinks: 1, agentConnections: 1, accounts: 2, rooms: 1 });
+    assert.deepEqual({ ...report.checked, credentials: 0 }, { credentials: 0, shareLinks: 1, agentConnections: 1, accounts: 2, membershipDelegations: 1, rooms: 1 });
 
     // A restore reconciled against a reference that made no changes is clean.
     const quiet = await backupRoom(filename, backupDest);

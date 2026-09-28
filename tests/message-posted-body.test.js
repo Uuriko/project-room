@@ -79,3 +79,31 @@ test("POST commands returns a body hint when message.posted sends text", async t
   assert.equal(ok.status, 201);
   assert.equal((await ok.json()).event.data.body, "hello");
 });
+
+
+test('oversized non-message field has a typed, actionable limit', async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const make = title => ({ id: randomUUID(), type: T.WORK_PROPOSED, data: {
+    workItemId: 'work-field-cap', title, definitionOfDone: 'Done',
+    accountableMemberId: 'owner', verifierMemberId: 'owner', mode: 'read',
+  } });
+  assert.throws(() => f.store.command(f.keys.owner, 'commons', make('x'.repeat(4097))), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, 'payload_too_large');
+    assert.match(error.message, /title must be at most 4096 characters/);
+    return true;
+  });
+  assert.equal(f.store.room('commons').state.workItems['work-field-cap'], undefined);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/commands`, {
+    method: 'POST', headers: { Authorization: `Bearer ${f.keys.owner}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(make('x'.repeat(4097))),
+  });
+  assert.equal(res.status, 422);
+  const body = await res.json();
+  assert.equal(body.error.code, 'payload_too_large');
+  assert.match(body.error.message, /title must be at most 4096 characters/);
+});

@@ -27,8 +27,8 @@ const FAILURE_SIGNATURES = [
   },
   {
     symptom: "MCP route: initialize succeeds but zero tools are listed",
-    check: "compare scripts/agent-mcp.mjs against the repo's current copy",
-    fix: "Re-fetch scripts/agent-mcp.mjs from the repo; a stale client against a newer server lists no tools.",
+    check: "verify this host registered the saved connection and exposes its tools; HTTP initialize alone does not prove native tool availability",
+    fix: "Inspect the host registration and logs for the existing connection. If the runtime is stale, update the complete runtime containing scripts/agent-mcp.mjs, then reload that connection and list tools in this session.",
   },
   {
     symptom: "identity-create demands a credential for the unauthenticated first step",
@@ -38,7 +38,7 @@ const FAILURE_SIGNATURES = [
   {
     symptom: "identity minted but no room to join (commons 404 / no owner tap)",
     check: "docs' example room ids are not a live directory; access-requests 404 conflates missing room with missing identity",
-    fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs bootstrap-agent-room \"Your Agent Name\". Needs only ROOM_AGENT_ORIGIN. Or step through identity-create → room-create → invite-code.",
+    fix: "Use your saved identity to list its rooms (GET /api/agent-rooms), check the intended room ID with its owner, or request access with that identity. If you intentionally want a new room, room-create can reuse the existing identity; do not mint another identity to repair access.",
   },
   {
     symptom: "POST /api/identity-create or /room/api/identity-create returns 404",
@@ -72,6 +72,8 @@ export async function doctorMain(argv) {
 Read-only self-test: checks the service origin, the credential source and
 access, then prints one concrete repair step for the first failure, followed
 by a symptom → fastest check → exact fix table for common silent failures.
+Healthy means service origin and configured room access passed. Native host
+registration, listening and execution remain unchecked.
 Prints no secrets and writes nothing to the room.`);
     return;
   }
@@ -109,7 +111,7 @@ Prints no secrets and writes nothing to the room.`);
 
     // 2. Credential source.
     if (credentialError) {
-      if (!anyCredential) fail("credential", "missing", `No credential yet. Mint one with only the origin set: node scripts/agent-inbox.mjs identity-create "Your Agent Name"`);
+      if (!anyCredential) fail("credential", "missing", "Look for your existing saved connection and set ROOM_AGENT_CONFIG to its private directory, or configure the existing identity credential. Only if none exists, follow docs/SWARM-PLUG-IN.md to enroll.");
       else if (credentialError.code === "ambiguous_config") fail("credential", "ambiguous", "Choose a saved connection OR environment credentials, not both: clear ROOM_AGENT_CONFIG or the four ROOM_AGENT_* variables.");
       else if (credentialError.code === "config_not_found") fail("credential", "config_not_found", "Point ROOM_AGENT_CONFIG at the private directory saved by connect/import.");
       else if (credentialError.code === "config_not_private") fail("credential", "config_not_private", "Use an owner-only local directory and regular private file, without links.");
@@ -129,12 +131,16 @@ Prints no secrets and writes nothing to the room.`);
           detail: `credential_accepted as ${identity ? "agent identity" : "member"} ${access.memberId} in room ${access.roomId}; permissions: ${(access.permissions ?? []).join(",") || "none"}` });
       } catch (error) {
         const status = error instanceof RoomClientError ? error.status : 0;
-        const rejected = status === 401 || status === 403;
         const identitySecret = typeof config.token === "string" && config.token.startsWith("pri_");
-        if (rejected && identitySecret) {
-          fail("access", "identity_not_linked",
-            `No membership in this room. Ask the owner to link it (identity-link ${config.memberId ?? "<identity-id>"} steer,accept_work,complete_work,verify), redeem an invite-code, account-link this room, or create your own: node scripts/agent-inbox.mjs bootstrap-agent-room "Your Agent Name"`);
-        } else if (rejected) fail("access", "credential_rejected", "Access was not accepted. Ask the operator for the correct active agent key.");
+        if (status === 401 && identitySecret) {
+          // The server deliberately conflates invalid identity secrets with
+          // missing/inactive room access. A token prefix proves neither cause.
+          fail("access", "credential_or_membership_rejected",
+            `This room rejected the configured identity credential; this response cannot distinguish an invalid or revoked secret from missing room access. Verify the saved connection for ${config.memberId ?? "<identity-id>"}, then use that identity's GET /api/agent-rooms to check existing rooms or ask the owner to confirm access. Do not create another identity to repair this failure.`);
+        } else if (status === 401) fail("access", "credential_rejected", "The configured key was not accepted. Restore the active saved credential or ask its operator to repair access for the existing member.");
+        else if (status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code)) {
+          fail("access", error.code, "The service rejected the request host, origin or proxy path. Verify the configured service origin and deployment routing, then retry the same saved connection. This does not establish a missing membership.");
+        } else if (status === 403) fail("access", "access_denied", "The service denied this request. Check the configured room and the existing member's access with its owner; do not replace the identity or assume its secret is invalid.");
         else if (error.code === "identity_mismatch") fail("access", "identity_mismatch", "The credential does not match the configured room and member. Re-check ROOM_AGENT_ROOM and ROOM_AGENT_MEMBER. Agent owners of their own rooms may connect; a human owner key still cannot be saved as an agent connection.");
         else {
           const diagnostic = connectionDiagnostic(error);
@@ -144,7 +150,8 @@ Prints no secrets and writes nothing to the room.`);
     }
 
     const healthy = repair === undefined;
-    console.log(JSON.stringify({ healthy, checks, ...(healthy ? {} : { repair, signatures: FAILURE_SIGNATURES }) }, null, 2));
+    console.log(JSON.stringify({ healthy, checks, scope: "service_origin_and_room_access",
+      nativeHost: "unchecked", execution: "unchecked", ...(healthy ? {} : { repair, signatures: FAILURE_SIGNATURES }) }, null, 2));
     if (!healthy) process.exitCode = 1;
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or secrets.

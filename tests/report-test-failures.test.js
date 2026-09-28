@@ -132,12 +132,5 @@ test("test:browser:ci runs the test:browser suite list with spec + junit reporte
   assert.throws(() => ciArgs("node --test --test-reporter=tap a.mjs"), /already sets --test-reporter/);
 });
 
-test("the browser job runs test:browser:ci and always reports failures before uploading evidence", () => {
-  const workflow = readFileSync(".github/workflows/test.yml", "utf8");
-  const browser = workflow.slice(workflow.indexOf("\n  browser:"), workflow.indexOf("\n  cloudflare:"));
-  const order = ["run: npm run test:browser:ci", "if: always()", `run: node scripts/report-test-failures.mjs ${RESULTS_FILE}`, "uses: actions/upload-artifact@v4"]
-    .map(needle => browser.indexOf(needle));
-  assert.ok(order.every(i => i >= 0), `browser job is missing a step: ${JSON.stringify(order)}`);
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), "steps run in order: tests, report, upload");
-  assert.ok(!browser.includes("run: npm run test:browser\n"), "CI uses the reporter-equipped variant");
-});
+// Shard execution, reporting artifacts and aggregate failure behavior are exercised
+// through real child processes in browser-shards.test.js.

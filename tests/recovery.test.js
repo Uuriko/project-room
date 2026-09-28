@@ -14,6 +14,7 @@ import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { fenceDefinitions } from "../server/writer-fence.mjs";
+import { issueGrant } from "../server/grants.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 function fixture(t) {
@@ -23,7 +24,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 118 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all application tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -111,6 +112,8 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
   f.store.db.prepare(`INSERT INTO membership_delegation_grants(room_id,identity_id,granted_by,granted_at,revoked_at,added_invite_member)
     VALUES('commons',?,'owner',?,NULL,1)`)
     .run(identityId, f.now());
+  f.store.delegationJournal.append("commons", identityId, "baseline_active", "legacy_unattributed", f.now(), false, true);
+  f.store.db.exec("DELETE FROM membership_delegation_pending");
   // Seed wakeable-presence rows so the capture covers agent_hosts and agent_wake_signals (RC-2026-09-18-051).
   f.store.db.prepare(`INSERT INTO agent_hosts(agent_id,host_id,mode,wake_url,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
     .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
@@ -133,6 +136,29 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
   f.store.db.prepare(`INSERT INTO guest_members(member_id,room_id,guest_identity_id,tier,invite_id,created_at)
     VALUES('guest-agent-recovery','commons',?,'observer','recovery-guest-invite',?)`)
     .run(identityId, f.now());
+  // Seed one self-serve guest seat + its request-ID idempotency record so
+  // the capture covers guest_selfserve and guest_selfserve_idem
+  // (RC-2026-09-25-912). Written directly: the join path needs a signed
+  // agent card the fixture has no reason to mint.
+  f.store.db.prepare(`INSERT INTO guest_selfserve(member_id,room_id,key_hash,created_at,last_active_at)
+    VALUES('guest-agent-selfserve','commons',?,?,?)`)
+    .run("b".repeat(64), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO guest_selfserve_idem(room_id,key_hash,request_id,token_hash,member_id,expires_at,renewed,created_at)
+    VALUES('commons',?,'recovery-selfserve-request',?,'guest-agent-selfserve',?,0,?)`)
+    .run("b".repeat(64), "c".repeat(64), f.now() + 86400000, f.now());
+  // Seed the board-v2 durable registry tables (PR #1144) so the recovery
+  // audit's substantive-fixture-data check covers them. Written directly:
+  // the fixture has no reason to run the board-v2 claim state machine.
+  f.store.db.prepare(`INSERT INTO board_vtwo_claims(task_id,lane,files,lease,lease_h,reason,state,claim_seq,claim_at,heartbeat_at,last_seq,receipts)
+    VALUES('recovery-claim','recovery-lane','[]','lease=6h',6,'recovery fixture','claimed',1,?,?,0,'[]')`)
+    .run(new Date(f.now()).toISOString(), new Date(f.now()).toISOString());
+  f.store.db.prepare(`INSERT INTO board_vtwo_events(at,kind,task_id,lane,payload,supersedes,idempotency_key,mirror_issue,mirror_comment)
+    VALUES(?, 'claim.created','recovery-claim','recovery-lane','{}',NULL,'recovery-idem-key',NULL,NULL)`)
+    .run(new Date(f.now()).toISOString());
+  f.store.db.prepare(`INSERT INTO board_vtwo_mirror(id,current_issue,issues) VALUES(1,266,'[266]')`).run();
+  f.store.db.prepare(`INSERT INTO board_vtwo_idempotency(scoped_key,status,body,fingerprint,created_at)
+    VALUES('recovery-scope',200,'{}','recovery-fingerprint',?)`)
+    .run(Date.now());
   // Seed one referral invite (redeemed) + its key row + chain membership so
   // the capture covers referral_invite_keys, referral_invites and
   // referral_chain_members (#1025 signed agent-carried referral invites).
@@ -335,11 +361,32 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
      mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', 'lq_recovery', 'acme/widgets', 7, 'owner', 'owner', 'Recovery PR', ?, 'unknown', 0, 'pending', 1, ?, ?)`)
     .run("a".repeat(40), f.now(), f.now());
+  // telegram_live_status (durable Telegram live-delivery/send facts, task 10).
+  // Synthetic data only: the recovery account received 3 updates and its last
+  // send succeeded, so the capture covers the new table.
+  f.store.db.prepare(`INSERT INTO telegram_live_status(account_id,connection_id,last_update_received_at,received_updates,last_send_at,last_send_outcome,last_send_code,updated_at)
+    VALUES('recovery-account','recovery-connection',?,3,?,'ok','200',?)`)
+    .run(f.now(), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO human_push_subscriptions
+    (endpoint, room_id, member_id, p256dh, auth, expiration_time, created_at)
+    VALUES ('https://push.example.test/recovery', 'commons', 'owner', 'recovery-p256dh', 'recovery-auth', NULL, ?)`)
+    .run(f.now());
+  // Seed one live grant edge so the capture covers agent_capability_grants
+  // (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728).
+  // issueGrant is the product writer; the audit's "every table has
+  // substantive data" check needs one row.
+  issueGrant(f.store.db, "commons", "agent", "grants:issue", { grantedBy: "owner", nowMs: f.now() });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 123,
-    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025); +2: private_next_action_dismissals, private_next_action_suppressions (ranked next-actions private state RC-2026-09-25-911)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 136,
+    "a table was added or removed: confirm the audit covers it, then update this count"); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables; +2: agent_identity_verification, room_verification_policy (RC-2026-09-18-049); +2: agent_hosts, agent_wake_signals (RC-2026-09-18-051); +1: oauth_pending_states (RC-2026-09-19); +2: dm_consents, room_public_settings (consent-bound DMs + public face, 2026-09-20); +1: room_directory_settings (opt-in public room directory #605); +2: mention_states, room_mention_settings (mention lifecycle #658); +1: membership_delegation_grants (membership delegation #761); +7: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences (credits-only bounty exchange #762); +1: agent_key_registry (agent public-key registry, integration-map slice #9); +1: inbox_handoff_rooms (room scope for collab-route handoffs); +4: bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags (bounty slices 6+8+10: pinned rubrics, anti-flake ladder, sybil detector #792); +2: guest_invites, guest_members (GX guest-invite public handoff RC-2026-09-23-100); +3: activity_events, read_horizons, saved_messages (attention: activity feed, read horizons, saved messages); +1: thread_mutes (shared: attention thread mutes + server/thread-mutes.mjs); +1: bounty_reputation_packets (slice #4: probation-gate review packets); +1: referrals (referral attribution); +2: web_fetch_cache, web_fetch_log (room-side web fetch RC-2026-09-23-102); +3: agent_bonds, peer_dm_threads, peer_dm_messages (agent Bond and peer DMs); +1: jev_shadow_decisions (Jev shadow-gate journal); +1: agent_autonomy_tiers (graduated agent autonomy tiers #928, replaces slice 1/3 agent_operator_controls); +1: agent_skill_cards (evidence-backed skill cards RC-2026-09-24-202); +1: agent_push_configs (push wake path RC-2026-09-24-203); +1: identity_link_codes (identity-holder link codes RC-2026-09-24-210); +1: inbox_attachment_bytes (identity-scoped staged inbox attachment bytes); +1: web_research_log (knowledge router RC-2026-09-24-310); +1: land_queue (pull-request land queue); +1: web_fetch_cache_rooms (room-scoped fetch visibility, RC-2026-09-24-310 follow-up); +3: referral_invite_keys, referral_invites, referral_chain_members (signed agent-carried referral invites #1025); +2: private_next_action_dismissals, private_next_action_suppressions (ranked next-actions private state RC-2026-09-25-911); +1: telegram_live_status (durable Telegram live-delivery/send facts, task #10); +2: guest_selfserve, guest_selfserve_idem (self-serve guest entry RC-2026-09-25-912); +4: board_vtwo_claims, board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency (board-v2 durable registry PR #1144); +1: agent_capability_grants (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728)
 
-  for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
+  for (const table of before.tables) {
+    if (table.table === "membership_delegation_pending") {
+      assert.equal(table.rows, 0, "no rollback-era transitions remain after reconciliation");
+      continue;
+    }
+    assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
+  }
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
   assert.deepEqual(receipt.recovery, before);
@@ -357,6 +404,8 @@ test("online capture preserves all 118 tables, identity boundaries and exact ret
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Synthetic post-capture write" } });
   assert.throws(() => f.store.authenticate(f.validSession.token), { code: "unauthenticated" });
   let recovered = new RoomStore(receipt.filename, { now: f.now });
+  assert.deepEqual(recovered.workClaims.get("commons", "recovery-claim"), f.store.workClaims.get("commons", "recovery-claim"));
+  assert.equal(recovered.workClaims.configFor("commons").defaultLeaseHours, 6);
   try {
     assert.equal(recovered.requestRuns.list(f.keys.owner, "commons").runs[runRequest.id].state, "working");
     assert.throws(() => recovered.requestRuns.apply(f.keys.agent, "commons", { ...runInput, attemptId: "replacement-host" }), { code: "request_run_owned" });

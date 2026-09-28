@@ -158,6 +158,25 @@ test("claim lease expiring within 24h surfaces; distant leases stay quiet", t =>
   assert.match(items[0].detail, /2h/);
 });
 
+test("an action stays visible when informational claim leases fill the cap", t => {
+  const f = setup(t);
+  const expires = new Date(f.clock.now + 2 * 3600000).toISOString();
+  for (let n = 1; n <= 25; n++) {
+    const wid = proposeWork(f, `lease-${String(n).padStart(2, "0")}`, { mode: "write" });
+    f.send("agent", T.WORK_ACCEPTED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision });
+    f.send("agent", T.CLAIM_ACQUIRED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision,
+      repository: "repo", ref: "main", paths: [`path-${n}`], expiresAt: expires });
+  }
+  f.send("owner", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 });
+  const spendId = "lease-01";
+  f.send("agent", T.SESSION_STARTED, { workItemId: spendId, expectedRevision: f.store.room("commons").state.workItems[spendId].revision,
+    budget: { maxSpendCents: 4500 } });
+  const report = f.report();
+  assert.ok(report.itemCount > report.items.length, "the rollup is over the visible cap");
+  assert.ok(report.items.some(item => item.kind === "spend" && item.severity === "action"),
+    "a spend action is not dropped behind informational claim leases");
+});
+
 test("report carries the viewer echo the browser client requires (no session kill)", async t => {
   // Regression for the #744 Cloudflare browser failure: the rollup response
   // lacked viewerId/viewerAccountId/viewerAuthEpoch/viewerSessionBinding, so
@@ -181,4 +200,43 @@ test("report carries the viewer echo the browser client requires (no session kil
   };
   const client = new RoomClient({});
   assert.equal(client.ownsResponse(report, session), true, "the rollup must survive the client identity check");
+});
+
+// Owner-boundary contract: continuation reaches every pending request, stays
+// bounded, and restarts rather than skipping when the live queue changes.
+test("attention pages reach every request and reset stale continuations", t => {
+  const f = setup(t);
+  const add = n => {
+    const identity = f.store.identities.create(`Page joiner ${n}`);
+    f.accessRequests.request("commons", { identityId: identity.identityId, displayName: `Page joiner ${n}`,
+      requestedPermissions: ["accept_work"], requestId: `page-${String(n).padStart(3, "0")}` });
+  };
+  for (let n = 1; n <= 60; n++) add(n);
+  const page = cursor => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "commons", null, f.clock.now, { cursor });
+  const first = page(null);
+  assert.equal(first.itemCount, 60);
+  assert.equal(first.actionCount, 60);
+  assert.equal(first.items.length, 25);
+  assert.equal(first.previousCursor, null);
+  assert.ok(first.nextCursor);
+  const second = page(first.nextCursor), third = page(second.nextCursor);
+  assert.equal(second.pageOffset, 25);
+  assert.equal(third.items.length, 10);
+  assert.equal(third.nextCursor, null);
+  assert.deepEqual(page(second.previousCursor).items, first.items);
+  const all = [...first.items, ...second.items, ...third.items];
+  assert.equal(new Set(all.map(item => item.id)).size, 60);
+  assert.ok(all.some(item => item.id === "page-060"));
+  add(61);
+  const changed = page(second.nextCursor);
+  assert.equal(changed.reset, true);
+  assert.equal(changed.pageOffset, 0);
+  assert.equal(changed.itemCount, 61);
+  const deny = changed.items[0];
+  f.accessRequests.decide(f.keys.owner, "commons", deny.id, deny.actions[1].body);
+  const removed = page(changed.nextCursor);
+  assert.equal(removed.reset, true);
+  assert.equal(removed.itemCount, 60);
+  assert.equal(removed.items.some(item => item.id === deny.id), false);
+  assert.throws(() => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.member, "commons", null, f.clock.now, { cursor: first.nextCursor }), { code: "owner_required" });
 });

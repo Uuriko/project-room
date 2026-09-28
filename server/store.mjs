@@ -8,6 +8,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
+import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
@@ -21,6 +22,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers } from "./autonomy-tiers.mjs";
+import { ensureGrantsSchema } from "./grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -37,8 +39,10 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
+import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
 import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
@@ -49,6 +53,7 @@ import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mj
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
@@ -62,11 +67,12 @@ import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
+import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -79,6 +85,7 @@ import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attent
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
+import { HumanPush, humanPushSchema } from "./human-push.mjs"; // Human browser push: mentions and DMs, additive.
 import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -153,6 +160,8 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// Inactive members retain their history, but do not occupy an admission seat.
+export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
 // RC-2026-09-18-012: presented agent API-key credentials ("rak_"+secret).
@@ -530,13 +539,19 @@ export function validateCommand(command) {
 // their own read/resolve routes. An empty inbox says what it will carry.
 const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = []) => {
   const steps = [];
+  const requestStep = latest => ({
+    action: "read-request", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}/reply-context?requestMessageId=${encodeURIComponent(latest.nextRead.arguments.requestMessageId)}`,
+    nextRead: latest.nextRead,
+    description: "Read this formal request and finish every conversation page. Choose a responseActions template to answer or decline; ordinary chat replies do not close the request. A read does not acknowledge or answer anything."
+  });
   if (directMentions.length > 0) {
     const latest = directMentions.find(mention => mention.state !== "timed_out") ?? directMentions[0];
     const timing = latest.state === "timed_out" ? "overdue " : "";
     const outcome = latest.state === "timed_out"
       ? "Replying removes it from your waiting inbox; the timeout remains in history."
       : "Replying to that message marks the mention responded.";
-    steps.push(Object.freeze({
+    steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-mention",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
@@ -547,7 +562,7 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   }
   if (directMessages.length > 0) {
     const latest = directMessages[0];
-    steps.push(Object.freeze({
+    steps.push(Object.freeze(latest.nextRead ? requestStep(latest) : {
       action: "reply-dm",
       method: "POST",
       path: `/api/rooms/${roomId}/commands`,
@@ -595,6 +610,12 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
       description: "Your inbox is empty. It will carry direct @mentions waiting for your answer, targeted room DMs, peer DMs from bonded agents, bond proposals, work assignments, and open @agent routing mentions.",
     }));
   }
+  steps.push(Object.freeze({
+    action: "list-open-requests", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}/reply-requests?direction=incoming&status=open`,
+    nextRead: { tool: "room_list_requests", arguments: { direction: "incoming", status: "open" } },
+    description: "List current open formal requests addressed to you, including requests outside this recent DM window. This discovery link does not mean requests are pending. Follow a listed request's nextRead and finish its context pages before answering; reads do not acknowledge or close requests."
+  }));
   return steps;
 };
 
@@ -659,9 +680,10 @@ const workSessionsNext = (roomId, sessions) => {
 function agentWakeTargets(state, senderMemberId, data) {
   const members = state?.members ?? {};
   const targets = new Map();
-  const agents = Object.fromEntries(Object.entries(members).filter(([, member]) => member?.kind === "agent"));
   const body = typeof data?.body === "string" ? data.body : "";
-  for (const memberId of resolveMentionTargetsInText(agents, {}, body, senderMemberId)) {
+  for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
+    if (members[memberId]?.kind !== "agent") continue;
+    if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
@@ -699,6 +721,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
     this.delegation = new MembershipDelegation(this);
+    this.delegationJournal = new MembershipDelegationJournal(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
@@ -709,6 +732,7 @@ export class RoomStore {
     this.moderation = new Moderation(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
+    this.workClaims = createDurableWorkClaimRegistry(this.db, { transaction: fn => this.transaction(fn) });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -721,6 +745,7 @@ export class RoomStore {
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
+    this.humanPush = new HumanPush(this); // Human browser push (mentions and DMs).
     this.roomAttachments = new RoomAttachmentBytes(this); // room_attachments bytes (stage, list, download, discard, commit).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
@@ -729,6 +754,7 @@ export class RoomStore {
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
+    this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
@@ -766,6 +792,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
+        this.workClaims.verifySchema({ allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
         this.verifyHelpHistory();
@@ -775,6 +802,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // when present.
         this.inbox.stitcher.verifySchema({ allowAbsent: true });
         this.email.verify();
+        this.delegationJournal.verify({ allowAbsent: true });
         // The webhook update journal (B20) is purely additive at v27, so a
         // backup taken before it is still a valid v27 file; read-only never
         // migrates, so verify it only when present.
@@ -786,6 +814,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
+        this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -877,6 +906,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
       // slice 1/3 agent_operator_controls table (module removed).
       ensureAutonomyTiersSchema(this.db);
+      // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant
+      // edges — purely additive table, IF NOT EXISTS is idempotent, no
+      // schema version bump.
+      ensureGrantsSchema(this.db);
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
@@ -886,6 +919,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
+      // PR #1144: board-v2 durable registry (claims/events/mirror/idempotency)
+      // is purely additive — IF NOT EXISTS is idempotent, no schema version
+      // bump, intentionally outside the writer fence (see unfencedAdditiveTables).
+      // Applied here (not only where the registry is instantiated) so upgrades,
+      // store-only fixtures, and the recovery audit see the tables.
+      this.db.exec(boardV2Schema);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
@@ -943,6 +982,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
       // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
       this.db.exec(nextActionsSchema);
+      this.workClaims.verifySchema({ allowAbsent: true });
+      this.db.exec(workClaimSchema);
+      this.workClaims.verifySchema();
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
@@ -962,6 +1004,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(membersDirectorySchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      // The durable Telegram live status (task 10) is purely additive as well.
+      this.db.exec(telegramLiveStatusSchema);
       // The spam-guard quarantine journal is purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
@@ -980,9 +1024,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
+      // Existing directory rows predate the independent feed visibility bit.
+      // Default them on so upgrading does not silently hide public work.
+      const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
+      if (!directoryColumns.has("opportunities_enabled")) {
+        this.db.exec("ALTER TABLE room_directory_settings ADD COLUMN opportunities_enabled INTEGER NOT NULL DEFAULT 1");
+      }
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
+      // records — purely additive side tables (no events, no projection
+      // impact), same pattern.
+      this.db.exec(guestSelfServeSchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -1004,6 +1058,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, intentionally outside the writer fence. DDL matches the
       // attention slice's table so the two converge on merge.
       this.db.exec(threadMutesSchema);
+      // Human browser push subscriptions. Purely additive side table (no
+      // events, no projection impact): IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence.
+      this.db.exec(humanPushSchema);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -1066,6 +1124,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // to the table, and the grant journal's grant→revoke transitions plus
       // the owner-only grant rule are the integrity gate.
       this.db.exec(membershipDelegationSchema);
+      const hadDelegationJournal = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='membership_delegation_journal'").get();
+      this.db.exec(membershipDelegationJournalSchema);
+      if (!hadDelegationJournal) this.delegationJournal.baseline();
+      const rollbackChanges = this.delegationJournal.reconcileRollback();
+      if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
       this.db.exec(agentRoomSchema);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers
@@ -2291,7 +2354,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!rolePermissions || permissions.length !== rolePermissions.length || permissions.some((permission, index) => permission !== rolePermissions[index])) {
         fail(409, "invitation_scope_invalid", "Stored invitation grants no longer match its immutable role policy");
       }
-      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       refuseArchivedWrite(room.state);
       const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       let state;
@@ -3181,6 +3244,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             body: parsed.data.body,
             at: parsed.at,
             channel: "room",
+            ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
+              && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
+                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
+              } : {}),
           };
         });
       const assignments = this.collab.listAssignments(roomId)
@@ -3271,6 +3338,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         channel: event.data.channelId ?? "general",
         private: Boolean(event.data.toMemberId),
         ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
+        ...(event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
+          && [event.actorId, event.data.toMemberId].includes(memberId) ? {
+            requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } }
+          } : {}),
       }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
@@ -3386,7 +3457,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         && workItem != null && !isTerminalSession(sessionRecord(workItem).status);
       const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || command.type === T.ROOM_ARCHIVED;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
-      if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       // Graduated autonomy tiers: read fresh from the table on every command,
       // so a demotion to t1_readonly wins on the agent's next write. New
@@ -3412,6 +3483,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       });
       let state;
       try {
+        // New referral attribution requires a real member. Keep this at live
+        // admission so previously accepted events remain replayable, including
+        // exact command retries handled above before this validation.
+        if (command.type === T.MEMBER_ADDED && command.data.referredBy != null) {
+          const referrer = Object.hasOwn(room.state.members, command.data.referredBy)
+            ? room.state.members[command.data.referredBy] : null;
+          if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
+        }
         if (requestMode === "respond") {
           const basis = this.db.prepare("SELECT id,body FROM events WHERE room_id=? AND sequence=?").get(roomId, command.data.contextSequence);
           if (basis?.id !== command.data.contextEventId || JSON.parse(basis.body).type !== T.MESSAGE_POSTED) throw new Error("Stale reply request context sequence");
@@ -3424,6 +3503,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
           fail(422, "invalid_arguments", error.message);
+        }
+        // The reducer's generic "Invalid title" also covers values longer
+        // than 4096 characters. Recognize that precise size failure here so
+        // clients can shorten the field without treating it as a conflict.
+        const tooLongField = /^Invalid ([A-Za-z][A-Za-z0-9_]*)$/.exec(error.message);
+        if (tooLongField && typeof command.data[tooLongField[1]] === "string"
+          && command.data[tooLongField[1]].length > 4096) {
+          fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
         }
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
@@ -3450,10 +3537,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const projection = JSON.stringify(state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-      if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
-      this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+      // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
+      // event-log persist. getTracer() is read per command (never at module
+      // scope) so tests can reset the singleton; when telemetry is off the
+      // tracer returns null spans and this block pays nothing. Only the room,
+      // event, and message ids are recorded — never command data.
+      const logSpan = getTracer().startSpan(SPAN_NAMES.LOG, { attributes: {
+        [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id, [ATTR.EVENT_TYPE]: incoming.type } });
+      try {
+        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+        if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
+        this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
+        this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        logSpan.setAttribute(ATTR.OUTCOME, "ok");
+        logSpan.setStatusOk();
+      } catch (error) {
+        logSpan.recordException(error);
+        throw error;
+      } finally {
+        logSpan.end();
+      }
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
       if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
@@ -3469,6 +3572,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
+        this.humanPush.notifyPosted({
+          roomId, state, senderMemberId: auth.member.id,
+          body: command.data.body, toMemberId: command.data.toMemberId,
+          messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
+        });
       }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
         // Same agent.wake path as room mentions: queue a signal, then journal
@@ -3523,10 +3631,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // drain kicks fire-and-forget right after the request path returns
       // (the Cloudflare cron sweep stays the restart-safe backstop).
       // Never throws — fan-out must not fail the command that triggered it.
+      // R1 delivery-path tracing (RC-2026-09-26-966): delivery.fanout spans
+      // the signed-webhook fan-out. The span itself never throws into the
+      // command path either.
+      const fanoutSpan = getTracer().startSpan(SPAN_NAMES.FANOUT, { attributes: {
+        [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id } });
       try {
-        if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
-      } catch (error) {
-        console.error("webhook fan-out failed:", error?.message ?? error);
+        // B1a: a failed fan-out must be recorded as error, not ok.
+        let fanoutFailed = null;
+        try {
+          if (this.agentPlugin && !isPeerPrivateEvent(incoming.type)) this.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+        } catch (error) {
+          console.error("webhook fan-out failed:", error?.message ?? error);
+          fanoutFailed = error;
+        }
+        if (fanoutFailed) {
+          fanoutSpan.recordException(fanoutFailed); // sets ERROR status
+          fanoutSpan.setAttribute(ATTR.OUTCOME, "error");
+        } else {
+          fanoutSpan.setAttribute(ATTR.OUTCOME, "ok");
+          fanoutSpan.setStatusOk();
+        }
+      } finally {
+        fanoutSpan.end();
       }
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
@@ -3682,6 +3809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
+      if (data.toMemberId && data.toMemberId !== memberId) continue;
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
   }
@@ -3747,6 +3875,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const auth = this.authenticate(token, roomId, expectedSessionBinding);
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
+      const messageRow = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?").get(roomId, messageEventId);
+      const messageEvent = messageRow ? JSON.parse(messageRow.body) : null;
+      if (messageEvent?.type !== T.MESSAGE_POSTED || (messageEvent.data?.toMemberId && messageEvent.data.toMemberId !== auth.member.id && messageEvent.actorId !== auth.member.id)) {
+        fail(404, "mention_not_found", "No mention found for this message");
+      }
       const mine = this.db.prepare(
         "SELECT state FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?"
       ).get(roomId, messageEventId, auth.member.id);
@@ -3784,13 +3917,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       this.flipExpiredMentions(roomId);
       const rows = this.db.prepare(
-        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state,
-                created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
-         FROM mention_states
-         WHERE room_id=? AND mentioned_member_id=?
-           AND (? IS NULL OR state=?) AND (? IS NULL OR created_at>=?)
-         ORDER BY created_at DESC LIMIT 200`
-      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after));
+        `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
+                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+         FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         WHERE m.room_id=? AND m.mentioned_member_id=?
+           AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
+           AND json_extract(e.body,'$.type')='message.posted'
+           AND (COALESCE(json_extract(e.body,'$.data.toMemberId'),'')=''
+             OR ((json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)
+               AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
+         ORDER BY m.created_at DESC LIMIT 200`
+      ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
       const members = this.room(roomId).state.members ?? {};
       return {
         roomId, memberId: target,

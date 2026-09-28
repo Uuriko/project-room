@@ -19,6 +19,7 @@
 // caller — an agent can never clear its own draft, enforced both here (403)
 // and by the queue itself (approval_not_human).
 import { ServiceError } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 const STATUS_BY_CODE = new Map(Object.entries({
   assign_invalid: 422, assign_conflict: 409, assign_forbidden: 403, assign_not_assigned: 404,
@@ -63,8 +64,25 @@ const callerOf = auth => ({
   label: auth.member.displayName ?? auth.member.id,
 });
 
-export async function handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute, collabId, helpers }) {
+// Read network input before opening the synchronous storage transaction.
+// Reauthenticate the original credential after upload, and emit success only
+// after the authorized state transition commits.
+export async function handleInboxCollab(options) {
+  const { req, res, store, helpers, reauthorize } = options;
+  if (["GET", "HEAD"].includes(req.method)) return handleInboxCollabCore(options);
+  const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  const result = store.transaction(() => handleInboxCollabCore({ ...options,
+    auth: reauthorize ? reauthorize() : options.auth,
+    helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
+  }));
+  return helpers.json(res, result.status, result.value);
+}
+
+function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute, collabId, helpers }) {
   const { json, reject, body } = helpers;
+  if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
+    db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+    actor: auth.member, action: `${req.method} inbox-collab ${collabRoute}`, fail: reject });
   const collab = store.collab;
   const caller = callerOf(auth);
   const asHuman = () => {
@@ -85,7 +103,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
     switch (collabRoute) {
       case "assignments": {
         if (req.method === "POST") {
-          const fields = await body(req);
+          const fields = body(req);
           if (!shape(fields, { required: ["threadId", "assignee"], optional: ["force"] })) {
             invalidInput(reject, "{threadId, assignee, force?}");
           }
@@ -117,7 +135,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "assignment-release": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: [], optional: ["reason"] })) invalidInput(reject, "{reason?}");
         const { assignmentId, record } = collab.releaseAssignment(roomId, collabId,
           { by: caller, reason: fields.reason ?? null });
@@ -125,7 +143,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "notes": {
         if (req.method === "POST") {
-          const fields = await body(req);
+          const fields = body(req);
           if (!shape(fields, { required: ["threadId", "body"], optional: ["tag"] })) {
             invalidInput(reject, "{threadId, body, tag?}");
           }
@@ -143,7 +161,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       case "lock-acquire": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
         const holder = asAgent();
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["threadId"], optional: ["ttlMs"] })) {
           invalidInput(reject, "{threadId, ttlMs?}");
         }
@@ -153,7 +171,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "lock-release": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["lockId"] })) invalidInput(reject, "{lockId}");
         const released = collab.releaseDraftLock(roomId, fields.lockId, { by: caller });
         return json(res, 200, released);
@@ -166,7 +184,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "approvals": {
         if (req.method === "POST") {
-          const fields = await body(req);
+          const fields = body(req);
           if (!shape(fields, { required: ["threadId", "draft", "channel"] })) {
             invalidInput(reject, "{threadId, draft: {subject?, body}, channel}");
           }
@@ -184,7 +202,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       case "approval-decide": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
         const human = asHuman();
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["decision"], optional: ["note", "editedBody"] })
           || !["approve", "edit", "reject"].includes(fields.decision)) {
           invalidInput(reject, '{decision: "approve"|"edit"|"reject", note?, editedBody?}');
@@ -207,14 +225,14 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       case "approval-resubmit": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
         const agent = asAgent();
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["draft"] })) invalidInput(reject, "{draft: {subject?, body}}");
         const proposal = collab.resubmitApproval(roomId, collabId, { draft: fields.draft, byAgent: agent });
         return json(res, 200, { proposal });
       }
       case "routing-mentions": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["mentionedAgentId"], optional: ["threadId", "context"] })) {
           invalidInput(reject, "{mentionedAgentId, threadId?, context?}");
         }
@@ -235,7 +253,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "routing-resolve": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         // The resolver is whoever authenticated, like every other actor on
         // these routes. This one used to accept a resolvedBy from the body and
         // only shape-check it, so any member could record the owner, or anyone
@@ -252,7 +270,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "routing-policy": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["agentId", "policy"] })) {
           invalidInput(reject, "{agentId, policy: {mode: direct|escalate, scopes?, escalateTo?, note?}}");
         }
@@ -261,7 +279,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "handoffs": {
         if (req.method === "POST") {
-          const fields = await body(req);
+          const fields = body(req);
           if (!shape(fields, { required: ["threadId", "to"],
             optional: ["summary", "openQuestions", "pendingActions", "excerpt", "subject"] })) {
             invalidInput(reject, "{threadId, to: {kind: agent|human, id}, summary?, openQuestions?, pendingActions?, excerpt?, subject?}");
@@ -295,7 +313,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "handoff-transition": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["status"], optional: ["note"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
         }
@@ -309,13 +327,14 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       // (store.handoffEnvelopes); these routes are thin room-scoped adapters.
       case "envelopes": {
         if (req.method === "POST") {
-          const fields = await body(req);
+          const fields = body(req);
           if (!shape(fields, { required: ["to", "objective", "inputs", "authority", "expectedOutput", "acceptanceTest", "termination"],
-            optional: ["provenance"] })) {
-            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?}");
+            optional: ["provenance", "requestId"] })) {
+            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?, requestId?}");
           }
-          const receipt = store.handoffEnvelopes.create(roomId, fields, { from: caller.id });
-          return json(res, 201, receipt);
+          const { requestId, ...envelopeFields } = fields;
+          const receipt = store.handoffEnvelopes.create(roomId, envelopeFields, { from: caller.id, requestId });
+          return json(res, receipt.duplicate ? 200 : 201, receipt);
         }
         if (req.method === "GET") {
           const status = url.searchParams.get("status");
@@ -328,7 +347,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "envelope-transition": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        const fields = await body(req);
+        const fields = body(req);
         if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
         }
@@ -338,7 +357,7 @@ export async function handleInboxCollab({ req, res, url, store, roomId, auth, co
       }
       case "envelope-sweep": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
-        await body(req); // no fields; the sweep is idempotent
+        body(req); // no fields; the sweep is idempotent
         const moved = store.handoffEnvelopes.sweepExpired(roomId);
         return json(res, 200, { swept: moved });
       }

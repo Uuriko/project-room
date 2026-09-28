@@ -9,6 +9,10 @@
 // 4xx/429 on a listed route carries the canonical envelope with a non-empty next[].
 //
 // Route entries: { path, methods, auth, summary, operationId }.
+// Multi-method routes MUST use the optional `operationIds` extra to give each
+// method its own honest id (OpenAPI requires unique operationIds across all
+// operations): { operationIds: { GET: "...", POST: "..." } }. The shared
+// `operationId` then serves as the fallback for any method not in the map.
 // auth kinds: none | open | invite-code | identity-secret | identity-scoped |
 //             agent-credential | room-member | mcp
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -35,22 +39,28 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias"),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
-  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom"),
+  route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
+    { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite"),
   route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess"),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink"),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
   // Hosted MCP (JSON-RPC over POST).
-  route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp"),
-  route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp"),
+  route("/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postMcp",
+    { operationIds: { GET: "getMcpJoinDoc", POST: "postMcp" } }),
+  route("/room/mcp", ["GET", "POST"], "mcp", "Hosted MCP endpoint on the www door: GET serves the public join document; POST is JSON-RPC tools/list + tools/call.", "postRoomMcp",
+    { operationIds: { GET: "getRoomMcpJoinDoc", POST: "postRoomMcp" } }),
   // Webhooks family.
-  route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks"),
-  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById"),
+  route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
+    { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
+  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById",
+    { operationIds: { GET: "getAgentWebhook", DELETE: "deleteAgentWebhook" } }),
   route("/api/agent-webhooks/{subscriptionId}/deliveries", ["GET"], "agent-credential", "Delivery journal for one subscription.", "agentWebhookDeliveries"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
-  route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause"),
+  route("/api/rooms/{roomId}/agent-pause", ["GET", "POST"], "room-member", "Inspect or change wake-pause state for a room member.", "agentPause",
+    { operationIds: { GET: "inspectAgentPause", POST: "setAgentPause" } }),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and
@@ -108,7 +118,10 @@ export function buildOpenApiJson({ origin }) {
     const item = {};
     for (const method of entry.methods) {
       const op = {
-        operationId: entry.operationId,
+        // Per-method id where the table declares one, else the route-level
+        // fallback. operationIds MUST be unique across the whole document
+        // (tests/discoverability.test.js pins this).
+        operationId: entry.operationIds?.[method] ?? entry.operationId,
         summary: entry.summary,
         description: AUTH_DESCRIPTION[entry.auth] ?? "",
         responses: operationResponses(entry, method),
@@ -207,15 +220,11 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   let hint = null;
   let next = null;
   if (httpStatus === 401) {
-    if (scope.auth === "identity-secret") {
-      hint = "Send your identity secret as Authorization: Bearer <identity secret>. Mint one first — no credential needed.";
-      next = [MINT_NEXT, { tool: "room_check_access" }];
+    if (["identity-secret", "room-member"].includes(scope.auth)) {
+      return base;
     } else if (scope.auth === "agent-credential") {
-      hint = "Send Authorization: Bearer <identity secret> (mint at POST /api/agent-identities) or a rak_ API key with the webhooks:manage scope.";
-      next = [MINT_NEXT, { path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
-    } else if (scope.auth === "room-member") {
-      hint = "Send a room credential as Authorization: Bearer <room key or room-linked identity secret>. Mint an identity at POST /api/agent-identities, then join or create a room.";
-      next = [MINT_NEXT, { tool: "room_check_access" }];
+      hint = "Keep your saved connection. Send its identity secret or existing rak_ key; check access before issuing another credential.";
+      next = base.next;
     } else if (scope.auth === "invite-code") {
       hint = "Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.";
       next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
@@ -284,3 +293,25 @@ export const nextActionsForAccessRequest = ({ requestId, identityId, decisionWin
     path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
     description: `Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${decisionWindowDays} days.` }),
 ]);
+
+// Status-aware continuation for the identity-scoped poll read (GET
+// /api/access-requests/{requestId}?identityId=...). The filing response teaches
+// the poll path (nextActionsForAccessRequest); the poll response itself teaches
+// what follows each decision, so an approved requester learns where the room
+// read lives instead of receiving a bare status string.
+export const nextActionsForAccessRequestStatus = ({ requestId, identityId, roomId, status, decisionWindowDays }) => {
+  if (status === "approved") return Object.freeze([Object.freeze({
+    action: "read-room", transport: "http", method: "GET",
+    path: `/api/rooms/${encodeURIComponent(roomId)}`,
+    description: "This request records an approval. Read the room with your identity secret as the Bearer token to check current access, permissions and next actions; later revocation can still prevent access." })]);
+  if (status === "denied" || status === "cancelled") return Object.freeze([Object.freeze({
+    action: "closed", transport: "http",
+    description: `This request is ${status}. Asking again means filing a new POST /api/access-requests with a fresh requestId; the room owner can also invite you directly.` })]);
+  if (status === "expired") return Object.freeze([Object.freeze({
+    action: "refile", transport: "http", method: "POST", path: "/api/access-requests",
+    description: "This request expired undecided. File a new request with a fresh requestId to ask again." })]);
+  return Object.freeze([Object.freeze({
+    action: "poll-status", transport: "http", method: "GET",
+    path: `/api/access-requests/${encodeURIComponent(requestId)}?identityId=${encodeURIComponent(identityId)}`,
+    description: `Still pending. Poll this path with your identityId to learn the owner's decision. Requests expire undecided after ${decisionWindowDays} days.` })]);
+};

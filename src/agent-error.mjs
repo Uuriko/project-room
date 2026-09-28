@@ -36,15 +36,25 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access")]
     };
   }
+  if (reasonCode === "identity_credential_changed") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This saved credential has changed or was revoked. Keep the connection; obtain the current credential from its owner.",
+      next: [command("Locate the current saved identity credential with its owner. Do not rotate, register a replacement, or retry with a work revision."),
+        tool("room_check_access")]
+    };
+  }
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Agents can self-mint an identity at POST /api/agent-identities, or ask the owner to Add agent.",
+      hint: "Keep your saved connection. Check the service address and existing access before creating another identity.",
       next: [
-        path("/api/agent-identities"),
         tool("room_check_access"),
+        path("/api/agent-rooms"),
         path("/api/session"),
-        command("Mint an identity at POST /api/agent-identities, or ask the owner for a guest invite or Add agent")
+        command("Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."),
+        command("A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."),
+        command("If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.")
       ]
     };
   }

@@ -150,14 +150,29 @@ Evidence: `tests/notification-feed.test.js` (unit/HTTP) and
 `scripts/notification-feed-browser-check.mjs` (Playwright, desktop and
 mobile; wired into `npm run test:browser`).
 
+## Human browser push
+
+Humans can turn on browser notifications from Catch up → Notifications. The
+only switch is the browser permission prompt. The default is fixed: mentions
+and direct messages. There is no level picker and no quiet-hours control.
+Thread mutes and member mutes already suppress delivery; that is the undo.
+
+The server stores the browser subscription in `human_push_subscriptions` and
+sends a count for the room, never the message. Delivery stays off until
+`ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, and `ROOM_VAPID_SUBJECT`
+are set. Agent heartbeat push is a different path.
+
+Subscriptions accept only browser push services (FCM, Mozilla, Apple, and
+Windows). Credential-bearing URLs, nonstandard ports, fragments, and redirects
+are refused. Delivery rechecks the committed message, active membership,
+subscription and mutes immediately before sending. Deleted or rolled-back
+messages do not send. Missing mute state suppresses delivery. Push failures
+never change the outcome of a room write.
+
 ## Not in this slice (follow-ups)
 
-- **Push delivery** needs VAPID keys (a new deployment `secret` binding), a
-  service worker, and a subscription table (`schema`). When it lands,
-  lock-screen bodies stay off by default; the push payload carries the room
-  and count only, and the feed above remains the source of truth the client
-  fetches after a push.
-- **Per-room mute** and quiet hours: no preference field exists yet.
+- **Per-room mute** and quiet hours: no preference field exists yet. Quiet
+  hours stay out of the human push path on purpose.
 - **Announcements**: no event type produces them; the channel is reserved.
 - **Cross-room feed** for account sessions: the feed is per room by design;
   the account inbox (`docs/UNIFIED-INBOX.md`) is the place a roll-up would go.

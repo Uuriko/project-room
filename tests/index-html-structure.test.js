@@ -51,18 +51,8 @@ test("every id reference in index.html resolves to an element that exists", () =
   assert.deepEqual(dangling, [], "these point at ids no element declares");
 });
 
-test("the chat composer has no Options disclosure", () => {
-  assert.doesNotMatch(html, /id="composer-options"/);
-  assert.doesNotMatch(html, /id="remember-drafts"/);
-  assert.doesNotMatch(html, /id="draft-hint"/);
-  assert.doesNotMatch(html, /id="draft-recovery-status"/);
-  assert.match(html, /id="request-reply"/);
-  assert.match(html, /id="work-options"/);
-  const composer = html.slice(html.indexOf('id="message-form"'), html.indexOf('id="cursor-label"'));
-  assert.doesNotMatch(composer, /conversation-boundaries/);
-  assert.doesNotMatch(composer, /<strong>Options<\/strong>/);
-  assert.match(composer, /aria-description="Enter to send/);
-});
+// Composer disclosure, keyboard help and recovery are exercised through real
+// browser journeys in scripts/composer-browser-check.mjs, not HTML text matches.
 
 test("the guard actually detects what it claims to", () => {
   // A gate over a document that happens to be clean proves nothing until it has

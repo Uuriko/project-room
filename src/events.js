@@ -157,7 +157,7 @@ export function roomTrust(state) {
 // Humans own themselves. An agent belongs to its accountable human, or to
 // the room owner when that sponsor was never recorded.
 export function memberOwnerId(state, memberId) {
-  const member = state?.members?.[memberId];
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
   if (!member) return null;
   if (typeof member.accountableHumanId === "string" && member.accountableHumanId) return member.accountableHumanId;
   if (member.kind === "human") return member.id;
@@ -239,7 +239,7 @@ export function spendAllowance(state) {
 
 function setSpendAllowance(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
   const { allowanceCents, periodDays } = incoming.data;
   const clearing = allowanceCents === null;
   if (!clearing && (!Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || allowanceCents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
@@ -273,7 +273,7 @@ export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"
 // Owner, manage_members, or invite_member (agents may hold invite_member
 // without manage_members/decide). Used by invite-code mint/redeem.
 export function canInviteMembers(state, memberId) {
-  const member = state?.members?.[memberId];
+  const member = state?.members && Object.hasOwn(state.members, memberId) ? state.members[memberId] : null;
   if (!member || member.active === false) return false;
   if (memberId === state.room?.ownerId) return true;
   return member.permissions.includes("manage_members") || member.permissions.includes("invite_member");
@@ -605,7 +605,7 @@ function transferOwnership(state, incoming) {
 function addMember(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "kind", "permissions"]);
   const memberId = incoming.data.memberId;
-  if (state.members[memberId]) throw new Error("Member already exists");
+  if (Object.hasOwn(state.members, memberId)) throw new Error("Member already exists");
   const isBootstrapOwner = Object.keys(state.members).length === 0 && memberId === state.room.ownerId;
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) {
@@ -649,6 +649,8 @@ function addMember(state, incoming) {
       throw new Error("referredBy must be a member id");
     }
     if (incoming.data.referredBy === memberId) throw new Error("a member cannot refer themselves");
+    // Historical events admitted prototype names as referrers. Preserve their
+    // replay; live commands enforce own-member attribution before persistence.
     const referrer = state.members?.[incoming.data.referredBy];
     if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
   }
@@ -689,7 +691,7 @@ function joinMemberViaInvitation(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "role", "permissions", "invitedByMemberId", "invitationId", "rolePolicyVersion", "authorityPolicyVersion"]);
   const { memberId, invitedByMemberId, invitationId, role, permissions, rolePolicyVersion, authorityPolicyVersion } = incoming.data;
   if (incoming.actorId !== memberId) throw new Error("An invited member must join as themself");
-  if (state.members[memberId]) throw new Error("Member already exists");
+  if (Object.hasOwn(state.members, memberId)) throw new Error("Member already exists");
   requirePermission(state, invitedByMemberId, "manage_members");
   const rolePolicy = INVITATION_ROLE_POLICIES[rolePolicyVersion];
   const rolePermissions = rolePolicy && Object.hasOwn(rolePolicy, role) && rolePolicy[role];

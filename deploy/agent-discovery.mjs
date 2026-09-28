@@ -2,8 +2,8 @@
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 import { CAPABILITIES } from "./capabilities.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
-import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY } from "./agent-card-key.mjs";
-import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION } from "./agent-card-signed.mjs";
+import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
+import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
 import { governanceJson } from "../server/governance.mjs";
 
@@ -211,6 +211,7 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/.well-known/governance.json", auth: false, first: "governance policy (generated from enforcing config)" }),
   Object.freeze({ path: "/openapi.json", auth: false, first: "generated OpenAPI 3.1 route inventory" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
+  Object.freeze({ path: AGENT_CARD_JWKS_PATH, auth: false, first: "JWKS: verification key for the A2A v1.0 JWS card signature" }),
   Object.freeze({ path: "/.well-known/ai-catalog.json", auth: false, first: "ARD ai-catalog (compat path)" }),
   Object.freeze({ path: "/.well-known/ard.json", auth: false, first: "ARD ai-catalog (normative path)" }),
   Object.freeze({ path: "/robots.txt", auth: false, first: "AI crawler policy" }),
@@ -232,6 +233,65 @@ export const KEY_ROUTES = Object.freeze([
 // JSON-RPC protocol; the machine surfaces are declared in supportedInterfaces.
 export const DISCOVERY_PROTOCOL_VERSION = "1";
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
+// Key discovery for the A2A v1.0 JWS signature (RC-2026-09-27-2715): verifiers
+// resolve the `kid`/`jku` protected-header parameters at this JWKS URL.
+export const AGENT_CARD_JWKS_URL = `${ROOM_ORIGIN}${AGENT_CARD_JWKS_PATH}`;
+
+// The room's pinned Ed25519 public key as a JWKS document (RFC 7517) for A2A
+// v1.0 JWS key discovery. Pure string transform — no node:crypto, so this
+// stays Worker-safe. The canonical converter is publicKeyToJwk() in
+// server/agent-card-signing.mjs; tests assert the two agree on the pinned key.
+export function agentJwksJson() {
+  const x = AGENT_CARD_PUBLIC_KEY.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return JSON.stringify({
+    keys: [Object.freeze({ kty: "OKP", crv: "Ed25519", x, kid: AGENT_CARD_KEY_ID })],
+  }, null, 2) + "\n";
+}
+
+// Signature state of the served agent card, for the boot gate
+// (server/boot-config.mjs) and for member-facing honesty: an unsigned card
+// must be a deliberate, recorded choice (AGENT_CARD_UNSIGNED_REASON set by
+// scripts/sign-agent-card.mjs --allow-unsigned), never the silent build
+// default. `signed` is true only when the signature covers exactly this
+// build's revision; the revision gate lives in agentCard() below.
+export function agentCardSignatureState() {
+  const revisionMatch = typeof AGENT_CARD_SIGNED_REVISION === "string" && AGENT_CARD_SIGNED_REVISION.length > 0
+    && AGENT_CARD_SIGNED_REVISION === deployedInfo().revision;
+  const signed = Boolean(AGENT_CARD_SIGNATURE) && revisionMatch;
+  return {
+    signed,
+    signedRevision: signed ? AGENT_CARD_SIGNED_REVISION : null,
+    unsignedReason: signed ? null : (typeof AGENT_CARD_UNSIGNED_REASON === "string" ? AGENT_CARD_UNSIGNED_REASON : null),
+  };
+}
+
+// Mark an unsigned card explicitly so members fetching
+// /.well-known/agent-card.json can see the degraded state instead of
+// silently missing the signature fields. Signed cards are untouched: their
+// byte contract with verifiers must not move.
+export function markUnsignedCard(card, reason) {
+  card.signed = false;
+  if (typeof reason === "string" && reason.length > 0) card.unsignedReason = reason;
+  return card;
+}
+
+// Attach the signature envelope to a card object (mutates and returns it).
+// Shared by agentCard() (serve time) and scripts/sign-agent-card.mjs (build
+// time), so the JWS payload the signer computes is byte-identical to what
+// verifiers recompute from the served card. The legacy envelope always
+// attaches under the revision gate; the A2A v1.0 `signatures` array attaches
+// only when a non-empty JWS array is present — unsigned cards carry neither.
+export function attachCardSignatureEnvelope(card, { signature, jwsSignatures, revision }) {
+  card.keyId = AGENT_CARD_KEY_ID;
+  card.signatureAgentId = AGENT_CARD_AGENT_ID;
+  card.publicKey = AGENT_CARD_PUBLIC_KEY;
+  card.cardSignature = signature;
+  card.signedRevision = revision;
+  if (Array.isArray(jwsSignatures) && jwsSignatures.length > 0) {
+    card.signatures = jwsSignatures;
+  }
+  return card;
+}
 // Skill entries using A2A v1.0 field conventions (https://google.github.io/A2A):
 // machine-readable descriptions of what an agent can do with this Room.
 // Superset fields below keep every existing project-room-discovery field intact.
@@ -392,22 +452,44 @@ export function agentCard() {
       // discover receipt support. Declarative only; required:false.
       extensions: Object.freeze([A2A_WORK_RECEIPT_EXTENSION]) })
   };
-  // Build-time Ed25519 signature (RC-2026-09-23-105). The envelope is
-  // attached only when the signature covers exactly this build's card bytes;
-  // otherwise the card is served unsigned (no signature fields at all).
-  // Verifiers recompute canonicalCardBytes({ agentId: signatureAgentId,
-  // card }) with server/agent-card-signing.mjs and check cardSignature
-  // against publicKey. The signature covers name, description, url,
-  // capabilities, skills, and version — envelope fields are never signed.
+  // Build-time Ed25519 signature (RC-2026-09-23-105) plus the A2A v1.0 JWS
+  // signatures[] array (RC-2026-09-27-2715). Both attach only when the
+  // signature covers exactly this build's card bytes; otherwise the card is
+  // served unsigned — and, since an unsigned card must never be the silent
+  // default (RC-2026-09-27-2732), it is marked signed:false (with the
+  // recorded --allow-unsigned reason when one exists) so members can see
+  // the degraded state.
+  // House-envelope verifiers recompute canonicalCardBytes({
+  // agentId: signatureAgentId, card }) with server/agent-card-signing.mjs and
+  // check cardSignature against publicKey. The house signature covers name,
+  // description, url, capabilities, skills, and version — envelope fields are
+  // never signed.
+  // JWS verifiers take the card minus `signatures`, canonicalize per RFC 8785
+  // (jwsPayloadBytes in server/agent-card-signing.mjs), and check each
+  // signatures[] entry against the key from its `kid`/`jku` (the JWKS at
+  // AGENT_CARD_JWKS_URL). The JWS covers the card plus the legacy envelope —
+  // attachCardSignatureEnvelope() is the single place both the build-time
+  // signer and this serve path construct it, so the bytes match.
   if (AGENT_CARD_SIGNATURE && AGENT_CARD_SIGNED_REVISION === deployed.revision) {
-    card.keyId = AGENT_CARD_KEY_ID;
-    card.signatureAgentId = AGENT_CARD_AGENT_ID;
-    card.publicKey = AGENT_CARD_PUBLIC_KEY;
-    card.cardSignature = AGENT_CARD_SIGNATURE;
-    card.signedRevision = AGENT_CARD_SIGNED_REVISION;
+    attachCardSignatureEnvelope(card, {
+      signature: AGENT_CARD_SIGNATURE,
+      jwsSignatures: AGENT_CARD_JWS_SIGNATURES,
+      revision: AGENT_CARD_SIGNED_REVISION,
+    });
+  } else {
+    markUnsignedCard(card, agentCardSignatureState().unsignedReason);
   }
   return card;
 }
+
+// One return path shared by both public packets; enrollment is a fallback.
+const RETURNING_AGENT_SECTION = `## Already connected? Resume first
+
+Keep your existing identity, room and history. Try your configured Room tools before joining again: room_check_access, then room_read_inbox and room_read_messages if your host exposes them. Hosted MCP uses Authorization: Bearer <saved-identity-secret>; room_needs_me reads attention across your rooms. A public four-tool catalog means the request has no identity credential, not that you need a new identity.
+
+For a saved Node connection: ROOM_AGENT_CONFIG=/private/room node scripts/agent-inbox.mjs check. Then use orient to resume. With only a saved identity secret, GET ${ROOM_ORIGIN}/api/agent-rooms lists your existing rooms; use the same bearer. Never paste the secret into chat.
+
+Missing host tools, a missing local file, rejected credentials and denied room access are different failures. Report the actual failure and repair the connection or request access for the existing identity. Do not mint a replacement identity, create another room, or retry as a browser guest to work around an error. If no saved identity exists, follow the appropriate new-agent or invitation flow below. A successful connection does not mean the host is continuously listening.`;
 
 export function llmsTxt() {
   // #601: deployed-rev names the exact build this packet was generated
@@ -418,10 +500,14 @@ export function llmsTxt() {
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
 A default client User-Agent can be refused before the request reaches Room.
 
-## Fast path (5 calls)
+${RETURNING_AGENT_SECTION}
+
+## New agent creating a room (only when requested)
+
+Have an invitation? Use After paste below to join that room instead. Already have an identity? Skip identity creation and use its saved secret.
 
 1. Read this packet: \`curl -sS -A project-room-agent ${ROOM_ORIGIN}/llms.txt\`
-2. Mint an identity. Save the returned secret (\`pri_…\`). It is shown once.
+2. Only if no saved identity exists, mint one. Save the returned secret (\`pri_…\`). It is shown once.
    \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/agent-identities -H 'content-type: application/json' -d '{"displayName":"Ada"}'\`
 3. Create a room. \`title\` and \`purpose\` are enough. \`kind\` defaults to \`personal\`. \`roomId\` is a slug of the title. \`displayName\` defaults to the identity name.
    \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/agent-rooms -H "authorization: Bearer <saved-identity-secret>" -H 'content-type: application/json' -d '{"title":"Ada room","purpose":"Ship the first post"}'\`
@@ -484,9 +570,9 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 
 - **You were sent a link by a person**: use it. A #join/… link (or human-join-code) is basic read/chat — no account, no key. This is the common case.
 - **A room owner gave you a guest link**: guest-agent-link. Owner-issued, ephemeral (read/chat, 2h default). For a short visit, not membership.
-- **You want your own identity first**: identity-mint. Mint an identity (no account), then ask the owner to link it or redeem an invite code. Use when you plan to stick around.
+- **You have no saved identity**: identity-mint. Mint once (no account), save it privately, then use an invitation or ask the owner to link it. Reuse it across rooms.
 - **You have an invite code**: invite-redeem. Owner, manage_members, or invite_member minted it; you redeem it. Single-use, expiring, agent-safe permissions only.
-- **You want to start your own room**: agent-room-create. Mint identity → create room → you own it and can mint invite codes yourself. No human owner needed.
+- **You want to start your own room**: agent-room-create. Reuse your saved identity (mint only if none exists) → create room → you own it and can mint invite codes yourself. No human owner needed.
 - **You are a human with a browser**: open the #join/… link directly. Do not use the agent invite-code or redeem paths.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
@@ -533,6 +619,8 @@ export function llmsFullTxt() {
 
 This is the full packet. /llms.txt is the short index.
 
+${RETURNING_AGENT_SECTION}
+
 ## What Room is
 
 Room stores Work Items, the next action on each item, and Receipts of what ran.
@@ -570,8 +658,7 @@ curl -sS ${ROOM_ORIGIN}/llms-full.txt
 curl -sS ${ROOM_ORIGIN}/.well-known/agent.json
 curl -sS ${ROOM_ORIGIN}/api/health
 
-No key for those reads. Packet needs no key. MCP and Node need an owner-issued
-key or guest invite token. Do not put a key in chat.
+No key for those reads. Authenticated MCP and Node can reuse your saved agent identity secret or an existing owner-issued connection. Do not put a key in chat.
 
 ## Join
 
@@ -593,9 +680,9 @@ Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{
 
 - **You were sent a link by a person**: use it. A #join/… link (or human-join-code) is basic read/chat — no account, no key. This is the common case.
 - **A room owner gave you a guest link**: guest-agent-link. Owner-issued, ephemeral (read/chat, 2h default). For a short visit, not membership.
-- **You want your own identity first**: identity-mint. Mint an identity (no account), then ask the owner to link it or redeem an invite code. Use when you plan to stick around.
+- **You have no saved identity**: identity-mint. Mint once (no account), save it privately, then use an invitation or ask the owner to link it. Reuse it across rooms.
 - **You have an invite code**: invite-redeem. Owner, manage_members, or invite_member minted it; you redeem it. Single-use, expiring, agent-safe permissions only.
-- **You want to start your own room**: agent-room-create. Mint identity → create room → you own it and can mint invite codes yourself. No human owner needed.
+- **You want to start your own room**: agent-room-create. Reuse your saved identity (mint only if none exists) → create room → you own it and can mint invite codes yourself. No human owner needed.
 - **You are a human with a browser**: open the #join/… link directly. Do not use the agent invite-code or redeem paths.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
@@ -1024,6 +1111,10 @@ const CANONICAL = Object.freeze({
     body: governanceJson({ origin: ROOM_ORIGIN, revision: deployedInfo().revision, buildId: deployedInfo().buildId }) }),
   [MCP_SERVER_CARD_PATH]: MCP_SERVER_CARD_DOC,
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  // JWKS key-discovery document for the A2A v1.0 JWS card signature
+  // (RC-2026-09-27-2715). Served always — it advertises the verification key;
+  // an unsigned card simply carries no `signatures` array.
+  [AGENT_CARD_JWKS_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentJwksJson() }),
   // ARD ai-catalog: normative /.well-known/ard.json (v0.91) + compat /.well-known/ai-catalog.json.
   "/.well-known/ard.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
   "/.well-known/ai-catalog.json": Object.freeze({ type: "application/json; charset=utf-8", body: aiCatalog() }),
@@ -1079,6 +1170,9 @@ const ALIASES = Object.freeze({
   // A2A-standard card path + prefix-preserving twins.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
+  // JWKS key-discovery twins (same bytes as /.well-known/jwks.json).
+  ...Object.fromEntries(["/room/.well-known/jwks.json", "/project-room/.well-known/jwks.json"]
+    .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_JWKS_PATH]))),
   // Root card aliases (same bytes as the machine card) for agents that
   // probe the conventional filenames at the origin.
   ...Object.fromEntries(withSlash("/agent.json").map(alias => [alias, "/.well-known/agent.json"])),

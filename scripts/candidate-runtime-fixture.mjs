@@ -19,6 +19,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/action-classes.mjs');
   paths.add('server/inbox.mjs');
   paths.add('server/inbox-stitch.mjs'); paths.add('server/inbox-stitch-store.mjs'); // Task #19 (imported by server/inbox.mjs)
+  paths.add('server/boot-config.mjs'); // RC-2026-09-27-2732 (imported by server.mjs)
   paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
   paths.add('scripts/stamp-version.mjs');
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
@@ -61,6 +62,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
   paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
   paths.add('server/thread-mutes.mjs'); // Per-thread mutes (imported by server/store.mjs)
+  paths.add('server/human-push.mjs'); // Human browser push (imported by server/store.mjs)
+  paths.add('server/push-subscriptions.mjs'); paths.add('server/web-push.mjs'); // Browser push delivery (imported by server/human-push.mjs)
+  paths.add('src/human-push.js'); paths.add('src/human-push-display.js'); paths.add('push-sw.js'); // Human push button, lock-screen text, service worker
   paths.add('join.html'); // Self-serve join page
   paths.add('src/join.js'); // Join page logic
   paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
@@ -90,6 +94,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
@@ -115,6 +120,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)
   paths.add('server/claim-validate.mjs'); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
   for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
+  paths.add('server/persisted-row.mjs'); // RC-2026-09-27-2730: replay-safe persisted-row envelope (imported by server/bounty-escrow.mjs, server/work-claim-sqlite.mjs, server/dispatch-journal.mjs; pure, no imports)
   paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
   paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)
   paths.add('src/dm-consents.js'); // DM consent browser view-model + API helpers (imported by src/app.js)
@@ -132,7 +138,9 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
   paths.add('server/receipts-page.mjs'); // Public run-receipts page aggregation + rendering (imported by server/http.mjs)
   paths.add('server/receipts-data.mjs'); // Generated run-receipts snapshot (imported by server/http.mjs)
+  paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
   paths.add('server/capability-registry.mjs'); // Integration slice #11: typed capability registry (library module; pure, no imports of its own)
+  for (const path of ['server/board-v2.mjs', 'server/board-v2-sqlite.mjs', 'server/board-v2-durable.mjs']) paths.add(path); // RC-2026-09-27-2720: board-v2 HTTP wiring (imported by server/http.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

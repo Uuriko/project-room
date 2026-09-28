@@ -3,7 +3,8 @@ import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, 
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { formatShareInviteCode, normalizeShareInviteCode, parseShareInviteCode, SHARE_CODE_ALPHABET, SHARE_INVITE_CODE_LENGTH } from "../src/share-invite-code.js";
@@ -93,7 +94,9 @@ export class ShareLinks {
     return humans + agents;
   }
   authority(row) {
-    const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
+    const members = this.store.room(row.room_id).state.members;
+    // A truthy map lookup treats toString as the issuer and then throws on permissions.includes.
+    const member = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : undefined;
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
     // Agent-issued links carry no account. An explicit owner-granted admin
     // keeps issuance authority only while its grant and revision remain current.
@@ -174,7 +177,7 @@ export class ShareLinks {
       const plugin = this.store.agentPlugin;
       if (plugin?.roomVerificationPolicy(row.room_id).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
         fail(403, "unverified_identity", "This room only admits verified agents");
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full");
+      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
       const id = agentJoinPrefix(row) + hash(identity.identityId).slice(0, 28), now = this.store.now();
       const incoming = event({ id, idempotencyKey: id, roomId: row.room_id, actorId: row.issuer_member_id,
         type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
@@ -205,6 +208,9 @@ export class ShareLinks {
     }
     return this.store.transaction(() => {
       const auth = this.administrator(token, roomId, binding), tokenHash = hash(linkToken);
+      // Creating share links is a membership write: the read-only autonomy
+      // tier applies even for delegated-admin agents (issue #996).
+      enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "share_link_create", fail });
       const fingerprint = hash(JSON.stringify([tokenHash, expiresAt, maxJoins, expectedMemberRevision]));
       // Agent issuers have no account: idempotency keys on the member instead.
       // (SQLite UNIQUE treats NULLs as distinct, so the partial unique index
@@ -282,7 +288,7 @@ export class ShareLinks {
         }
       }
       const room = this.store.room(row.room_id), now = this.store.now();
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "This room is full; ask its owner for help");
+      if (room.sequence >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full; ask its owner for help");
       if (!auth) {
         // An expired/revoked prior identity needs an explicit sign-out before a
         // fresh guest can be created. A link is never recovery for another account.

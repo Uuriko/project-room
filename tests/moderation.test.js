@@ -216,3 +216,27 @@ test("a report outlives the message and its author: deletion and removal keep th
   // The report table is immutable: no update path exists.
   assert.throws(() => f.store.db.prepare("UPDATE message_reports SET reason='edited'").run(), /immutable/);
 });
+
+test("guest-agent members cannot file moderation reports; member reporting is unchanged", t => {
+  const f = fixture(t);
+  // Production guest admission mints member ids carrying the guest-agent-
+  // prefix exactly; the denial keys on that shape, so the fixture does too.
+  const guestId = "guest-agent-mod-01";
+  f.send("owner", T.MEMBER_ADDED, { memberId: guestId, displayName: "Guest visit", kind: "agent", permissions: [], accountableHumanId: "owner" });
+  // t2_standard so the guest passes the autonomy tier gate and reaches the
+  // guest denial (the tier gate precedes it, mirroring referral-invites).
+  setTier(f.store.db, "commons", guestId, "t2_standard", { updatedBy: "owner", nowMs: Date.parse("2026-09-14T12:00:00Z") });
+  const guestKey = f.store.issueAccessKey("commons", guestId);
+
+  const messageId = f.post("producer", "gm1", "a reportable message");
+  const denied = f.rejects(
+    () => f.store.moderation.report(guestKey, "commons", { messageId, reason: "spam" }),
+    /Guest members cannot file moderation reports/, 403);
+  assert.equal(denied.code, "guest_scope_denied");
+
+  // A t2_standard non-guest member still reports normally.
+  const receipt = f.store.moderation.report(f.keys.producer, "commons",
+    { messageId: f.post("reviewer", "gm2"), reason: "off topic" });
+  assert.equal(receipt.duplicate, false);
+  assert.ok(receipt.report.id);
+});

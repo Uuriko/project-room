@@ -1,5 +1,6 @@
 import { openRequestJournal, runRequestOnce, runRequestQueue } from "../client/request-runner.mjs";
 import test from "node:test";
+import { createServer } from "node:http";
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,8 @@ import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { buildReplyCommand, validReplyArguments, replyTools, validateReplyRead, replyRefusal } from "../client/reply-actions.mjs";
 import { confirmsAgentCommand } from "../client/work-actions.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
 async function fixture(t) {
@@ -312,8 +315,8 @@ test("closed and unaddressed requests never execute the configured host", async 
 
 test("one command drives a separate host process and repeat invocation reuses its result", async t => {
   const f = await fixture(t), q = f.open("process-host"), counter = join(f.directory, "executions"), hostFile = join(f.directory, "host.json");
-  const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.preparation.room.id||!v.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
-  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000 }));
+  const hostCode = `const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const v=JSON.parse(input);if(!v.context.preparation.room.id||!v.context.messages.length||process.env.ROOM_AGENT_CONFIG)process.exit(2);fs.appendFileSync(process.argv[1],'1');console.log(JSON.stringify({body:'Separate host answered the prepared request'}));});`;
+  writeFileSync(hostFile, JSON.stringify({ command: process.execPath, args: ["-e", hostCode, counter], cwd: f.directory, timeoutMs: 5000, policy: { version: 1, checkout: f.directory, filesystem: "checkout-write", network: "none", ambientSecrets: "none", externalEffects: "none" } }));
   const invoke = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["scripts/run-room-request.mjs", q.command.data.messageId, join(f.directory, "process.sqlite"), hostFile],
       { env: { ROOM_AGENT_CONFIG: f.configDirectory }, stdio: ["ignore", "pipe", "pipe"] });
@@ -586,4 +589,246 @@ test("stream wakeups retain deadlines, reject malformed cursors and enforce revo
   f.store.command(f.keys.owner, "commons", { id: "end-stream-member", type: "member.access_changed", data: {
     memberId: "producer", expectedMemberRevision: member.revision, permissions: [], active: false } });
   await ended;
+});
+
+
+test("a fresh recipient discovers how to answer from messages and verifies closure without reconstructing fixed arguments", async t => {
+  const f = await fixture(t), q = f.open("guided-answer"), id = q.command.data.messageId;
+  const adapter = await f.mcp();
+  const messages = (await adapter.call("room_read_messages", {})).result.structuredContent;
+  const inbox = (await adapter.call("room_read_inbox", {})).result.structuredContent;
+  const listing = inbox.next.find(step => step.action === "list-open-requests").nextRead;
+  const listed = (await adapter.call(listing.tool, listing.arguments)).result.structuredContent;
+  assert.deepEqual(listed.requests.map(request => request.id), [id]);
+  const incoming = messages.messages.find(message => message.messageId === id);
+  assert.deepEqual(inbox.directMessages.find(message => message.messageId === id).nextRead, incoming.nextRead);
+  assert.equal(incoming.requestKind, "reply");
+  const step = inbox.next.find(step => step.action === "read-request");
+  assert.equal(step.method, "GET");
+  const rest = await fetch(f.origin + step.path, { headers: { Authorization: `Bearer ${f.keys.producer}` } });
+  assert.equal(rest.status, 200); assert.equal((await rest.json()).request.id, id);
+  assert.equal(inbox.next.some(step => step.action === "reply-dm"), false);
+  const discovered = step.nextRead;
+  assert.equal(discovered.tool, "room_read_request");
+  const context = (await adapter.call(discovered.tool, discovered.arguments)).result.structuredContent;
+  const unbound = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer });
+  const unboundMessage = (await unbound.roomMessages()).messages.find(message => message.messageId === id);
+  assert.equal(Object.hasOwn(unboundMessage, "nextRead"), false, "a client without expected identity must not claim to be a request party");
+  const action = context.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  assert.deepEqual(action.requiredInput, ["requestId", "body"]);
+  const args = { ...action.arguments, requestId: "guided-answer-once", body: "A concrete answer from the discovered action." };
+  const receipt = (await adapter.call(action.tool, args)).result.structuredContent;
+  assert.equal(receipt.status, "recorded");
+  const sequence = f.store.room("commons").sequence;
+  const retried = (await adapter.call(action.tool, args)).result.structuredContent;
+  assert.equal(retried.duplicate, true); assert.equal(retried.eventId, receipt.eventId);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  const final = (await adapter.call(receipt.next.tool, receipt.next.arguments)).result.structuredContent;
+  assert.equal(final.request.status, "answered");
+  assert.equal(final.page.items.at(-1).message.body, args.body);
+  assert.deepEqual(final.responseActions, []);
+  assert.equal((await f.client.replyRequests()).requests.length, 0);
+});
+
+test("HTTP response templates require completed current recipient context and stale templates cannot write", async t => {
+  const f = await fixture(t), q = f.open("guided-fence"), id = q.command.data.messageId;
+  const get = async (path, key = f.keys.producer) => {
+    const response = await fetch(f.origin + path, { headers: { Authorization: `Bearer ${key}` } });
+    assert.equal(response.status, 200); return response.json();
+  };
+  const list = await get("/api/rooms/commons/reply-requests");
+  assert.equal(Object.hasOwn(list, "responseActions"), false);
+  const path = list.nextReads[0].http.path;
+  const initial = await get(path);
+  assert.equal(initial.responseActions.length, 2);
+  const requesterRead = await get(path, f.keys.owner);
+  assert.deepEqual(requesterRead.responseActions, []); assert.deepEqual(requesterRead.responseHttpActions, []);
+  await f.client.replyAction("room_reply", { requestId: "guided-clarification", replyToId: id, body: "A new constraint" });
+  const before = f.store.room("commons").sequence;
+  const stale = initial.responseActions[0];
+  await assert.rejects(f.client.replyAction(stale.tool, { ...stale.arguments, requestId: "guided-stale", body: "Old answer" }), { code: "command_rejected" });
+  const staleHttp = initial.responseHttpActions[0];
+  const staleCommand = structuredClone(staleHttp.command); staleCommand.data.body = "Old REST answer";
+  const refused = await fetch(f.origin + staleHttp.path, { method: staleHttp.method,
+    headers: { Authorization: `Bearer ${f.keys.producer}`, "Content-Type": "application/json" }, body: JSON.stringify(staleCommand) });
+  assert.equal(refused.status, 409);
+  assert.equal(f.store.room("commons").sequence, before);
+  const first = await get(path + "&limit=1");
+  assert.equal(first.page.hasMore, true); assert.deepEqual(first.responseActions, []); assert.deepEqual(first.responseHttpActions, []);
+  const last = await get(path + "&limit=1&cursor=" + encodeURIComponent(first.page.nextCursor));
+  assert.equal(last.responseActions.length, 2);
+  const valid = { name: "room_read_request", args: { requestMessageId: id, limit: 1, cursor: first.page.nextCursor }, roomId: "commons" };
+  validateReplyRead(last, valid);
+  for (const change of [value => { value.responseActions[0] = null; }, value => { value.responseActions[0].arguments.toMemberId = "reviewer"; },
+    value => { value.responseActions[0].arguments.contextSequence--; },
+    value => { value.responseActions[0].arguments.workItemId = "unrelated"; },
+    value => { value.responseActions[0].arguments.body = "Injected answer"; }]) {
+    const forged = structuredClone(last); change(forged);
+    assert.throws(() => validateReplyRead(forged, valid), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(last); delete legacy.responseActions;
+  validateReplyRead(legacy, valid);
+});
+
+
+test("hosted discovery keeps room identity and distinguishes formal requests from ordinary private chat", async t => {
+  const f = await fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder"), outsider = f.store.identities.create("Observer");
+  const rooms = new AgentRooms(f.store);
+  const created = rooms.create(owner.secret, { roomId: "guided-hosted", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
+  for (const person of [peer, outsider]) f.store.identities.link(owner.secret, created.roomId, { identityId: person.identityId, displayName: person === peer ? "Responder" : "Observer", permissions: [] });
+  for (const [from, to] of [[created.ownerMemberId, peer.identityId], [peer.identityId, created.ownerMemberId]]) {
+    f.store.dmConsents.request(created.roomId, from, to, "Fixture");
+    f.store.dmConsents.decide(created.roomId, to, from, "approve");
+  }
+  for (const [id, formal] of [["formal", true], ["ordinary", false]]) f.store.command(owner.secret, created.roomId, {
+    id, type: "message.posted", data: { messageId: id, body: "Private question", toMemberId: peer.identityId, ...(formal ? { requestKind: "reply" } : {}) }
+  });
+  const mcp = createHostedRoomMcp(f.store, { agentRooms: rooms });
+  const call = async (name, args, secret = peer.secret) => {
+    const response = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, { authorization: `Bearer ${secret}` });
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response)); return response.result.structuredContent;
+  };
+  const messages = await call("room_read_messages", { roomId: created.roomId });
+  const formal = messages.messages.find(message => message.messageId === "formal");
+  const ordinary = messages.messages.find(message => message.messageId === "ordinary");
+  assert.equal(formal.requestKind, "reply");
+  assert.equal(Object.hasOwn(ordinary, "requestKind"), false); assert.equal(Object.hasOwn(ordinary, "nextRead"), false);
+  assert.deepEqual((await call("room_read_messages", { roomId: created.roomId }, outsider.secret)).messages, []);
+  const inbox = await call("room_read_inbox", { roomId: created.roomId });
+  assert.deepEqual(inbox.directMessages.find(message => message.messageId === "formal").nextRead, formal.nextRead);
+  assert.equal(Object.hasOwn(inbox.directMessages.find(message => message.messageId === "ordinary"), "nextRead"), false);
+  const list = await call("room_list_requests", { roomId: created.roomId });
+  assert.deepEqual(list.nextReads[0].nextRead, formal.nextRead);
+  const selected = await call(formal.nextRead.tool, formal.nextRead.arguments);
+  const action = selected.responseActions[0];
+  const receipt = await call(action.tool, { ...action.arguments, requestId: "hosted-answer", body: "A helpful answer" });
+  const closed = await call(receipt.next.tool, receipt.next.arguments);
+  assert.equal(closed.request.status, "answered"); assert.deepEqual(closed.responseActions, []);
+});
+
+
+test("a REST-only recipient follows the supplied command recipe and verifies its exact retried answer", async t => {
+  const f = await fixture(t), q = f.open("rest-recipe"), headers = { Authorization: `Bearer ${f.keys.producer}`, "Content-Type": "application/json" };
+  const list = await (await fetch(f.origin + "/api/rooms/commons/reply-requests", { headers })).json();
+  const readPath = list.nextReads[0].http.path;
+  const context = await (await fetch(f.origin + readPath, { headers })).json();
+  const selection = { name: "room_read_request", args: { requestMessageId: q.command.data.messageId }, roomId: "commons" };
+  validateReplyRead(context, selection);
+  for (const alter of [value => { value.responseHttpActions[0] = null; },
+    value => { value.responseHttpActions[0].path = "https://outside.invalid/commands"; },
+    value => { value.responseHttpActions[0].verify.path = "/api/rooms/other/reply-context?requestMessageId=unrelated"; },
+    value => { value.responseHttpActions[0].command.data.messageId = "forged"; },
+    value => { value.responseHttpActions[0].command.data.replyToId = null; },
+    value => { value.responseHttpActions[0].command.data.requestPolicyVersion = 1; },
+    value => { value.responseHttpActions[0].command.data.body = "Injected answer"; }]) {
+    const forged = structuredClone(context); alter(forged);
+    assert.throws(() => validateReplyRead(forged, selection), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(context); delete legacy.responseHttpActions; validateReplyRead(legacy, selection);
+  const recipe = context.responseHttpActions.find(action => action.command.data.responseOutcome === "answered");
+  assert.deepEqual(recipe.requiredInput, ["command.data.body"]);
+  assert.notEqual(recipe.command.id, q.command.data.messageId);
+  assert.equal(recipe.command.data.responseToRequestId, q.command.data.messageId);
+  const command = structuredClone(recipe.command); command.data.body = "REST answer without guessing protocol fields.";
+  const submit = () => fetch(f.origin + recipe.path, { method: recipe.method, headers, body: JSON.stringify(command) });
+  const sent = await submit(); assert.equal(sent.status, 201);
+  const receipt = await sent.json(), sequence = f.store.room("commons").sequence;
+  const retried = await submit(); assert.equal(retried.status, 200);
+  const duplicate = await retried.json(); assert.equal(duplicate.duplicate, true); assert.equal(duplicate.event.id, receipt.event.id);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  const final = await (await fetch(f.origin + recipe.verify.path, { headers })).json();
+  assert.equal(final.request.status, "answered"); assert.equal(final.request.responseMessageId, command.data.messageId);
+  assert.deepEqual(final.responseHttpActions, []);
+});
+
+
+test("MCP failed request reads give private-safe read recovery instead of uncertain-write advice", async t => {
+  const f = await fixture(t), privateQuestion = f.open("private-other", { toMemberId: "reviewer" }), adapter = await f.mcp();
+  const read = async args => {
+    const response = await adapter.call("room_read_request", args);
+    assert.equal(response.result.isError, true); return response.result.structuredContent;
+  };
+  const before = f.store.room("commons").sequence;
+  const missing = await read({ requestMessageId: "absent-question" });
+  assert.equal(missing.outcome, "read_failed");
+  assert.deepEqual(missing.next, [{ tool: "room_list_requests", arguments: { direction: "both", status: "all" } }]);
+  assert.deepEqual(await read({ requestMessageId: privateQuestion.command.data.messageId }), missing);
+  assert.equal(/unknown write|requestId exactly/.test(missing.message), false);
+  const q = f.open("read-error-cursor");
+  await f.client.replyAction("room_reply", { requestId: "read-error-clarify", replyToId: q.command.data.messageId, body: "Clarification" });
+  const selection = { requestMessageId: q.command.data.messageId, limit: 1 };
+  const page = (await adapter.call("room_read_request", selection)).result.structuredContent;
+  const changed = JSON.parse(Buffer.from(page.page.nextCursor, "base64url")); changed.horizonEventId = "different-anchor";
+  const failed = await read({ ...selection, cursor: Buffer.from(JSON.stringify(changed)).toString("base64url") });
+  assert.equal(failed.code, "reply_history_changed"); assert.equal(failed.outcome, "read_failed");
+  assert.deepEqual(failed.next, []); assert.match(failed.message, /never.*reset/i);
+  const invalid = await read({ ...selection, cursor: "abc" });
+  assert.equal(invalid.code, "invalid_reply_cursor"); assert.equal(invalid.outcome, "read_failed");
+  assert.equal(f.store.room("commons").sequence, before + 2);
+});
+
+test("automatic pickup reports one connection failure per outage and reports a later outage after recovery", { timeout: 20000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
+  let reads = 0;
+  const gateway = createServer(async (req, res) => {
+    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+      reads++;
+      if (reads !== 3) {
+        res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "Temporary outage" } }));
+        if (reads === 5) setTimeout(() => controller.abort(), 50);
+        return;
+      }
+    }
+    const upstream = await fetch(f.origin + req.url, { headers: req.headers });
+    res.writeHead(upstream.status, { "Content-Type": "application/json" }); res.end(await upstream.text());
+  });
+  await new Promise(resolve => gateway.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { controller.abort(); gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); });
+  const sequence = f.store.room("commons").sequence;
+  await runRequestQueue({ ...a, connection: { ...f.config, origin: `http://127.0.0.1:${gateway.address().port}` },
+    signal: controller.signal, stream: false, intervalMs: 1000,
+    execute: async () => { throw new Error("An empty queue must not execute"); }, emit: value => observed.push(value) });
+  assert.equal(reads, 5);
+  assert.deepEqual(observed, [{ status: "connection_unavailable" }, { status: "connection_unavailable" }]);
+  assert.equal(f.store.room("commons").sequence, sequence);
+});
+
+
+test("MCP transport failures distinguish a failed read from a saved answer with a lost response", async t => {
+  const f = await fixture(t);
+  const gateway = createServer(async (req, res) => {
+    if (req.url.startsWith("/api/rooms/commons/reply-requests")) {
+      res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "service_unavailable", message: "PRIVATE upstream detail" } })); return;
+    }
+    let body = ""; for await (const chunk of req) body += chunk;
+    const upstream = await fetch(f.origin + req.url, { method: req.method, headers: req.headers, ...(body ? { body } : {}) });
+    if (req.method === "POST" && req.url.endsWith("/commands")) { await upstream.text(); res.destroy(); return; }
+    res.writeHead(upstream.status, { "Content-Type": "application/json" }); res.end(await upstream.text());
+  });
+  await new Promise(resolve => gateway.listen(0, "127.0.0.1", resolve));
+  const directory = join(f.directory, "recovery-proxy");
+  saveAgentConnection(directory, { ...f.config, origin: `http://127.0.0.1:${gateway.address().port}` });
+  const adapter = await openMcpTestClient(directory);
+  t.after(async () => { await adapter.close(); gateway.closeAllConnections(); await new Promise(resolve => gateway.close(resolve)); });
+  const args = { direction: "incoming", status: "open" };
+  const read = (await adapter.call("room_list_requests", args)).result.structuredContent;
+  assert.equal(read.outcome, "read_failed"); assert.deepEqual(read.next, [{ tool: "room_list_requests", arguments: args }]);
+  assert.equal(JSON.stringify(read).includes("PRIVATE upstream detail"), false);
+  const q = f.open("lost-answer"), context = await f.client.replyContext(q.command.data.messageId), input = f.respond(context, { requestId: "lost-answer-write" });
+  const uncertain = (await adapter.call("room_respond_to_request", input)).result.structuredContent;
+  assert.equal(uncertain.type, "reply_refused"); assert.equal(uncertain.outcome, "not_confirmed");
+  assert.match(uncertain.message, /Preserve unknown write input/);
+  const retry = await f.client.replyAction("room_respond_to_request", input);
+  assert.equal(retry.duplicate, true);
+  assert.equal((await f.client.replyContext(q.command.data.messageId)).request.status, "answered");
+});
+
+test("automatic pickup keeps separate failed-request notifications visible", async t => {
+  const f = await fixture(t), a = runner(t, f), controller = new AbortController(), observed = [];
+  t.after(() => controller.abort());
+  const ids = [f.open("failed-one").command.data.messageId, f.open("failed-two").command.data.messageId];
+  await runRequestQueue({ ...a, signal: controller.signal, stream: false, intervalMs: 1000,
+    execute: async () => { throw new Error("Host needs operator attention"); },
+    emit: value => { observed.push(value); if (observed.length === 2) controller.abort(); } });
+  assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId })));
 });

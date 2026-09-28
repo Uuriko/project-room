@@ -1,12 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent, replay, event } from "../src/events.js";
 import { replyContextOwners, MAX_REPLY_REQUESTS, prepareReplyPost } from "../src/reply-requests.js";
 import { DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { auditReplyRequests, REPLY_PAGE_BYTES } from "../server/reply-requests.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
+import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
+import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t, extra = []) {
@@ -47,14 +53,60 @@ function fixture(t, extra = []) {
   return { store, keys, send, post, open, answer, cancel, state };
 }
 
-test("ordinary directed messages and ignored historical request fields remain ordinary", t => {
+test("ordinary directed messages and ignored historical request fields remain ordinary", async t => {
   const old = event({ roomId: "commons", actorId: "owner", type: "message.posted", data: {
-    body: "Legacy data", requestKind: "reply", responseToRequestId: "old-subject", expectedRequestRevision: "ignored", contextSequence: 9
+    body: "Legacy data", toMemberId: "historical", requestKind: "reply", responseToRequestId: "old-subject", expectedRequestRevision: "ignored", contextSequence: 9
   } });
-  const f = fixture(t, [old]); f.post("guest", { body: "Agent, a thought?", toMemberId: "agent" });
+  const member = event({ roomId: "commons", actorId: "owner", type: "member.added", data: {
+    memberId: "historical", displayName: "Historical reader", kind: "agent", permissions: []
+  } });
+  const f = fixture(t, [member, old]); f.post("guest", { body: "Agent, a thought?", toMemberId: "agent" });
   assert.equal(Object.hasOwn(f.state(), "replyRequests"), false);
   assert.equal(f.state().messages[0].body, "Legacy data");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const key = f.store.issueAccessKey("commons", "historical");
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "historical", token: key });
+  const hosted = await callHostedStdioTool(f.store, key, "room_read_messages", { roomId: "commons" });
+  for (const result of [await client.roomMessages(), hosted.value]) {
+    const legacy = result.messages.find(message => message.body === "Legacy data");
+    assert.equal(legacy.workItemId, null);
+    assert.equal(Object.hasOwn(legacy, "nextRead"), false);
+    assert.equal(Object.hasOwn(legacy, "requestKind"), false);
+  }
   auditRecovery(f.store);
+});
+
+test("compact message reads retain work links without exposing private messages to other members", async t => {
+  const f = fixture(t);
+  f.send("owner", { id: "linked-work", type: "work.proposed", data: {
+    workItemId: "linked-work", title: "Review", definitionOfDone: "A useful answer", accountableMemberId: "agent", mode: "read"
+  } });
+  const publicMessage = f.post("owner", { messageId: "linked-public", body: "Public context", workItemId: "linked-work" });
+  f.post("owner", { messageId: "unlinked", body: "No work selected" });
+  const q = f.open("guest", { workItemId: "linked-work" }, "linked-private-question");
+  const sequence = f.store.room("commons").sequence;
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  for (const memberId of ["agent", "reviewer"]) {
+    const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId, token: f.keys[memberId] });
+    const args = { after: publicMessage.sequence - 1, limit: 100 };
+    const hosted = await callHostedStdioTool(f.store, f.keys[memberId], "room_read_messages", { roomId: "commons", ...args });
+    for (const result of [await client.roomMessages(args), hosted.value]) {
+      assert.equal(result.messages.find(row => row.messageId === "linked-public").workItemId, "linked-work");
+      assert.equal(result.messages.find(row => row.messageId === "unlinked").workItemId, null);
+      const question = result.messages.find(row => row.messageId === q.command.data.messageId);
+      if (memberId === "agent") {
+        assert.equal(question.workItemId, "linked-work");
+        assert.equal(question.requestKind, "reply");
+        assert.equal(question.nextRead.arguments.requestMessageId, q.command.data.messageId);
+      } else assert.equal(question, undefined);
+      assert.equal(result.hasMore, false);
+    }
+  }
+  assert.equal(f.store.room("commons").sequence, sequence);
 });
 
 test("explicit answer appends once, retains exact historical retries and does not complete work", t => {
@@ -401,4 +453,130 @@ test("follow-up chains stop at eight prior exchanges and never carry another wor
   f.send("owner", { id: "propose-branch", type: "work.proposed", data: { workItemId: "another-work", title: "Other work", definitionOfDone: "Done", accountableMemberId: "agent", mode: "read" } });
   const other = f.open("guest", { replyToId: parent, workItemId: "another-work" });
   assert.deepEqual(f.store.replyRequests.selected(f.keys.agent, "commons", other.command.data.messageId).preparation.previousExchanges, []);
+});
+
+// These regressions guard discovery without bypassing scoped context preparation.
+// Existing selected-read tests do not exercise list pointers or either orientation adapter.
+// They use the real store/HTTP/hosted MCP boundaries and require no production seams.
+test("reply discovery points to selected context and cannot bypass unfinished pages", async t => {
+  const f = fixture(t);
+  const q = f.open("guest", { messageId: "visible-request", body: "Visible question body" });
+  f.post("guest", { messageId: "visible-context", body: "Visible clarification body", replyToId: "visible-request" });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const read = async (path, method = "GET") => {
+    const response = await fetch(new URL(path, origin), { method, headers: { Authorization: `Bearer ${f.keys.agent}` } });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const listed = await read("/api/rooms/commons/reply-requests");
+  assert.equal(JSON.stringify(listed).includes("Visible question body"), false);
+  const row = listed.requests[0];
+  assert.equal(listed.nextReads.length, 1);
+  const pointer = listed.nextReads[0];
+  assert.equal(pointer.requestMessageId, row.id);
+  assert.deepEqual(pointer.nextRead, { tool: "room_read_request", arguments: { requestMessageId: "visible-request" } });
+  const complete = await read(pointer.http.path, pointer.http.method);
+  assert.equal(complete.request.id, row.id);
+  assert.deepEqual(complete.page.items.map(item => item.message.body), ["Visible question body", "Visible clarification body"]);
+  assert.equal(Object.hasOwn(row, "nextRead"), false, "wire rows retain the legacy exact-key contract");
+  assert.equal(Object.hasOwn(row, "answerBasis"), false);
+  assert.equal(Object.hasOwn(row, "actions"), false);
+  const opts = { name: "room_list_requests", args: { direction: "incoming", status: "open" }, roomId: "commons" };
+  assert.equal(validateReplyRead(listed, opts).requests[0].id, row.id);
+  const legacy = structuredClone(listed); delete legacy.nextReads;
+  assert.equal(validateReplyRead(legacy, opts).requests[0].id, row.id);
+  const forged = structuredClone(listed); forged.nextReads[0].nextRead.arguments.requestMessageId = "another-request";
+  assert.throws(() => validateReplyRead(forged, opts), { code: "invalid_response" });
+  for (const path of ["https://elsewhere.invalid/steal", "/api/rooms/other/reply-context?requestMessageId=visible-request", "/api/rooms/commons/reply-context?requestMessageId=another-request"]) {
+    const bad = structuredClone(listed); bad.nextReads[0].http.path = path;
+    assert.throws(() => validateReplyRead(bad, opts), { code: "invalid_response" });
+  }
+  const first = await read(`${pointer.http.path}&limit=1`, pointer.http.method);
+  assert.equal(first.page.hasMore, true);
+  assert.equal(first.current.answerBasis, null);
+  assert.ok(first.preparation.instructions);
+  const last = await read(`${pointer.http.path}&limit=1&cursor=${encodeURIComponent(first.page.nextCursor)}`, pointer.http.method);
+  assert.equal(last.page.hasMore, false);
+  assert.ok(last.current.answerBasis);
+  f.send("agent", f.answer(q, { event: { id: last.current.answerBasis.contextEventId }, sequence: last.current.answerBasis.contextSequence }));
+  assert.equal(f.store.replyRequests.list(f.keys.agent, "commons").requests.length, 0);
+});
+
+test("needs-me orientation includes only incoming open request metadata", async t => {
+  const f = fixture(t);
+  f.open("guest", { messageId: "needs-me-request", body: "Needs-me question body" });
+  const answered = f.open("guest", { messageId: "answered-request" });
+  f.send("agent", f.answer(answered));
+  const cancelled = f.open("guest", { messageId: "cancelled-request" });
+  f.send("guest", f.cancel(cancelled));
+  const declined = f.open("guest", { messageId: "declined-request" });
+  f.send("agent", f.answer(declined, declined.receipt, { responseOutcome: "declined" }));
+  f.open("agent", { messageId: "outgoing-request", toMemberId: "guest" });
+  f.open("guest", { messageId: "someone-else-request", toMemberId: "reviewer" });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  let raced = false;
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", token: f.keys.agent, memberId: "agent",
+    fetchImpl: async (url, init) => {
+      if (!raced && new URL(url).pathname.endsWith("/reply-requests")) {
+        raced = true;
+        f.post("guest", { messageId: "between-reads", body: "A newer clarification", replyToId: "needs-me-request" });
+      }
+      return fetch(url, init);
+    } });
+  const needs = await client.orient({ focus: "needs_me" });
+  assert.ok(needs.replyRequestsEvaluatedThrough > needs.evaluatedThrough, "reply discovery must not claim the earlier work snapshot sequence");
+  assert.equal(needs.selection.openReplyRequests, 1);
+  assert.deepEqual(needs.replyRequests.map(r => r.id), ["needs-me-request"]);
+  assert.deepEqual(needs.replyRequests[0].nextRead, { tool: "room_read_request", arguments: { requestMessageId: "needs-me-request" } });
+  assert.equal(needs.replyRequestsEvaluatedThrough, f.store.room("commons").sequence);
+  assert.equal(Object.hasOwn(needs.replyRequests[0], "answerBasis"), false);
+  assert.equal(JSON.stringify(needs).includes("Needs-me question body"), false);
+  assert.equal(Object.hasOwn(await client.orient(), "replyRequests"), false);
+});
+
+// Hosted MCP has a separate orientation implementation and identity authenticator.
+test("hosted needs-me discovers private incoming requests without exposing their bodies", async t => {
+  const f = fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder");
+  const rooms = new AgentRooms(f.store);
+  const created = rooms.create(owner.secret, { roomId: "hosted-replies", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
+  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Responder", permissions: [] });
+  f.store.dmConsents.request(created.roomId, created.ownerMemberId, peer.identityId, "Fixture");
+  f.store.dmConsents.decide(created.roomId, peer.identityId, created.ownerMemberId, "approve");
+  const send = command => f.store.command(owner.secret, created.roomId, command);
+  send({ id: "hosted-open", type: "message.posted", data: { messageId: "hosted-question", body: "Private hosted question", toMemberId: peer.identityId, requestKind: "reply" } });
+  const mcp = createHostedRoomMcp(f.store, { agentRooms: rooms });
+  const list = async secret => {
+    const response = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "room_list_work", arguments: { roomId: created.roomId, focus: "needs_me" } } }, { authorization: `Bearer ${secret}` });
+    assert.equal(response.result?.isError, undefined, JSON.stringify(response));
+    return response.result.structuredContent;
+  };
+  const before = await list(peer.secret);
+  assert.deepEqual(before.replyRequests.map(r => r.id), ["hosted-question"]);
+  assert.deepEqual(before.replyRequests[0].nextRead, { tool: "room_read_request", arguments: { requestMessageId: "hosted-question" } });
+  assert.equal(before.replyRequestsEvaluatedThrough, f.store.room(created.roomId).sequence);
+  assert.equal(JSON.stringify(before).includes("Private hosted question"), false);
+  assert.equal(Object.hasOwn(before.replyRequests[0], "answerBasis"), false);
+  assert.deepEqual((await list(owner.secret)).replyRequests, []);
+  send({ id: "hosted-cancel", type: "reply_request.cancelled", data: { requestMessageId: "hosted-question", expectedRequestRevision: 0, reason: "Resolved elsewhere" } });
+  assert.deepEqual((await list(peer.secret)).replyRequests, []);
+});
+
+test("reply audit rejects an access change for an inherited member id", () => {
+  const state = {
+    room: { id: "commons", ownerId: "owner" },
+    members: { owner: { id: "owner", kind: "human", active: true } },
+    messages: []
+  };
+  const history = [
+    { sequence: 1, event: { type: "room.created", id: "room-created", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:00.000Z", data: { ownerId: "owner", roomId: "commons" } } },
+    { sequence: 2, event: { type: "member.added", id: "member-added", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:01.000Z", data: { memberId: "owner", kind: "human", displayName: "Owner", permissions: [] } } },
+    { sequence: 3, event: { type: "member.access_changed", id: "access-changed", roomId: "commons", actorId: "owner", at: "2026-09-27T00:00:02.000Z", data: { memberId: "toString", active: false, expectedMemberRevision: 0, permissions: [] } } }
+  ];
+  assert.throws(() => auditReplyRequests(state, history), /Reply request history requires operator reconciliation/);
+  assert.equal(Object.hasOwn(Object.prototype.toString, "active"), false);
 });

@@ -7,6 +7,14 @@
 // AC-02); the journal and the guard are provider-agnostic.
 import { appendFileSync, readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { encodeRow, decodeRow } from "./persisted-row.mjs";
+
+// Replay-safe row kind for journal entries (RC-2026-09-27-2730). Entries
+// written by older code (plain JSON lines, no envelope) still load: unknown
+// fields are dropped, missing fields take the defaults below.
+export const DISPATCH_JOURNAL_ROW_KIND = "dispatch-journal";
+const ENTRY_FIELDS = ["key", "roomId", "workItemId", "payloadDigest", "state", "jobId", "at", "note"];
+const ENTRY_DEFAULTS = { roomId: null, workItemId: null, payloadDigest: null, jobId: null, note: null };
 
 const STATES = Object.freeze(["intended", "dispatched", "unknown", "done", "failed"]);
 const TERMINAL = new Set(["done", "failed"]);
@@ -39,6 +47,10 @@ export class DispatchJournal {
     }
   }
   apply(entry) {
+    // Replay-safe decode first: enveloped rows unwrap, legacy rows (plain
+    // JSON, no envelope) decode with unknown fields dropped and missing
+    // fields defaulted. Never throws on old rows.
+    entry = decodeRow(entry, { kind: DISPATCH_JOURNAL_ROW_KIND, fields: ENTRY_FIELDS, defaults: ENTRY_DEFAULTS });
     checkKey(entry.key);
     checkState(entry.state);
     const existing = this.records.get(entry.key);
@@ -58,7 +70,7 @@ export class DispatchJournal {
   append(entry) {
     const full = { ...entry, at: this.now() };
     this.apply(full); // validate before touching disk
-    appendFileSync(this.path, JSON.stringify(full) + "\n");
+    appendFileSync(this.path, JSON.stringify(encodeRow(DISPATCH_JOURNAL_ROW_KIND, full)) + "\n");
     return full;
   }
   // Persist the intent BEFORE the provider is contacted. Same key + same

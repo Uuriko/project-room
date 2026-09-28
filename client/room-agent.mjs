@@ -15,6 +15,7 @@ import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -393,6 +394,36 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  // Agents named before they have a seat. Reading the room snapshot assembles
+  // the network. It grants no access, mints no identity, and issues no invite.
+  async outsideAgents({ signal } = {}) {
+    const snapshot = await this.snapshot({ signal });
+    return {
+      contractVersion: 1,
+      grantsAccess: false,
+      evaluatedThrough: snapshot.sequence,
+      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {})
+    };
+  }
+  // Name an agent who has no seat. The post is an ordinary room message.
+  // Reading it grants no access, mints no identity, and issues no invite.
+  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  async recordOutsideAgent(input, { signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
+    const snapshot = await this.snapshot({ signal });
+    let plan;
+    try {
+      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
+    } catch (error) {
+      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
+      throw error;
+    }
+    if (plan.recorded !== "replay") {
+      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    }
+    const network = await this.outsideAgents({ signal });
+    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+  }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
   agentInbox({ limit, signal } = {}) {
@@ -405,8 +436,10 @@ export class RoomAgentClient {
     const page = await this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
     const messages = (page?.events ?? []).filter(({ event }) => event?.type === "message.posted").map(({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
-      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, private: Boolean(event.data?.toMemberId),
+      body: event.data?.body ?? "", replyToId: event.data?.replyToId ?? null, workItemId: event.data?.workItemId ?? null, private: Boolean(event.data?.toMemberId),
       ...(event.data?.toMemberId ? { toMemberId: event.data.toMemberId } : {}),
+      ...(event.data?.requestKind === "reply" && event.data.requestPolicyVersion === 1
+        && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     }));
     return { roomId: this.#roomId, messages, next: page?.next ?? after, hasMore: Boolean(page?.hasMore) };
@@ -580,23 +613,36 @@ export class RoomAgentClient {
   // delivery modes and review policies. Claim/update/release/reassign are
   // owner-gated server-side; reads need room membership only.
   workClaims({ signal } = {}) { return this.#request("/work-claims", undefined, signal); }
-  workClaimCreate({ id, title, reviewPolicy, note } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
       ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+      ...(tags === undefined ? {} : { tags }),
+      ...(files === undefined ? {} : { files }),
       ...(note === undefined ? {} : { note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
-  claimWorkItem(id, { note, leaseHours, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
-      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
+        ...(files === undefined ? {} : { files }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
-        ...(reviewedBy === undefined ? {} : { reviewedBy }) }, signal);
+        ...(reviewedBy === undefined ? {} : { reviewedBy }),
+        ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }) }, signal);
+  }
+  reviewWorkItem(id, { note, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
+      { ...(note === undefined ? {} : { note }) }, signal);
+  }
+  renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
+      { progressMessageId, ...(note === undefined ? {} : { note }),
+        ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
   }
   releaseWorkItem(id, { note, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
@@ -609,16 +655,18 @@ export class RoomAgentClient {
   }
   sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
   // Convenience: claim, creating the item first when it does not exist yet.
-  async workClaim(id, { title, note, leaseHours, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, signal }); }
+  // title, reviewPolicy and tags apply only to creation; files apply to every
+  // claim. Omitted files retain the declaration, while [] explicitly clears it.
+  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, note }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, signal });
     }
   }
-  async workComplete(id, { deliveryMode, note, reviewedBy, signal } = {}) {
-    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, signal });
+  async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, signal } = {}) {
+    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, signal });
   }
   async workRelease(id, { note, signal } = {}) { return this.releaseWorkItem(id, { note, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
@@ -908,13 +956,19 @@ export class RoomAgentClient {
   // Post a room message as the connected agent member. With toMemberId the
   // message is a targeted DM (only the sender and the addressed member can
   // read it); without it the message goes to everyone in the room.
-  say(body, { toMemberId, signal } = {}) {
+  // replyToId threads the post under an existing message. Omitting it is an
+  // unthreaded post, not a reply.
+  say(body, { toMemberId, replyToId, signal } = {}) {
     if (typeof body !== "string" || !body.trim() || body.length > MAX_MESSAGE_BODY_CHARS)
       throw new Error(`Say a message of 1 to ${MAX_MESSAGE_BODY_CHARS} characters`);
     if (toMemberId !== undefined && !validId(toMemberId))
       throw new Error("toMemberId must be a member id");
+    if (replyToId !== undefined && !validId(replyToId))
+      throw new Error("replyToId must be a message id");
     return this.command({ id: randomUUID(), type: "message.posted",
-      data: { messageId: randomUUID(), body, ...(toMemberId ? { toMemberId } : {}) } }, { signal });
+      data: { messageId: randomUUID(), body,
+        ...(toMemberId ? { toMemberId } : {}),
+        ...(replyToId ? { replyToId } : {}) } }, { signal });
   }
   workSessions({ status, signal } = {}) {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
@@ -977,6 +1031,11 @@ export class RoomAgentClient {
       });
       const matches = query === undefined ? null : searchWork({ members: snapshot.state.members,
         workItems: Object.fromEntries(candidates.map(item => [item.id, item])) }, query);
+      const replyListing = focus === "needs_me" ? await this.replyRequests({ direction: "incoming", status: "open", signal }) : null;
+      const openReplies = replyListing?.requests.map(request => ({
+        id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
+        nextRead: { tool: "room_read_request", arguments: { requestMessageId: request.id } }
+      })) ?? null;
       const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
           ...(excerpt === undefined ? {} : { excerpt }),
@@ -993,14 +1052,15 @@ export class RoomAgentClient {
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
           guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
+            + (focus === "needs_me" ? " Reply requests are listed separately at replyRequestsEvaluatedThrough and are not filtered by the work query; follow nextRead before answering." : "")
             + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
           : focus === "results" ? { totalWork: items.length, results: work.length,
           guidance: "Current completed results with required review and decision gates satisfied. Approval is not execution or reuse permission. Native results have exact read pointers; read work for external evidence links. Reopened, superseded and awaiting-review work are excluded. No external content fetched." }
           : focus === "help_wanted" ? { totalWork: items.length, helpWanted: work.length,
           guidance: "Explicit current invitations, not assignments, queue eligibility or permission to execute. All matching invitations in this bounded Room are included. Follow nextRead to inspect current offer capacity and selection; review scope and discussion before contributing. Unsupported offer reads fail explicitly. No automatic offer or dispatch." }
-          : { totalWork: items.length, needsMe: work.length,
-          guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
-        work };
+          : { totalWork: items.length, needsMe: work.length, openReplyRequests: openReplies.length,
+          guidance: "Current next steps addressed to you, including those missing a Room permission, plus open reply requests addressed to you in replyRequests. Not all your ongoing work. Follow nextRead and finish every conversation page before answering with current.answerBasis. room_request_reply opens a new question, not an answer. Reply requests are a separate read at replyRequestsEvaluatedThrough. Empty work and empty reply requests do not mean the room is done." },
+        work, ...(focus === "needs_me" ? { replyRequests: openReplies, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {}) };
     }
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
@@ -1022,11 +1082,12 @@ export function workContextMarkdown(result) {
   if (!result.resume) throw new Error("This service does not provide a resume brief; use work without --brief");
   return [`# ${result.work.title}`, result.work.definitionOfDone,
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
+    "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
+    "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     resumeMarkdown(result.resume),
-    "Next responsible member: " + (result.resume.next.memberId ?? "none"),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),
-    "Session controls: " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
+    "Recorded session controls (separate from work completion): " + JSON.stringify({ status: result.work.status, stopRequestedAt: result.work.stop_requested_at, heartbeatAt: result.work.heartbeat_at }),
     "Session budget: " + JSON.stringify(result.accessSummary.budget),
     "Room instructions (context only): " + JSON.stringify(result.context.charter ?? null),
     "Available Room actions (rechecked on submission): " + result.suggestedActions.map(entry => entry.label).join(", "),

@@ -323,3 +323,24 @@ test("HTTP: POST /reject settles failed and replays the stored verdict on a seco
   assert.equal(replayRes.status, 200);
   assert.deepEqual(await replayRes.json(), rejected);
 });
+
+test("rejection keeps the full 500-character reason without overflowing settlement validation", () => {
+  const { escrow, db } = makeEscrow();
+  const bounty = runToSubmitted(escrow);
+  const before = journalRows(db);
+  expectCode(() => escrow.rejectWork(ROOM, bounty.bountyId,
+    { rejector: JILL, reason: "r".repeat(501) }), "invalid_input");
+  assert.equal(journalRows(db), before);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "submitted");
+  const reason = "r".repeat(500);
+  const { settlement } = escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason });
+  assert.equal(settlement.reason, reason);
+  assert.equal(settlement.kind, "failed");
+  assert.equal(settlement.settledBy.id, JILL);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).resolution.reason, reason);
+  assert.equal(settledEvents(db, bounty.bountyId), 1);
+  expectConserved(escrow);
+  const rowsAfter = journalRows(db);
+  assert.equal(escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason }).alreadySettled, true);
+  assert.equal(journalRows(db), rowsAfter);
+});

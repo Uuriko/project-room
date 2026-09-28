@@ -45,3 +45,49 @@ test('paused ProjectRoom cron methods run inside workerd, and an unknown method 
     await mf.dispose();
   }
 });
+
+// The paused RPC smoke check cannot exercise storage. This owns the real
+// unpaused retention boundary: native transaction compatibility and rollback.
+test('unpaused retention RPC preserves dry-run, opt-in deletion and atomic rollback on Workers', async () => {
+  const bundled = await build({
+    entryPoints: [fileURLToPath(new URL('./scheduled-rpc.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']
+  });
+  for (const deletion of [false, true]) {
+    const mf = new Miniflare({
+      modules: true, script: bundled.outputFiles[0].text,
+      compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+      durableObjects: { ROOM: { className: 'RetentionTestRoom', useSQLite: true } },
+      bindings: { ROOM_ORIGIN: 'https://room.example.test', ROOM_MAINTENANCE: '0',
+        ...(deletion ? { ROOM_RETENTION_ALLOW_DELETION: '1' } : {}) }
+    });
+    const call = async path => {
+      const response = await mf.dispatchFetch('https://room.example.test/retention/' + path);
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      return body;
+    };
+    try {
+      const before = await call('seed');
+      assert.deepEqual({ fetch: before.fetch, research: before.research }, { fetch: 2, research: 2 });
+      assert.ok(before.events > 0);
+      if (deletion) {
+        await call('fail');
+        const failed = await mf.dispatchFetch('https://room.example.test/retention/run');
+        assert.equal(failed.status, 500);
+        assert.match((await failed.json()).error, /retention fixture failure/);
+        assert.deepEqual(await call('counts'), before, 'the second category failure rolls back the first deletion');
+        await call('recover');
+      }
+      const receipt = await call('run');
+      assert.equal(receipt.dryRun, !deletion);
+      assert.equal(receipt.liveStoreScanned, true);
+      assert.equal(receipt.deleted, deletion ? 2 : 0);
+      assert.equal(receipt.categories.web_fetch_log.eligible, 1);
+      assert.deepEqual(await call('counts'), {
+        fetch: deletion ? 1 : 2, research: deletion ? 1 : 2, events: before.events
+      });
+      assert.equal((await call('run')).deleted, 0, 'repeated runs preserve fresh rows');
+    } finally { await mf.dispose(); }
+  }
+});

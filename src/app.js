@@ -1,11 +1,11 @@
 import { installRoomLayout } from "./room-layout.js";
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
@@ -30,9 +30,10 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, SESSION_HINT_COPY, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
+import { installHumanPush } from "./human-push.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -232,7 +233,6 @@ const client = new RoomClient({
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
       void refreshRoomFiles();
-      showRoomGuide();
       void refreshDmConsents();
       void refreshFriendBonds();
       void refreshSavedIds();
@@ -284,6 +284,7 @@ const client = new RoomClient({
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+    clearResultComparison($("#action-result-diff"));
     closeResult(false);
     selectWorkView("work");
     renderContent("#room-results-list", "");
@@ -330,6 +331,7 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     signinUI?.clear();
+    showSigninMethods();
     agentSigninUI?.clear();
     clearStoredPasswords();
     const accessKey = $("#access-key");
@@ -352,7 +354,6 @@ const client = new RoomClient({
     // closed summary for the rest of the session.
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     for (const id of ["people-panel", "room-about"]) $(`#${id}`).open = true;
-    if ($("#room-guide")) $("#room-guide").hidden = true;
     agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
@@ -832,7 +833,8 @@ const name = displayName; // Ordinary summaries use the same duplicate-aware att
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
-const initials = text => esc(text.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase());
+// First letter or digit of each word, so "Maya (tester)" is "MT", not "M(".
+const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
@@ -861,7 +863,18 @@ function setFormStatus(status, text, error = false) {
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
 }
+function composerOverLimit() { return $("#message-input").value.length > MAX_MESSAGE_BODY_CHARS; }
+function renderComposerLength() {
+  const input = $("#message-input"), over = composerOverLimit();
+  const limit = new Intl.NumberFormat("en-US").format(MAX_MESSAGE_BODY_CHARS);
+  const message = over ? `Message is too long. Shorten it to ${limit} characters or fewer; emoji may count as two. Your draft has not been shortened.` : "";
+  input.setCustomValidity(message);
+  if (over) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+  const status = $("#message-length-status");
+  status.hidden = !over; setFormStatus(status, message, over);
+}
 function renderComposerError() {
+  renderComposerLength();
   const text = drafts.get(composerKey()).error;
   const status = $("#composer-status");
   if (status.textContent !== text) status.textContent = text;
@@ -1075,10 +1088,6 @@ function setAuthKind(kind) {
   configureAuthPanel();
   focusSignin();
 }
-function dismissRoomGuide() {
-  if ($("#room-guide")) $("#room-guide").hidden = true;
-  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
-}
 function maybeShowGuestUpgradeHint() {
   // One-time hint for guests after their first message: surface the
   // account-upgrade path at the moment they've gotten value.
@@ -1105,17 +1114,6 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
-function showRoomGuide() {
-  const guide = $("#room-guide");
-  if (!guide) return;
-  try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
-  if (state?.messages?.length) { dismissRoomGuide(); return; }
-  // QA-UX 2026-09-19: the inbox sentence is noise for room-key members —
-  // they have no inbox (account sessions only). Hide it there.
-  const inboxNote = $("#room-guide-inbox");
-  if (inboxNote) inboxNote.hidden = !accountClient.session?.authenticated;
-  guide.hidden = false;
-}
 function syncComposerChrome() {
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
@@ -1127,9 +1125,9 @@ function syncComposerChrome() {
     // DMs are open by default (2026-09-24): only an explicit denial
     // (blocked/rejected/revoked) is surfaced, so a refusal is never a
     // surprise. No row / pending / approved needs no callout.
-    const recipient = to && state?.members?.[to] ? state.members[to] : null;
-    if (recipient) {
-      note.textContent = `Private — only you and ${recipient.displayName} can see this message.`;
+    const audience = composerAudienceNote(state?.members, to);
+    if (audience) {
+      note.textContent = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
@@ -2003,7 +2001,9 @@ function messageLinksHTML(m, { linked, moderation, count, muted, canReact = fals
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
   const reactHtml = canReact
     ? `<button class="message-to-work" type="button" data-message-action="add-reaction" data-message-id="${esc(m.id)}">Add reaction</button>` : "";
-  const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>`;
+  const request = state.replyRequests?.[m.id];
+  const clarify = request?.status === "open" && request.recipientId === session.member.id;
+  const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button"${clarify ? ' title="Reply without closing this request"' : ""}>${clarify ? "Clarify" : "Reply"}</button>`;
   const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
   // Attention: mark-unread rewinds the read horizon; save/unsave toggles the
   // per-member "later" list. Both ride the ⋯ overflow menu.
@@ -2222,7 +2222,7 @@ function requestControls(message) {
     : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
   const actions = [];
   if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
-  if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
+  if (open && own === request.recipientId) actions.push(["answered", "Answer request"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
   return `<span class="request-state">${esc(status)}</span><span class="request-state" data-request-run="${esc(message.id)}" role="status">${esc(requestRunLabel(message.id))}</span>${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
@@ -2230,10 +2230,16 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  $("#request-reply").hidden = !state || active;
+  const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
+  const members = state?.members;
+  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
+  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
+  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
+  requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
@@ -2247,8 +2253,9 @@ function syncRequestComposer() {
   select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
-  send.disabled = busy || requestReading || archived || Boolean(request && request.status !== "open" && !pendingMessage);
-  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
+  renderComposerLength();
+  send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
+  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
   input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
@@ -2303,6 +2310,20 @@ async function openRequestMode(kind, id) {
     if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
   }
 }
+const composerOptions = $("#composer-options");
+composerOptions.addEventListener("click", event => {
+  if (!event.target.closest("button")) return;
+  composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+}, true);
+composerOptions.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !composerOptions.open) return;
+  event.preventDefault(); event.stopPropagation(); composerOptions.open = false;
+  $("#composer-options-toggle").focus({ preventScroll: true });
+});
+document.addEventListener("click", event => {
+  if (!composerOptions.contains(event.target)) composerOptions.open = false;
+});
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
 $("#recipe-preview-toggle").addEventListener("click", () => {
   const panel = $("#recipe-preview");
@@ -2516,7 +2537,8 @@ function revealLocationHash() {
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
-  return workActions(i, state.members[session.member.id], now).filter(([action]) => (["release", "renew"].includes(action)) === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  if (!scopeOnly) return renderWorkActions(i, state.members[session.member.id], { now, busy, esc, workId: i.id });
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => ["release", "renew"].includes(action)).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
   try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
@@ -2690,7 +2712,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${recovery}${handoff}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -2958,10 +2980,11 @@ $("#invitation-accept").addEventListener("click", async () => {
     renderInvitation();
   }
 });
-$("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
 function focusSignin() {
   const keyVisible = !$("#signin-extra").hidden && $("#key-signin").open;
-  $(keyVisible ? "#access-key" : "#google-signin").focus({ preventScroll: true });
+  const emailVisible = !$("#email-auth-step").hidden;
+  const target = keyVisible ? $("#access-key") : emailVisible ? $("#email-auth-panel [name=email]") : $("#google-signin");
+  target?.focus({ preventScroll: true });
 }
 function setSigninExtra(open) {
   const extra = $("#signin-extra"), toggle = $("#signin-more");
@@ -2974,28 +2997,43 @@ $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
   setSigninExtra(extra ? extra.hidden : false);
 });
+function showSigninMethods() {
+  $("#signin-methods").hidden = false;
+  $("#email-auth-step").hidden = true;
+  $("#signin-more").hidden = false;
+}
 function openEmailAuth(mode) {
   const panel = $("#email-auth-panel");
-  signinUI.openEmail(mode, panel);
+  if (!signinUI.openEmail(mode, panel)) return;
+  $("#signin-methods").hidden = true;
+  $("#email-auth-step").hidden = false;
+  $("#signin-more").hidden = true;
+  setSigninExtra(false);
   panel?.querySelector('[name="email"]')?.focus();
 }
-$("#email-signup")?.addEventListener("click", () => openEmailAuth("signup"));
+$("#email-auth-back")?.addEventListener("click", () => {
+  if (!signinUI.closeEmail()) return;
+  showSigninMethods();
+  $("#email-signin").focus();
+});
 $("#email-signin")?.addEventListener("click", () => openEmailAuth("login"));
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
 $("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
 $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
-// Connecting an agent is the thing this room does that a chat app does not,
-// and the sign-in screen showed no sign of it: "Welcome.", one Google button,
-// and a More options disclosure hiding everything else. So the prompt sits
-// here, outside that disclosure, readable before anything is clicked, and the
-// explanation is what goes behind a summary instead.
-//
-// The address is built from location.origin rather than written down, so it
-// always names the host the reader is actually on. A hardcoded one goes stale
-// the first time this is served elsewhere, and a staging address in
-// agent-facing copy is already something live-audit fails the build for.
+// Keep the agent path discoverable without asking everyone to read setup
+// instructions. Existing links open the disclosure directly.
+function revealAgentSigninLink() {
+  if (location.hash !== "#join-agent") return;
+  if (!signinUI.closeEmail()) return;
+  showSigninMethods();
+  setSigninExtra(true);
+  const details = $("#join-agent");
+  if (details) details.open = true;
+}
+revealAgentSigninLink();
+// Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
 function fillJoinAgent() {
   const field = $("#join-agent-prompt");
@@ -3226,6 +3264,7 @@ $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
+  if (composerOverLimit()) { renderComposerLength(); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   if (!content.body) return;
@@ -3260,7 +3299,6 @@ $("#message-form").addEventListener("submit", e => {
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
-    dismissRoomGuide();
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
@@ -3467,7 +3505,7 @@ $("#reply-mention").addEventListener("click", () => {
   const input = $("#message-input");
   if (messageMentionsMember(input.value, author)) {
     input.value = removeMention(input.value, author);
-    saveComposer();
+    saveComposer(); syncRequestComposer();
     input.focus({ preventScroll: true });
   } else applyMentionMember(author);
   updateReply();
@@ -3583,7 +3621,7 @@ function applyEmoji(emoji) {
   if (!input || !found || !emoji) return;
   const next = insertEmoji(input.value, input.selectionStart, found.start, emoji);
   input.value = next.body;
-  hideEmoji(); saveComposer(); syncComposerChrome();
+  hideEmoji(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 function mentionChoices() {
@@ -3612,10 +3650,10 @@ function applyMentionMember(member) {
   input.value = next.body;
   // Mentions are text only: never change the DM recipient select here.
   // A message becomes a DM only when the sender explicitly picks a recipient.
-  hideMentions(); saveComposer(); syncComposerChrome();
+  hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); });
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
@@ -4018,6 +4056,7 @@ window.addEventListener("popstate", () => {
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
+  revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (fragment) openInvitation(fragment);
   else revealLocationHash();
@@ -4546,7 +4585,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#conversation-title");
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }
@@ -4743,11 +4782,48 @@ function resultRow(item) {
     : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
   return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
 }
+// Both reading and reviewing compare the same pinned completion versions.
+// Each caller owns its dialog/session lifetime; late reads cannot fill a new view.
+function clearResultComparison(box) {
+  box.hidden = true; box.replaceChildren();
+}
+function loadResultComparison(workItemId, previousId, text, box, owns) {
+  clearResultComparison(box);
+  if (!previousId) return;
+  client.workResult(workItemId, { completionEventId: previousId }).then(previous => {
+    if (!owns() || !previous) return;
+    if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
+    const before = previous.result?.text?.body;
+    if (previous.result?.text?.withdrawnAt || text.withdrawnAt) {
+      box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
+        previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
+          : "This version's text has been withdrawn, so the two cannot be compared."
+      } Previous approval never carries over.</p>`;
+      box.hidden = false;
+      return;
+    }
+    if (typeof before !== "string") throw new Error("Previous version has no exact text");
+    const rows = diffResultLines(before, text.body);
+    const note = "Previous approval never carries over; review the exact new text.";
+    box.innerHTML = rows === null
+      ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
+      : (() => { const summary = diffResultSummary(rows);
+          const body = rows.length > 200 ? rows.slice(0, 200) : rows;
+          return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
+            (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
+        })();
+    box.hidden = false;
+  }).catch(() => {
+    if (!owns()) return;
+    box.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+    box.hidden = false;
+  });
+}
 function resultStatus() {
   const view = resultView;
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
   const item = state.workItems[view.workItemId];
-  const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
+  const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
   $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
@@ -4757,6 +4833,7 @@ function closeResult(restore = true) {
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true;
+  clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
@@ -4803,39 +4880,7 @@ function readResult(e) {
       const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
       view.originalId = original?.id; $("#result-original").hidden = !original;
       view.loaded = true; resultStatus();
-      // F4: a resubmitted result names its previous version; show the changed
-      // bytes and restate that earlier approval never carries over.
-      const previousId = receipt.nativeText.previousCompletionEventId;
-      if (previousId) {
-        client.workResult(item.id, { completionEventId: previousId }).then(previous => {
-          if (!owns() || !previous) return;
-          if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
-          const before = previous.result?.text?.body;
-          if (previous.result?.text?.withdrawnAt || view.withdrawn) {
-            diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> ${
-              previous.result?.text?.withdrawnAt ? "The previous version's text has been withdrawn, so the two cannot be compared."
-                : "This version's text has been withdrawn, so the two cannot be compared."
-            } Previous approval never carries over.</p>`;
-            diffBox.hidden = false;
-            return;
-          }
-          if (typeof before !== "string") throw new Error("Previous version has no exact text");
-          const rows = diffResultLines(before, value.result.text.body);
-          const note = "Previous approval never carries over; review the exact new text.";
-          diffBox.innerHTML = rows === null
-            ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
-            : (() => { const summary = diffResultSummary(rows);
-                const body = rows.length > 200 ? rows.slice(0, 200) : rows;
-                return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
-                  (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
-              })();
-          diffBox.hidden = false;
-        }).catch(() => {
-          if (!owns()) return;
-          diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
-          diffBox.hidden = false;
-        });
-      }
+      loadResultComparison(item.id, receipt.nativeText.previousCompletionEventId, value.result.text, diffBox, owns);
     }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
     return;
   }
@@ -4926,6 +4971,7 @@ function loadActionText(item, action) {
   const request = (entry.textRequest ?? 0) + 1; entry.textRequest = request;
   entry.text = null; entry.textRequired = Boolean(entry.draftMessageId || ["verify", "decide"].includes(action) && item.receipt?.nativeText);
   $("#action-text").hidden = !entry.textRequired; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+  clearResultComparison($("#action-result-diff"));
   if (!entry.textRequired) return;
   $("#action-text-origin").textContent = "Loading exact text…";
   if (entry.draftMessageId) $("#action-title").textContent = "Save as result";
@@ -4934,6 +4980,7 @@ function loadActionText(item, action) {
     if (!owns() || !value) return;
     if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
     entry.text = value.result.text;
+    if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns);
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
     $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
@@ -5062,6 +5109,7 @@ function closeActionDialog({ returnFocus = true, confirmed = false } = {}) {
   actionEpoch++;
   if ($("#action-dialog").open) $("#action-dialog").close();
   if (confirmed || !entry?.uncertain) pendingAction = null;
+  if (!pendingAction) clearResultComparison($("#action-result-diff"));
   $("#resume-action").hidden = !pendingAction?.uncertain;
   if (returnFocus) restoreActionFocus(entry);
 }
@@ -5179,6 +5227,7 @@ function loadReturnBrief() { return briefView.refresh(); }
 // acknowledges; "Mark read" moves the marker to exactly the sequence the list was
 // evaluated through, so items arriving later stay unread.
 let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
+let humanPushUi = null;
 // Saved-but-not-refreshed, shown in the feed's own status line. Kept apart from
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
@@ -5207,6 +5256,7 @@ function resetNotifications() {
   $("#notification-panel").hidden = true; $("#notification-list").replaceChildren(); delete $("#notification-list")._content;
   $("#notification-status").textContent = ""; $("#notification-status").classList.remove("visible");
   $("#notification-read-button").hidden = true; $("#notification-read-button").disabled = true; $("#notification-read-button").textContent = "Mark read";
+  humanPushUi?.reset();
 }
 function renderNotifications() {
   const owned = Boolean(state) && ownsNotifications(notificationOwner);
@@ -5246,7 +5296,14 @@ function renderNotifications() {
       : "";
     return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a>${ack}</li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
+  humanPushUi?.refresh();
 }
+humanPushUi = installHumanPush({
+  client,
+  button: $("#human-push-button"),
+  note: $("#human-push-note"),
+  eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
+});
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
 // suggested 👍 react through the normal reaction path. Idempotent — when the
 // member already reacted (stale feed), the button does nothing rather than
@@ -6209,7 +6266,7 @@ shareLinksUI = installShareLinks({ client, accountClient,
   onJoinedRoom: focus => {
     if (focus.kind === "work" && state?.workItems[focus.id]) {
       revealWork(focus.id);
-      notice(`You're here to help with "${state.workItems[focus.id].title}".`);
+      notice(`This invitation opens "${state.workItems[focus.id].title}".`);
     } else if (focus.kind === "message" && conversation.byId.has(focus.id)) {
       revealMessage(focus.id);
     } else {

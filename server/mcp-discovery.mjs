@@ -5,6 +5,7 @@ import { ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_VERSION, CORE_MCP_TOOLS, CORE_MCP_
 import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";
 import { MCP_JOIN_TOOLS } from "./mcp-http.mjs";
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
+import { capabilityVisibleTo } from "./capability-visibility.mjs";
 
 export function livePublicMcpTools() {
   return MCP_JOIN_TOOLS;
@@ -14,7 +15,12 @@ export function livePublicMcpTools() {
 // snake_case names). profile "full" is the whole catalog. aliases adds the
 // hidden dotted names. The server card uses the default so it matches a
 // bearer tools/list with no profile argument.
-export function listedMcpTools(profile = "core", aliases = false) {
+// The optional agent descriptor (see server/capability-visibility.mjs)
+// filters BEFORE listing: withheld, never refused. A capability the
+// agent's grants/tiers do not admit is ABSENT from the returned catalog —
+// never present-but-denying. Omit it for the public/unfiltered lists
+// (server card, join surface), which stay full by design.
+export function listedMcpTools(profile = "core", aliases = false, agent = null) {
   const source = profile === "full"
     ? hostedMcpToolDefs
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
@@ -27,7 +33,8 @@ export function listedMcpTools(profile = "core", aliases = false) {
       ...(aliases && alias ? { aliases: [alias] } : {})
     };
   });
-  return [...tools, ...MCP_JOIN_TOOLS];
+  const listed = [...tools, ...MCP_JOIN_TOOLS];
+  return agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed;
 }
 
 export function liveEnrolledMcpTools() {

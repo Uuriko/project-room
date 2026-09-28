@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed } from "../scripts/runtime-package.mjs";
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
@@ -19,7 +20,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ repository, commit, destination });
+  let receipt = createRuntimePackage({ repository, commit, destination });
   for (const name of ["LICENSE", "NOTICE", "THIRD_PARTY.md"]) {
     assert.deepEqual(readFileSync(join(destination, name)),
       execFileSync("git", ["show", `${commit}:${name}`], { cwd: repository }),
@@ -57,6 +58,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : packagedTools.includes('"room_list_outside_agents"') ? 39
+      : packagedTools.includes('"room_begin_work"') ? 37
       : packagedWorkActions.includes('"renew_claim"') ? 36
       : packagedTools.includes('"get_room_context"') && packagedTools.includes('"room_read_inbox"') ? 35
       : packagedTools.includes('"room_read_inbox"') ? 34
@@ -71,6 +74,26 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.equal(await buildAssets(pathToFileURL(assets + "/")), committedAssets.length);
   for (const path of committedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const committedFixture = await frozenRecoveryFixture(repository, destination, commit);
+  // The fail-loud boot gate (server/boot-config.mjs) refuses a production boot
+  // with an unsigned card. This synthetic package is built from an unsigned dev
+  // tree, so fixture-sign the packaged card for the packaged revision (the
+  // candidate's version.mjs is unstamped, so packaged deployedInfo().revision
+  // is "dev") and update the manifest hash. A real production build goes
+  // through scripts/sign-agent-card.mjs, which fails closed without the key.
+  {
+    const signedPath = "deploy/agent-card-signed.mjs";
+    const module = `// Fixture-signed by tests/runtime-package.test.js for the packaged\n// production boot probe — not a real signature (see scripts/sign-agent-card.mjs).\nexport const AGENT_CARD_SIGNATURE = "fixture-signature";\nexport const AGENT_CARD_SIGNED_REVISION = "dev";\nexport const AGENT_CARD_UNSIGNED_REASON = null;\nexport const AGENT_CARD_JWS_SIGNATURES = null;\n`;
+    writeFileSync(join(destination, signedPath), module);
+    const manifestPath = join(destination, "runtime-manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const entry = manifest.files.find(file => file.path === signedPath);
+    entry.bytes = Buffer.byteLength(module);
+    entry.sha256 = createHash("sha256").update(module, "utf8").digest("hex");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  }
+  // Re-baseline: the boot/data probes below must not mutate the package
+  // relative to this fixture-signed state.
+  receipt = verifyRuntimePackage(destination);
   const { auditRecovery } = await import(pathToFileURL(join(destination, "server/recovery.mjs")));
   const f = committedFixture(join(directory, "fixture.sqlite"));
   try {
@@ -189,7 +212,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   assert.equal(receipt.files, expectedFiles,
     `candidate package ships ${receipt.files} files but the allowlisted fixture set has ${expectedFiles}`);
   // Cold imports below exercise the host runner, process adapter and CLI.
-  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
+  for (const file of ["client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs"]) assert.ok(existsSync(join(destination, file)), file);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { configuredHost } from ${JSON.stringify(pathToFileURL(join(destination, "client/host-process.mjs")).href)};

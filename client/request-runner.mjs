@@ -124,7 +124,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
 export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs;
+  let delay = intervalMs, connectionUnavailable = false;
   while (!signal?.aborted) {
     let cursor = null;
     try {
@@ -148,7 +148,12 @@ export async function runRequestQueue({ connection, db, execute, signal, emit = 
         }
       }
       delay = intervalMs;
-    } catch { if (!signal?.aborted) emit({ status: "connection_unavailable" }); delay = Math.min(delay * 2, 60000); }
+      connectionUnavailable = false;
+    } catch {
+      if (!signal?.aborted && !connectionUnavailable) emit({ status: "connection_unavailable" });
+      connectionUnavailable = true;
+      delay = Math.min(delay * 2, 60000);
+    }
     const waitingAt = Date.now(); let changed = false;
     if (stream && Number.isSafeInteger(cursor) && !signal?.aborted) {
       try { ({ changed } = await client.waitForChange(cursor, { signal, timeoutMs: delay })); }

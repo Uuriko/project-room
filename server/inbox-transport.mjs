@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { previewProvider } from "./inbox-outbox.mjs";
+import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 
 const operation = (kind, value) => kind + "-" + createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class SyntheticInboxTransport {
@@ -22,13 +23,29 @@ export class SyntheticInboxTransport {
   async dispatch(token, sourceId, sendId, binding) {
     const send = this.current(token, sourceId, sendId, binding);
     if (send.status !== "queued") return send;
-    const started = this.inbox.transport(token, { action: "send.dispatch", requestId: operation("dispatch", [sendId, send.revision]),
-      sourceId, sendId, expectedRevision: send.revision }, binding);
-    if (started.duplicate) return this.current(token, sourceId, sendId, binding);
-    let observed;
-    try { observed = await this.adapter.submit({ operationId: this.correlation(send), envelope: structuredClone(send.envelope) }); }
-    catch { return this.current(token, sourceId, sendId, binding); }
-    return this.observe(token, started.receipt.send, observed, binding);
+    // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send spans
+    // the provider submit; the delivery.receipt span (observe) nests as its
+    // child. Opt-in via TELEMETRY=true; disabled tracers return null spans.
+    // Only the channel, the attempt id, and outcomes are recorded.
+    const bridgeSpan = getTracer().startSpan(SPAN_NAMES.BRIDGE_SEND, { attributes: {
+      [ATTR.CHANNEL]: this.adapter.kind, [ATTR.MESSAGE_ID]: send.id } });
+    try {
+      const started = this.inbox.transport(token, { action: "send.dispatch", requestId: operation("dispatch", [sendId, send.revision]),
+        sourceId, sendId, expectedRevision: send.revision }, binding);
+      if (started.duplicate) {
+        bridgeSpan.setAttribute(ATTR.OUTCOME, "duplicate");
+        bridgeSpan.setStatusOk();
+        return this.current(token, sourceId, sendId, binding);
+      }
+      let observed;
+      try { observed = await this.adapter.submit({ operationId: this.correlation(send), envelope: structuredClone(send.envelope) }); }
+      catch { bridgeSpan.setAttribute(ATTR.OUTCOME, "error"); return this.current(token, sourceId, sendId, binding); }
+      bridgeSpan.setAttribute(ATTR.OUTCOME, "ok");
+      bridgeSpan.setStatusOk();
+      return this.observe(token, started.receipt.send, observed, binding, bridgeSpan);
+    } finally {
+      bridgeSpan.end();
+    }
   }
   async reconcile(token, sourceId, sendId, binding) {
     const send = this.current(token, sourceId, sendId, binding);
@@ -38,7 +55,7 @@ export class SyntheticInboxTransport {
     catch { return this.current(token, sourceId, sendId, binding); }
     return this.observe(token, send, observed, binding);
   }
-  observe(token, send, observed, binding) {
+  observe(token, send, observed, binding, parentSpan = null) {
     // Missing, uncorrelated and unsupported evidence leaves the attempt unknown;
     // "not found" cannot establish that another request was never accepted.
     if (!observed || observed.operationId !== this.correlation(send) || observed.previewVersion !== send.envelope.previewVersion
@@ -46,13 +63,29 @@ export class SyntheticInboxTransport {
       return this.current(token, send.sourceId, send.id, binding);
     if (send.status === observed.outcome && send.providerId === observed.providerId)
       return this.current(token, send.sourceId, send.id, binding);
-    const request = { action: "send.observe", requestId: operation("observation", [send.id, send.revision, observed]),
-      sourceId: send.sourceId, sendId: send.id, expectedRevision: send.revision, outcome: observed.outcome, providerId: observed.providerId };
-    try { return this.inbox.transport(token, request, binding).receipt.send; }
-    catch (error) {
-      if (["stale_inbox_send", "conflicting_inbox_observation", "invalid_inbox_send"].includes(error.code))
-        return this.current(token, send.sourceId, send.id, binding);
-      throw error;
+    // R1 delivery-path tracing (RC-2026-09-26-966): delivery.receipt spans the
+    // send.observe recording of the provider's delivery outcome. Only the
+    // channel, the attempt id, and the outcome are recorded.
+    const receiptSpan = getTracer().startSpan(SPAN_NAMES.RECEIPT, { parent: parentSpan, attributes: {
+      [ATTR.CHANNEL]: this.adapter.kind, [ATTR.MESSAGE_ID]: send.id } });
+    try {
+      const request = { action: "send.observe", requestId: operation("observation", [send.id, send.revision, observed]),
+        sourceId: send.sourceId, sendId: send.id, expectedRevision: send.revision, outcome: observed.outcome, providerId: observed.providerId };
+      try {
+        const result = this.inbox.transport(token, request, binding).receipt.send;
+        receiptSpan.setAttribute(ATTR.OUTCOME, observed.outcome);
+        receiptSpan.setStatusOk();
+        return result;
+      } catch (error) {
+        if (["stale_inbox_send", "conflicting_inbox_observation", "invalid_inbox_send"].includes(error.code)) {
+          receiptSpan.setAttribute(ATTR.OUTCOME, "dropped");
+          return this.current(token, send.sourceId, send.id, binding);
+        }
+        receiptSpan.recordException(error);
+        throw error;
+      }
+    } finally {
+      receiptSpan.end();
     }
   }
 }

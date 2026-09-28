@@ -12,6 +12,11 @@ import {
   isValidPublicKey,
   canonicalCardBytes,
   SigningError,
+  signCardJws,
+  verifyCardJws,
+  jwsPayloadBytes,
+  jwsProtectedHeader,
+  publicKeyToJwk,
 } from "../server/agent-card-signing.mjs";
 import { createAgentDirectory, DirectoryError } from "../server/agent-directory.mjs";
 
@@ -276,4 +281,104 @@ test("rotation statement normalizes omitted url/skills the same way", () => {
     agentId: "sparse-agent", card: normalized, newPublicKey: newKp.publicKey,
     oldPublicKey: oldKp.publicKey, rotationSignature,
   }));
+});
+
+// A2A v1.0 §8.4 JWS Agent Card signatures (RC-2026-09-27-2715). These guard the
+// new JWS sign/verify contract: each test names the regression it would catch,
+// and none of it is covered by the house-scheme tests above (different
+// payload, different wire shape, different header).
+
+test("JWS round-trips: signCardJws verifies with verifyCardJws", () => {
+  const kp = generateKeyPair();
+  const jws = signCardJws({ card: CARD, privateKey: kp.privateKey, keyId: "key-1", jku: "https://example.com/.well-known/jwks.json" });
+  assert.equal(typeof jws.protected, "string");
+  assert.equal(typeof jws.signature, "string");
+  assert.ok(verifyCardJws({ card: CARD, publicKey: kp.publicKey, jws }), "fresh JWS verifies");
+});
+
+test("JWS rejects tampered cards and wrong keys", () => {
+  const kp = generateKeyPair();
+  const jws = signCardJws({ card: CARD, privateKey: kp.privateKey, keyId: "key-1" });
+  assert.equal(verifyCardJws({ card: { ...CARD, name: "Evil Agent" }, publicKey: kp.publicKey, jws }), false,
+    "tampered card rejected");
+  assert.equal(verifyCardJws({ card: CARD, publicKey: generateKeyPair().publicKey, jws }), false,
+    "wrong key rejected");
+  // A signature over different bytes must not verify even with the right key.
+  const other = signCardJws({ card: { ...CARD, version: "9.9.9" }, privateKey: kp.privateKey, keyId: "key-1" });
+  assert.equal(verifyCardJws({ card: CARD, publicKey: kp.publicKey, jws: other }), false,
+    "signature transplant from another card rejected");
+});
+
+test("JWS protected header carries alg/kid/typ/jku per A2A v1.0 §8.4", () => {
+  const header = JSON.parse(Buffer.from(
+    jwsProtectedHeader({ keyId: "key-9", jku: "https://room.example/.well-known/jwks.json" }), "base64url").toString("utf8"));
+  assert.equal(header.alg, "EdDSA", "Ed25519 key must mint alg=EdDSA (RFC 8037)");
+  assert.equal(header.typ, "JOSE", "typ SHOULD be JOSE");
+  assert.equal(header.kid, "key-9", "kid names the signing key");
+  assert.equal(header.jku, "https://room.example/.well-known/jwks.json", "jku points at the JWKS");
+  const noJku = JSON.parse(Buffer.from(jwsProtectedHeader({ keyId: "key-9" }), "base64url").toString("utf8"));
+  assert.equal(noJku.jku, undefined, "jku is optional");
+  assert.throws(() => jwsProtectedHeader({ keyId: "" }), SigningError, "empty keyId rejected");
+});
+
+test("verifyCardJws never throws on malformed input", () => {
+  const kp = generateKeyPair();
+  const jws = signCardJws({ card: CARD, privateKey: kp.privateKey, keyId: "key-1" });
+  for (const bad of [null, undefined, "nope", 42, [], {}, { protected: null, signature: jws.signature },
+    { protected: jws.protected, signature: null }, { protected: "!!!", signature: "!!!" },
+    { protected: jws.protected, signature: jws.signature.slice(0, 10) }]) {
+    assert.equal(verifyCardJws({ card: CARD, publicKey: kp.publicKey, jws: bad }), false,
+      `malformed jws rejected without throwing: ${JSON.stringify(bad)?.slice(0, 40)}`);
+  }
+  assert.equal(verifyCardJws({ card: null, publicKey: kp.publicKey, jws }), false, "null card rejected");
+  assert.equal(verifyCardJws({ card: CARD, publicKey: "not-a-key", jws }), false, "bad public key rejected");
+});
+
+test("jwsPayloadBytes excludes the signatures field", () => {
+  const kp = generateKeyPair();
+  const jws = signCardJws({ card: CARD, privateKey: kp.privateKey, keyId: "key-1" });
+  const withSigs = { ...CARD, signatures: [jws] };
+  // The served card carries `signatures`; a verifier stripping it must
+  // recompute the exact signed bytes — otherwise verification is
+  // unimplementable for any A2A client.
+  assert.ok(jwsPayloadBytes(withSigs).equals(jwsPayloadBytes(CARD)), "payload ignores signatures");
+  assert.ok(verifyCardJws({ card: withSigs, publicKey: kp.publicKey, jws }),
+    "JWS verifies against the served card shape (signatures attached)");
+  assert.throws(() => jwsPayloadBytes(null), SigningError, "null card rejected");
+});
+
+test("jwsPayloadBytes keeps explicitly-set falsy properties (no default stripping)", () => {
+  const sparse = {
+    ...CARD,
+    description: "",
+    count: 0,
+    capabilities: { streaming: false, pushNotifications: false },
+    skills: [],
+  };
+  const bytes = jwsPayloadBytes(sparse).toString("utf8");
+  // A2A v1.0 §8.4's "remove properties with default values" is ProtoJSON
+  // explicit-presence against the A2A proto schema — an explicitly-set
+  // optional field keeps its default value. The room card is not a proto
+  // message, so nothing beyond `signatures` is stripped; a verifier that
+  // guessed otherwise could never reproduce these bytes.
+  for (const fragment of [`"description":""`, `"count":0`, `"streaming":false`, `"skills":[]`]) {
+    assert.ok(bytes.includes(fragment), `payload keeps ${fragment}`);
+  }
+  const kp = generateKeyPair();
+  const jws = signCardJws({ card: sparse, privateKey: kp.privateKey, keyId: "key-1" });
+  assert.ok(verifyCardJws({ card: sparse, publicKey: kp.publicKey, jws }),
+    "round-trips with falsy properties intact");
+});
+
+test("publicKeyToJwk emits an Ed25519 JWK for the key id", () => {
+  const kp = generateKeyPair();
+  const jwk = publicKeyToJwk({ publicKey: kp.publicKey, keyId: "key-7" });
+  assert.deepEqual(Object.keys(jwk).sort(), ["crv", "kid", "kty", "x"]);
+  assert.equal(jwk.kty, "OKP");
+  assert.equal(jwk.crv, "Ed25519");
+  assert.equal(jwk.kid, "key-7");
+  assert.deepEqual(Buffer.from(jwk.x, "base64url"), Buffer.from(kp.publicKey, "base64"),
+    "JWK x carries the same 32 key bytes");
+  assert.throws(() => publicKeyToJwk({ publicKey: "nope", keyId: "key-7" }), SigningError);
+  assert.throws(() => publicKeyToJwk({ publicKey: kp.publicKey, keyId: "" }), SigningError);
 });

@@ -29,6 +29,7 @@
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -57,7 +58,7 @@ const runPure = (reject, fn) => {
     if (error instanceof EscrowError) {
       if (error.code === "unknown_bounty" || error.code === "unknown_flag") reject(404, error.code, error.message);
       if (error.code === "not_authorized") reject(403, error.code, error.message);
-      if (error.code === "already_claimed" || error.code === "dispute_exists") reject(409, error.code, error.message);
+      if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
     }
     throw error;
@@ -95,8 +96,11 @@ const readPayload = async (reject, readBody, req) => {
   return payload;
 };
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
   const { json, reject, body } = helpers;
+  if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
+    db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+    actor: auth.member, action: `${req.method} bounty ${escrowRoute}`, fail: reject });
   const escrow = store.bountyEscrow instanceof BountyEscrow ? store.bountyEscrow : new BountyEscrow(store);
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
@@ -116,7 +120,20 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   };
   const idem = (payload, route, status, thunk) =>
     runPure(reject, () => {
-      const result = escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk));
+      const result = store.transaction(() => {
+        // Body upload is asynchronous. Recheck the original credential and
+        // session fence inside the same transaction as replay or mutation.
+        if (typeof reauthorize !== "function") reject(403, "access_denied", "Fresh authorization is required");
+        const current = reauthorize();
+        if (current.member.id !== auth.member.id) reject(403, "access_denied", "The acting identity changed");
+        if (["sybil-dismiss", "sybil-confirm"].includes(escrowRoute) && !isRoomOwner(store, roomId, current))
+          reject(403, "owner_required", "Only the room owner can confirm or dismiss a sybil flag.");
+        enforceAutonomyTierForAction({ db: store.db, roomId,
+          state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
+          actor: current.member, action: `${req.method} bounty ${escrowRoute}`, fail: reject });
+        return escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk),
+          { callerLane: caller, bountyId: bountyId ?? sybilFlagId ?? null, payload: Object.fromEntries(Object.entries(payload).filter(([name]) => name !== "idempotencyKey")) });
+      });
       if (!result.replayed) publishEvent(result.body?.receipt?.event);
       return json(res, result.status, result.body);
     });

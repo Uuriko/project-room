@@ -10,7 +10,7 @@ Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and
 1. Search existing issues and PRs. For a substantial feature, open an issue with
    the user problem and proposed behavior before building it. Small fixes can
    go directly to a PR. Comment on an issue when starting work; check
-   [the coordination thread #266](https://github.com/Uuriko/project-room/issues/266)
+   [the coordination thread #1160](https://github.com/Uuriko/project-room/issues/1160)
    if several contributors are changing the same area.
 2. Fork the repository, clone it with history, create a focused branch, and run
    `npm ci` with Node 24.19 or newer. No hosted account or model API key is
@@ -32,6 +32,24 @@ Start with the [README](README.md), [self-host guide](docs/SELF-HOSTING.md), and
    deploy another person's service.
 
 ## Contributions and AI tools
+
+### Replay and release evidence
+
+For changes to event admission, reducers, projections or journals, explain three
+compatibility cases in the PR: old history on new code, newly accepted events
+on older code, and the supported recovery path. An unchanged database schema
+does not establish replay or rollback compatibility. Exercise a persisted
+history across close/reopen when the change affects recovery. Prefer validating
+new commands before persistence over retroactively rejecting accepted history.
+
+Use the existing read-only `scripts/release-checkpoint.mjs --pr NUMBER`
+collector for a shared checkpoint instead of creating another status ledger.
+Include the reviewed head and base, exact CI run, actual merge revision, and
+each Worker's own revision in the release receipt. `/api/version` can report a
+shared backend; it does not prove both entry Workers were uploaded. Collector
+exit zero means collection completed, not permission or readiness to deploy.
+Keep access, binding and recovery verification alongside that checkpoint, and
+link updates to it rather than repeating unqualified “ready” or “shipped” claims.
 
 Submit only work you have the right to contribute under [Apache-2.0](LICENSE).
 Keep attribution and dependency notices. No copyright assignment or separate

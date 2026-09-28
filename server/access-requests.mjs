@@ -22,6 +22,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -60,7 +61,7 @@ export const accessRequestSchema = `
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
 `;
 
-const STATUSES = ["pending", "approved", "denied", "expired"];
+const STATUSES = ["pending", "approved", "denied", "expired", "cancelled"];
 const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
@@ -260,6 +261,9 @@ export class AccessRequests {
   decide(token, roomId, requestId, { decision, permissions, note } = {}, expectedSessionBinding = null) {
     if (!DECISIONS.includes(decision)) fail(422, "invalid_request", "decision must be 'approve' or 'deny'");
     const { auth, authority } = this.#requireMembershipAdministration(token, roomId, expectedSessionBinding);
+    // Deciding access requests is a membership write: the read-only autonomy
+    // tier applies even when the agent holds manage_members (issue #996).
+    enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "access_decide", fail });
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(requestId, roomId);
       if (!row) fail(404, "not_found", "No such join request");
@@ -290,6 +294,27 @@ export class AccessRequests {
       // members but may never confer manage_members — that would make the
       // grant transitive. The owner (or a member already holding
       // manage_members) remains sovereign.
+      const existingLink = this.db.prepare(
+        "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
+      ).get(roomId, row.identity_id);
+      if (existingLink) {
+        // A direct grant already admitted this identity. Recording the
+        // decision must not link them again or change the grant they hold.
+        this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
+          .run(now, auth.member.id, "already a member; request closed without a second grant", requestId);
+        const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+        const held = authority.members[existingLink.memberId]?.permissions ?? [];
+        return Object.freeze({
+          ...updated,
+          memberId: existingLink.memberId,
+          grantedPermissions: Object.freeze([...held]),
+          alreadyMember: true,
+          next: Object.freeze([
+            Object.freeze({ action: "see-new-member", method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/presence`,
+              description: "This identity is already a member. The pending request is closed and their existing permissions are unchanged." }),
+          ]),
+        });
+      }
       if (grants.includes("manage_members") && !this.store.delegation.mayConferManageMembers(authority, auth)) {
         fail(403, "access_denied", "Delegated membership administration cannot grant manage_members");
       }
@@ -302,6 +327,7 @@ export class AccessRequests {
         identityId: row.identity_id,
         displayName: row.display_name,
         permissions: grants,
+        settleAccessRequests: false,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
@@ -328,6 +354,25 @@ export class AccessRequests {
             description: "Confirm the new member in the room's member list, with their granted permissions." }),
         ]),
       });
+    });
+  }
+
+  // Only the current identity-secret holder may withdraw a request. Public
+  // request/identity IDs alone confer no cancellation authority.
+  // A repeated cancel returns the cancelled row so a lost response can retry.
+  cancel(requestId, identityId, secret) {
+    if (typeof identityId !== "string" || !identityId) fail(422, "invalid_request", "identityId is required");
+    return this.store.transaction(() => {
+      this.store.identities.authenticateIdentitySecret(identityId, secret);
+      const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
+      if (!row || row.identity_id !== identityId) fail(404, "not_found", "No such join request");
+      const live = this.maybeExpire(row);
+      if (live.status === "cancelled") return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
+      if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
+      const now = this.store.now();
+      this.db.prepare("UPDATE access_requests SET status='cancelled', decided_at=?, decision_note=? WHERE request_id=?")
+        .run(now, "withdrawn by requester", requestId);
+      return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
     });
   }
 

@@ -8,8 +8,12 @@
 // is written through inside the same store transaction. API-key secrets are
 // never persisted — only their SHA-256 hashes (the pure module never returns
 // a stored secret). Webhook signing secrets ARE persisted because the server
-// needs them to sign deliveries, but they are never returned over HTTP
-// (only shown once when the server generates one at subscribe time).
+// needs them to sign deliveries, but they are never returned over HTTP at
+// all: agent-visible views carry only an opaque sentinel
+// (`pr_sentinel_<subscriptionId>`, UFO-steal slice 2, RC-2026-09-27-2729),
+// and the raw value is resolved server-side at the single dispatch/verify
+// boundary. Agents verify inbound deliveries through verifyWebhookDelivery,
+// which checks the signature server-side and answers valid/invalid.
 //
 // Ownership: API keys, directory cards and webhook subscriptions are scoped
 // to the publishing agent identity. Cross-identity access reads as 404
@@ -751,8 +755,6 @@ export class AgentPluginStore {
 
   subscribeWebhook({ identityId, url, events, secret = null }) {
     return this.mutate(() => {
-      // Caller-supplied secrets are never echoed; a server-generated secret
-      // is shown exactly once so the agent can verify deliveries.
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
@@ -760,7 +762,11 @@ export class AgentPluginStore {
         (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json)
         VALUES (?, ?, ?, ?, ?, 1, ?, '[]')`)
         .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt);
-      return { subscription: view, secretShownOnce: secret === null ? signingSecret : null };
+      // RC-2026-09-27-2729 (UFO-steal slice 2): the raw signing secret is
+      // never returned over HTTP — not even once. The view carries the
+      // opaque `secretRef` sentinel instead; the agent holds no raw token.
+      // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
+      return { subscription: view };
     });
   }
 
@@ -865,6 +871,26 @@ export class AgentPluginStore {
         throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
       }
       return this.webhookJournal(subscriptionId);
+    });
+  }
+
+  // RC-2026-09-27-2729 (UFO-steal slice 2): server-side delivery
+  // verification. The agent holds only the `secretRef` sentinel, never the
+  // raw signing secret, so it cannot verify HMAC itself — it submits the
+  // inbound payload + signature and the room checks them at the single
+  // trusted boundary (sentinel -> real secret), answering { valid }.
+  // Cross-identity reads 404 like the journal — an agent never verifies
+  // (or learns about) another's deliveries.
+  verifyWebhookDelivery({ identityId, subscriptionId, eventType, data, signature }) {
+    return this.store.readTransaction(() => {
+      const row = this.db.prepare("SELECT agent_id FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
+      if (!row || row.agent_id !== identityId) {
+        throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
+      }
+      return Object.freeze({
+        subscriptionId,
+        valid: this.webhooks.verifyDelivery(subscriptionId, { eventType, data, signature }),
+      });
     });
   }
 

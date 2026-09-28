@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 import { ensureSidebarClosed } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Agent-operated usability regression, not evidence from human participants.
@@ -49,11 +50,19 @@ for (const touch of [false, true]) {
     await fillAccessKey(owner, ownerKey);
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
+    assert.equal(await owner.getByRole('button', { name: 'Got it', exact: true }).count(), 0, 'chat opens without a redundant tutorial dismissal');
+    const firstMessage = owner.getByRole('button', { name: 'Write the first one', exact: true });
+    await firstMessage.focus(); await owner.keyboard.press('Enter');
+    assert.equal(await owner.evaluate(() => document.activeElement.id), 'message-input');
+    await owner.locator('#message-input').fill('Keep this first draft');
+    await owner.screenshot({ path: `test-results/first-minute-quiet-${touch ? 'touch' : 'desktop'}.png` });
     await clickChrome(owner, "#invite-people-button");
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();
     await owner.locator('#share-link-close').click();
+    assert.equal(await owner.locator('#message-input').inputValue(), 'Keep this first draft');
+    await owner.locator('#message-input').fill('');
     await ensureSidebarClosed(owner);
     await guest.goto(invitation);
     await guest.locator('#join-link-name').fill('Maya');
@@ -126,7 +135,7 @@ for (const touch of [false, true]) {
     await message.locator('[data-message-action="work"]').click();
     await owner.locator('#work-title-input').fill('An edited suggestion');
     await owner.locator('#cancel-work-button').click();
-    await owner.locator('#new-work-button').click();
+    await openComposerOptions(owner); await owner.locator('#new-work-button').click();
     assert.equal(await owner.locator('#work-title-input').inputValue(), '');
     assert.equal(await owner.locator('#source-message-id').inputValue(), '');
     await owner.locator('#assignee-select').selectOption('owner');

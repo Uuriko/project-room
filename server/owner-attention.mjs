@@ -11,6 +11,7 @@
 // Local ServiceError (mirrors server/access-requests.mjs): store.mjs imports
 // are avoided here to keep the Workers bundle cycle-free; http.mjs injects
 // its store and AccessRequests instances.
+import { createHash } from "node:crypto";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 
 class ServiceError extends Error {
@@ -24,6 +25,15 @@ const CLAIM_LEASE_WARN_MS = 24 * 60 * 60 * 1000;
 const SPEND_HEADROOM_WARN_FRACTION = 0.2;
 // The card is a triage surface, not a full queue.
 const MAX_ITEMS = 25;
+
+// A full card keeps decisions ahead of informational leases. Under the cap,
+// insertion order stays so an owner still sees requests before later notes.
+function orderedAttention(items) {
+  if (items.length <= MAX_ITEMS) return items;
+  const actions = items.filter(item => item.severity === "action");
+  const rest = items.filter(item => item.severity !== "action");
+  return [...actions, ...rest];
+}
 
 function requireOwner(store, auth, roomId) {
   // Mirrors the diagnostics-export owner gate on main.
@@ -48,7 +58,7 @@ function reviewAction(roomId, workItemId) {
     path: `/api/rooms/${roomId}/work-context?workItemId=${encodeURIComponent(workItemId)}` });
 }
 
-export function attentionReport(deps, token, roomId, expectedSessionBinding = null, nowMs = Date.now()) {
+export function attentionReport(deps, token, roomId, expectedSessionBinding = null, nowMs = Date.now(), { cursor = null } = {}) {
   const { store, accessRequests } = deps;
   if (!store || !accessRequests) fail(500, "misconfigured", "Attention rollup is not wired");
   const auth = store.authenticate(token, roomId, expectedSessionBinding);
@@ -145,6 +155,18 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     }
   }
 
+  const ordered = orderedAttention(items);
+  // A changed queue restarts at the first page; never combine pages from
+  // different snapshots or silently skip entries after a removal.
+  const fingerprint = createHash("sha256").update(JSON.stringify([
+    roomId, auth.member.id, auth.sessionBinding ?? null, ordered,
+  ])).digest("hex");
+  const match = typeof cursor === "string" && cursor.match(/^([a-f0-9]{64}):([0-9]{1,10})$/);
+  const requestedOffset = match ? Number(match[2]) : 0;
+  const valid = match && match[1] === fingerprint && requestedOffset % MAX_ITEMS === 0
+    && requestedOffset < ordered.length;
+  const pageOffset = valid ? requestedOffset : 0;
+  const pageCursor = offset => `${fingerprint}:${offset}`;
   return Object.freeze({
     roomId,
     // Viewer echo for the client's ownsResponse identity check: without these
@@ -157,6 +179,11 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
     viewerSessionRevision: auth.sessionRevision ?? null,
     evaluatedThrough: room.sequence,
     itemCount: items.length,
-    items: Object.freeze(items.slice(0, MAX_ITEMS)),
+    actionCount: items.filter(item => item.severity === "action").length,
+    pageOffset,
+    reset: cursor !== null && !valid,
+    previousCursor: pageOffset > 0 ? pageCursor(Math.max(0, pageOffset - MAX_ITEMS)) : null,
+    nextCursor: pageOffset + MAX_ITEMS < ordered.length ? pageCursor(pageOffset + MAX_ITEMS) : null,
+    items: Object.freeze(ordered.slice(pageOffset, pageOffset + MAX_ITEMS)),
   });
 }

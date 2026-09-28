@@ -160,7 +160,7 @@ test("transfer to an unknown or inactive member is a bare 404", async t => {
     err => err.status === 404 && err.code === "unknown_member");
 });
 
-test("an agent owner may set room policy but not the spend allowance", async t => {
+test("an agent owner may set room policy and the room-wide spend allowance", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
   store.identities.link(ownerToken, "commons", {
     identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
@@ -172,11 +172,14 @@ test("an agent owner may set room policy but not the spend allowance", async t =
     data: { requireIndependentReview: true, requireOwnerDecision: false }
   });
   assert.equal(policy.event.type, "room.policy_set");
-  // ...but account-bound powers stay human-gated.
-  assert.throws(() => store.command(identity.secret, "commons", {
+  // Room ownership, unlike membership-delegation grants, also governs the
+  // existing room-wide allowance. It does not introduce per-agent spending.
+  const allowance = store.command(identity.secret, "commons", {
     id: randomUUID(), type: "room.spend_allowance_set",
     data: { allowanceCents: 100, periodDays: 30 }
-  }), /Only the Room owner may set the spend allowance/);
+  });
+  assert.equal(allowance.event.type, "room.spend_allowance_set");
+  assert.equal(store.room("commons").state.room.spendAllowance.allowanceCents, 100);
 });
 
 test("an agent owner may archive its own room", async t => {
@@ -260,7 +263,9 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(missing.body?.error?.code, "not_found");
   for (const path of [
     "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
-    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem"
+    "/api/share-links/join-agent", "/api/access-requests",
+    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem",
+    "/room/api/share-links/join-agent", "/room/api/access-requests"
   ]) {
     const got = await fetch(`${origin}${path}`);
     assert.equal(got.status, 405, path);

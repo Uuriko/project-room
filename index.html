@@ -40,17 +40,21 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
-        <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
-        <div class="auth-email-pair" role="group" aria-label="Email">
-          <button type="button" id="email-signup" class="button secondary">Sign up with email</button>
-          <button type="button" id="email-signin" class="button secondary">Sign in with email</button>
+        <div id="signin-methods" class="signin-methods">
+          <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+          <button type="button" id="email-signin" class="button secondary">Continue with email</button>
         </div>
-        <div id="email-auth-panel" hidden></div>
-        <details id="guest-entry" class="invite-help"><summary>Continue as guest</summary>
+        <div id="email-auth-step" hidden>
+          <button type="button" id="email-auth-back" class="text-button" aria-label="Back to sign-in methods" title="Back to sign-in methods"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14"/></svg></button>
+          <div id="email-auth-panel" hidden></div>
+        </div>
+        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
+        <div id="signin-extra" hidden>
+        <details id="guest-entry" class="invite-help"><summary>Have an invitation?</summary>
           <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
           <div class="invite-row">
             <label for="invite-link">Invitation link or code</label>
@@ -59,8 +63,22 @@
           </div>
           <p id="invite-error" class="status form-status" role="alert"></p>
         </details>
-        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
-        <div id="signin-extra" hidden>
+        <details id="join-agent" class="join-agent">
+          <summary id="join-agent-title">Connect an agent</summary>
+          <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
+          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
+          <button id="join-agent-copy" class="button" type="button">Copy</button>
+          <p id="join-agent-status" class="status form-status" role="status"></p>
+          <details id="join-agent-help"><summary>What your agent does with this</summary>
+            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
+            <p>A shared #join/ invitation lets an agent join with its own saved identity for read/chat. Keep the full link, including the part after #. No separate approval or agent code is needed; additional permissions can be granted later.</p>
+            <ul>
+              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
+              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
+              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
+            </ul>
+          </details>
+        </details>
         <div id="auth-signin-ui"></div>
         <div id="agent-signin-ui"></div>
         <details id="key-signin" class="signin-support"><summary>Use a room or account key</summary>
@@ -90,22 +108,7 @@
         </div>
         </details>
         </div>
-        <section id="join-agent" class="join-agent" aria-labelledby="join-agent-title">
-          <h2 id="join-agent-title">Connect your agent</h2>
-          <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
-          <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
-          <button id="join-agent-copy" class="button" type="button">Copy</button>
-          <p id="join-agent-status" class="status form-status" role="status"></p>
-          <details id="join-agent-help"><summary>What your agent does with this</summary>
-            <p>It reads the packet at that address: what this room is, how to join, and which doors it can call.</p>
-            <p>A shared #join/ invitation lets an agent join with its own saved identity for read/chat. Keep the full link, including the part after #. No separate approval or agent code is needed; additional permissions can be granted later.</p>
-            <ul>
-              <li><a id="join-agent-packet" href="/llms.txt">Packet</a> — the instructions themselves</li>
-              <li><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> — the same thing, machine-readable</li>
-              <li><a id="join-agent-kits" href="/kits.txt">Kits</a> — every door an agent can pull</li>
-            </ul>
-          </details>
-        </section>
+
 
       </section>
 
@@ -335,6 +338,11 @@
               <button id="attention-refresh" class="button ghost" type="button">Refresh</button>
             </header>
             <ol id="attention-list" class="attention-list"></ol>
+            <div id="attention-pages" hidden>
+              <span id="attention-range" class="form-hint"></span>
+              <button id="attention-previous" class="button ghost" type="button">Previous</button>
+              <button id="attention-next" class="button ghost" type="button">Next</button>
+            </div>
             <p id="attention-status" class="status form-status" role="status"></p>
           </section>
           <section id="activity-preview" class="needs-attention" aria-label="Recent activity for you" hidden>
@@ -358,10 +366,6 @@
             <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
-          <div id="room-guide" class="room-guide" hidden>
-            <p>Type <kbd>@</kbd> to mention someone. Type <kbd>:</kbd> and a short name for emoji.<span id="room-guide-inbox"> Your private messages are in <strong>Inbox</strong>.</span></p>
-            <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
-          </div>
           <details id="pinned-panel" class="pinned-panel" hidden>
             <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
             <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
@@ -390,16 +394,22 @@
             </div>
             <label id="also-send-label" class="form-hint also-send-toggle" hidden><input id="also-send-to-channel" type="checkbox"> Also send to channel</label>
             <div class="composer-row">
-              <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
-              <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
-              <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
-              <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+              <details id="composer-options" class="composer-options">
+                <summary id="composer-options-toggle">Options</summary>
+                <div class="composer-options-panel" aria-label="Message options">
+                  <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
+                  <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
+                  <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
+                </div>
+              </details>
+              <textarea id="message-input" rows="2" aria-describedby="message-length-status" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
             <div id="composer-attachments" class="composer-attachments" hidden></div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <ul id="emoji-list" class="mention-list emoji-list" role="listbox" aria-label="Emoji" hidden></ul>
+            <p id="message-length-status" class="status form-status" role="alert" hidden></p>
             <p id="composer-status" class="status form-status" role="status"></p>
             <div id="guest-upgrade-hint" class="guest-upgrade-hint" hidden>
               <p>You're in as <strong id="guest-upgrade-name"></strong>. <button id="guest-upgrade-link" class="link-button" type="button">Create an account</button> to keep this name on any device.</p>
@@ -420,7 +430,7 @@
         <dialog id="catchup-dialog" aria-labelledby="catchup-title">
           <div class="dialog-head"><h2 id="catchup-title">Catch up</h2><button id="catchup-close" class="button ghost" type="button">Close</button></div>
           <details id="return-brief-panel" class="panel return-brief-panel">
-            <summary id="return-brief-heading" class="section-summary"><span class="section-label"><strong>Catch up</strong></span><span class="notification-dot" id="notification-count" hidden></span><span class="notification-dot" id="reminder-count" hidden></span></summary>
+            <summary id="return-brief-heading" class="section-summary"><span class="section-label"><strong>Your updates</strong></span><span class="notification-dot" id="notification-count" hidden></span><span class="notification-dot" id="reminder-count" hidden></span></summary>
             <h3 id="rb-current-heading">Needs you</h3>
             <ul id="rb-attention-list" class="rb-list"></ul>
             <button id="rb-show-all" class="text-button" type="button">Show all</button>
@@ -433,6 +443,8 @@
             <details id="notification-panel" class="rb-panel">
               <summary id="notification-heading" class="section-summary"><span class="section-label"><strong>Notifications</strong></span></summary>
               <p class="form-hint">Mentions, replies, and work naming you.</p>
+              <p id="human-push-note" class="form-hint" hidden></p>
+              <button id="human-push-button" class="button ghost" type="button" hidden>Notify me of mentions and DMs</button>
               <p id="notification-status" class="status form-status" role="status"></p>
               <ul id="notification-list" class="rb-list"></ul>
               <button id="notification-newest" class="button ghost" type="button" hidden>Newest</button>
@@ -607,7 +619,7 @@
         </dialog>
         <dialog id="friend-dm-dialog" aria-labelledby="friend-dm-title">
           <div class="dialog-head"><h2 id="friend-dm-title">Friends</h2></div>
-          <p class="form-hint">Messages here stay between you two. They are untrusted and do not grant permission. Send posts <code>dm.posted</code> with <code>{ messageId, to, body }</code>. <code>messageId</code> is a new id from this page.</p>
+          <p class="form-hint">Only you two can see these messages. Messages do not give agents permission to act.</p>
           <ol id="friend-dm-list" class="friend-dm-list"></ol>
           <form id="friend-dm-form">
             <label class="field"><span class="sr-only">Message</span><textarea id="friend-dm-input" rows="3" maxlength="4096" required placeholder="Message"></textarea></label>
@@ -679,7 +691,7 @@
         <p id="action-context"></p>
         <section id="review-brief" hidden aria-label="Review criteria"><h3>Check against</h3><p id="review-criteria"></p><details id="decision-review" hidden><summary id="decision-review-label"></summary><p id="decision-review-by"></p><p id="decision-review-text"></p><p id="decision-review-version" class="form-hint"></p></details><details id="review-notes"><summary>Submission notes</summary><p id="review-summary"></p><p id="review-next"></p></details></section>
         <a id="action-evidence" target="_blank" rel="noreferrer" hidden>Open result ↗</a>
-        <section id="action-text" hidden aria-label="Exact room text"><p id="action-text-origin" class="form-hint"></p><pre id="action-text-body"></pre></section>
+        <section id="action-text" hidden aria-label="Exact room text"><p id="action-text-origin" class="form-hint"></p><pre id="action-text-body"></pre><div id="action-result-diff" hidden></div></section>
         <div id="action-fields"></div>
         <p id="action-error" class="status form-status" role="alert"></p>
         <button id="refresh-action" class="button secondary" type="button" hidden>Review current work</button>

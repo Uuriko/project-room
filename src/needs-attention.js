@@ -18,9 +18,35 @@ export function createNeedsAttentionCard({ client, section }) {
   const count = section.querySelector("#attention-count");
   const status = section.querySelector("#attention-status");
   const refreshButton = section.querySelector("#attention-refresh");
-  let inFlight = null;
+  const pages = section.querySelector("#attention-pages");
+  const range = section.querySelector("#attention-range");
+  const previous = section.querySelector("#attention-previous");
+  const next = section.querySelector("#attention-next");
+  let currentReport = null, epoch = 0, busy = false;
 
-  function setStatus(message) { status.textContent = message || ""; }
+  function owns(ticket, session, generation) {
+    return ticket === epoch && session === client.session && generation === client.generation;
+  }
+  function setBusy(value) {
+    busy = value;
+    refreshButton.disabled = value;
+    previous.disabled = value || !currentReport?.previousCursor;
+    next.disabled = value || !currentReport?.nextCursor;
+    list.querySelectorAll(".attention-decide").forEach(button => { button.disabled = value; });
+  }
+  function hide() {
+    epoch++;
+    currentReport = null;
+    section.hidden = true;
+    list.innerHTML = "";
+    count.textContent = "";
+    range.textContent = "";
+    pages.hidden = true;
+    setStatus("");
+    setBusy(false);
+  }
+
+  function setStatus(message) { status.textContent = message || ""; status.classList.toggle("visible", Boolean(message)); }
 
   function actionControls(item) {
     return item.actions.map((action, index) => {
@@ -40,7 +66,10 @@ export function createNeedsAttentionCard({ client, section }) {
 
   function render(report) {
     const items = report?.items ?? [];
-    count.textContent = String(items.length);
+    currentReport = report;
+    count.textContent = String(report?.itemCount ?? items.length);
+    pages.hidden = !report?.nextCursor && !report?.previousCursor;
+    range.textContent = items.length ? `Showing ${report.pageOffset + 1}–${report.pageOffset + items.length} of ${report.itemCount}` : "";
     section.hidden = items.length === 0;
     list.innerHTML = items.map((item, itemIndex) => `
       <li class="attention-item attention-${esc(item.kind)} attention-severity-${esc(item.severity)}" data-item-index="${itemIndex}">
@@ -52,40 +81,55 @@ export function createNeedsAttentionCard({ client, section }) {
         <div class="attention-actions">${actionControls(item)}</div>
       </li>`).join("");
     list.querySelectorAll(".attention-decide").forEach(button => {
-      button.addEventListener("click", () => decide(Number(button.closest("li").dataset.itemIndex), Number(button.dataset.actionIndex), button));
+      button.addEventListener("click", () => decide(report, Number(button.closest("li").dataset.itemIndex), Number(button.dataset.actionIndex)));
     });
-    setStatus("");
+    setBusy(false);
+    setStatus(report?.reset ? "The list changed. Showing the first page." : "");
   }
 
-  async function decide(itemIndex, actionIndex, button) {
-    const report = inFlight?.report;
+  async function decide(report, itemIndex, actionIndex) {
+    if (busy || report !== currentReport || !client.session) return;
     const item = report?.items?.[itemIndex], action = item?.actions?.[actionIndex];
     if (!action?.path || action.method !== "POST" || !action.body) return;
-    button.disabled = true;
+    const ticket = ++epoch, session = client.session, generation = client.generation;
+    setBusy(true);
     setStatus("Working…");
     try {
       await client.request(action.path, { method: "POST", data: action.body });
+      if (!owns(ticket, session, generation)) return;
       await refresh();
     } catch (error) {
+      if (!owns(ticket, session, generation)) return;
+      setBusy(false);
       setStatus(error.code === "already_decided" ? "Already decided — refreshing…" : `Could not decide: ${error.message}`);
-      button.disabled = false;
       if (error.code === "already_decided") await refresh();
     }
   }
 
-  async function refresh() {
-    if (!client.session) { section.hidden = true; return; }
+  async function refresh(cursor = null) {
+    if (!client.session) { hide(); return; }
+    const ticket = ++epoch, session = client.session, generation = client.generation;
+    const focused = document.activeElement;
+    setBusy(true);
     setStatus("Checking…");
     try {
-      const report = await client.needsAttention();
-      inFlight = { report };
-      // null = not the owner (403 owner_required) — the card simply stays hidden.
+      const report = await client.needsAttention(cursor);
+      if (!owns(ticket, session, generation)) return;
+      // null = not the owner; never retain the previous owner's queue.
       render(report);
+      if (focused === previous || focused === next) {
+        // Avoid leaving keyboard focus on a now-disabled paging control.
+        (pages.hidden ? refreshButton : focused.disabled ? (focused === next ? previous : next) : focused).focus();
+      }
     } catch (error) {
+      if (!owns(ticket, session, generation)) return;
+      setBusy(false);
       setStatus(`Could not load: ${error.message}`);
     }
   }
 
-  refreshButton.addEventListener("click", refresh);
-  return { refresh, hide: () => { section.hidden = true; } };
+  refreshButton.addEventListener("click", () => refresh());
+  previous.addEventListener("click", () => { if (!busy && currentReport?.previousCursor) refresh(currentReport.previousCursor); });
+  next.addEventListener("click", () => { if (!busy && currentReport?.nextCursor) refresh(currentReport.nextCursor); });
+  return { refresh, hide };
 }

@@ -35,6 +35,8 @@ export const unfencedAdditiveTables = Object.freeze([
   // the grant journal's grant→revoke transitions plus the owner-only grant
   // rule are the integrity gate.
   "membership_delegation_grants",
+  "membership_delegation_journal",
+  "membership_delegation_pending",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path
@@ -200,6 +202,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
+  // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
+  // request-ID idempotency records. Purely additive and intentionally NOT
+  // fenced — older writers have no code path to them, and the module
+  // verifies its own schema on open.
+  "guest_selfserve",
+  "guest_selfserve_idem",
   // activity_events + read_horizons + saved_messages
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
@@ -267,6 +276,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // intentionally NOT fenced — older writers have no code path to it, and
   // the module verifies its own schema on open. Rows never grant permission.
   "land_queue",
+  // agent_capability_grants (UFO-steal slice 1, RC-2026-09-27-2728:
+  // per-agent capability grant edges). One row per (room, agent,
+  // capability); revocation stamps revoked_at, expiry is lazy/fail-closed.
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to it, and server/grants.mjs verifies its own schema on open.
+  "agent_capability_grants",
   // referral_invite_keys + referral_invites + referral_chain_members
   // (signed agent-carried referral invites): per-room Ed25519 signing keys
   // (private half never leaves the database), the private mint/redeem/
@@ -277,7 +292,27 @@ export const unfencedAdditiveTables = Object.freeze([
   // (convergent).
   "referral_invite_keys",
   "referral_invites",
-  "referral_chain_members"
+  "referral_chain_members",
+  // telegram_live_status (durable Telegram live-delivery/send facts, task 10)
+  // is purely additive and intentionally NOT fenced: same rationale — older
+  // writers have no code path to it, and the class verifies its own schema.
+  "telegram_live_status",
+  // Durable live work claims: additive, verified on open, included in recovery.
+  "work_claims",
+  "work_claim_config",
+  // human_push_subscriptions (browser push for human members): one row per
+  // device endpoint in a room. Purely additive and intentionally NOT fenced
+  // — older writers have no code path to it. Rows are a delivery address,
+  // never room content and never a grant.
+  "human_push_subscriptions",
+  // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
+  // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to them,
+  // and the module verifies its own schema on open.
+  "board_vtwo_claims",
+  "board_vtwo_events",
+  "board_vtwo_mirror",
+  "board_vtwo_idempotency"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

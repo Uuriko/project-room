@@ -28,7 +28,8 @@ export const roomDirectorySchema = `
     room_id TEXT PRIMARY KEY,
     discoverable INTEGER NOT NULL DEFAULT 0,
     listed_at INTEGER,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    opportunities_enabled INTEGER NOT NULL DEFAULT 1
   );
 `;
 
@@ -60,7 +61,7 @@ export class RoomDirectory {
   }
 
   _requireOwner(state, memberId) {
-    if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change directory listing");
+    if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change public discovery settings");
   }
 
   // ---- owner controls ------------------------------------------------------
@@ -85,6 +86,33 @@ export class RoomDirectory {
             listed_at=excluded.listed_at, updated_at=excluded.updated_at`)
         .run(roomId, discoverable ? 1 : 0, listedAt, at);
       return { roomId, discoverable, listedAt };
+    });
+  }
+
+  // The public directory and the opportunity feed are separate choices.
+  // Existing discoverable rooms default to feed-on, preserving prior behavior;
+  // turning the feed off does not unlist the room or change its work items.
+  opportunityStatus(roomId, memberId) {
+    const state = this._roomState(roomId);
+    this._requireOwner(state, memberId);
+    const row = this.db.prepare("SELECT opportunities_enabled AS enabled FROM room_directory_settings WHERE room_id=?").get(roomId);
+    return { roomId, enabled: row?.enabled !== 0 };
+  }
+
+  setOpportunities(roomId, memberId, enabled) {
+    if (typeof enabled !== "boolean") fail(422, "invalid_opportunities", "enabled (boolean) is the accepted field");
+    const state = this._roomState(roomId);
+    this._requireOwner(state, memberId);
+    return this.store.transaction(() => {
+      // A room can opt out before it is listed. Upsert preserves the existing
+      // listing bit and timestamp on every subsequent owner change.
+      this.db.prepare(`INSERT INTO room_directory_settings
+          (room_id, discoverable, listed_at, updated_at, opportunities_enabled)
+          VALUES (?, 0, NULL, ?, ?)
+          ON CONFLICT(room_id) DO UPDATE SET opportunities_enabled=excluded.opportunities_enabled,
+            updated_at=excluded.updated_at`)
+        .run(roomId, nowMs(), enabled ? 1 : 0);
+      return { roomId, enabled };
     });
   }
 

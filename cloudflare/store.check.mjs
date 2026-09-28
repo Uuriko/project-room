@@ -8,6 +8,19 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
+test('human push uses real Worker crypto and committed Durable Object state with a synthetic delivery service', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } } });
+  try {
+    const response = await mf.dispatchFetch('http://localhost/human-push');
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), { defaultOff: true, encrypted: true, rollbackSuppressed: true });
+  } finally { await mf.dispose(); }
+});
+
 test('shared RoomStore: guests, retries, messages, journal rollback, cancellation and restart on Workers', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
@@ -57,5 +70,47 @@ test('shared RoomStore: guests, retries, messages, journal rollback, cancellatio
     assert.equal(guard.status, 200, await guard.clone().text());
     assert.deepEqual(await guard.json(), { rejected: true });
     console.log('Synthetic shared-store restart evidence retained at', persistence);
+  } finally { await mf.dispose(); }
+});
+
+// Node SQLite exposes lastInsertRowid; DurableDatabase does not. Exercise the
+// real adapter and a fresh workerd instance so a committed broken chain cannot hide.
+test('membership delegation grant, revoke and regrant retain journal integrity after Worker restart', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const persistence = await mkdtemp(join(tmpdir(), 'project-room-cf-delegation-'));
+  const config = { modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } }, durableObjectsPersist: persistence };
+  let mf = new Miniflare(config);
+  try {
+    const response = await mf.dispatchFetch('http://localhost/delegation');
+    assert.equal(response.status, 200, await response.clone().text());
+    const receipt = await response.json(); // Synthetic credential stays in memory.
+    await mf.dispose();
+    mf = new Miniflare(config);
+    const resumed = await mf.dispatchFetch('http://localhost/delegation-resume', { method: 'POST', body: JSON.stringify(receipt) });
+    assert.equal(resumed.status, 200, await resumed.clone().text());
+    assert.deepEqual(await resumed.json(), { recovered: true, entries: 4, active: false });
+  } finally { await mf.dispose(); }
+});
+
+test('bounty draft receipts match durable event sequences and replay after Worker restart', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const persistence = await mkdtemp(join(tmpdir(), 'project-room-cf-bounty-'));
+  const config = { modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } }, durableObjectsPersist: persistence };
+  let mf = new Miniflare(config);
+  try {
+    const response = await mf.dispatchFetch('http://localhost/bounty-receipts');
+    assert.equal(response.status, 200, await response.clone().text());
+    const receipt = await response.json();
+    assert.deepEqual(receipt, { sequences: [2, 3], drafts: 2 });
+    await mf.dispose(); mf = new Miniflare(config);
+    const resumed = await mf.dispatchFetch('http://localhost/bounty-receipts-resume');
+    assert.equal(resumed.status, 200, await resumed.clone().text());
+    assert.deepEqual(await resumed.json(), receipt);
   } finally { await mf.dispose(); }
 });

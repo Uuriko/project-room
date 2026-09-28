@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -65,6 +66,29 @@ const HELP_KEYS = ["kind", "workItemId", "roomId", "roomTitle", "roomPath", "tit
 const BOUNTY_KEYS = ["kind", "bountyId", "roomId", "roomTitle", "roomPath", "title",
   "criteria", "amountMillis", "state", "deadlineMs", "label", "createdAt"].sort();
 
+test("existing directory databases migrate to feed-on without losing the listing", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-opportunities-upgrade-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, "room.sqlite");
+  // An older stored directory row has no feed column. On open, add the
+  // column with the compatibility default and retain the listing verbatim.
+  const store = new RoomStore(file);
+  store.initialize(initialRoom());
+  store.roomDirectory.set(ROOM, "owner", true);
+  const before = store.roomDirectory.status(ROOM, "owner");
+  store.close();
+  const db = new DatabaseSync(file);
+  db.exec("ALTER TABLE room_directory_settings DROP COLUMN opportunities_enabled");
+  db.close();
+  const reopened = new RoomStore(file);
+  t.after(() => reopened.close());
+  assert.deepEqual(reopened.roomDirectory.status(ROOM, "owner"), before);
+  assert.equal(reopened.roomDirectory.opportunityStatus(ROOM, "owner").enabled, true);
+  assert.equal(reopened.roomDirectory.list().rooms.length, 1);
+  reopened.roomDirectory.setOpportunities(ROOM, "owner", false);
+  assert.equal(reopened.roomDirectory.opportunityStatus(ROOM, "owner").enabled, false);
+});
+
 test("feed is empty when no rooms are directory-listed", async t => {
   const fixture = serve(t);
   const { get } = await started(t, fixture);
@@ -100,6 +124,38 @@ test("open help-wanted work in a listed room appears with a strict shape", async
   const serialized = JSON.stringify(opp);
   assert.ok(!serialized.includes("owner"), "member ids must not leak");
   assert.ok(!/invite|redeem|code/i.test(serialized), "no admission material");
+});
+
+test("owner feed opt-out hides both help and bounties, not the public directory; re-enable restores them", async t => {
+  const fixture = serve(t);
+  const { get, origin } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  store.roomDirectory.set(ROOM, "owner", true);
+  propose(store, ownerKey, ROOM, "w-toggle");
+  openHelp(store, ownerKey, ROOM, "w-toggle", new Date(fixture.now() + 3600e3).toISOString());
+  seedBounty(store, { bountyId: "b-toggle", roomId: ROOM, state: "funded", deadlineMs: fixture.now() + 3600e3 });
+  const route = `/api/rooms/${ROOM}/opportunities`;
+  const request = (method, token, data) => fetch(origin + route, {
+    method, headers: { Origin: origin, ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
+    ...(data ? { body: JSON.stringify(data) } : {}),
+  });
+  assert.equal((await (await get("/api/opportunities.json")).json()).opportunities.length, 2);
+  assert.equal((await (await request("GET", ownerKey)).json()).enabled, true);
+  assert.ok([401, 403].includes((await request("POST", null, { enabled: false })).status));
+  store.command(ownerKey, ROOM, { id: cmdId(), type: T.MEMBER_ADDED, data: {
+    memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work"] } });
+  const memberKey = store.issueAccessKey(ROOM, "agent");
+  assert.equal((await request("GET", memberKey)).status, 403);
+  assert.equal((await request("POST", memberKey, { enabled: false })).status, 403);
+  assert.equal((await request("POST", ownerKey, { enabled: "false" })).status, 422);
+  assert.equal((await request("POST", ownerKey, { enabled: false, discoverable: false })).status, 422);
+  assert.equal((await request("POST", ownerKey, { enabled: false })).status, 200);
+  assert.equal((await (await request("GET", ownerKey)).json()).enabled, false);
+  assert.deepEqual((await (await get("/api/opportunities.json")).json()).opportunities, []);
+  assert.deepEqual((await (await get(`/api/opportunities.json?room=${ROOM}`)).json()).opportunities, []);
+  assert.equal((await (await get("/api/public/rooms/directory")).json()).rooms.length, 1);
+  assert.equal((await request("POST", ownerKey, { enabled: true })).status, 200);
+  assert.deepEqual((await (await get("/api/opportunities.json")).json()).opportunities.map(o => o.kind).sort(), ["bounty", "help-wanted"]);
 });
 
 test("withdrawn, expired, completed, and superseded work stay out of the feed", async t => {
@@ -215,4 +271,72 @@ test("?since= returns only items opened after the cursor; labels surface for cur
   // an unparseable cursor is rejected, never silently mis-parsed
   const bad = await get("/api/opportunities.json?since=not-a-time");
   assert.equal(bad.status, 422);
+});
+
+
+test('listed room projection is read once for help and bounty in the same feed', async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  store.roomDirectory.set(ROOM, 'owner', true);
+  propose(store, ownerKey, ROOM, 'w-cached');
+  openHelp(store, ownerKey, ROOM, 'w-cached', new Date(fixture.now() + 3600e3).toISOString());
+  seedBounty(store, { bountyId: 'b-cached', roomId: ROOM, state: 'funded', deadlineMs: fixture.now() + 3600e3 });
+  const originalPrepare = store.db.prepare.bind(store.db);
+  let reads = 0;
+  store.db.prepare = (...args) => {
+    if (args[0].includes('SELECT projection FROM rooms WHERE id=?')) reads++;
+    return originalPrepare(...args);
+  };
+  try {
+    const response = await get('/api/opportunities.json');
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.opportunities.map(row => row.kind).sort(), ['bounty', 'help-wanted']);
+    assert.equal(reads, 1, 'each listed room projection should be read and parsed once');
+  } finally {
+    store.db.prepare = originalPrepare;
+  }
+});
+
+test("the public feed still returns bounties for 100 listed rooms when SQL rejects more than 100 binds", async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store } = fixture;
+  const now = fixture.now();
+  const ids = [];
+  const insertRoom = store.db.prepare("INSERT INTO rooms (id, sequence, projection, archived_at) VALUES (?,?,?,NULL)");
+  const listRoom = store.db.prepare("INSERT INTO room_directory_settings (room_id, discoverable, listed_at, updated_at) VALUES (?,1,?,?)");
+  for (let i = 0; i < 100; i++) {
+    const roomId = `listed-${String(i).padStart(3, "0")}`;
+    const bountyId = `b-listed-${String(i).padStart(3, "0")}`;
+    insertRoom.run(roomId, 1, JSON.stringify({ room: { title: `Listed ${i}` } }));
+    listRoom.run(roomId, now, now);
+    seedBounty(store, { bountyId, roomId, state: "funded", deadlineMs: now + 3600e3 });
+    ids.push(bountyId);
+  }
+  insertRoom.run("secret-room", 1, JSON.stringify({ room: { title: "Secret" } }));
+  seedBounty(store, { bountyId: "b-secret", roomId: "secret-room", state: "funded", deadlineMs: now + 3600e3 });
+  const db = store.db, prepare = db.prepare.bind(db);
+  db.prepare = sql => {
+    const stmt = prepare(sql);
+    const placeholders = (String(sql).match(/\?/g) || []).length;
+    const limited = method => (...args) => {
+      if (placeholders > 100 || args.length > 100) throw new Error(`too many SQL variables: ${Math.max(placeholders, args.length)}`);
+      return method.apply(stmt, args);
+    };
+    return new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === "all" || prop === "get" || prop === "run" || prop === "iterate" || prop === "bind") return limited(target[prop]);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const res = await get("/api/opportunities.json?limit=100");
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body.opportunities.map(row => row.bountyId).sort(), ids);
+  assert.equal(JSON.stringify(body).includes("b-secret"), false);
+  assert.equal(JSON.stringify(body).includes("poster-member"), false);
 });

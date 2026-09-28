@@ -19,12 +19,15 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
-async function serve(t) {
+async function serve(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
-  store.initialize(initialRoom("commons"));
-  const ownerKey = store.issueAccessKey("commons", "owner");
+  store.initialize(initialRoom("commons", ownerId));
+  const ownerKey = store.issueAccessKey("commons", ownerId);
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -337,4 +340,98 @@ test("existing invite-code redemption still works alongside referral invites", a
   const redeemed = await post(origin, "/api/agent-invites/redeem", { code: created.json.code, displayName: "Classic" });
   assert.equal(redeemed.status, 201);
   assert.deepEqual(redeemed.json.permissions, []);
+});
+
+// Instinct's #996-family finding: POST /api/referral-invites/mint signs and
+// inserts ledger rows directly (no store.command), so a demoted t1_readonly
+// agent could mint signed invite tokens. Minting is a membership write and
+// must refuse t1 callers; t2 agents, human members, and the room owner pass.
+test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const t2 = await enrollInviter(store, origin, ownerKey);
+  const t1 = await enrollInviter(store, origin, ownerKey);
+  demoteToReadonly(store.db, "commons", t1.identityId, { updatedBy: "owner" });
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });
+  const humanKey = store.issueAccessKey("commons", "human1");
+
+  const refused = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t1.secret);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.json.error.code, "agent_readonly");
+
+  const okT2 = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t2.secret);
+  assert.equal(okT2.status, 201);
+  const okHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
+  assert.equal(okHuman.status, 201);
+  const okOwner = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  assert.equal(okOwner.status, 201);
+});
+
+test("redeem rejects missing and inherited ledger inviters without admitting anyone", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const seed = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  assert.equal(seed.status, 201);
+  const before = store.room("commons");
+  const count = table => store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
+  const tables = ["agent_identities", "identity_links", "referral_chain_members"];
+  const counts = tables.map(count);
+  for (const inviter of ["toString", "missing-inviter"]) {
+    // A malformed trusted ledger fixture, not a remotely forgeable token.
+    const crafted = craftToken(store, { inviter });
+    const redeemed = await post(origin, "/api/referral-invites/redeem", { token: crafted.token, displayName: "Nobody" });
+    assert.equal(redeemed.status, 410);
+    assert.equal(redeemed.json?.error?.code, "invite_expired");
+    assert.equal(JSON.stringify(redeemed.json).includes(inviter), false);
+    assert.equal(JSON.stringify(redeemed.json).includes(crafted.token), false);
+    assert.deepEqual(tables.map(count), counts);
+    assert.deepEqual(store.room("commons"), before);
+    assert.deepEqual({ ...store.db.prepare("SELECT status,reject_reason,redeemed_member_id,redeemed_identity_id FROM referral_invites WHERE jti=?").get(crafted.jti) },
+      { status: "rejected", reject_reason: "inviter_inactive", redeemed_member_id: null, redeemed_identity_id: null });
+  }
+});
+
+test("an actual enrolled toString inviter retains private referral admission authority", async t => {
+  const { store, origin, ownerKey } = await serve(t, "toString");
+  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  assert.equal(minted.status, 201);
+  const preview = await post(origin, "/api/referral-invites/preview", { token: minted.json.token });
+  assert.equal(preview.status, 200);
+  const joined = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: "Real invitee" });
+  assert.equal(joined.status, 201);
+  assert.deepEqual(joined.json.permissions, []);
+  assert.equal(store.room("commons").state.members[joined.json.memberId].active, true);
+  assert.equal(JSON.stringify(preview.json).includes("toString"), false);
+  assert.equal(JSON.stringify(joined.json).includes("toString"), false);
+});
+
+test("guest members cannot mint referral invites", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  // Faithful guest fixture through the real GX guest-invite redeem path:
+  // the member id carries the guest-agent- prefix exactly as production
+  // guest admission produces.
+  const minted = await post(origin, "/api/rooms/commons/guest-invites", {
+    requestId: randomUUID(), guestLabel: "Guest visit", expectedOwnerRevision: 0,
+  }, ownerKey);
+  assert.equal(minted.status, 201);
+  const identity = store.identities.create("Guest Visitor");
+  const keys = generateKeyPair();
+  const cardBody = { name: "Guest Visitor", description: "visiting agent", capabilities: ["chat"] };
+  const redeemed = await post(origin, "/api/guest-invites/redeem", {
+    inviteCode: minted.json.code,
+    card: { ...cardBody, publicKey: keys.publicKey,
+      signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) },
+  }, identity.secret);
+  assert.equal(redeemed.status, 201);
+  const guest = redeemed.json;
+  assert.ok(guest.token.startsWith("ga1."), "guest credential is a guest-agent bearer");
+  assert.ok(guest.member.id.startsWith("guest-agent-"), "member id carries the guest prefix");
+  assert.equal(store.room("commons").state.members[guest.member.id].active, true);
+
+  const attempt = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, guest.token);
+  assert.equal(attempt.status, 403);
+  assert.equal(attempt.json?.error?.code, "guest_scope_denied");
+  // The owner audit ledger must not record a minted token for the guest.
+  assert.equal(store.db.prepare(
+    "SELECT count(*) n FROM referral_invites WHERE inviter_member_id = ? AND status = 'minted'"
+  ).get(guest.member.id).n, 0);
 });

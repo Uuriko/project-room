@@ -82,7 +82,7 @@ test("malformed values report their exact rebuild errors", () => {
     ["task-id", "A010-2", "task-id not RC-YYYY-MM-DD-NNN"],
     ["task-id", "rc-2026-09-24-204", "task-id not RC-YYYY-MM-DD-NNN"],
     ["files", "server/*.mjs", "files: * forbidden"],
-    ["lease", "6h", "lease must be lease=<N>h"], // the classic bare-6h mistake
+    ["lease", "6h", "lease must be lease=<N>h (1-72h); did you mean lease=6h?"], // the classic bare-6h mistake
     ["lease", "lease=6", "lease must be lease=<N>h"],
     ["lease", "lease=six-h", "lease must be lease=<N>h"],
     ["lease", "lease=0h", "lease out of range 1-72h"],
@@ -214,6 +214,7 @@ const PARITY_VECTORS = [
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: server/*.mjs", "lease: lease=6h", "state: working", "reason: r"]),
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "state: working", "reason: r"]),
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "lease: 6h", "state: working", "reason: r"]),
+  block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "lease: lease=six-h", "state: working", "reason: r"]),
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "lease: lease=0h", "state: working", "reason: r"]),
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "lease: lease=73h", "state: working", "reason: r"]),
   block(["task-id: RC-2026-09-24-204", "lane: jill", "files: a.mjs", "lease: lease=007h", "state: working", "reason: r"]),
@@ -287,7 +288,7 @@ test("POST /api/claims/validate answers 200 with the verdict, anonymously", asyn
   assert.equal(bad.json.valid, false);
   assert.deepEqual(bad.json.errors, [
     "task-id not RC-YYYY-MM-DD-NNN", "missing lane", "missing files",
-    "lease must be lease=<N>h", "missing reason",
+    "lease must be lease=<N>h (1-72h); did you mean lease=6h?", "missing reason",
   ]);
 });
 

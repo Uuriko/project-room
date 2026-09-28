@@ -123,15 +123,18 @@ function provenanceHtml(provenance) {
 
 function lifecycleTrailHtml(receipt) {
   const history = Array.isArray(receipt?.history) ? receipt.history : [];
-  // UI calming: the card shows the three most recent entries by default; the
-  // full journal stays available in the Envelope sections below.
+  // Supported lifecycles have at most three entries: proposal, optional
+  // acceptance, and a terminal state. Keep the card compact.
   const recent = history.slice(-3);
   if (!recent.length) return "";
   return `<ol class="handoff-trail" aria-label="Envelope lifecycle">${recent.map(entry => {
     const note = entry?.note ? ` — ${esc(entry.note)}` : "";
     const by = entry?.by ? ` by ${esc(entry.by)}` : "";
+    const reason = entry?.reason === "termination.expiresAt reached" ? "Handoff deadline reached" : entry?.reason;
+    const why = reason ? ` — ${esc(reason)}` : "";
+    const to = entry?.escalatedTo ? ` to ${esc(entry.escalatedTo)}` : "";
     return `<li><span class="handoff-badge handoff-badge-${statusTone(entry?.status)}">${esc(statusLabel(entry?.status))}</span>`
-      + `<span class="handoff-trail-meta">${esc(fmtWhen(entry?.at))}${by}${note}</span></li>`;
+      + `<span class="handoff-trail-meta">${esc(fmtWhen(entry?.at))}${by}${to}${why}${note}</span></li>`;
   }).join("")}</ol>`;
 }
 

@@ -8,19 +8,19 @@ test('preparation follows frozen pages, refreshes work and reports changes witho
   const calls = [];
   const client = {
     async workContext(id, options) { calls.push([id, options.includeSource]); return { work: { id, revision: reads++ }, evaluatedThrough: 12 }; },
-    async workDiscussion(id, options) { calls.push(options.cursor ?? 'first'); return { discussion: {
+    async workDiscussion(id, options) { calls.push([options.cursor ?? 'first', options.since]); return { discussion: {
       items: [{ message: { id: options.cursor ? 'reply' : 'source' } }], horizon: 10,
       hasMore: !options.cursor, nextCursor: options.cursor ? null : 'next', checkpoint: options.cursor ? 10 : null
     } }; }
   };
-  const result = await prepareWork(client, 'work', { includeSource: true });
+  const result = await prepareWork(client, 'work', { includeSource: true, discussionSince: 5 });
   assert.equal(result.work.revision, 1);
   assert.equal(result.preparation.changedDuringRead, true);
   assert.equal(result.preparation.eventsAfterDiscussion, true);
   assert.equal(result.preparation.discussion.items.length, 2);
   assert.equal(result.preparation.discussion.checkpoint, 10);
   assert.equal(result.preparation.nextRead, null);
-  assert.deepEqual(calls, [['work', true], 'first', 'next', ['work', true]]);
+  assert.deepEqual(calls, [['work', true], ['first', 5], ['next', undefined], ['work', true]]);
 });
 
 test('large discussions retain an exact continuation instead of silently truncating', async () => {
@@ -37,6 +37,9 @@ test('large discussions retain an exact continuation instead of silently truncat
 });
 
 test('cancellation and stalled cursors stop preparation', async () => {
+  for (const discussionSince of [null, -1, 1.5, '2', Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(prepareWork({}, 'work', { discussionSince }), /nonnegative discussion checkpoint/);
+  }
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(prepareWork({}, 'work', { signal: controller.signal }), { name: 'AbortError' });

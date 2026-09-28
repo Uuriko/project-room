@@ -31,3 +31,10 @@ export function fileChipLabel(filename) {
   const name = typeof filename === "string" && filename.trim() ? filename.trim() : "file";
   return name;
 }
+
+export function composerAudienceNote(members, to) {
+  // A truthy map lookup treats toString as a recipient and writes a private note for nobody.
+  const recipient = to && members && Object.hasOwn(members, to) ? members[to] : undefined;
+  if (!recipient) return null;
+  return `Private — only you and ${recipient.displayName} can see this message.`;
+}

@@ -10,7 +10,7 @@ test("restore rehearsal names resurrected authority", () => {
     console.error(run.stderr);
   }
   assert.equal(run.status, 0, "rehearsal exits green");
-  for (const kind of ["credential", "share_link", "agent_connection", "member"])
+  for (const kind of ["credential", "share_link", "agent_connection", "member", "membership_delegation"])
     assert.ok(run.stdout.includes(`stale ${kind}:`), `report names stale ${kind}`);
   assert.ok(run.stdout.includes("was revoked after the backup"), "revocation named");
   assert.ok(run.stdout.includes("was deactivated after the backup"), "deactivation named");

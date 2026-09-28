@@ -16,7 +16,8 @@
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -152,6 +153,9 @@ export class AgentInvites {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
+    // Minting invites is a membership write: the read-only autonomy tier
+    // applies even when the agent holds an invite grant (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_create", fail });
     let profileName = null;
     if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
@@ -240,7 +244,7 @@ export class AgentInvites {
       // journal event written in the same transaction. A one-slot check would
       // admit the member at the last slot and then fail journaling the
       // referral, rolling the whole join back after the fact.
-      if (room.sequence + 1 >= 10000 || Object.keys(room.state.members).length >= 100) {
+      if (room.sequence + 1 >= 10000 || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
@@ -349,6 +353,9 @@ export class AgentInvites {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    // Revoking invites is a membership write: the read-only autonomy tier
+    // applies even when the agent holds a manage_members grant (issue #996).
+    enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_revoke", fail });
     if (typeof id !== "string" || !INVITE_ID_PATTERN.test(id)) fail(422, "invalid_invite", "inviteId is required");
     return this.store.transaction(() => {
       const rows = this.db.prepare(`SELECT code_hash FROM agent_invite_codes

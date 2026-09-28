@@ -1,7 +1,6 @@
 // Signed discovery agent card (A2A v1.0 field conventions) served at
 // /.well-known/agent-card.json (RC-2026-09-23-105).
 import test from "node:test";
-import { AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,10 +9,12 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import {
   agentCard, agentCardJson, discoveryDoc, aiCatalog, robotsTxt, AGENT_CARD_A2A_PATH, DISCOVERY_PROTOCOL_VERSION,
+  attachCardSignatureEnvelope, agentJwksJson,
 } from "../deploy/agent-discovery.mjs";
-import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID } from "../deploy/agent-card-key.mjs";
+import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID, AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
 import {
   canonicalCardBytes, generateKeyPair, isValidPublicKey, signCard, verifyCardSignature,
+  signCardJws, verifyCardJws, publicKeyToJwk,
 } from "../server/agent-card-signing.mjs";
 
 const FORBIDDEN = /privateKey|ROOM_AGENT_CARD_SIGNING_KEY|\.key("|$)/i;
@@ -195,4 +196,56 @@ test("ARD ai-catalog serves at ard.json and ai-catalog.json with the same bytes"
   assert.deepEqual(catalog, JSON.parse(aiCatalog()), "served bytes match aiCatalog()");
   const doc = discoveryDoc("/.well-known/ard.json");
   assert.equal(doc.body, aiCatalog(), "discoveryDoc body matches aiCatalog()");
+});
+
+test("unsigned card carries no signature fields at all (no-key prod state)", () => {
+  // Production is unsigned (signing custody tap #59): the served card must not
+  // grow half-attached signature fields — an empty signatures array or null
+  // envelope fields would change prod bytes and confuse A2A clients.
+  const card = agentCard();
+  for (const field of ["signatures", "cardSignature", "keyId", "signatureAgentId", "publicKey", "signedRevision"]) {
+    assert.equal(field in card, false, `unsigned card must not carry ${field}`);
+  }
+});
+
+test("/.well-known/jwks.json serves the pinned key as JWKS", async t => {
+  const origin = await serve(t);
+  const doc = discoveryDoc("/.well-known/jwks.json");
+  assert.ok(doc, "jwks.json is a discovery doc");
+  assert.match(doc.type, /application\/json/);
+  assert.equal(doc.body, agentJwksJson(), "served bytes match agentJwksJson()");
+  const jwks = JSON.parse(doc.body);
+  assert.ok(Array.isArray(jwks.keys) && jwks.keys.length === 1, "single-key JWKS");
+  const [jwk] = jwks.keys;
+  assert.equal(jwk.kty, "OKP");
+  assert.equal(jwk.crv, "Ed25519");
+  assert.equal(jwk.kid, AGENT_CARD_KEY_ID);
+  // The served x must be the pinned public key — cross-checked against the
+  // canonical converter in server/agent-card-signing.mjs.
+  const canonical = publicKeyToJwk({ publicKey: AGENT_CARD_PUBLIC_KEY, keyId: AGENT_CARD_KEY_ID });
+  assert.equal(jwk.x, canonical.x, "served JWKS x matches the pinned key");
+  // Served bytes over HTTP match the discovery doc (incl. /room alias).
+  const get = await fetch(`${origin}/.well-known/jwks.json`);
+  assert.equal(get.status, 200);
+  assert.equal(await get.text(), doc.body);
+  const alias = await fetch(`${origin}/room/.well-known/jwks.json`);
+  assert.equal(alias.status, 200);
+  assert.equal(await alias.text(), doc.body);
+});
+
+test("fixture-signed card verifies end-to-end through the JWS path", () => {
+  // The real card shape (not a toy fixture) flows through sign and verify:
+  // build the served card, sign it like scripts/sign-agent-card.mjs does,
+  // attach the signatures array like agentCard() does, verify.
+  const { publicKey, privateKey } = generateKeyPair();
+  const card = agentCard();
+  const withEnvelope = attachCardSignatureEnvelope({ ...card }, {
+    signature: "fixture-house-signature",
+    jwsSignatures: null,
+    revision: "fixture-revision",
+  });
+  const jws = signCardJws({ card: withEnvelope, privateKey, keyId: "fixture-key", jku: "https://example.com/.well-known/jwks.json" });
+  const served = { ...withEnvelope, signatures: [jws] };
+  assert.ok(verifyCardJws({ card: served, publicKey, jws }), "JWS verifies on the real card shape");
+  assert.equal(verifyCardJws({ card: { ...served, description: "tampered" }, publicKey, jws }), false);
 });

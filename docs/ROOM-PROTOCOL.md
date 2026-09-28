@@ -8,7 +8,7 @@
 > Adapted to the substrate: GitHub issue comments, not websockets; GitHub is the
 > durable log, and this doc is the protocol's only editable surface.
 
-**Purpose.** Issue #266 ("Claims board") is a coordination surface, not a
+**Purpose.** Issue #1160 ("Claims board") is a coordination surface, not a
 chat room. This protocol defines the exact machine-readable and
 human-readable shapes every lane (quill, quill-s2, instinct, grokbot,
 codex, Jillian — see `docs/AGENT-LANES.md`) must use to claim work, report
@@ -149,6 +149,11 @@ can be taken over.
      task returns to `submitted` with no lane — open for a fresh
      `[claim]`. The released lane may re-claim, but with a new task-id
      (a task-id never gets a second claimant).
+- **Submitted-state claims are struck the same way.** A claim that never
+  moved `submitted → working` gets strike-one when its lease expires and
+  releases (lane cleared) on strike-two like any working claim — an
+  expired submitted claim has the same expiry path, never a silent rot.
+  Suspended claims are not struck (out of scope for the takeover).
 - **Duplicate live claim is REJECTED and recorded, never silent.** If a
   `[claim]` names a task-id that is already live (`submitted`/`working`/
   `suspended`) under another lane, the claim is refused: the first lane
@@ -174,6 +179,95 @@ a lane SHOULD run its intended file set through the detector against the
 current board — a hit means negotiate first, then claim non-overlapping
 files. The detector is advisory: it flags, it never blocks.
 
+### 4b. Live file-claim registry (S1)
+
+`scripts/room rebuild` renders two machine sections into ROOM-STATE.md from
+the live (submitted/working/suspended) claims:
+
+- `## file-claims` — inverted index: `file | lane | task-id | state`, one
+  row per file per live claim, sorted by file then task-id. This is the
+  live map of who is touching what, right now.
+- `## overlap-warnings` — `file | lanes | task-ids` for every file held by
+  two or more live claims. Empty (rendered as `(none)`) in the healthy case.
+
+The `## signals` line carries `files_claimed=<n>` (unique files across live
+claims) and `overlap_files=<n>` (files with 2+ live holders) for machine
+consumers.
+
+`scripts/room overlaps` is the read-only pre-claim check: `--files "a,b"`
+reports which live claims already hold those files (`(unclaimed)` when
+free); without `--files` it reports all current overlaps. The `claim` verb
+hard-refuses when the requested files collide with another lane's live
+claim; `overlaps` is the soft check a lane runs before drafting.
+
+### 4c. Durable knowledge base (kb/)
+
+`kb/` is the room's durable agent memory: markdown, git-versioned,
+human-readable. State belongs in git, not in agent memory — the next
+lane recovers cold from these files.
+
+- **Layout.** `kb/index.md` (hand-maintained front door),
+  `kb/notes/` (reusable learnings: gotchas, tool quirks),
+  `kb/plans/` (per-claim: what was attempted, what worked, what
+  didn't, what the next lane should know), `kb/decisions/` (why, with
+  date and decider).
+- **Write path.** When a lane posts `[done]`, it also writes
+  `kb/plans/<task-id>.md`. When it learns something reusable, it writes
+  `kb/notes/<slug>.md`. A `[done]` block may carry an optional `kb:`
+  line linking the plan note. Keep AGENTS.md for the *critical*
+  lessons; kb/ holds the long tail.
+- **Read path.** Workers `grep -r kb/` at task start. Promote to an
+  index (sqlite FTS or similar) only when grep stops being enough —
+  markdown stays authoritative, any index is derived and rebuildable.
+- **Index discipline.** A stale index is worse than none: every kb file
+  must be linked from `kb/index.md`, and every link must resolve. The
+  `tests/kb-index.test.js` suite enforces this.
+
+### 4d. Backlog — the fed queue
+
+`BACKLOG.md` (repo root) is the prioritized fed queue. The claims board is
+self-declared work; the backlog is fed work. Sections: `## ready`
+(ranked, top first), `## blocked`, `## done` (archive, newest last).
+One line per item: `- [ ] BL-NNN · title · scope: ... · accept: ... ·
+files: f1, f2`, with optional `· blocked on: ...`, `· claimed: RC-...`,
+`· shipped as: #NNNN` trailers.
+
+The dispatch convention (GUPP — "if there's work on your hook, you run
+it"): an idle lane runs `scripts/room backlog pull`, which takes the top
+unclaimed ready item, marks it `claimed: <task-id>` in place, and emits a
+pre-filled `[lane][claim]` fenced block (task-id, title, `files:` from the
+backlog line) for the lane to post. The lane works it in its own
+persistent worktree, opens a PR, posts `[done]`, then runs `scripts/room
+backlog done BL-NNN --pr NNNN` to archive it. One agent per item.
+
+`backlog pull` refuses when the item's files are held live by another lane
+(via the S1 overlaps check, when present). Room-watch `metrics` reports
+`backlog_ready` / `backlog_blocked` depth; "backlog empty" in the digest is
+a signal for John (add items or pause the loop).
+
+John's single lever: reorder `BACKLOG.md` (or comment the desired order on
+#1160 and a lane applies it). The file is the schedule.
+
+### 4e. File scopes in claims (R3, 2026-09-27)
+
+A claim's `files:` entry may carry a trailing parenthesized scope naming
+the claimed sub-area, e.g. `server/store.mjs (OTel fanout span only)`. An
+entry with no scope claims the whole file. The board reducer
+(`scripts/room rebuild`) refuses a claim whose files overlap another
+lane's *live* claim, recording the refusal — this is the machine closing
+the TOCTOU gap between the client-side `overlaps` pre-check and board
+acceptance. Overlap semantics:
+
+- Same path, either entry unscoped → overlap (an unscoped claim covers the
+  whole file, so it collides with any scoped entry on that file).
+- Same path, both scoped → overlap only when the scope text matches
+  exactly after trimming and case-folding.
+- Different paths → never overlap.
+- Only live claims (`submitted`/`working`/`suspended`) held by a *different*
+  lane block; same-lane entries never collide, and released (strike-two,
+  lane cleared) or terminal (`completed`/`failed`/`cancelled`) claims free
+  their files.
+
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:
@@ -189,6 +283,12 @@ Lane tags are deliberate tokens, never prose accidents:
   `[quill-s2]` at the start of a comment (the existing room convention from
   #11) addresses that lane. A `[quill-s2]` appearing mid-prose is a
   reference. Tooling scans the block and the prefix, never the paragraph.
+- **Comment-start lane tags use only letters, digits, `_`, and `-`.**
+  A display name with spaces, such as `[Grok Bot][claim]`, is not a lane ID.
+  The board parser emits `lane-tag-unparseable` (with a failed log entry)
+  rather than registering a claim or silently treating it as prose. Use the
+  registered short lane ID, or a fenced `room-claim` block with a valid lane.
+  Do not silently strip spaces: that could address another lane.
 
 A bare lane name, a bare `@lane`, or a guess at a lane id addresses nobody —
 exactly like Rowboat's mention grammar, where the href key (the token) is
@@ -291,7 +391,7 @@ suffix is not a half-match.
 
 ## 10. Noise discipline
 
-The claims board (#266) is for **claims, handoffs, and receipts** — not
+The claims board (#1160) is for **claims, handoffs, and receipts** — not
 play-by-play. The room-wide reactions carry the lightweight channel:
 
 - 👀 — **picked up.** Posted (as a reaction, not a comment) when work
@@ -519,3 +619,20 @@ When an agent hits friction — a confusing error, a broken flow, a papercut —
 Labels are validated slugs (`[a-z0-9-]`, max 32 chars, max 10 per item) and ride the event envelope, so they survive replay.
 
 *Amended 2026-09-23 (RC-2026-09-23): friction label, digest, and reporter close-loop.*
+
+
+## Advisory merge coordination checks
+
+`scripts/room` has no merge verb. A coordinator preparing a merge is responsible
+for running `node scripts/merge-hold.mjs check --pr <number>` against the live
+board immediately before attempting the merge. Exit 3 means a hold blocks it;
+exit 1 means the board could not be checked completely and the caller should
+stop and retry. Exit 0 only means no applicable advisory hold was observed.
+The `by` and `exempt-pr` fields are coordination text, not authenticated authority:
+they never authorize a merge or bypass required CI, reviews, or branch protection.
+This integration does not enable a merge bot, queue, or automated hold enforcement.
+
+`node scripts/pr-overlap.mjs` is a read-only review aid, not a merge simulation.
+It reports duplicate declarations (exit 2), missing patch evidence (exit 1),
+shared files, and overlapping hunks. A clean report cannot establish semantic
+compatibility or replace exact-head tests and normal GitHub merge requirements.

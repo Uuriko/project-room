@@ -7,8 +7,10 @@ test('discovery transfer measurement counts identity reads and separates result 
   const chat = await profileDiscovery({ workCount: 4, messageCount: 40, samples: 1 });
   for (const profile of [small, chat]) {
     assert.equal(profile.roomAuditUnchanged, true);
-    for (const metric of Object.values(profile.metrics)) {
-      assert.equal(metric.requestsPerRead, 2); assert.equal(metric.identityChecksPerRead, 1);
+    for (const [name, metric] of Object.entries(profile.metrics)) {
+      const readsReplies = name === 'focused' || name === 'search';
+      assert.equal(metric.requestsPerRead, readsReplies ? 4 : 2);
+      assert.equal(metric.identityChecksPerRead, readsReplies ? 2 : 1);
       assert.ok(metric.decodedBodyBytes.min > 0); assert.ok(metric.resultJsonBytes.min > 0);
     }
   }

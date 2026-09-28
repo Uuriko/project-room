@@ -75,7 +75,9 @@ export function validateClaimFields(fields) {
     errors.push("missing lease");
   } else {
     const match = LEASE_RE.exec(lease);
-    if (!match) errors.push("lease must be lease=<N>h");
+    if (!match) errors.push(/^[0-9]+h$/.test(lease)
+      ? `lease must be lease=<N>h (1-72h); did you mean lease=${lease}?`
+      : "lease must be lease=<N>h");
     else {
       const hours = Number(match[1]);
       if (hours < 1 || hours > 72) errors.push("lease out of range 1-72h");

@@ -17,10 +17,10 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The v2-journal and runtime-package gates read retained ancestor commits.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
@@ -28,12 +28,15 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - run: npm ci
       - run: npm run lint
+      # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, no
+      # install needed, runs before the heavier suites would even finish.
+      - run: node scripts/untested-modules-lint.mjs
   unit:
     # Root-suite unit tests (tests/*.test.js at the repo root). The five
     # path-scoped workflows run `npm test` inside their shard subdirectories
@@ -44,48 +47,100 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The agent-upgrade gates read retained ancestor commits.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - run: npm ci
+      - name: Install Linux host isolation for automatic-run unit tests
+        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - name: Permit the sandbox launcher to create its isolated namespaces
+        # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
+        # unless the launcher has an application profile. Scope the exception to
+        # distro bubblewrap; keep global AppArmor restrictions and --unshare-all.
+        # https://documentation.ubuntu.com/release-notes/24.04/#unprivileged-user-namespace-restrictions
+        run: |
+          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
+            if [ -f /etc/apparmor.d/bwrap ]; then
+              sudo apparmor_parser -r /etc/apparmor.d/bwrap
+            else
+              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
+          abi <abi/4.0>,
+          include <tunables/global>
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
+            fi
+          fi
+      - name: Verify automatic host namespace support without operator input
+        run: node scripts/host-isolation-preflight.mjs
       - run: npm test
-  browser:
+  browser-shards:
+    name: browser shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The packaged fallback gate reads retained ancestor commits.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
         # Same suites as test:browser, plus a junit file under test-results/ for the step below.
-        run: npm run test:browser:ci
+        run: scripts/test-env.sh npm run test:browser:ci -- --shard=${{ matrix.shard }}/4
       - name: Report failing browser tests as annotations and job summary
         # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
         if: always()
-        run: node scripts/report-test-failures.mjs test-results/browser-junit.xml
-      - uses: actions/upload-artifact@v4
+        run: node scripts/report-test-failures.mjs test-results/browser-junit-${{ matrix.shard }}-of-4.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: conversation-browser-evidence
+          name: conversation-browser-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: ignore
+  # Keep the required check name stable. Dependency success alone cannot prove
+  # the intended matrix was complete: require each exact-run completion receipt.
+  browser:
+    needs: browser-shards
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: conversation-browser-evidence-*-attempt-${{ github.run_attempt }}
+          path: browser-evidence
+          merge-multiple: true
+      - name: Require all four successful browser shards from this run
+        if: always()
+        env:
+          BROWSER_MATRIX_RESULT: ${{ needs.browser-shards.result }}
+        run: node scripts/browser-shards-check.mjs browser-evidence
   cloudflare:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # The recovery gate packages an exact retained ancestor.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
       - run: npm ci
@@ -95,13 +150,13 @@ jobs:
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs browser.check.mjs release-pause-browser.check.mjs
+        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs google-auth.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs scheduled-rpc.check.mjs version-signal.check.mjs browser.check.mjs release-pause-browser.check.mjs
       - name: Build exact assets and validate the deployment bundle
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
         run: node ../scripts/worker-ci-build.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: cloudflare-browser-evidence

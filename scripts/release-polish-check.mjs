@@ -57,7 +57,7 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await openSearch(page);
   await page.locator('#message-search').fill('agenda');
   assert.equal(await page.locator('#clear-search').isVisible(), true);
-  assert.equal(await page.locator('#composer-options').count(), 0);
+  assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
   await settle(page);
   await page.evaluate(() => {
     window.searchMutations = 0;

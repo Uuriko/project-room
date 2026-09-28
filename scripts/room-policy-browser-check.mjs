@@ -1,3 +1,4 @@
+import { openComposerOptions } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A4: when the room owner makes review or approval mandatory, the new-work
 // form shows the requirement locked on with the reason, and the recorded item carries it.
@@ -29,7 +30,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   const items = () => f.store.room("commons").state.workItems;
-  const openForm = async () => { await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" }); await page.locator("#work-options").evaluate(el => { el.open = true; }); };
+  const openForm = async () => { await openComposerOptions(page); await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" }); await page.locator("#work-options").evaluate(el => { el.open = true; }); };
   const login = async (key, view = viewport) => {
     const other = await browser.newPage({ viewport: view, reducedMotion: "reduce" }); other.setDefaultTimeout(8000); other.on("pageerror", error => errors.push(error.message));
     await other.goto(`http://127.0.0.1:${server.address().port}`); await fillAccessKey(other, key);
