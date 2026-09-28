@@ -183,20 +183,26 @@ test("get_room_context is not_modified when unchanged and never carries bodies",
   const sequence = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.workerKey, "commons", sequence);
   const moved = await workerClient.roomContext({ sinceVersion: worker.context_version });
-  assert.equal(moved.not_modified, undefined);
+  assert.equal(moved.not_modified, true);
   assert.equal(moved.cursors.resumeAfter, sequence);
   assert.equal(moved.cursors.eventsQuery, "after");
-  assert.notEqual(moved.context_version, worker.context_version);
+  assert.equal(moved.context_version, worker.context_version);
 
   f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "later", body: "MESSAGE-BODY-SENTINEL" });
   const afterMessage = await (await f.request("/api/rooms/commons/context", f.ownerKey)).json();
-  assert.notEqual(afterMessage.context_version, owner.context_version);
+  assert.equal(afterMessage.context_version, owner.context_version);
+  const quietMessage = await (await f.request(`/api/rooms/commons/context?since_version=${owner.context_version}`, f.ownerKey)).json();
+  assert.equal(quietMessage.not_modified, true);
+  assert.equal(quietMessage.evaluatedThrough, afterMessage.evaluatedThrough);
+  assert.deepEqual(quietMessage.cursors, afterMessage.cursors);
+  assert.equal(Object.hasOwn(quietMessage, "roster"), false);
   assert.ok(afterMessage.cursors.roomSequence > owner.cursors.roomSequence);
   assertNoBodies(afterMessage);
 
   f.send(f.ownerKey, T.WORK_SUPERSEDED, { workItemId: "old", expectedRevision: 0, supersededByWorkItemId: "replacement", reason: "REASON-SENTINEL" });
   const afterDep = f.store.roomContext(f.ownerKey, "commons", {});
   assert.deepEqual(afterDep.deps, [{ workItemId: "old", supersededBy: "replacement" }]);
+  assert.notEqual(afterDep.context_version, owner.context_version, "work changes invalidate the structural projection");
   assertNoBodies(afterDep);
 
   const cli = await exec(process.execPath, ["scripts/agent-inbox.mjs", "context"], {

@@ -62,7 +62,7 @@ test("an overdue mention reads as timed_out without a write inside the read", t 
   assert.equal(mention.state, "timed_out");
 });
 
-test("inbox prioritizes current mentions and labels overdue replies without hiding them", t => {
+test("inbox prioritizes current mentions and labels timed-out delivery without requiring replies", t => {
   const { f, token } = enrolledAgent(t);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const now = f.store.now();
@@ -78,7 +78,8 @@ test("inbox prioritizes current mentions and labels overdue replies without hidi
   say(f, token, { messageId: "current-answer", body: "Done", replyToId: "current-ask" });
   const overdue = f.store.agentInbox(token, "commons");
   assert.equal(overdue.directMentions[0].messageId, "overdue-ask");
-  assert.match(overdue.next.find(step => step.action === "reply-mention").description, /overdue/i);
+  assert.match(overdue.next.find(step => step.action === "reply-mention").description, /delivery-timed-out/i);
+  assert.equal(overdue.next.find(step => step.action === "reply-mention").required, false);
   assert.match(overdue.next.find(step => step.action === "reply-mention").description, /timeout remains in history/);
 });
 

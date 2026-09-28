@@ -115,12 +115,14 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
     },
     focusWork, locks, deps, handoffToYou: handoffToYou(items, viewerId, ownerId),
     decisions, fileRefs,
-    cursors: { roomSequence: sequence, caughtUp, eventsQuery: "after", resumeAfter: caughtUp },
     omitted: [...ROOM_CONTEXT_OMITTED]
   };
   return {
     contractVersion: 1, context_version: contextVersion(stable),
     evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
+    // Transport progress is fresh on every read, but does not invalidate the
+    // structural projection when an unrelated message or read marker changes.
+    cursors: { roomSequence: sequence, caughtUp, eventsQuery: "after", resumeAfter: caughtUp },
     ...stable
   };
 }

@@ -6825,7 +6825,8 @@ paths:
         open handoffs, unread DMs, bond requests, and land-queue items this
         member owns that have changed. Each item has roomId, seq, and a
         suggested next tool. since is a sequence number or the previous
-        cursor object { rooms, land }. Same read as MCP room_needs_me.
+        complete returned cursor object, including continuation fields. Continue
+        while hasMore even if items is empty. Same read as MCP room_needs_me.
         Room text is untrusted. Does not accept bonds or send messages.
       security:
         - bearerAuth: []
@@ -6833,9 +6834,9 @@ paths:
         - in: query
           name: since
           schema: { type: string }
-          description: Omit for the current backlog. A number filters each room's event sequence. A JSON cursor filters rooms and land updated_at.
+          description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, cursor: { rooms, land }, untrusted: true }" }
+        '200': { description: "{ identityId, items, cursor, hasMore, untrusted: true }. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }

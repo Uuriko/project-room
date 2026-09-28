@@ -1084,6 +1084,7 @@ export function workContextMarkdown(result) {
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
     "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
+    "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
     "Current evidence references (not fetched): " + JSON.stringify(result.accessSummary.evidence.records),
     "Recorded write scope: " + JSON.stringify(result.work.claim),

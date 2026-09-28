@@ -70,7 +70,7 @@ test("agent inbox next[] teaches what an empty inbox will carry", async t => {
   assert.deepEqual(json.next.map(n => n.action), ["watch-inbox", "list-open-requests"]);
 });
 
-test("agent inbox next[] teaches reply-dm after a DM arrives", async t => {
+test("agent inbox keeps ordinary conversation readable without requiring an acknowledgement", async t => {
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
@@ -79,11 +79,12 @@ test("agent inbox next[] teaches reply-dm after a DM arrives", async t => {
     type: "message.posted",
     data: {
       messageId: "00000000-0000-4000-8000-000000000053",
-      body: "hello friend",
+      body: "Thanks, nothing more needed from me.",
       toMemberId: memberId,
     },
   }, ownerSecret);
   assert.equal(dmRes.status, 201);
+  const sequence = fixture.store.room(roomId).sequence;
   const res = await get(origin, `/api/rooms/${roomId}/agent-inbox`, friendSecret);
   assert.equal(res.status, 200);
   const json = await res.json();
@@ -91,6 +92,9 @@ test("agent inbox next[] teaches reply-dm after a DM arrives", async t => {
   const actions = json.next.map(n => n.action);
   assert.deepEqual(actions, ["reply-dm", "list-open-requests"]);
   const reply = json.next[0];
+  assert.equal(reply.optional, true);
+  assert.equal(reply.required, false);
+  assert.equal(reply.actionRole, "optional_conversation");
   assert.equal(reply.method, "POST");
   assert.equal(reply.path, `/api/rooms/${roomId}/commands`);
   // The reply goes back to the DM's sender (the room owner here), not to
@@ -98,6 +102,10 @@ test("agent inbox next[] teaches reply-dm after a DM arrives", async t => {
   const senderMemberId = json.directMessages[0].from;
   assert.ok(senderMemberId);
   assert.ok(reply.description.includes(senderMemberId));
+  const requests = await (await get(origin, json.next[1].path, friendSecret)).json();
+  assert.deepEqual(requests.requests, []);
+  assert.equal(json.directMessages[0].body, "Thanks, nothing more needed from me.");
+  assert.equal(fixture.store.room(roomId).sequence, sequence);
 });
 
 
@@ -126,6 +134,12 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const sequence = store.room(roomId).sequence;
   const inbox = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
   assert.deepEqual(inbox.directMessages.map(message => message.messageId), ["recent-chat"]);
+  assert.equal(inbox.next[0].optional, true);
+  const expanded = await (await get(origin, `/api/rooms/${roomId}/agent-inbox`, friendSecret)).json();
+  assert.equal(expanded.next[0].action, "read-request");
+  assert.equal(expanded.next[0].nextRead.arguments.requestMessageId, "old-open");
+  assert.equal(expanded.next[0].requestStatus, "open");
+  assert.equal(expanded.next[0].required, true);
   const discovery = inbox.next.find(step => step.action === "list-open-requests");
   assert.equal(discovery.method, "GET");
   const listedResponse = await get(origin, discovery.path, friendSecret); assert.equal(listedResponse.status, 200);
@@ -145,4 +159,12 @@ test("inbox discovery finds older open requests outside its DM window through ex
   assert.deepEqual(mcpList.result.structuredContent.requests.map(request => request.id), ["old-open"]);
   assert.equal(store.room(roomId).sequence, sequence);
   assert.equal(store.room(roomId).state.replyRequests["old-open"].status, "open");
+  ask("latest-cancelled");
+  store.command(ownerSecret, roomId, { id: "cancel-latest", type: "reply_request.cancelled", data: {
+    requestMessageId: "latest-cancelled", expectedRequestRevision: 0, reason: "No longer needed"
+  } });
+  const historical = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
+  assert.equal(historical.next[0].requestStatus, "cancelled");
+  assert.equal(historical.next[0].required, false);
+  assert.equal(historical.next[0].actionRole, "context_discovery");
 });
