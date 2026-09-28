@@ -628,3 +628,27 @@ test("guest tier upgrade journals a strictly-valid MEMBER_ACCESS_CHANGED event",
   assert.equal(authorityPolicyVersion, MEMBERSHIP_AUTHORITY_POLICY_VERSION);
   assert.doesNotThrow(() => validateCommand({ id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: commandData }));
 });
+
+// GX redemption appends a membership event directly. It must observe the
+// room seat budget before burning its one-use code or issuing a credential.
+test("GX redemption refuses a full room while preserving the unused code", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  const minted = await mintInvite(request, ownerKey);
+  const identity = store.identities.create("Capacity Visitor");
+  const keys = generateKeyPair();
+  const cardBody = { name: "Capacity Visitor", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey,
+    signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  for (let i = 0; i < 99; i++) store.command(ownerKey, "commons", {
+    id: `fill-room-gx-${i}`, type: T.MEMBER_ADDED,
+    data: { memberId: `gx-fill-${i}`, displayName: `Member ${i}`, kind: "human", permissions: [] }
+  });
+  const before = store.room("commons").sequence;
+  const denied = await request("/api/guest-invites/redeem", {
+    method: "POST", token: identity.secret, data: { inviteCode: minted.code, card }
+  });
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error.code, "pilot_limit");
+  assert.equal(store.room("commons").sequence, before);
+  assert.equal(store.db.prepare("SELECT status FROM guest_invites WHERE id=?").get(minted.inviteId).status, "active");
+});
