@@ -36,7 +36,7 @@ import {
   hostedMcpToolDefs as HOSTED_TOOLS,
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools } from "./mcp-discovery.mjs";
-import { resolveCatalogAgent } from "./capability-visibility.mjs";
+import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -307,6 +307,24 @@ function listWork(store, secret, args) {
   };
 }
 
+// UFO-steal track 2 (RC-2026-09-27-2743): call-time tier denial mirroring
+// the #1170 catalog filter exactly. The same predicate that withholds a
+// write tool from tools/list now denies its direct invocation: a
+// t1_readonly or guest agent calling a withheld write gets a 403
+// (agent_readonly / guest_scope_denied), never silent success and never a
+// filter-invisibility bypass. Reads are never withheld, so they pass
+// through untouched. Roomless identities keep the full catalog, so
+// onboarding tools (room_create, room_join, wake_register) stay reachable
+// for agents with no memberships yet. The check lives in the handlers,
+// not the router; per-room checks below stay authoritative for the target
+// room ("usable somewhere = listed" is a superset, never a substitute).
+function enforceMcpCallVisibility(store, identity, toolName) {
+  const def = HOSTED_TOOLS.find(entry => entry.name === toolName);
+  if (!def) return; // unknown tool: the tools/call router already rejects it
+  const denial = catalogCallDenial(resolveCatalogAgent(store, identity), def);
+  if (denial) throw new ServiceError(denial.status, denial.code, denial.message);
+}
+
 async function callLandTool(store, secret, name, args) {
   const auth = store.authenticate(secret, args.roomId);
   // add/remove/report are room writes; the read-only tier applies to them
@@ -331,6 +349,7 @@ async function callLandTool(store, secret, name, args) {
 }
 
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
+  enforceMcpCallVisibility(store, identity, name);
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
@@ -425,6 +444,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
 }
 
 function callInboxTool(store, identity, name, args) {
+  enforceMcpCallVisibility(store, identity, name);
   const identityId = identity.identityId;
   if (name === "inbox_put_attachment") {
     return store.inboxAttachments.put(identityId, {
@@ -512,6 +532,7 @@ function wakeFailure(error) {
 }
 
 async function callWakeTool(store, secret, identity, name, args) {
+  enforceMcpCallVisibility(store, identity, name);
   const agentId = identity.identityId;
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;

@@ -7,6 +7,10 @@ import { OutsideAgents } from "./outside-agents.mjs";
 // Writes call the same command builders as stdio, then RoomStore.command.
 // Local attention tools stay off this URL: they read an operator directory.
 
+import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
@@ -98,9 +102,32 @@ function recorded(store, secret, roomId, identity, command, present) {
   return { value: stampRoom(present(receipt), roomId), isError: false };
 }
 
+// UFO-steal track 2 (RC-2026-09-27-2743): call-time tier denial for the
+// hosted stdio tools, mirroring the #1170 catalog filter exactly. This
+// dispatch path bypasses callRoomTool, so the family guards in
+// mcp-room-profile.mjs never see it — and the store.command guest gate
+// admits message.posted chat posts, which lets guests reach tools the
+// catalog withholds: room_introduce_outside_agent writes the shared
+// outside-agent directory, and room_request_reply / room_respond_to_request /
+// room_reply create formal request-system writes, all encoded as plain
+// message.posted. Reads pass through untouched. The contributor-tier draft
+// allowance stays call-time-gated, exactly as the catalog contract
+// documents (withheld from the listing, permitted at call time).
+function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
+  const def = hostedStdioToolDefinitions().find(entry => entry.name === name);
+  if (!def) return; // unknown tool: the tools/call router already rejects it
+  if (name === "room_post_draft" && isGuestAgentMemberId(memberId)
+    && store.guestInvites.guestTierOf(memberId) === "contributor") return;
+  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  if (!identity) return; // no identity on file: store.authenticate already threw
+  const denial = catalogCallDenial(resolveCatalogAgent(store, identity), def);
+  if (denial) throw new ServiceError(denial.status, denial.code, denial.message);
+}
+
 export async function callHostedStdioTool(store, secret, name, args) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
+  enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
   const identity = { roomId, memberId: auth.member.id };
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
