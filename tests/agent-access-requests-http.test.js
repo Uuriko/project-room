@@ -90,3 +90,87 @@ test("access-requests ignores an Authorization header on the public route (E2)",
   assert.equal(json.status, "pending");
   assert.deepEqual(json.requestedPermissions, []);
 });
+
+// RC-2026-09-28-3410: the access-request gate ports the MCP
+// structured-argument shape ({missing, unexpected, invalid}) down to HTTP,
+// and its required/optional set aligns with the service: note and requestId
+// are optional (the service treats null note as "no note" and mints a
+// requestId when omitted). The old gate answered every violation with one
+// static "accepted fields" list — a fresh agent could not self-diagnose.
+test("access-requests 422 names the missing field (RC-2026-09-28-3410)", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  const friend = fixture.store.identities.create("ar missing-field friend");
+  const res = await post(origin, "/api/access-requests", {
+    identityId: friend.identityId, displayName: "Missing",
+    requestedPermissions: ["accept_work"], requestId: "ar-missing-1",
+  });
+  assert.equal(res.status, 422);
+  const json = await res.json();
+  assert.ok(json.error.message.includes("missing required field: roomId"), "422 names the missing field");
+  assert.ok(!json.error.message.includes("accepted fields"), "no static accepted-fields list");
+});
+
+test("access-requests 422 names the unexpected field (RC-2026-09-28-3410)", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  const friend = fixture.store.identities.create("ar unexpected-field friend");
+  const res = await post(origin, "/api/access-requests", {
+    roomId, identityId: friend.identityId, displayName: "Unexpected",
+    requestedPermissions: ["accept_work"], requestId: "ar-unexpected-1",
+    zzzUnknown: true,
+  });
+  assert.equal(res.status, 422);
+  const json = await res.json();
+  assert.ok(json.error.message.includes("unexpected field: zzzUnknown"), "422 names the unexpected field");
+});
+
+test("access-requests 422 names the invalid field (RC-2026-09-28-3410)", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  const friend = fixture.store.identities.create("ar invalid-field friend");
+  const res = await post(origin, "/api/access-requests", {
+    roomId, identityId: friend.identityId, displayName: "Invalid",
+    requestedPermissions: "accept_work", requestId: "ar-invalid-1",
+  });
+  assert.equal(res.status, 422);
+  const json = await res.json();
+  assert.ok(json.error.message.includes("requestedPermissions: wrong type"), "422 names the invalid field and reason");
+});
+
+test("access-requests accepts the 4-required-field shape: note and requestId optional (RC-2026-09-28-3410)", async t => {
+  // P1-2 from QA 2026-09-28: the service treats note as optional and mints
+  // requestId when omitted; the gate must agree with the service.
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  const friend = fixture.store.identities.create("ar minimal friend");
+  const res = await post(origin, "/api/access-requests", {
+    roomId, identityId: friend.identityId, displayName: "Minimal",
+    requestedPermissions: ["accept_work"],
+  });
+  assert.equal(res.status, 201);
+  const json = await res.json();
+  assert.ok(json.requestId, "server mints requestId when omitted");
+  assert.equal(json.status, "pending");
+});
+
+test("access-requests still accepts the legacy 6- and 7-field shapes (RC-2026-09-28-3410)", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  for (const [label, body] of [
+    ["6-field", { note: "hi", requestId: "ar-legacy-6" }],
+    ["7-field", { note: "hi", requestId: "ar-legacy-7", referredBy: "Owner" }],
+  ]) {
+    const friend = fixture.store.identities.create(`ar legacy ${label} friend`);
+    const res = await post(origin, "/api/access-requests", {
+      roomId, identityId: friend.identityId, displayName: "Legacy",
+      requestedPermissions: ["accept_work"], ...body,
+    });
+    assert.equal(res.status, 201, `${label} shape still files`);
+  }
+});
