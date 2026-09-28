@@ -20,7 +20,7 @@ import {
   resolveProofRef, ensureEmissaryLureSchema,
   DROP_ID_PATTERN, ATTRIBUTION_ID_PATTERN,
   DROP_DAILY_LIMIT, INVITE_DAILY_LIMIT,
-  EMISSARY_JOURNAL_KINDS, LURE_VENUES, VENUE_LIMITS,
+  EMISSARY_JOURNAL_KINDS, LURE_VENUES,
 } from "../server/emissary-lure.mjs";
 
 const db = () => { const d = new DatabaseSync(":memory:"); ensureEmissaryLureSchema(d); return d; };

@@ -47,7 +47,7 @@ function setup(t) {
 }
 
 function addMember(setupResult, displayName) {
-  const { store, rooms, owner, roomId } = setupResult;
+  const { store, owner, roomId } = setupResult;
   const identity = store.identities.create(displayName);
   const invite = store.invites.create(owner.secret, roomId, { profile: "chat", displayName }, null);
   const joined = store.invites.redeem(invite.code, { displayName, identitySecret: identity.secret });
