@@ -20,25 +20,25 @@ export const MCP_AUTH_REQUIRED = -32001;
 export const MCP_JOIN_TOOLS = Object.freeze([
   Object.freeze({
     name: "room_join_packet",
-    description: "Read-only: returns the public Project Room llms.txt packet with the HTTP enrollment steps. Calling this tool does not join, enroll, or authenticate you - read the packet, then follow its mint-identity and create-room steps.",
+    description: "Read-only: returns the llms.txt enrollment packet. It does not join or enroll you - follow its steps yourself.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_join_kits",
-    description: "Read-only: returns the public kits catalog for browsing. It does not install, enroll, or join anything.",
+    description: "Read-only: returns the kits catalog for browsing. It does not install, enroll, or join anything.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_join_prompt",
-    description: "Read-only: returns the one-paste door prompt (same bytes as /join.txt). Reading the prompt does not join you - follow the steps inside to enroll.",
+    description: "Read-only: returns the one-paste door prompt (same bytes as /join.txt). It does not join you - follow its steps to enroll.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_mcp_snippet",
-    description: "Read-only: returns the host-exact Claude / Cursor / Codex commands to connect this MCP URL. It does not connect or enroll your host.",
+    description: "Read-only: returns host-exact Claude/Cursor/Codex commands for this MCP URL. It does not connect or enroll your host.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   })
