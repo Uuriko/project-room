@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, validId } from "../src/events.js";
+import { EVENT_TYPES as T, event, validId } from "../src/events.js";
+import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 class GuestAgentLinkError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -81,14 +82,17 @@ export class GuestAgentLinks {
   constructor(store) { this.store = store; this.db = store.db; }
 
   owner(token, roomId, binding) {
+    // Owner delegates (server/owner-delegates.mjs) arrive via
+    // store.authenticate with the delegate flag stamped on the member copy:
+    // the journal keeps the delegate as the actor.
     const auth = this.store.authenticate(token, roomId, binding);
     // #643: owner-by-id — the owner capability follows the owner identity,
     // not the credential flavor (share-links-style owner-capability
     // exemption): an agent owner may mint guest links on their identity
     // bearer. The mint itself stays account-bound: guest member ids derive
     // from the sponsor account (see mint()).
-    if (auth.member?.id !== this.store.room(roomId).state.room.ownerId
-      || !auth.member.permissions.includes("manage_members")) {
+    if (!auth.delegate && (auth.member?.id !== this.store.room(roomId).state.room.ownerId
+      || !auth.member.permissions.includes("manage_members"))) {
       fail(403, "owner_required", "Only the room owner can mint a guest invite. Use Add agent for a durable key.");
     }
     return auth;
@@ -140,6 +144,14 @@ export class GuestAgentLinks {
   }
 
   sweepExpired(token, roomId, binding) {
+    // A delegate's member record carries no manage_members, so store.command
+    // (which re-authenticates from the token and would be rejected by the
+    // reducer for the delegate actor) cannot run for it: the delegate flavor
+    // below builds the same MEMBER_ACCESS_CHANGED events directly — the
+    // same pattern as GuestInvites#deactivateGuestSeat — with the delegation
+    // provenance recorded in the event data.
+    const auth = this.store.authenticate(token, roomId, binding);
+    if (auth.delegate) return this.sweepExpiredAsDelegate(roomId, auth);
     const members = this.store.room(roomId).state.members;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
@@ -151,6 +163,58 @@ export class GuestAgentLinks {
         data: { memberId: member.id, expectedMemberRevision: member.revision, active: false, permissions: member.permissions }
       }, binding);
     }
+  }
+
+  sweepExpiredAsDelegate(roomId, auth) {
+    // The event model requires member.access_changed to be actor-attributed
+    // to a member with manage_members, so the mechanical expiry sweep runs
+    // as the room owner whose authority the delegate exercises (exactly as
+    // the non-delegate sweep attributes to the minting owner). The real
+    // actor and the delegation source ride explicitly in the event data;
+    // the delegate's own mint stays credited to the delegate in
+    // guest_invites.
+    const ownerId = this.store.room(roomId).state.room.ownerId;
+    const grantedBy = this.db.prepare(
+      "SELECT granted_by FROM owner_delegate_grants WHERE room_id=? AND identity_id=? AND revoked_at IS NULL")
+      .get(roomId, auth.identityId)?.granted_by ?? ownerId;
+    const room = this.store.room(roomId);
+    let state = room.state, sequence = room.sequence, swept = 0;
+    for (const member of Object.values(room.state.members)) {
+      if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
+      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, member.id);
+      if (row && row.revoked === 0 && row.expires_at > this.store.now()) continue;
+      const eventId = `guest-agent-end-${hash(`${member.id}:${row?.hash || "none"}`).slice(0, 40)}`;
+      const incoming = event({
+        id: eventId,
+        idempotencyKey: eventId,
+        roomId,
+        actorId: ownerId,
+        type: T.MEMBER_ACCESS_CHANGED,
+        at: new Date(this.store.now()).toISOString(),
+        data: { memberId: member.id, expectedMemberRevision: member.revision, active: false, permissions: member.permissions,
+          // Delegation provenance as flat top-level keys: the event envelope
+          // validator (src/events.js) only accepts plain objects for a
+          // whitelisted set of keys, so the provenance rides as *Id-suffixed
+          // strings, which the validator already checks with validId().
+          delegatedSweepByMemberId: auth.member.id, delegatedSweepByIdentityId: auth.identityId,
+          delegatedSweepGrantedBy: grantedBy },
+      });
+      try {
+        state = { ...applyEventWithGrowth(state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      } catch (error) {
+        fail(422, "command_rejected", error.message);
+      }
+      sequence += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      this.store.agentConnections.revokeMember(roomId, member.id);
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
+      this.store.reminders.retireMember(roomId, member.id);
+      swept += 1;
+    }
+    if (swept === 0) return;
+    const projection = JSON.stringify(state);
+    if (Buffer.byteLength(projection) > 4 * 1024 * 1000) fail(409, "pilot_limit", "Room storage limit reached");
+    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }
 
   mint(token, roomId, details, binding) {

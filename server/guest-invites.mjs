@@ -245,7 +245,11 @@ export class GuestInvites {
   // delegating mint to lanes is a later decision, not a code gap.
   ownerGate(token, roomId, binding) {
     const auth = this.store.guestAgentLinks.owner(token, roomId, binding);
-    if (!auth.account) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+    // The mint itself is account-bound (see mint), but an owner delegate is
+    // accountless by design: their authority comes from the owner's
+    // persisted grant (server/owner-delegates.mjs), not a signed-in account
+    // session.
+    if (!auth.account && !auth.delegate) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
     return auth;
   }
 
@@ -435,7 +439,12 @@ export class GuestInvites {
     }
     return this.store.transaction(() => {
       const auth = this.ownerGate(token, roomId, binding);
-      if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
+      // The freshness check pins the OWNER's member revision: the minter
+      // asserts they saw the current owner state. A delegate's own member
+      // revision is irrelevant to their delegated authority, so the check
+      // always reads the owner's record.
+      const authority = this.store.roomAuthority(roomId);
+      if (expectedOwnerRevision !== authority.members[authority.ownerId]?.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       // Expiry rides the existing sweep: any expired guest-agent-* member
       // (ga1. or GX-redeemed) is deactivated here, during owner mint activity.
       this.store.guestAgentLinks.sweepExpired(token, roomId, binding);
@@ -450,7 +459,7 @@ export class GuestInvites {
         minted_by_member_id, minted_by_account_id, issue_request_id, created_at, redeem_by, status)
         VALUES(?,?,?,?,?,?,?,?,?,?,?, 'active')`)
         .run(inviteId, hash(code), roomId, tier, credentialTtlMs, guestLabel.trim(),
-          auth.member.id, auth.account.id, requestId, now, now + redeemWindowMs);
+          auth.member.id, auth.account?.id ?? null, requestId, now, now + redeemWindowMs);
       const row = this.inviteRow(hash(code));
       return { ...this.issued(row, roomId, code), duplicate: false };
     });
