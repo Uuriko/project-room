@@ -6,6 +6,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
 import { clickChrome, openSettings, closeSettings } from "./room-chrome.mjs";
+import { EVENT_TYPES } from "../src/events.js";
 
 // Authoring gate: real-browser transport/lifecycle contract. Eager loading
 // wastes entry requests; a late import after sign-out must not read room data.
@@ -13,6 +14,8 @@ import { clickChrome, openSettings, closeSettings } from "./room-chrome.mjs";
 // No production test hooks or API doubles.
 async function setup(t) {
   const fixture = createAcceptanceFixture();
+  // Landing waits for write-mode work (src/room-layout.js), so give the room one.
+  fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: EVENT_TYPES.WORK_PROPOSED, data: { workItemId: "lazy-boards-write", title: "Synthetic write task", definitionOfDone: "Evidence returned", accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false } });
   const server = createRoomServer({ store: fixture.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

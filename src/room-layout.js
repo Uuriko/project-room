@@ -67,3 +67,25 @@ export function installRoomLayout() {
   compact.addEventListener("change", sync);
   sync();
 }
+
+// Chat-first room: a new room's sidebar shows only what it uses. Landing is
+// the pull-request land queue, so it waits for write-mode work. Referrals wait
+// for a second human or a referral join. The Invite section still mints links.
+export function sidebarSectionsInUse(state) {
+  const members = Object.values(state?.members ?? {});
+  const humans = members.filter(m => m.kind === 'human' && m.active !== false);
+  return {
+    landing: Object.values(state?.workItems ?? {}).some(item => item.mode === 'write' || item.claim),
+    referrals: humans.length > 1 || members.some(m => m.referredBy)
+  };
+}
+
+// An open panel stays, so a live render never pulls a section out from under
+// someone reading it.
+export function syncSidebarSections(state) {
+  const inUse = sidebarSectionsInUse(state);
+  for (const [id, show] of [['#land-queue-panel', inUse.landing], ['#referral-panel', inUse.referrals]]) {
+    const panel = document.querySelector(id);
+    if (panel) panel.hidden = Boolean(panel.closest("#room-sidebar")) && !show && !panel.open;
+  }
+}
