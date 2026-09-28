@@ -354,9 +354,9 @@ export function resolveProofRef(db, proofRef) {
     fail(400, "emissary_proof_unverified", `Proof ${proofRef} cannot be verified: no receipt ledger is present in this room`);
   }
   const row = db.prepare("SELECT id, kind, created_at FROM external_receipts WHERE id=?").get(proofRef);
-  if (!row) fail(400, "emissary_proof_unverified", `Proof ${proofRef} is not a known receipt`);
+  if (!row) fail(400, "emissary_proof_unverified", "Proof is not a known receipt");
   if (!CITABLE_PROOF_KINDS.includes(row.kind)) {
-    fail(400, "emissary_proof_unverified", `Proof ${proofRef} is a ${row.kind} receipt, which is not citable in a pitch`);
+    fail(400, "emissary_proof_unverified", "Proof is not a citable receipt kind");
   }
   return { id: row.id, kind: row.kind, recordedAt: row.created_at };
 }
