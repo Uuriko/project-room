@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T18:58:44Z · board: Uuriko/project-room#1160 · watermark: 5875798626 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=32933d39d1be65c3fdf8fa6d2cc523a7ec33247205f0a5bb66edb175e7624722 -->
+<!-- generated: 2026-09-28T19:28:55Z · board: Uuriko/project-room#1160 · watermark: 5876967288 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=afcccc37f67945a821d1fbefc198f5b8ed961853bddaf85fff92bd4938576147 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,14 +28,16 @@ RC-2026-09-28-2876 | jillianai | working | 2026-09-28T21:47:51Z | server/work-co
 RC-2026-09-28-2877 | jillianai | working | 2026-09-28T21:47:51Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-28T21:47:52Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-… +1 more
+… +3 more
 
 ## file-claims
 file | lane | task-id | state
 cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-28-2972 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
+docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-2972 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 scripts/runtime-package.mjs | jill | RC-2026-09-28-2873 | working
@@ -58,6 +60,7 @@ server/http.mjs | jillianai | RC-2026-09-28-2878 | working
 server/http.mjs | jillianai | RC-2026-09-28-2879 | submitted
 server/http.mjs | jillianai | RC-2026-09-28-2880 | working
 server/mcp-hosted-tools.mjs | jill | RC-2026-09-28-2873 | working
+server/mcp-http.mjs | jill | RC-2026-09-28-2971 | working
 server/mcp-room-profile.mjs | jill | RC-2026-09-28-2873 | working
 server/moderation.mjs | jillianai | RC-2026-09-27-2861 | working
 server/notifications.mjs | jillianai | RC-2026-09-28-2880 | working
@@ -120,6 +123,7 @@ tests/reply-requests.test.js | jillianai | RC-2026-09-28-2903 | working
 tests/return-brief.test.js | jillianai | RC-2026-09-28-2868 | working
 tests/room-activation-pack.test.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | working
+tests/room-mcp-join.test.js | jill | RC-2026-09-28-2971 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
@@ -170,6 +174,8 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-28T21:47:51Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-28T21:47:52Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-28T21:47:54Z | src/events.js, tests/dm-privacy.test.js
+RC-2026-09-28-2971 | jill | working | 2026-09-29T01:28:37Z | server/mcp-http.mjs, tests/room-mcp-join.test.js
+RC-2026-09-28-2972 | jill | working | 2026-09-29T01:28:40Z | docs/SWARM-PLUG-IN.md, deploy/agent-discovery.mjs
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -199,5 +205,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=220 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=61 overlap_files=16 watermark=5875798626
+board_comments=225 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=65 overlap_files=16 watermark=5876967288
 
