@@ -9,6 +9,24 @@
 // through it first.
 
 import { roomWorkClaimConfig } from "./work-claims.mjs";
+import { encodeRow, decodeRow } from "./persisted-row.mjs";
+
+// Replay-safe row kind for claim items (RC-2026-09-27-2730). The fields mirror
+// the workOf() output shape in work-claims.mjs; unknown fields are dropped on
+// read and missing fields take these defaults, so rows written by older code
+// (plain JSON, no envelope) still load.
+export const WORK_CLAIM_ROW_KIND = "work-claim";
+const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
+  "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
+  "attestations", "tags", "files", "blobs"];
+const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
+  claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
+  reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], blobs: [] };
+const decodeItem = text => {
+  const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
+  if (item.title == null) item.title = item.id; // workOf: title ?? id
+  return item;
+};
 
 export const workClaimSchema = `
   CREATE TABLE IF NOT EXISTS work_claims (
@@ -64,14 +82,14 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     get(roomId, id) {
       const row = selectOne.get(roomId, id);
-      return row ? parse(row.item_json) : null;
+      return row ? decodeItem(row.item_json) : null;
     },
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
-      upsert.run(roomId, item.id, JSON.stringify(item), now());
+      upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
       return item;
     },
-    list(roomId) { return selectRoom.all(roomId).map(row => parse(row.item_json)); },
+    list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
