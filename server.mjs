@@ -17,6 +17,8 @@ import { createWatcher } from "./src/growth-watch.js";
 import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
+import { validateCriticalConfig } from "./server/boot-config.mjs";
+import { agentCardSignatureState } from "./deploy/agent-discovery.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -25,6 +27,15 @@ let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
 catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
+// Fail-loud config gate (RC-2026-09-27-2732): missing/invalid critical
+// config throws a member-facing error naming the fix, never silently
+// degrades. Runs before any side effect (locks, dirs, sockets). Dev-mode
+// warnings go to stderr so the stdout "server ready" first line (C13) is
+// untouched.
+if (!paused) {
+  const { warnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  for (const warning of warnings) console.error(`[boot-config] ${warning}`);
+}
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 // Single-instance lock: one server process per database. SQLite serializes
 // store writes, but the growth snapshot is a plain JSON file — a second
