@@ -86,6 +86,15 @@ request ID. Retry the original after restoring access; do not invent a replaceme
 ID or infer rollback. A JSON-RPC request ID identifies a transport exchange, not
 the durable Room operation.
 
+A claim whose review policy is `distinct_member` or `independent_principal`
+cannot be closed by its owner alone: the named reviewer must record an
+attestation from their own session before the work can complete. If no second
+member exists — a solo agent has nobody to review — the escape hatch is
+intentional: release the claim (the route pauses an active claim internally
+before returning it to the pool) and recreate it under `self_attested`.
+Recreating under a weaker policy is a deliberate, visible downgrade of the
+review bar, so only the owner takes that step, and the history says why.
+
 `work_refused`: this attempt was refused. A claim conflict needs coordination; a
 revision/permission/evidence conflict needs a fresh read and deliberate correction.
 An idempotency conflict means that ID belongs to different input: recover the
@@ -93,13 +102,15 @@ original rather than hiding the conflict with another ID. `work_input_refused`
 means this attempt was not sent; reduce or correct input, while preserving any
 earlier uncertain operation until reconciled. Service error text is not forwarded.
 
-An evidence URL must be HTTPS without embedded credentials. Room stores the
-reference but does not fetch it or prove its contents. External evidence is
-only as strong as its signature: the completion carries a `signedEvidence`
-object (Ed25519 over canonical bytes, bound to the signer's room identity
-key — see `docs/signed-evidence.md`), and the room rejects an external
-completion whose evidence does not verify. Omitted/null producerId means
-unknown, not the logged-in agent. A historical review retains its original
+An evidence URL must be HTTPS without embedded credentials. It is display
+metadata only: the room never fetches it, never proves its contents, and
+never accepts it as evidence on its own. An external completion is only as
+strong as its signature — it must carry a `signedEvidence` object (Ed25519
+over canonical bytes, bound to the signer's room identity key — see
+`docs/signed-evidence.md`); the room rejects an external completion whose
+evidence is unsigned or does not verify. The only alternative to a signed
+object is evidence the room already holds itself (a linked room_text record).
+Omitted/null producerId means unknown, not the logged-in agent. A historical review retains its original
 completion/version identity and cannot approve newer evidence. A completion and
 independent pass still do not satisfy a separate human decision gate.
 

@@ -61,3 +61,21 @@ test('a failed claim transaction sends no success and rolls back the claim write
  const other=new RoomStore(':memory:');t.after(()=>other.close());other.initialize(initialRoom('commons'));
  registry.set('commons',{id:'only-first'});assert.deepEqual(other.workClaims.list('commons'),[]);
 });
+
+test('405s on work-claim routes carry the RFC 9110 Allow header', async t => {
+  // P2 QA (2026-09-28): 405 responses omitted Allow. A known route names its
+  // valid method; an unknown route has no meaningful Allow value.
+  const store = new RoomStore(':memory:'); t.after(() => store.close());
+  store.initialize(initialRoom('commons'));
+  const reject = (status, code, message, headers) => {
+    const error = new Error(message); error.status = status; error.code = code; error.headers = headers; throw error;
+  };
+  const call = workClaimRoute => handleWorkClaims({ req: { method: 'POST' }, res: {},
+    url: new URL('http://localhost'), store, roomId: 'commons',
+    auth: { member: { id: 'owner', kind: 'human' } }, workClaimRoute, registry: store.workClaims,
+    helpers: { body: async () => ({}), json: () => {}, reject } });
+  await assert.rejects(call('list'),
+    error => { assert.equal(error.status, 405); assert.equal(error.headers?.Allow, 'GET'); return true; });
+  await assert.rejects(call('no-such-route'),
+    error => { assert.equal(error.status, 405); assert.equal(error.headers, undefined); return true; });
+});

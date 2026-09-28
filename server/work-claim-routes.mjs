@@ -99,6 +99,13 @@ const claimIdOf = (reject, id) => {
   return id;
 };
 
+// W1 (QA 2026-09-28): `data.leaseHours ?? undefined` converts an explicit
+// null into "not provided", silently applying the 24h default. The pure
+// machine treats null as "opt out of leases entirely" (leaseHoursOf), so the
+// route must preserve the distinction between "key absent" (default) and
+// "explicitly null" (no lease).
+const leaseHoursOfBody = data => ("leaseHours" in data ? data.leaseHours : undefined);
+
 // Evaluate lease expiry across the room's items; expired claims auto-release
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.
@@ -316,7 +323,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files"] })) invalidInput(reject, "{note?, leaseHours?, files?}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
-    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: data.leaseHours ?? undefined, files: data.files, room: roomLike, now: nowMs }));
+    const claimed = runPure(reject, () => claimWork(item, caller, { note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files, room: roomLike, now: nowMs }));
     registry.set(roomId, claimed);
     // Warn, never block: tell the claimant which declared files other
     // active claims already hold, so the lanes talk before both edit them.
@@ -406,8 +413,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    let item = load(claimIdOf(reject, workClaimId));
     own(item);
+    // W2 (QA 2026-09-28): /release used to 422 on in_progress claims with no
+    // recovery path. The pure machine's release path is claimed -> unclaimed,
+    // so route an active claim through the pause transition internally —
+    // both steps are stamped in history — instead of refusing.
+    if (item.state === "in_progress" || item.state === "blocked") {
+      item = runPure(reject, () => updateWork(item, caller, { state: "claimed", note: "paused for release", now: nowMs }));
+      registry.set(roomId, item);
+    }
     const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: data.note, now: nowMs }));
     registry.set(roomId, released);
     return json(res, 200, released);
@@ -417,7 +432,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     own(item);
-    const reassigned = runPure(reject, () => reassignWork(item, caller, data.newOwner, { note: data.note, now: nowMs }));
+    // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
+    // typo stranded the claim on a nonexistent member (owner-only routes
+    // then 403 for everyone until the lease swept). Validate against live
+    // room membership: the new owner must be a current, active member.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const target = data.newOwner;
+    const targetMember = typeof target === "string" ? members[target] : null;
+    if (!targetMember || targetMember.active === false) {
+      reject(422, "work_reassign_unknown_member",
+        `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
+    }
+    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note: data.note, now: nowMs }));
     registry.set(roomId, reassigned);
     return json(res, 200, reassigned);
   }
@@ -429,6 +455,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { required: ["progressMessageId"], optional: ["note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
+    // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
+    // cleared), so the ownership check below would misdiagnose it as an
+    // access problem ("owned by nobody — ask the owner for a guest invite").
+    // Name the real recovery instead: the lease lapsed, claim it again.
+    if (item.state === "unclaimed") {
+      const lapsed = item.history.some(entry => entry.action === "lease_expired");
+      reject(409, "claim_lease_lapsed", lapsed
+        ? `Work "${item.id}" is unclaimed: its lease lapsed and the claim auto-released — claim it again to continue the work`
+        : `Work "${item.id}" is not claimed — claim it first, then renew`);
+    }
     own(item);
     const progressId = data.progressMessageId;
     if (typeof progressId !== "string" || !progressId.trim()) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
@@ -452,9 +488,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         "The progress update must be newer than the current lease start — post a fresh update in the room first");
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
-      { note: data.note, leaseHours: data.leaseHours ?? undefined, room: roomLike, now: nowMs }));
+      { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     registry.set(roomId, renewed);
     return json(res, 200, renewed);
   }
-  reject(405, "method_not_allowed", "Method not allowed");
+  // RFC 9110: a 405 names the resource's valid methods. The route table above
+  // is the source of truth; an unknown route has no meaningful Allow value.
+  const WORK_CLAIM_METHODS = {
+    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", create: "POST",
+    read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
+    reassign: "POST", renew: "POST",
+  };
+  const allowedMethod = WORK_CLAIM_METHODS[workClaimRoute];
+  reject(405, "method_not_allowed", "Method not allowed",
+    allowedMethod ? { Allow: allowedMethod } : undefined);
 }

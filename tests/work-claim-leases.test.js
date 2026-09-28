@@ -306,7 +306,9 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   assert.equal(review2.value.attestations.length, 1);
   assert.equal(review2.value.attestations[0].note, "second look");
   // reassign drops attestations — reviews belong to the previous owner's round
-  await runRoute({ route: "reassign", id: "a1", body: { newOwner: "instinct" }, registry });
+  // ("instinct" is a live room member here, so W3's membership validation passes)
+  await runRoute({ route: "reassign", id: "a1", body: { newOwner: "instinct" }, registry,
+    storeMembers: { instinct: { id: "instinct", kind: "agent", active: true, permissions: [] } } });
   const { out: read } = await runRoute({ route: "read", id: "a1", registry });
   assert.deepEqual(read.value.attestations, []);
   // release drops them too
