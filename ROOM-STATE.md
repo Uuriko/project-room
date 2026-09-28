@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T23:02:53Z · board: Uuriko/project-room#1160 · watermark: 5880234159 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=147e296e06d8d146d32f263ae6a50a5004bd3f1c191b61fead9921e92c57e2c6 -->
+<!-- generated: 2026-09-28T23:28:33Z · board: Uuriko/project-room#1160 · watermark: 5880586459 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=51ff5968ef2ae9b70af0c5f3b9bfe9a752ace51aeb94766ffef72fc1cdb513e6 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -28,6 +28,7 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-29T03:38:59Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T03:39:00Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-29T03:39:01Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T03:39:02Z | src/events.js, tests/dm-privacy.test.js
+… +1 more
 
 ## file-claims
 file | lane | task-id | state
@@ -35,11 +36,14 @@ cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
+docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-3602 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 scripts/runtime-package.mjs | jill | RC-2026-09-28-2873 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2880 | working
+server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
+server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
 server/board-v2-sqlite.mjs | codex | RC-2026-09-27-1167 | working
 server/command-fields.mjs | jillianai | RC-2026-09-28-2871 | working
 server/discoverability.mjs | jillianai | RC-2026-09-28-2871 | working
@@ -90,6 +94,7 @@ src/room-mcp-join.js | jill | RC-2026-09-28-2873 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
+tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
 tests/command-catalog.test.js | jillianai | RC-2026-09-28-2871 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2879 | submitted
@@ -164,6 +169,7 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-29T03:38:59Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T03:39:00Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-29T03:39:01Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T03:39:02Z | src/events.js, tests/dm-privacy.test.js
+RC-2026-09-28-3602 | jill | working | 2026-09-29T05:20:39Z | server/agent-heartbeats.mjs, server/agent-plugin-routes.mjs, docs/SWARM-PLUG-IN.md, tests/agent-wake-poll.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -193,5 +199,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=318 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=58 overlap_files=16 watermark=5880234159
+board_comments=324 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=62 overlap_files=16 watermark=5880586459
 
