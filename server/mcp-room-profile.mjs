@@ -474,7 +474,7 @@ function webhookListBody(subscriptions) {
   const next = subscriptions.length === 0
     ? [{
       action: "subscribe", method: "POST", path: "/api/agent-webhooks",
-      description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once."
+      description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)."
     }]
     : subscriptions.slice(0, 3).map(subscription => ({
       action: "check-journal", method: "GET",
@@ -484,11 +484,15 @@ function webhookListBody(subscriptions) {
   return { subscriptions, next };
 }
 
-function webhookSubscribeBody(subscription, secretShownOnce) {
+// RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never leaves
+// the server — not even once. The subscription view carries the opaque
+// `secretRef` sentinel; inbound deliveries are verified server-side.
+function webhookSubscribeBody(subscription) {
   const steps = [
     {
-      action: "verify-deliveries",
-      description: "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret."
+      action: "verify-deliveries", method: "POST",
+      path: `/api/agent-webhooks/${encodeURIComponent(subscription.subscriptionId)}/verify-delivery`,
+      description: "Verify inbound deliveries server-side: POST { eventType, data, signature } — the room checks the HMAC with the signing secret and answers { valid }. The secret itself is never returned; keep this subscription's secretRef sentinel."
     },
     {
       action: "check-journal", method: "GET",
@@ -496,15 +500,7 @@ function webhookSubscribeBody(subscription, secretShownOnce) {
       description: "The delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks."
     }
   ];
-  if (secretShownOnce) {
-    steps.unshift({
-      action: "store-secret",
-      description: "Store this signing secret now. It is shown once and is not returned again."
-    });
-  }
-  return secretShownOnce
-    ? { ...subscription, secret: secretShownOnce, next: steps }
-    : { ...subscription, next: steps };
+  return { ...subscription, next: steps };
 }
 
 function wakeFailure(error) {
@@ -540,10 +536,10 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.wakeQueue.resume(secret, args.roomId, request, null, { memberId: args.memberId ?? null });
   }
   if (name === "webhook_subscribe") {
-    const { subscription, secretShownOnce } = store.agentPlugin.subscribeWebhook({
+    const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
     });
-    return webhookSubscribeBody(subscription, secretShownOnce);
+    return webhookSubscribeBody(subscription);
   }
   if (name === "webhook_list") return webhookListBody(store.agentPlugin.listWebhooks(agentId));
   if (name === "webhook_unsubscribe") {

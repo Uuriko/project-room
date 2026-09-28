@@ -23,7 +23,7 @@ import { createAgentApiKeys } from "../server/agent-api-keys.mjs";
 import { createAgentDirectory } from "../server/agent-directory.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
-  createAgentWebhookSubscriptions, verifySignature,
+  createAgentWebhookSubscriptions,
 } from "../server/agent-webhook-subscriptions.mjs";
 import { createA2ATransport } from "../src/a2a-transport.mjs";
 
@@ -100,6 +100,8 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
   assert.equal(newAgent.deadLetters.length, 0);
 
   // --- Step 6: subscribe to room events; verify a signed delivery ---
+  // The agent holds only the sentinel (never the raw secret) and asks the
+  // room to verify inbound deliveries server-side (RC-2026-09-27-2729).
   const subs = createAgentWebhookSubscriptions({ clock: now });
   const secret = "reference-subscription-secret-01";
   const view = subs.subscribe({
@@ -107,16 +109,19 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
     events: ["message.posted"], secret,
   });
   assert.equal(view.agentId, identityId);
+  assert.equal(view.secretRef, `pr_sentinel_${view.subscriptionId}`,
+    "the subscription view carries the opaque sentinel, not the secret");
+  assert.ok(!("secret" in view));
   assert.equal(subs.match(identityId, "message.posted").length, 1);
 
   const delivery = subs.buildDelivery(view.subscriptionId,
     { eventType: "message.posted", data: { threadId: "t-1" } });
-  assert.ok(verifySignature(secret, delivery.signature,
-    { eventType: "message.posted", data: { threadId: "t-1" } }),
-    "the agent verifies the HMAC signature of the inbound delivery");
-  assert.ok(!verifySignature(secret, delivery.signature,
-    { eventType: "message.posted", data: { threadId: "t-2" } }),
-    "tampered payloads fail verification");
+  assert.equal(subs.verifyDelivery(view.subscriptionId,
+    { eventType: "message.posted", data: { threadId: "t-1" }, signature: delivery.signature }),
+    true, "the room verifies the HMAC signature of the inbound delivery");
+  assert.equal(subs.verifyDelivery(view.subscriptionId,
+    { eventType: "message.posted", data: { threadId: "t-2" }, signature: delivery.signature }),
+    false, "tampered payloads fail verification");
   subs.recordAttempt(delivery.deliveryId, { ok: true });
   const journal = subs.journal(view.subscriptionId);
   assert.equal(journal.length, 1);

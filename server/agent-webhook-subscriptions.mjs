@@ -23,6 +23,19 @@ const check = (condition, message) => { if (!condition) fail("invalid_subscripti
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SUBSCRIPTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+// UFO-steal slice 2 (RC-2026-09-27-2729): sentinel-swapped secrets. An
+// agent never holds a raw signing secret — it only ever sees the opaque
+// sentinel `pr_sentinel_<subscriptionId>`, e.g. in the subscription view's
+// `secretRef` field. The raw value lives server-side only (the caller's
+// Map / the `agent_webhook_subs.secret` column) and is resolved to a real
+// value at exactly one trusted boundary — resolveSentinel() below — used
+// only by the delivery signer and verifier. Fail-closed: an unknown or
+// malformed sentinel throws; it never resolves to null, "", or another
+// subscription's secret.
+export const SENTINEL_PREFIX = "pr_sentinel_";
+export const sentinelFor = subscriptionId => `${SENTINEL_PREFIX}${subscriptionId}`;
+const SENTINEL_PATTERN = new RegExp(`^${SENTINEL_PREFIX}[A-Za-z0-9_-]{1,64}$`);
+
 // The canonical dotted event catalog: every room event the subscription
 // surface can filter on, derived from EVENT_TYPES so the taught list can
 // never drift from what the room actually emits, plus the wake-ping event
@@ -51,15 +64,35 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
   let counter = 0;
   const newId = id ?? (() => `sub_${(++counter).toString(36)}${Date.now().toString(36)}`);
 
+  // The agent-visible view. Carries the `secretRef` sentinel (an opaque
+  // handle for the signing secret) — the raw `secret` never appears here,
+  // and no other read path in this module returns it either.
   const subscriptionView = sub => Object.freeze({
     subscriptionId: sub.subscriptionId,
     agentId: sub.agentId,
+    secretRef: sentinelFor(sub.subscriptionId),
     url: sub.url,
     events: Object.freeze([...sub.events]),
     enabled: sub.enabled,
     createdAt: sub.createdAt,
     deliveries: sub.deliveries.length,
   });
+
+  // THE single trusted boundary (UFO-steal slice 2): resolve a sentinel to
+  // the raw signing secret. Everything else in this module handles only
+  // sentinels. Fail-closed — an unknown/malformed sentinel throws
+  // WebhookSubscriptionError("unknown_sentinel"); it never resolves to
+  // null, an empty string, or another subscription's secret. No logging
+  // of the raw value anywhere at this boundary.
+  const resolveSentinel = sentinel => {
+    const ok = typeof sentinel === "string" && SENTINEL_PATTERN.test(sentinel);
+    if (!ok) fail("unknown_sentinel", "unknown signing-secret reference");
+    const sub = subs.get(sentinel.slice(SENTINEL_PREFIX.length));
+    if (!sub || typeof sub.secret !== "string" || sub.secret.length === 0) {
+      fail("unknown_sentinel", "unknown signing-secret reference");
+    }
+    return sub.secret;
+  };
 
   // An agent subscribes its own endpoint to room events. secret (signing
   // secret for delivery verification) is caller-supplied; never echoed
@@ -153,7 +186,10 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
       url: sub.url,
       eventType,
       data: Object.freeze({ ...data }),
-      signature: signPayload(sub.secret, { eventType, data }),
+      // The dispatch boundary: the sentinel is swapped for the real
+      // secret here, server-side, at signing time. Nothing upstream of
+      // this call ever saw the raw value.
+      signature: signPayload(resolveSentinel(sentinelFor(subscriptionId)), { eventType, data }),
       state: "pending",
       attempts: 0,
       createdAt: now(),
@@ -193,7 +229,21 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
         state: d.state, attempts: d.attempts, error: d.error, createdAt: d.createdAt })));
   };
 
-  return Object.freeze({ subscribe, unsubscribe, setEnabled, forAgent, match, buildDelivery, recordAttempt, journal });
+  // Server-side delivery verification (UFO-steal slice 2): the agent
+  // holds only the `secretRef` sentinel, never the raw secret, so it
+  // cannot verify HMAC itself — it asks the room to verify. The raw
+  // secret is resolved at the single trusted boundary above; the result
+  // is a boolean, never the secret. Unknown sentinel fails closed.
+  const verifyDelivery = (subscriptionId, { eventType, data, signature }) => {
+    check(SUBSCRIPTION_ID_PATTERN.test(subscriptionId), "subscriptionId is invalid");
+    check(typeof eventType === "string" && eventType.length > 0, "eventType must be a non-empty string");
+    check(data !== null && typeof data === "object", "data must be an object");
+    const rawSecret = resolveSentinel(sentinelFor(subscriptionId));
+    return verifySignature(rawSecret, signature, { eventType, data });
+  };
+
+  return Object.freeze({ subscribe, unsubscribe, setEnabled, forAgent, match,
+    buildDelivery, recordAttempt, journal, verifyDelivery, resolveSentinel, sentinelFor });
 }
 
 // Sign a delivery payload with the subscription secret (HMAC-SHA256).
