@@ -242,7 +242,8 @@ Enforcer verbs (cron-only; sweep/receipts-scan --post write to the board):
             prose changes nothing).
   rotation-check
             board_comments=<n> threshold=1500 rotation_due=yes|no
-  metrics   [--since ISO]
+  metrics   [--since YYYY-MM-DD|ISO-TIMESTAMP]
+            Date-only means UTC midnight; timestamps need Z or ±HH:MM (±HHMM).
             claims_opened/completed/expired, receipts, missing_receipts,
             distinct_lanes, comments_per_day (machine lines).
 
@@ -2424,19 +2425,27 @@ cmd_metrics() {
     *) die "metrics: unknown flag $1" ;;
   esac; done
   if [ -n "$since" ]; then
-    if [[ "$since" =~ ^(.*)([+-])([0-9]{2}):?([0-9]{2})$ ]]; then
-      local base="${BASH_REMATCH[1]}Z" sign="${BASH_REMATCH[2]}" hh="${BASH_REMATCH[3]}" mm="${BASH_REMATCH[4]}"
-      local base_epoch
-      base_epoch="$(iso_epoch "$base" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
-      local off=$(( 10#$hh * 3600 + 10#$mm * 60 ))
-      if [ "$sign" = "+" ]; then
-        since_epoch=$(( base_epoch - off ))
-      else
-        since_epoch=$(( base_epoch + off ))
-      fi
+    local stamp="$since" base sign hh mm base_epoch normalized off=0
+    # Date-only windows start at UTC midnight. Require an explicit zone on
+    # timestamps so the same command has the same meaning on every host.
+    [[ "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && stamp="${stamp}T00:00:00Z"
+    if [[ "$stamp" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(Z|([+-])([0-9]{2}):?([0-9]{2}))$ ]]; then
+      base="${BASH_REMATCH[1]}Z"; sign="${BASH_REMATCH[3]}"
+      hh="${BASH_REMATCH[4]}"; mm="${BASH_REMATCH[5]}"
     else
-      since_epoch="$(iso_epoch "$since" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+      die "metrics: invalid --since timestamp: $since"
     fi
+    base_epoch="$(iso_epoch "$base" 2>/dev/null)" || die "metrics: invalid --since timestamp: $since"
+    # jq normalizes impossible dates such as February 30. Round-trip the
+    # local wall time before applying the offset instead of accepting that.
+    normalized="$(jq -nr --argjson epoch "$base_epoch" '$epoch | todateiso8601')"
+    [ "$normalized" = "$base" ] || die "metrics: invalid --since timestamp: $since"
+    if [ -n "$sign" ]; then
+      [ "$((10#$hh))" -le 23 ] && [ "$((10#$mm))" -le 59 ] || die "metrics: invalid --since timestamp: $since"
+      off=$((10#$hh * 3600 + 10#$mm * 60))
+      [ "$sign" = "+" ] || off=$((-off))
+    fi
+    since_epoch=$((base_epoch - off))
   fi
   local comments n wm st lo hi days cpd
   comments="$(fetch_comments)"

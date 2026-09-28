@@ -44,7 +44,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const f = await setup(t, viewport);
     f.post("producer", "mod-target", "Synthetic message the guest will report and then mute.");
     const page = await f.signIn(f.keys.guest);
-    const target = page.locator('#message-list li[data-key="mod-target"]');
+    const target = page.locator('#message-list li[data-message-record-id="mod-target"]');
     await target.locator(".message-body").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reports-section").isHidden(), true, "a non-owner never sees the report list");
     // Report: a short reason goes to the owner only; the room sees nothing.
@@ -82,9 +82,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await target.locator(".reaction").count(), 0, "no reactions on a muted message");
     assert.equal(await target.locator('[data-message-action="report"]').count(), 0, "report is offered on visible messages only");
     f.post("producer", "mod-second", "A later message from the muted author.");
-    const second = page.locator('#message-list li[data-key="mod-second"]');
+    const second = page.locator('#message-list li[data-message-record-id="mod-second"]');
     await second.locator(".message-muted").waitFor({ state: "visible" });
-    assert.equal(await page.locator('#message-list li[data-key="test-welcome"] .message-body').textContent(), "Disposable test room. Try a reply and a reaction; no real conversation is affected.", "other authors stay visible");
+    assert.equal(await page.locator('#message-list li[data-message-record-id="test-welcome"] .message-body').textContent(), "Disposable test room. Try a reply and a reaction; no real conversation is affected.", "other authors stay visible");
     const railToggle = page.locator('#presence-list [data-mute-member="producer"]');
     assert.equal(await railToggle.getAttribute("aria-pressed"), "true");
     assert.equal(await railToggle.textContent(), "Unmute Test producer");

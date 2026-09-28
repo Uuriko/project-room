@@ -31,13 +31,14 @@ exit 0
       PATH: `${bin}:${process.env.PATH}`,
     };
 
-    const result = spawnSync('bash', [room, 'metrics', '--since', 'garbage'], { encoding: 'utf8', env });
-    assert.equal(result.status, 1, `status was ${result.status}: ${result.stderr}`);
-    assert.ok(
-      result.stderr.includes('room: error: metrics: invalid --since timestamp: garbage'),
-      `stderr did not contain expected message: ${result.stderr}`
-    );
-    assert.equal(readFileSync(log, 'utf8'), '', 'mock gh was called, validation did not happen before fetch_comments');
+    for (const since of ['garbage', '2026-02-30T12:00:00Z', '2026-02-29',
+      '2026-09-23T12:00:00+24:00', '2026-09-23T12:00:00-07:60', '2026-09-23T12:00:00+99:99']) {
+      writeFileSync(log, '');
+      const result = spawnSync('bash', [room, 'metrics', '--since', since], { encoding: 'utf8', env, timeout: 10000 });
+      assert.equal(result.status, 1, `${since}: ${result.stderr}`);
+      assert.ok(result.stderr.includes(`room: error: metrics: invalid --since timestamp: ${since}`), result.stderr);
+      assert.equal(readFileSync(log, 'utf8'), '', `${since}: invalid input contacted the board`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -79,12 +80,22 @@ esac
       PATH: `${bin}:${process.env.PATH}`,
     };
 
-    const resA = spawnSync('bash', [room, 'metrics', '--since', '2026-09-23T12:00:00Z'], { encoding: 'utf8', env });
-    const resB = spawnSync('bash', [room, 'metrics', '--since', '2026-09-23T16:00:00+04:00'], { encoding: 'utf8', env });
-
-    assert.equal(resA.status, 0, `Command A failed: ${resA.stderr}`);
-    assert.equal(resB.status, 0, `Command B failed: ${resB.stderr}`);
-    assert.equal(resA.stdout, resB.stdout, 'Outputs differed between UTC and equivalent offset timestamps');
+    const run = since => spawnSync('bash', [room, 'metrics', '--since', since], { encoding: 'utf8', env, timeout: 10000 });
+    const utc = run('2026-09-23T12:00:00Z');
+    assert.equal(utc.status, 0, utc.stderr);
+    assert.match(utc.stdout, /^claims_opened=2$/m);
+    assert.match(utc.stdout, /^comments_per_day=2\.00$/m);
+    for (const since of ['2026-09-23T16:00:00+04:00', '2026-09-23T05:00:00-0700']) {
+      const result = run(since);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, utc.stdout, since);
+    }
+    for (const since of ['2026-09-23', '2026-09-23T00:00:00Z', '2024-02-29']) {
+      const result = run(since);
+      assert.equal(result.status, 0, `${since}: ${result.stderr}`);
+      assert.match(result.stdout, /^claims_opened=2$/m);
+      assert.match(result.stdout, /^comments_per_day=3\.00$/m);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

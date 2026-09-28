@@ -1973,7 +1973,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
+  const newMessages = sameView ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
@@ -1996,16 +1996,18 @@ function renderMessages() {
   // Chromium collapses a selection when its containing node is moved, so the
   // selection is captured up front and restored after the reorder below.
   const savedSelection = captureTimelineSelection(list);
-  const keep = new Set(messages.map(m => m.id));
+  // Message IDs are caller-controlled and may themselves begin with "work:".
+  const keep = new Set(messages.map(m => `message:${m.id}`));
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
   const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   messages.forEach((message, index) => {
-    const node = previous.get(message.id) || document.createElement("li");
+    const key = `message:${message.id}`;
+    const node = previous.get(key) || document.createElement("li");
     const cluster = messageCluster(messages, index);
     const domId = recordDomId("message", message.id);
     if (node.id !== domId) node.id = domId;
-    if (node.dataset.key !== message.id) node.dataset.key = message.id;
+    if (node.dataset.key !== key) node.dataset.key = key;
     if (node.dataset.messageRecordId !== message.id) node.dataset.messageRecordId = message.id;
     const muted = isMutedBy(state, session?.member?.id, message.authorId);
     const className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`;
