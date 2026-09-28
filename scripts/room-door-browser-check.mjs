@@ -46,9 +46,10 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#join-empty").getAttribute("hidden"), "");
     assert.equal(await paste.getAttribute("href"), "#join-agent");
     assert.equal(await people.getAttribute("href"), "#people");
-    assert.equal(await page.locator(".actions a").count(), 2, "first paint is Open + Join");
+    assert.equal(await page.locator(".actions a").count(), 2, "first paint is Start a room + Open");
+    assert.equal(await page.getByRole("link", { name: "Start a room", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?start=room`);
     assert.equal(await page.locator(".actions .open").count(), 1);
-    assert.equal(await page.locator(".whispers .whisper").count(), 2, "People + Join with code are whispers");
+    assert.equal(await page.locator(".whispers .whisper").count(), 3, "Join, People and Join with code are whispers");
     assert.equal(await page.getByRole("heading", { name: "Connect", exact: true }).count(), 1);
     assert.equal(await page.getByRole("link", { name: "Connect an agent", exact: true }).count(), 0);
     const mcp = page.getByRole("link", { name: "Add Room as MCP", exact: true });

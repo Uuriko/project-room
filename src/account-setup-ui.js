@@ -1,9 +1,13 @@
 // Account-owned setup. OAuth resumes from the persisted step; no mailbox data
 // or answers are kept in browser storage.
-export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
+// inRoom: when setup opens over a room (for example after Start a room), it
+// asks for a name only and does not send the person to Gmail.
+export function installAccountSetup({ api, owns, onInbox, gmailNotice = "", inRoom = () => false }) {
   const dialog = document.createElement('dialog'); dialog.id = 'account-setup-dialog'; dialog.className = 'account-setup-dialog';
   dialog.setAttribute('aria-labelledby', 'account-setup-title'); document.body.append(dialog);
-  let current = null, busy = false, generation = 0, checked = false;
+  let current = null, busy = false, generation = 0, checked = false, naming = false, flight = null;
+  const waiters = [];
+  dialog.addEventListener('close', () => { naming = false; waiters.splice(0).forEach(done => done()); });
   const el = (tag, text, className) => { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; return node; };
   const button = (label, action, primary = false) => { const b = el('button', label, 'button ' + (primary ? 'primary' : 'ghost')); b.type = 'button'; b.onclick = action; return b; };
   async function save(patch) {
@@ -23,7 +27,8 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
     if (!owns() || !current) return;
     const step = current.step;
     let answers = () => ({});
-    const progress = el('p', `Step ${step + 1} of 3`, 'form-hint');
+    const roomFirst = step === 0 && (naming || inRoom());
+    const progress = el('p', roomFirst ? '' : `Step ${step + 1} of 3`, 'form-hint'); progress.hidden = roomFirst;
     const title = el('h2', ['Make Project Room yours', 'Connect your email', 'You’re ready'][step]); title.id = 'account-setup-title'; title.tabIndex = -1;
     const status = el('p', '', 'form-hint'); status.setAttribute('role', 'status');
     const content = el('div', '', 'account-setup-content'), actions = el('div', '', 'account-setup-actions');
@@ -33,7 +38,9 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
       for (const [value, text] of [['personal', 'My projects and messages'], ['team', 'Working with a team'], ['agents', 'Working with AI agents'], ['', 'I’m exploring']]) { const o = el('option', text); o.value = value; purpose.append(o); }
       purpose.value = current.purpose; field.append(purpose); content.append(field);
       answers = () => ({ name: name.value.trim(), purpose: purpose.value });
-      actions.append(button('Continue', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, step: 1 }); render(); }), true));
+      actions.append(roomFirst
+        ? button('Done', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, completed: true }); dialog.close(); }), true)
+        : button('Continue', () => run(async () => { await save({ name: name.value.trim(), purpose: purpose.value, step: 1 }); render(); }), true));
     } else if (step === 1) {
       content.append(el('p', 'Read, send, and organize Gmail here.'));
       if (gmailNotice) content.append(el('p', gmailNotice, 'form-hint'));
@@ -61,14 +68,27 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
       content.append(el('p', 'Your inbox is private. Choose what to share when you bring a message into a room.'));
       actions.append(button('Back', () => run(async () => { await save({ step: 1 }); render(); })), button('Open my inbox', () => run(async () => { await save({ completed: true }); dialog.close(); onInbox(); }), true));
     }
-    if (step !== 1) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
+    if (step !== 1 && !roomFirst) actions.append(button('Set up later', () => run(async () => { await save({ ...answers(), completed: true }); dialog.close(); })));
     dialog.replaceChildren(progress, title, content, status, actions);
     if (!dialog.open) dialog.showModal(); title.focus();
   }
   dialog.addEventListener('cancel', event => { event.preventDefault(); run(async () => { await save({ completed: true }); dialog.close(); }); });
-  return {
-    async check(force = false) {
-      if (!owns() || checked && !force) return; checked = true;
+  const ui = {
+    // Start a room: ask for a name before the room is made, so the owner
+    // doesn't join it as "Owner". Resolves once setup is done or not needed.
+    async askName() {
+      naming = true;
+      await (flight ?? ui.check());
+      if (!dialog.open) { naming = false; return; }
+      if (!busy) render();
+      await new Promise(done => waiters.push(done));
+    },
+    check(force = false) {
+      if (!owns() || checked && !force) return flight ?? Promise.resolve(); checked = true;
+      flight = ui.load(force).finally(() => { flight = null; });
+      return flight;
+    },
+    async load(force) {
       const turn = generation;
       try {
         const value = await api.request('/setup'); if (turn !== generation || !owns()) return;
@@ -76,6 +96,9 @@ export function installAccountSetup({ api, owns, onInbox, gmailNotice = "" }) {
         if (force || !current.completed) render();
       } catch { if (turn === generation) checked = false; }
     },
+    // Re-render an open dialog, e.g. once a room has opened under it.
+    refresh() { if (dialog.open && !busy) render(); },
     reset() { generation++; checked = false; busy = false; current = null; dialog.close(); dialog.replaceChildren(); }
   };
+  return ui;
 }

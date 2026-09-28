@@ -34,6 +34,7 @@ import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChi
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
+import { chatSuggestions } from "./chat-suggestions.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -108,6 +109,27 @@ const initialJoinFragment = (() => {
   if (restored) { try { location.hash = restored.fragment; } catch { /* ignore */ } }
   return consumeJoinFragment();
 })();
+// Start a room: the door's main button opens /?start=room. The intent rides
+// sessionStorage through an OAuth round-trip in this tab, and after sign-in
+// the visitor lands inside their room instead of the Inbox.
+const START_ROOM_KEY = "pr-start-room";
+let startRoomIntent = (() => {
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.get("start") === "room") {
+      window.sessionStorage.setItem(START_ROOM_KEY, "1");
+      url.searchParams.delete("start");
+      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    }
+    return window.sessionStorage.getItem(START_ROOM_KEY) === "1";
+  } catch { return false; }
+})();
+function consumeStartRoomIntent() {
+  const wanted = startRoomIntent;
+  startRoomIntent = false;
+  try { window.sessionStorage.removeItem(START_ROOM_KEY); } catch { /* storage may be blocked */ }
+  return wanted;
+}
 // A Google/GitHub OAuth round-trip drops the #invite/ fragment (it never
 // reaches the server). Restore a stashed invitation one-shot when landing
 // without a room context, so the dialog re-opens after OAuth sign-in.
@@ -627,10 +649,26 @@ function showAccountWorkspace() {
     $(".connection-bar").hidden = true;
   }
   inboxUI.sync();
+  if (!state && startRoomIntent && !initialInvitationFragment && !initialJoinFragment && consumeStartRoomIntent()) {
+    openStartedRoom();
+    return;
+  }
   if (!state) {
     if (["#pr-view/rooms", "#pr-view/room-list"].includes(location.hash)) inboxUI.showRoomList();
     else inboxUI.open();
   }
+}
+async function openStartedRoom() {
+  const owned = accountClient.session;
+  try { await inboxUI.askSetupName?.(); } catch { /* setup is optional; the room still opens */ }
+  if (accountClient.session !== owned || state) return;
+  const body = await ensureDefaultRoom();
+  if (accountClient.session !== owned || state) return;
+  const roomId = body?.room?.id;
+  if (!roomId) { inboxUI.open(); return; }
+  history.replaceState(null, "", roomHandoffLocation(roomId));
+  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
   if (accountCheckFlight || !accountClient.session?.authenticated || signoutLoading || invitationIsCommitting() || leavingPage) return accountCheckFlight;
@@ -981,8 +1019,8 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   setFormStatus($("#auth-link-error"), "");
   const roomHint = $("#auth-room-hint");
   if (roomHint) {
-    roomHint.hidden = true;
-    roomHint.textContent = "";
+    roomHint.hidden = !startRoomIntent;
+    roomHint.textContent = startRoomIntent ? "Sign in to start your room. It’s free." : "";
   }
   if ($("#auth-kind-hint")) $("#auth-kind-hint").textContent = KEY_KIND_HINT;
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
@@ -1466,6 +1504,7 @@ function selectOptions(selector, members, blank) {
   if (previous) select.value = previous;
   select.dataset.signature = signature;
 }
+const WORK_PERMISSIONS = ["accept_work", "complete_work"];
 function syncWorkForm() {
   if (!state || busy) return;
   setWorkRetry(workRetryLocked);
@@ -1477,8 +1516,14 @@ function syncWorkForm() {
   const writing = $("#work-mode-select").value === "write";
   syncWorkPolicy();
   const reviewing = $("#require-verification").checked;
-  selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission))), "Choose assignee");
+  const assignable = active.filter(member => [...WORK_PERMISSIONS, ...(writing ? ["write_external"] : [])]
+    .every(permission => member.permissions.includes(permission)));
+  selectOptions("#assignee-select", assignable, "Choose assignee");
+  const waiting = active.filter(member => member.kind === "agent" && !assignable.includes(member));
+  if ($("#assignee-hint")) {
+    $("#assignee-hint").hidden = waiting.length === 0;
+    $("#assignee-hint").textContent = waiting.length ? `${waiting.map(m => m.displayName).join(", ")} can't take work yet. Change that in People.` : "";
+  }
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
   selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
@@ -1652,11 +1697,18 @@ function render() {
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
+  syncChatSuggestions();
   syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
+  // H4: agents that joined through a room link arrive with no permissions, so
+  // they never appear as assignees. The click handler leaves owner-connected
+  // agents alone, because changing their access retires their connection key.
+  const workControl = m => !ownerView || m.kind !== "agent" || m.active === false
+    || WORK_PERMISSIONS.every(p => m.permissions.includes(p)) ? ""
+    : `<button type="button" class="text-button" data-member-work="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>Let them take work</button>`;
   // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
   // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
   const memberActions = m => {
@@ -1694,7 +1746,7 @@ function render() {
     const ownedBy = serverPresence?.ownerIdentityId
       ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -1818,6 +1870,38 @@ function renderChannels() {
   }).join("");
   if (list._html !== html) { list.innerHTML = html; list._html = html; }
 }
+// One-tap replies and a task nudge under the latest message in view
+// (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
+const dismissedSuggestions = new Set();
+function syncChatSuggestions() {
+  const box = $("#chat-suggestions");
+  if (!box) return;
+  const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
+    : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const latest = messages.at(-1);
+  const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
+    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions }) : null;
+  const signature = offer ? JSON.stringify(offer) : "";
+  if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature;
+  box.hidden = !offer;
+  if (!offer) { box.replaceChildren(); return; }
+  box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}">${esc(choice)}</button>`).join("")
+    + (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
+    + `<button type="button" class="suggestion-dismiss" data-suggest-dismiss="${esc(offer.messageId)}" aria-label="Hide suggestions" title="Hide">×</button>`;
+}
+$("#chat-suggestions")?.addEventListener("click", e => {
+  const reply = e.target.closest("[data-suggest-reply]"), task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
+  if (dismiss) { dismissedSuggestions.add(dismiss.dataset.suggestDismiss); syncChatSuggestions(); $("#message-input").focus(); return; }
+  if (task) { dismissedSuggestions.add(task.dataset.suggestTask); syncChatSuggestions(); openWork(task.dataset.suggestTask); return; }
+  if (!reply || busy || !state) return;
+  const input = $("#message-input");
+  // A chip only fills a message the person hasn't started, then sends it
+  // through the normal composer (same retry and ownership rules).
+  if (input.value.trim()) { input.focus(); return; }
+  input.value = reply.dataset.suggestReply;
+  $("#message-form").requestSubmit();
+});
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
@@ -2682,6 +2766,14 @@ function accessPreviewHtml(i) {
   const readers = roster.map(member => `${esc(member.displayName)}${member.kind === "agent" ? " (agent)" : ""}${referenced.has(member.id) ? " · on this task" : ""}`).join(", ");
   return `<section class="access-preview" id="${esc(id)}" data-access-panel="${esc(i.id)}" role="region" aria-labelledby="${esc(id)}-title"><h4 id="${esc(id)}-title">What this agent can access</h4><p class="form-hint">The one-task view an agent reads before it starts, evaluated ${esc(new Date(entry.evaluatedAt).toLocaleString())}. Read-only: opening it starts nothing and grants nothing. Organization allowlists are not available yet.</p><dl class="work-facts"><div><dt>Conversation</dt><dd>${conversationLine}</dd></div><div><dt>Evidence</dt><dd>${evidence}</dd></div><div><dt>Budget</dt><dd>${budget}</dd></div><div><dt>Who can read</dt><dd>Room-wide membership: ${roster.length} active ${roster.length === 1 ? "member" : "members"} share this view — ${readers}. This is not a task-level grant.</dd></div><div><dt>Not included</dt><dd data-access-omitted>${summary.omitted.map(entry => esc(humanize(entry))).join(", ")}</dd></div></dl></section>`;
 }
+// Claims record which other active claims already held the same paths when
+// they were taken (src/events.js claimOverlaps). Show them so both holders talk.
+const claimOverlapCount = i => i.claim?.status === "active" ? (i.claim.overlaps ?? []).length : 0;
+function claimOverlapHtml(i) {
+  if (!claimOverlapCount(i)) return "";
+  const rows = i.claim.overlaps.map(o => `<li>${esc(state?.workItems?.[o.workItemId]?.title ?? o.workItemId)} · ${esc(memberLabel(o.holderId))} · ${esc(o.paths.join(", "))}</li>`).join("");
+  return `<p class="claim-overlap">Already claimed by others. Talk before you both edit:</p><ul class="claim-overlap-list">${rows}</ul>`;
+}
 function workCard(i, now, drafts, messages = []) {
   const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
@@ -2695,7 +2787,7 @@ function workCard(i, now, drafts, messages = []) {
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p>${source ? `<p><a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-handoff-source:${esc(i.id)}">Open discussion</a></p>` : ""}<details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const attempts = attemptLedger(i);
@@ -3727,6 +3819,32 @@ $("#share-link-admins").addEventListener("click", e => {
     revealPeopleChrome(); $("#people-panel > summary").focus();
   }, { once: true });
   $("#share-link-dialog").close();
+});
+$("#presence-list").addEventListener("click", async e => {
+  const button = e.target.closest("[data-member-work]");
+  if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
+  e.preventDefault();
+  const member = state.members[button.dataset.memberWork];
+  if (!member || member.kind !== "agent" || member.active === false) return;
+  const permissions = [...new Set([...member.permissions, ...WORK_PERMISSIONS])], generation = client.generation;
+  memberActionBusy = true; button.disabled = true;
+  try {
+    const { connections = [] } = await client.request(client.path("/agent-connections"));
+    if (generation !== client.generation || !state) return;
+    if (connections.some(row => row.memberId === member.id && row.status === "key_issued")) {
+      notice(`${member.displayName} connected with its own key. In Add agent, open Manage connections and choose Contribute work.`, true);
+      return;
+    }
+    const entry = draftCommand(null, T.MEMBER_ACCESS_CHANGED, { memberId: member.id, expectedMemberRevision: member.revision, permissions, active: true });
+    await client.send(entry.command);
+    if (generation !== client.generation || !state) return;
+    notice(`${member.displayName} can take work now.`);
+  } catch (error) {
+    if (generation === client.generation && state) notice(error.message || "Not saved. Try again.", true);
+  } finally {
+    memberActionBusy = false;
+    if (generation === client.generation && state) render();
+  }
 });
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-admin]");

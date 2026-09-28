@@ -38,6 +38,7 @@ import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
+import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -728,6 +729,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
         return writeRoomMcpNode(req, res, url);
+      }
+      if (isA2aPath(inboundPath)) {
+        rate(`a2a:${remoteAddress}`, 60);
+        const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large")) : "";
+        return writeA2aNode(req, res, { bodyText: text });
       }
       checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
