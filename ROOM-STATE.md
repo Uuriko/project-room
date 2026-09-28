@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T02:58:05Z · board: Uuriko/project-room#1160 · watermark: 5862298929 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=a46fcc4b1d8ab3b638fa48e8267e6ca784de9298bb5cb6f6a95da9d583d2a43d -->
+<!-- generated: 2026-09-28T03:28:06Z · board: Uuriko/project-room#1160 · watermark: 5862668869 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=527644a4d9296f4887d0c8091f02b770c9608d17cd87e07fa96611d249bca670 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -7,13 +7,17 @@ RC-2026-09-27-1165 | codex | working | 2026-09-28T00:53:58Z | server/owner-atten
 RC-2026-09-27-1167 | codex | working | 2026-09-28T01:45:05Z | server/board-v2-sqlite.mjs, cloudflare/http.check.mjs
 RC-2026-09-27-005 | instinct | working | 2026-09-28T02:04:39Z | server/referral-invites.mjs, tests/referral-invites.test.js
 RC-2026-09-27-2728 | jill | working | 2026-09-28T06:28:17Z | server/grants.mjs, server/schema additions, authz scope-check path
+RC-2026-09-27-2741 | jill | working | 2026-09-28T09:17:37Z | PR #1173 — server/grants.mjs, schema additions, authz scope-check path
 
 ## file-claims
 file | lane | task-id | state
+PR #1173 — server/grants.mjs | jill | RC-2026-09-27-2741 | working
 authz scope-check path | jill | RC-2026-09-27-2728 | working
+authz scope-check path | jill | RC-2026-09-27-2741 | working
 cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
 docs/openapi.yaml | codex | RC-2026-09-27-1165 | working
 index.html | codex | RC-2026-09-27-1165 | working
+schema additions | jill | RC-2026-09-27-2741 | working
 scripts/access-preview-browser-check.mjs | codex | RC-2026-09-27-1165 | working
 server/board-v2-sqlite.mjs | codex | RC-2026-09-27-1167 | working
 server/grants.mjs | jill | RC-2026-09-27-2728 | working
@@ -28,11 +32,12 @@ tests/referral-invites.test.js | instinct | RC-2026-09-27-005 | working
 
 ## overlap-warnings
 file | lanes | task-ids
-(none)
+authz scope-check path | jill | RC-2026-09-27-2728, RC-2026-09-27-2741
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-27-2728 | jill | working | 2026-09-28T06:28:17Z | server/grants.mjs, server/schema additions, authz scope-check path
+RC-2026-09-27-2741 | jill | working | 2026-09-28T09:17:37Z | PR #1173 — server/grants.mjs, schema additions, authz scope-check path
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -62,5 +67,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=71 threshold=1500 rotation_due=no watcher=active open_claims=4 prose_open=0 unfenced_prose=0 files_claimed=15 overlap_files=0 watermark=5862298929
+board_comments=75 threshold=1500 rotation_due=no watcher=active open_claims=5 prose_open=0 unfenced_prose=0 files_claimed=17 overlap_files=1 watermark=5862668869
 
