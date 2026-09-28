@@ -53,3 +53,35 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
     assert.deepEqual(errors, []);
   });
 }
+
+test("an unanswered question offers Ask @Agent, which only prefills the mention", { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, reducedMotion: "reduce" }), errors = [];
+  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
+  await page.clock.install();
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await fillAccessKey(page, f.keys.owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+
+  const box = page.locator("#chat-suggestions");
+  f.store.command(f.keys.guest, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "unanswered", body: "Where does the deploy log live?" } });
+  await page.locator("#message-list").getByText("Where does the deploy log live?").waitFor();
+  assert.equal(await box.locator("[data-suggest-agent]").count(), 0, "no chip before the wait");
+  await page.clock.fastForward("02:05");
+  const ask = box.locator("[data-suggest-agent]");
+  await ask.waitFor();
+  assert.match(await ask.textContent(), /^Ask @/);
+  const before = f.store.snapshot(f.keys.owner, "commons").state.messages.length;
+  await ask.click();
+  assert.match(await page.locator("#message-input").inputValue(), /^@\S.* $/);
+  await box.locator("[data-suggest-agent]").waitFor({ state: "detached" });
+  assert.equal(f.store.snapshot(f.keys.owner, "commons").state.messages.length, before, "the tap sends nothing");
+  assert.deepEqual(errors, []);
+});

@@ -11,6 +11,7 @@
 //   3. a yes/no question ("Can you...?", "Should we...?") -> Yes / No.
 // A task nudge appears for a request that reads like work ("can someone",
 // "please", "by Friday", "TODO") when no work item is linked yet.
+// An "Ask @Agent" chip appears when a person's question has sat unanswered.
 
 const MAX_CHOICES = 4;
 const MAX_CHOICE_CHARS = 40;
@@ -86,11 +87,32 @@ export function suggestsTask(message) {
   return TASKLIKE.some(pattern => pattern.test(body));
 }
 
+export const ASK_AGENT_AFTER_MS = 2 * 60 * 1000;
+
+// A person's question that is still the latest message, with no thread
+// replies, after ASK_AGENT_AFTER_MS. Offers one active agent that is not the
+// asker and is not already mentioned; agents that can take work come first.
+export function askAgentSuggestion(message, { members = {}, replyCount = 0, now = Date.now(), waitMs = ASK_AGENT_AFTER_MS } = {}) {
+  const body = typeof message?.body === "string" ? message.body.trim() : "";
+  if (!body.endsWith("?") || replyCount > 0) return null;
+  const author = members[message.authorId];
+  if (!author || author.kind === "agent") return null;
+  const asked = Date.parse(message.createdAt);
+  if (!Number.isFinite(asked) || now - asked < waitMs) return null;
+  const agents = Object.values(members).filter(m => m.kind === "agent" && m.active !== false && m.id !== message.authorId && m.displayName);
+  if (agents.some(m => body.includes(`@${m.displayName}`))) return null;
+  const canWork = m => (m.permissions ?? []).includes("accept_work");
+  const pick = agents.sort((a, b) => Number(canWork(b)) - Number(canWork(a)) || a.displayName.localeCompare(b.displayName))[0];
+  return pick ? { memberId: pick.id, name: pick.displayName } : null;
+}
+
 // What to offer under the latest message in view. The viewer never gets
 // reply choices for their own message; the task nudge needs steer.
-export function chatSuggestions(message, { viewerId, canCreateWork = false, dismissed = new Set() } = {}) {
+// ask carries askAgentSuggestion's options; without it no agent is offered.
+export function chatSuggestions(message, { viewerId, canCreateWork = false, dismissed = new Set(), ask = null } = {}) {
   if (!message || message.deletedAt || dismissed.has(message.id)) return null;
-  const choices = message.actorId !== viewerId ? replyChoices(message) : null;
+  const choices = message.authorId !== viewerId ? replyChoices(message) : null;
   const task = canCreateWork && suggestsTask(message);
-  return choices || task ? { messageId: message.id, choices: choices ?? [], task } : null;
+  const agent = ask ? askAgentSuggestion(message, ask) : null;
+  return choices || task || agent ? { messageId: message.id, choices: choices ?? [], task, ...(agent ? { agent } : {}) } : null;
 }
