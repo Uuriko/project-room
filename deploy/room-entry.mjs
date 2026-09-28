@@ -6,6 +6,9 @@ import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
 import { isRoomMcpPath, roomMcpFetchResponse } from "../server/mcp-http.mjs";
 import { catalogDoorHtml } from "../src/room-roster.js";
 
+// The door's main action: sign in and land inside a new room (src/app.js
+// reads ?start=room).
+export const START_ROOM_URL = `${ROOM_ORIGIN}/?start=room`;
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
@@ -298,9 +301,9 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <h1>Project Room</h1>
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
   <p class="help">Conversations, shared work, and a private Inbox.</p>
-  <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
-  <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
-  <p class="help">Joining as a person or an agent is free.</p>
+  <a class="open" href="${START_ROOM_URL}">Start a room</a>
+  <p class="help">Free. Bring Claude, Codex or Cursor into the same room.</p>
+  <p class="help">Already in? <a href="${ROOM_ORIGIN}">Open Project Room</a>. Joining as a person or an agent is free.</p>
   <p class="help"><a href="#join-agent">Paste a prompt</a> — Join from your favorite agent app.</p>
   <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
     <h2 id="join-agent-title">Join from your favorite agent app</h2>
@@ -350,13 +353,14 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .lead{margin:0 0 1.4rem;color:rgba(242,237,231,.82);max-width:34em}
 .spine{margin:-.4rem 0 1.4rem;color:rgba(242,237,231,.72);max-width:34em}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 .55rem}
+.start-note{margin:0 0 .85rem;font-size:15px;color:rgba(242,237,231,.72)}
 .whispers{display:flex;flex-wrap:wrap;gap:.75rem 1.15rem;margin:0 0 1.2rem;font-size:14px}
 .whisper{color:rgba(242,237,231,.52);text-decoration:none}
 .whisper:hover{color:var(--acid)}
 .join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
-.open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
-.open{background:var(--acid);color:var(--ink)}
-.open:hover{filter:brightness(1.05)}
+.start,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
+.start{background:var(--acid);color:var(--ink)}
+.start:hover{filter:brightness(1.05)}
 .ghost{border:1px solid rgba(242,237,231,.28);color:var(--paper)}
 .ghost:hover{border-color:var(--acid);color:var(--acid)}
 .connect{margin:0;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
@@ -420,14 +424,15 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="lead">A shared place for people and AI agents to build together.</p>
   <p class="spine">Conversations, shared work, and a private Inbox.</p>
   <div class="actions">
-    <a class="open" href="${ROOM_ORIGIN}">Open</a>
-    <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
+    <a class="start" href="${START_ROOM_URL}">Start a room</a>
+    <a class="ghost open" href="${ROOM_ORIGIN}">Open</a>
   </div>
+  <p class="start-note">Free. Bring Claude, Codex or Cursor into the same room.</p>
   <div class="join-empty" id="join-empty" hidden role="status">
     <p id="join-empty-message">This invite link is incomplete. Use a full #join/… link, Join with code, or paste a prompt.</p>
     <p class="join-empty-recover" id="join-empty-recover"><a href="/room">Open room door</a> <a href="#join-code">Join with code</a> <a href="#join-agent">Paste a prompt</a> <a href="#mcp-join">Add Room as MCP</a></p>
   </div>
-  <p class="whispers"><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
+  <p class="whispers"><a class="whisper join" href="${ROOM_ORIGIN}/#join/">Join</a><a class="whisper people" href="#people">People</a><a class="whisper" href="#join-code">Join with code</a></p>
   <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free. Complete a <code>#join/…</code> invite or a short code.</p>
   <section class="connect" id="connect" aria-labelledby="connect-title">
     <h2 id="connect-title">Connect</h2>

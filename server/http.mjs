@@ -17,6 +17,7 @@ import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectS
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
@@ -38,6 +39,7 @@ import { SKILLS_CATALOG_PATH } from "../deploy/agent-discovery.mjs";
 const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
+import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -532,6 +534,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
+  // Owner delegates (server/owner-delegates.mjs) need no parallel auth path:
+  // store.authenticate stamps the delegate flag on the member copy whenever
+  // the identity holds an active per-room grant, so route handlers keep
+  // their own authorization and a delegate only passes gates that name the
+  // delegate flag explicitly.
+  function roomAuth(selected, roomId, fence) {
+    return selected.mode === "account"
+      ? store.authenticateAccountSession(selected.token, roomId, fence)
+      : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+  }
   function roomCredentials(req, url) {
     const bearerToken = bearer(req);
     if (bearerToken) return { token: bearerToken, bearer: true, mode: "room" };
@@ -728,6 +740,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
         }
         return writeRoomMcpNode(req, res, url);
+      }
+      if (isA2aPath(inboundPath)) {
+        rate(`a2a:${remoteAddress}`, 60);
+        const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large")) : "";
+        return writeA2aNode(req, res, { bodyText: text });
       }
       checkOrigin(req);
       url.pathname = rewriteRoomApiPrefix(inboundPath);
@@ -1182,6 +1199,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scopes_supported: [...OAUTH_SCOPES],
           token_endpoint_auth_methods_supported: ["none"], // public clients with PKCE
         });
+      }
+      // GET /.well-known/feedback — /feedback standard discovery metadata.
+      // Mirrors docs/feedback-endpoint.md §7: version, intake URL template,
+      // accepted severities, identity requirements, rate limit, triage SLA,
+      // verdict enum, and the verdict polling URL template. Plain JSON, no
+      // signature: the standard's discovery card is advisory, not
+      // attestable (it states the room's policy; the room's signed agent
+      // card is the attestable surface). Unaauthenticated like the other
+      // well-known metadata on this door.
+      if (url.pathname === "/.well-known/feedback" && ["GET", "HEAD"].includes(req.method)) {
+        const origin = expectedOrigin();
+        return json(res, 200, {
+          feedback_version: "1",
+          intake: { url_template: `${origin}/api/rooms/{roomId}/feedback`, method: "POST" },
+          severities: ["bug", "perf", "missing-feature", "docs"],
+          identity: { required: "authenticated room member", lane: "member id", guests: "read-only" },
+          rate_limit: { filings_per_lane_per_hour: 10 },
+          triage_sla: "reviewers aim for a first verdict within 24 hours of filing",
+          verdict_enum: ["real", "junk", "user-error"],
+          verdict_polling: { url_template: `${origin}/api/rooms/{roomId}/feedback/{feedback_id}`, method: "GET" },
+        }, req.method === "HEAD");
       }
       // GET /oauth/authorize — validate the request and show the consent screen.
       // The user must be logged in (account session cookie); otherwise redirect
@@ -2336,8 +2374,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest invite mint fields");
         const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
-          : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, data.roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         protectWrite(req, auth, selected.bearer);
@@ -2977,9 +3014,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const action = landAdd ? "add_land_item" : landList ? "list_land_queue" : landRemove ? "remove_land_item" : "report_tip";
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = selected.mode === "account"
-          ? store.authenticateAccountSession(selected.token, roomId, fence)
-          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (auth.kind === "api-key") {
@@ -3035,9 +3070,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const writing = req.method === "POST";
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = selected.mode === "account"
-          ? store.authenticateAccountSession(selected.token, roomId, fence)
-          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (auth.kind === "api-key") {
@@ -3080,6 +3113,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const delegationGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/grant$/.exec(url.pathname);
       const delegationRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/revoke$/.exec(url.pathname);
       const delegationListMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation$/.exec(url.pathname);
+      // Owner delegates (server/owner-delegates.mjs): per-room grants that
+      // let an agent identity act with the owner's authority. Grant, revoke,
+      // and list are owner-only; the holder can never grant further.
+      const ownerDelegateGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates\/grant$/.exec(url.pathname);
+      const ownerDelegateRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates\/revoke$/.exec(url.pathname);
+      const ownerDelegateListMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates$/.exec(url.pathname);
       // Attention: DELETE /api/rooms/:roomId/saved/:messageId unsaves one message.
       const savedDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/saved\/([^/]{1,384})$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
@@ -3160,6 +3199,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimMatch = workClaimsMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
+      // Agent /feedback endpoint (structured bug/feature reports): every
+      // route template below is documented in docs/openapi.yaml — the
+      // route-docs gate extracts these literals from this file. The literal
+      // segments (queue, notifications) are tested before the {id} template
+      // so they are never mistaken for a feedback id (each regex is
+      // anchored, so this is belt-and-braces).
+      const feedbackBaseMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback$/.exec(url.pathname);
+      const feedbackQueueMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/queue$/.exec(url.pathname);
+      const feedbackNotificationsMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/notifications$/.exec(url.pathname);
+      const feedbackItemMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})$/.exec(url.pathname);
+      const feedbackTriageMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/triage$/.exec(url.pathname);
+      const feedbackAppealMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/appeal$/.exec(url.pathname);
+      const feedbackAppealDecisionMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/appeal\/decision$/.exec(url.pathname);
+      const feedbackOutcomeMatch = /^\/api\/rooms\/([^/]{1,384})\/feedback\/([^/]{1,64})\/outcome$/.exec(url.pathname);
+      const feedbackMatch = feedbackBaseMatch ?? feedbackQueueMatch ?? feedbackNotificationsMatch
+        ?? feedbackAppealDecisionMatch ?? feedbackTriageMatch ?? feedbackAppealMatch
+        ?? feedbackOutcomeMatch ?? feedbackItemMatch;
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // every route template below is documented in docs/openapi.yaml — the
       // route-docs gate extracts these literals from this file. The
@@ -3226,14 +3282,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !bountyMatch && !creditsMatch && !boardV2Match
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+        && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? bountyMatch ?? creditsMatch ?? boardV2Match
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+        ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
@@ -3246,7 +3302,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -3256,8 +3312,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : memberDeactivateMatch ? "member-deactivate"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
-      const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-        : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+      const auth = roomAuth(selected, roomId, fence);
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
@@ -3307,7 +3362,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // their approved history access. Same code and copy as the store
       // gate, so clients see one stable denial either way.
       if (auth.member && isGuestAgentMemberId(auth.member.id)
-        && (collabMatch || workClaimMatch || bountyMatch || creditsMatch)
+        && (collabMatch || workClaimMatch || feedbackMatch || bountyMatch || creditsMatch)
         && !["GET", "HEAD"].includes(req.method)) {
         reject(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -3370,6 +3425,39 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          reauthorize: () => {
+            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+            if (current.kind === "api-key") {
+              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
+              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+            }
+            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+            return current;
+          }, helpers: { json, reject, body } });
+      }
+      // Agent /feedback endpoint (task RC-2026-09-27-2745): structured
+      // bug/feature reports with a Mark-staked triage economy, feeding the
+      // claims board via severity-routed promotion. Shares the room funnel
+      // above (credential, fence, rate-limit, API-key scopes); non-GET
+      // routes enforce the caller's autonomy tier inside the handler. Guests
+      // may read but never write, per the guest policy (they stay out of
+      // claims-board participation; filing feedback is participation). The
+      // literal segments (queue, notifications) resolve before the {id}
+      // template so they are never mistaken for a feedback id (each regex
+      // is anchored, so this is belt-and-braces).
+      if (feedbackMatch) {
+        const feedbackRoute = feedbackQueueMatch ? "queue"
+          : feedbackNotificationsMatch ? "notifications"
+          : feedbackAppealDecisionMatch ? "appeal-decision"
+          : feedbackTriageMatch ? "triage"
+          : feedbackAppealMatch ? "appeal"
+          : feedbackOutcomeMatch ? "outcome"
+          : feedbackBaseMatch ? (["GET", "HEAD"].includes(req.method) ? "list" : "submit")
+          : "read";
+        const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
+        return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
+          feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
           reauthorize: () => {
             const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
               : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
@@ -4067,6 +4155,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.delegation.revokeEffective(selected.token, roomId, data, fence));
+      }
+      // Owner delegates (server/owner-delegates.mjs): per-room grants that
+      // let an agent identity act with the owner's authority. Grant, revoke,
+      // and list are owner-only; the holder can never grant further.
+      if (route === "owner-delegate-list" && req.method === "GET") {
+        return json(res, 200, { roomId, grants: store.ownerDelegates.list(selected.token, roomId, fence) });
+      }
+      if (route === "owner-delegate-grant" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.ownerDelegates.grant(selected.token, roomId, data, fence));
+      }
+      if (route === "owner-delegate-revoke" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.ownerDelegates.revoke(selected.token, roomId, data, fence));
       }
       if (route === "ownership-transfer" && req.method === "POST") {
         // Agent room ownership, appointment path: the current room owner

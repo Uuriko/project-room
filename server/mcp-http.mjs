@@ -104,7 +104,9 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
 }
 
 export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams } = {}) {
-  const presented = typeof authorization === "string" && authorization.trim() !== "";
+  // An empty "Bearer" (an MCP host config with an unset secret variable) is
+  // treated as no credential, so the public join tools still load.
+  const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
   if (!presented) return handleMcpJoinRpc(message, { mcpUrl });
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;

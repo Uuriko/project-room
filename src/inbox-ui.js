@@ -28,7 +28,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const gmailNotice = { connected: 'Gmail connected. Your recent email is ready.', 'sync-error': 'Gmail connected, but email could not be loaded. Choose Sync Gmail to try again.', cancelled: 'Gmail connection cancelled. You can connect later.', error: 'Gmail wasn’t connected. Please try again and approve email access.' }[callbackResult] ?? '';
   if (callbackResult) { const url = new URL(location.href); url.searchParams.delete('gmail'); history.replaceState(null, '', url.pathname + url.search + url.hash); }
   $('#inbox-gmail-notice').textContent = gmailNotice;
-  const setupUI = installAccountSetup({ api, owns, gmailNotice, onInbox: () => load() });
+  const setupUI = installAccountSetup({ api, owns, gmailNotice, onInbox: () => load(), inRoom: () => Boolean(getRoom?.()) });
   const gmailUI = installGmailWorkspace({ api, ownerKey: () => owns() ? owner : null, onConnectionsChanged: () => load() });
   $('#inbox-gmail-open').addEventListener('click', () => gmailUI.open());
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
@@ -890,7 +890,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending() || replyUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
-  return { sync, reset, open: () => { if (!active) return load(); },
+  return { sync, reset, refreshSetup: () => setupUI.refresh(), askSetupName: () => setupUI.askName(), open: () => { if (!active) return load(); },
     detachRoom: () => {
       navigationEpoch++;
       sharing = null; resultPreview = null; resultEpoch++;

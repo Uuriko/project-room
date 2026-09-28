@@ -37,6 +37,12 @@ export const unfencedAdditiveTables = Object.freeze([
   "membership_delegation_grants",
   "membership_delegation_journal",
   "membership_delegation_pending",
+  // owner_delegate_grants + owner_delegate_journal (owner-granted
+  // owner-delegation for agent identities, server/owner-delegates.mjs):
+  // purely additive and intentionally NOT fenced — older writers have no
+  // code path to them, and the owner-only grant rule is the integrity gate.
+  "owner_delegate_grants",
+  "owner_delegate_journal",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path

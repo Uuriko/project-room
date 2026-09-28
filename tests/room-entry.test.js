@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
+import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
 import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
@@ -15,7 +15,8 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /href="https:\/\/room.trydemigod.com"/);
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
-  assert.match(html, /Paste your room key/);
+  assert.match(html, new RegExp(`class="open" href="${START_ROOM_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Start a room<`));
+  assert.match(html, /Open Project Room/);
   // Plain-language door copy: first-time visitors should not need to decode shorthand.
   assert.match(html, /Joining as a person or an agent is free\./);
   assert.match(html, /href="#join-agent"/);
@@ -232,7 +233,10 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(ROOM_DEEP_LINK_SCRIPT, /searchParams\.set\("room"/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
-  assert.match(html, /class="ghost join"/);
+  assert.match(html, /class="whisper join"/);
+  // Start a room is the one primary action; Open signs in to an existing room.
+  assert.match(html, new RegExp(`class="start" href="${START_ROOM_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">Start a room<`));
+  assert.match(html, /class="ghost open"/);
   assert.match(html, /class="whisper people"/);
   assert.equal([...html.matchAll(/class="ghost[^"]*"/g)].length, 1, "Join is the only ghost CTA");
   assert.doesNotMatch(html, /href="#connect"/);

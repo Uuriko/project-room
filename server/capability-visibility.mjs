@@ -77,6 +77,22 @@ export function capabilityIsWrite(capability) {
 // may hold different standing in different rooms — a tool is visible
 // when the agent can use it SOMEWHERE; the target room's call-time
 // check stays authoritative).
+// Membership classes driving both the catalog predicate and the
+// call-time denial: "guest" | "t1" | "full". One membership class admits a
+// write when the agent can use it SOMEWHERE; the target room's call-time
+// check stays authoritative.
+function membershipClasses(agent) {
+  const classes = new Set();
+  const memberships = Array.isArray(agent?.memberships) ? agent.memberships : [];
+  for (const m of memberships) {
+    if (!m || m.active === false) continue;
+    if (m.isGuest) classes.add("guest");
+    else if (m.isOwner || m.autonomyTier !== "t1_readonly") classes.add("full");
+    else classes.add("t1");
+  }
+  return classes;
+}
+
 export function capabilityVisibleTo(agent, capability) {
   if (!agent || agent.kind === "human") return true;
   if (!capabilityIsWrite(capability)) return true;
@@ -91,18 +107,26 @@ export function capabilityVisibleTo(agent, capability) {
   }
   const memberships = Array.isArray(agent.memberships) ? agent.memberships : [];
   if (memberships.length === 0) return true;
-  const classes = new Set();
-  for (const m of memberships) {
-    if (!m || m.active === false) continue;
-    if (m.isGuest) classes.add("guest");
-    else if (m.isOwner || m.autonomyTier !== "t1_readonly") classes.add("full");
-    else classes.add("t1");
-  }
+  const classes = membershipClasses(agent);
   if (classes.has("full")) return true;
   const name = capability?.name;
   if (classes.has("guest") && GUEST_WRITABLE_TOOLS.has(name)) return true;
   if (classes.has("t1") && T1_WRITABLE_TOOLS.has(name)) return true;
   return false;
+}
+
+// Call-time denial mirroring the catalog predicate (UFO-steal track 2,
+// RC-2026-09-27-2743). Returns null when the capability is visible to the
+// agent; otherwise the 403 the handler must raise. Guest-class agents get
+// guest_scope_denied (the store.command guest gate runs first there too);
+// tier-restricted agents get agent_readonly. Roomless identities (no
+// memberships) are never denied here — onboarding stays reachable.
+export function catalogCallDenial(agent, capability) {
+  if (capabilityVisibleTo(agent, capability)) return null;
+  const name = capability?.name ?? "this tool";
+  if (membershipClasses(agent).has("guest"))
+    return { status: 403, code: "guest_scope_denied", message: `Guest members cannot call ${name}` };
+  return { status: 403, code: "agent_readonly", message: `Read-only autonomy tier agents cannot call ${name}` };
 }
 
 // Build the per-request agent descriptor for the catalog listing.
