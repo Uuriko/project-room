@@ -131,10 +131,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         if (req.method === "GET") {
           return json(res, 200, { assignments: collab.listAssignments(roomId) });
         }
-        return reject(405, "method_not_allowed", "Method not allowed");
+        return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       case "assignment-release": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: [], optional: ["reason"] })) invalidInput(reject, "{reason?}");
         const { assignmentId, record } = collab.releaseAssignment(roomId, collabId,
@@ -156,10 +156,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           if (!threadId) return reject(422, "invalid_input", "Query parameter threadId is required.");
           return json(res, 200, { notes: collab.listThreadNotes(roomId, threadId) });
         }
-        return reject(405, "method_not_allowed", "Method not allowed");
+        return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       case "lock-acquire": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const holder = asAgent();
         const fields = body(req);
         if (!shape(fields, { required: ["threadId"], optional: ["ttlMs"] })) {
@@ -170,14 +170,14 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, duplicate ? 200 : 201, { lock, duplicate });
       }
       case "lock-release": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: ["lockId"] })) invalidInput(reject, "{lockId}");
         const released = collab.releaseDraftLock(roomId, fields.lockId, { by: caller });
         return json(res, 200, released);
       }
       case "lock-detect": {
-        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         const threadId = url.searchParams.get("threadId");
         if (!threadId) return reject(422, "invalid_input", "Query parameter threadId is required.");
         return json(res, 200, collab.detectDraftLock(roomId, threadId, caller));
@@ -197,10 +197,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           const status = url.searchParams.get("status");
           return json(res, 200, { proposals: collab.listApprovals(roomId, { status }) });
         }
-        return reject(405, "method_not_allowed", "Method not allowed");
+        return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       case "approval-decide": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const human = asHuman();
         const fields = body(req);
         if (!shape(fields, { required: ["decision"], optional: ["note", "editedBody"] })
@@ -223,7 +223,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, 200, { proposal });
       }
       case "approval-resubmit": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const agent = asAgent();
         const fields = body(req);
         if (!shape(fields, { required: ["draft"] })) invalidInput(reject, "{draft: {subject?, body}}");
@@ -231,7 +231,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, 200, { proposal });
       }
       case "routing-mentions": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: ["mentionedAgentId"], optional: ["threadId", "context"] })) {
           invalidInput(reject, "{mentionedAgentId, threadId?, context?}");
@@ -248,11 +248,11 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, 201, { records, mentions });
       }
       case "routing": {
-        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         return json(res, 200, collab.listRouting(roomId));
       }
       case "routing-resolve": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         // The resolver is whoever authenticated, like every other actor on
         // these routes. This one used to accept a resolvedBy from the body and
@@ -269,7 +269,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, 200, { record });
       }
       case "routing-policy": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: ["agentId", "policy"] })) {
           invalidInput(reject, "{agentId, policy: {mode: direct|escalate, scopes?, escalateTo?, note?}}");
@@ -309,10 +309,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
             handoffs: collab.listHandoffs(scope, { status }),
           });
         }
-        return reject(405, "method_not_allowed", "Method not allowed");
+        return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       case "handoff-transition": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: ["status"], optional: ["note"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
@@ -343,10 +343,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
             envelopes: store.handoffEnvelopes.list(roomId, { status, to }),
           });
         }
-        return reject(405, "method_not_allowed", "Method not allowed");
+        return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       case "envelope-transition": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const fields = body(req);
         if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed"] })) {
           invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
@@ -356,13 +356,13 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         return json(res, 200, { envelope });
       }
       case "envelope-sweep": {
-        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         body(req); // no fields; the sweep is idempotent
         const moved = store.handoffEnvelopes.sweepExpired(roomId);
         return json(res, 200, { swept: moved });
       }
       case "envelope-metrics": {
-        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed");
+        if (req.method !== "GET") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
         return json(res, 200, store.handoffEnvelopes.metrics(roomId));
       }
       default:
