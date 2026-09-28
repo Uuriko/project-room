@@ -77,14 +77,19 @@ test("MCP rejects an invalid venue with invalid_arguments", async t => {
 
 // 3. Contract: emissary_pitch over MCP cites a verified receipt.
 //    Regression: proof resolution broken in the MCP path.
-test("MCP emissary_pitch cites a verified receipt", async t => {
-  const { store, roomId, owner, call } = setup(t);
-  store.db.exec("CREATE TABLE external_receipts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL)");
-  const ref = `ert1.${"ab".repeat(16)}`;
-  store.db.prepare("INSERT INTO external_receipts (id, kind, created_at) VALUES (?, 'jury', ?)").run(ref, Date.now());
+// Real receipt owner/schema: the former invented id-column fixture missed
+// both integration failure and room scope. No test-only production seam.
+test("MCP emissary_pitch cites its room's recorded receipt and rejects another room's receipt", async t => {
+  const { store, rooms, roomId, owner, call } = setup(t);
+  const ref = store.emissaryReceipts.record(roomId, { kind: "jury", payload: { summary: "Reviewed" } }).receipt_id;
   const result = await call(owner.secret, "emissary_pitch", { roomId, focus: "We need reviewers.", proof_refs: [ref] });
+  assert.equal(typeof result.text, "string", JSON.stringify(result));
   assert.ok(result.text.startsWith("We need reviewers."));
   assert.ok(result.text.includes(ref));
+  const other = rooms.create(owner.secret, { roomId: "other-proof-room", title: "Other proof room", purpose: "Separate receipts" });
+  const foreign = store.emissaryReceipts.record(other.roomId, { kind: "work" }).receipt_id;
+  const refused = await call(owner.secret, "emissary_pitch", { roomId, focus: "We need reviewers.", proof_refs: [foreign] });
+  assert.equal(refused.code, "emissary_proof_unverified");
 });
 
 // 4. Contract: the room owner can mint a human invite over MCP and gets a

@@ -14,6 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { emissaryReceiptSchema } from "../server/emissary-receipts.mjs";
 import {
   FORBIDDEN_PATTERNS, runLureLint, validateLureTemplate,
   formatDrop, generateDrop, generatePitch, mintHumanInvite,
@@ -195,9 +196,9 @@ test("idempotency key reuse across tools is a 409 conflict", () => {
 //     focus paraphrased (the member's words must stay theirs).
 test("generatePitch cites verified receipts under a verbatim focus", () => {
   const d = db();
-  d.exec("CREATE TABLE external_receipts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  d.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY); INSERT INTO rooms VALUES ('r1');" + emissaryReceiptSchema);
   const ref = `ert1.${"ab".repeat(16)}`;
-  d.prepare("INSERT INTO external_receipts (id, kind, created_at) VALUES (?, 'work', ?)").run(ref, nowMs);
+  d.prepare("INSERT INTO external_receipts (room_id, receipt_id, kind, created_at) VALUES ('r1', ?, 'work', ?)").run(ref, nowMs);
   const { text } = generatePitch(d, "r1", "m1", { focus: "We need builders.", proof_refs: [ref] }, { nowMs });
   assert.ok(text.startsWith("We need builders.\n\nproof:\n"), "focus must be verbatim and first");
   assert.ok(text.includes(ref), "proof block cites the receipt id");
@@ -211,7 +212,7 @@ test("generatePitch cites verified receipts under a verbatim focus", () => {
 //     degrades to "unverified but cited".
 test("pitch with an unknown proof ref fails closed", () => {
   const d = db();
-  d.exec("CREATE TABLE external_receipts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  d.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY); INSERT INTO rooms VALUES ('r1');" + emissaryReceiptSchema);
   assert.throws(() => generatePitch(d, "r1", "m1", { focus: "Hi", proof_refs: [`ert1.${"ff".repeat(16)}`] }, { nowMs }),
     err => err.code === "emissary_proof_unverified");
 });
@@ -220,9 +221,9 @@ test("pitch with an unknown proof ref fails closed", () => {
 //     proof. Regression: kind allowlist widened silently.
 test("pitch rejects non-citable receipt kinds", () => {
   const d = db();
-  d.exec("CREATE TABLE external_receipts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  d.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY); INSERT INTO rooms VALUES ('r1');" + emissaryReceiptSchema);
   const ref = `ert1.${"ab".repeat(16)}`;
-  d.prepare("INSERT INTO external_receipts (id, kind, created_at) VALUES (?, 'tier_cut', ?)").run(ref, nowMs);
+  d.prepare("INSERT INTO external_receipts (room_id, receipt_id, kind, created_at) VALUES ('r1', ?, 'tier_cut', ?)").run(ref, nowMs);
   assert.throws(() => generatePitch(d, "r1", "m1", { focus: "Hi", proof_refs: [ref] }, { nowMs }),
     err => err.code === "emissary_proof_unverified");
 });
@@ -240,7 +241,7 @@ test("pitch fails closed when the receipt table is absent", () => {
 //     laundered into a pitch. Regression: focus skipping the lint.
 test("pitch rejects forbidden language in the focus", () => {
   const d = db();
-  d.exec("CREATE TABLE external_receipts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL)");
+  d.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY); INSERT INTO rooms VALUES ('r1');" + emissaryReceiptSchema);
   assert.throws(() => generatePitch(d, "r1", "m1", { focus: "guaranteed returns here", proof_refs: [] }, { nowMs }),
     err => err.code === "emissary_lure_forbidden_content");
 });
@@ -249,7 +250,7 @@ test("pitch rejects forbidden language in the focus", () => {
 //     Regression: injection-shaped refs reaching the query.
 test("pitch rejects malformed proof refs", () => {
   const d = db();
-  assert.throws(() => resolveProofRef(d, "ert1.' OR '1'='1"),
+  assert.throws(() => resolveProofRef(d, "r1", "ert1.' OR '1'='1"),
     err => err.code === "emissary_pitch_bad_proof_ref" && err.status === 400);
 });
 

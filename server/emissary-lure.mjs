@@ -346,19 +346,19 @@ function tableExists(db, name) {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 }
 
-export function resolveProofRef(db, proofRef) {
+export function resolveProofRef(db, roomId, proofRef) {
   if (typeof proofRef !== "string" || !PROOF_REF_PATTERN.test(proofRef)) {
     fail(400, "emissary_pitch_bad_proof_ref", `proof_ref must look like ert1.<32 hex chars>: ${proofRef}`);
   }
   if (!tableExists(db, "external_receipts")) {
     fail(400, "emissary_proof_unverified", `Proof ${proofRef} cannot be verified: no receipt ledger is present in this room`);
   }
-  const row = db.prepare("SELECT id, kind, created_at FROM external_receipts WHERE id=?").get(proofRef);
+  const row = db.prepare("SELECT receipt_id, kind, created_at FROM external_receipts WHERE room_id=? AND receipt_id=?").get(roomId, proofRef);
   if (!row) fail(400, "emissary_proof_unverified", "Proof is not a known receipt");
   if (!CITABLE_PROOF_KINDS.includes(row.kind)) {
     fail(400, "emissary_proof_unverified", "Proof is not a citable receipt kind");
   }
-  return { id: row.id, kind: row.kind, recordedAt: row.created_at };
+  return { id: row.receipt_id, kind: row.kind, recordedAt: row.created_at };
 }
 
 // generatePitch: the member's focus verbatim, plus a proof: block citing
@@ -377,7 +377,7 @@ export function generatePitch(db, roomId, memberId, input, opts = {}) {
   if (!Array.isArray(proof_refs) || proof_refs.length > 5) {
     fail(400, "emissary_pitch_bad_proof_refs", "proof_refs must be an array of at most 5 receipt ids");
   }
-  const proofs = proof_refs.map(ref => resolveProofRef(db, ref));
+  const proofs = proof_refs.map(ref => resolveProofRef(db, roomId, ref));
   const lines = [focus.trim(), ``, `proof:`];
   for (const proof of proofs) {
     lines.push(`- ${proof.id} (${proof.kind}, recorded ${new Date(proof.recordedAt).toISOString()})`);
