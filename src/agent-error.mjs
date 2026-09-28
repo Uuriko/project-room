@@ -130,6 +130,49 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Ask the room owner to turn Room Trust on (room.trust_set with enabled true). Do not retry this cross-owner assign or wake until then.")]
     };
   }
+  // QA 2026-09-28 work-claims denial copy.
+  // W5: work_not_owner is about claim ownership, never access — the old
+  // generic 403 mapping told an owner to "ask the owner to mint a guest
+  // invite". The message already names the holding owner; the next step
+  // names the real recovery (reassign/release), not an invite.
+  if (reasonCode === "work_not_owner") {
+    const owner = /^Work "[^"]+" is owned by (.+?) —/.exec(String(message || ""))?.[1];
+    const named = owner && owner !== "nobody" ? owner : null;
+    const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
+    return {
+      status: "action_required", reason: "work_not_owner",
+      hint: named
+        ? `Only the claim owner (${named}) can change this work. Ask them to reassign or release it, or claim it after their lease lapses.`
+        : "This work is unclaimed — claim it first, then act on it.",
+      next: [path(claimPath), command(named
+        ? `Ask ${named} to reassign or release the claim.`
+        : "Claim the work item first (POST …/work-claims/{id}/claim).")]
+    };
+  }
+  // W6/WD1: review-policy denials never mentioned the attestation route.
+  // The recovery is reviewer-first: the named reviewer attests from their
+  // own session; solo with no second member, release and recreate under
+  // self_attested.
+  if (reasonCode === "work_review_rejected") {
+    const reviewPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}/review` : null;
+    return {
+      status: "action_required", reason: "work_review_rejected",
+      hint: "The named reviewer must attest from their own session before this work can close. Solo with no second member? Release and recreate it under self_attested.",
+      next: [...(reviewPath ? [path(reviewPath)] : []), command(reviewPath
+        ? `The named reviewer must POST ${reviewPath} {note?} from their own session first.`
+        : "The named reviewer must POST the item's /review route from their own session first.")]
+    };
+  }
+  // W4: a lapsed lease auto-releases the claim — the recovery is to claim
+  // again, never to debug the credential.
+  if (reasonCode === "claim_lease_lapsed") {
+    const claimRoute = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}/claim` : listPath;
+    return {
+      status: "action_required", reason: "claim_lease_lapsed",
+      hint: "The lease lapsed and the claim auto-released. Claim the work item again to continue.",
+      next: [path(claimRoute), command("Claim the work item again (POST …/work-claims/{id}/claim).")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
@@ -249,6 +292,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         status: "action_required", reason: "unknown_member",
         hint: "That member is not in this room. List the room's members and address the message to a current memberId.",
         next: [path(presencePath), command("List members, then resend to a current memberId")]
+      };
+    }
+    // B8 (QA 2026-09-28): an owner-decision proposal is refused BEFORE the
+    // work item is created — "Read current work" pointed at work that was
+    // never created. The recovery is resending the proposal with a named
+    // decision-maker.
+    if (/Owner decision requires a decision-maker/.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "command_rejected",
+        hint: "The proposal was refused before the work item was created — nothing was saved. Resend it with a decision-maker.",
+        next: [command("Resend work.proposed with humanDecisionMakerId naming a member who holds the decide permission.")]
       };
     }
     return {

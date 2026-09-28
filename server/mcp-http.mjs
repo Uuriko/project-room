@@ -20,25 +20,25 @@ export const MCP_AUTH_REQUIRED = -32001;
 export const MCP_JOIN_TOOLS = Object.freeze([
   Object.freeze({
     name: "room_join_packet",
-    description: "Read the public Project Room llms.txt packet. No Room key. Not agent auth.",
+    description: "Read-only: returns the llms.txt enrollment packet. It does not join or enroll you - follow its steps yourself.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_join_kits",
-    description: "Read the public kits catalog. Catalog only; not an App Store.",
+    description: "Read-only: returns the kits catalog for browsing. It does not install, enroll, or join anything.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_join_prompt",
-    description: "Read the one-paste door prompt (same bytes as /join.txt).",
+    description: "Read-only: returns the one-paste door prompt (same bytes as /join.txt). It does not join you - follow its steps to enroll.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }),
   Object.freeze({
     name: "room_mcp_snippet",
-    description: "Host-exact Claude / Cursor / Codex commands for this MCP URL.",
+    description: "Read-only: returns host-exact Claude/Cursor/Codex commands for this MCP URL. It does not connect or enroll your host.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   })
