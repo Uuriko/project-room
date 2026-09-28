@@ -304,3 +304,57 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   assert.equal(final.value.request.status, "answered"); assert.deepEqual(final.value.responseActions, []);
   assert.equal(final.value.page.items.at(-1).message.body, "Use the verified result.");
 });
+
+
+test("tools/list focus is explicit, stateless discovery with full-catalog escape and unchanged authorization", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Owner"), reader = store.identities.create("Reader");
+  const roomId = rooms.create(owner.secret, {
+    roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
+  }).roomId;
+  store.identities.link(owner.secret, roomId, { identityId: reader.identityId, displayName: "Reader", permissions: [] });
+  setTier(store.db, roomId, reader.identityId, "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
+  const before = JSON.stringify(store.room(roomId).state);
+  const review = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret)).json();
+  assert.equal(review.result.focus, "review");
+  assert.equal(review.result._meta.focus.permissionsChanged, false);
+  assert.match(review.result._meta.focus.reset, /profile=full/);
+  for (const name of ["room_check_access", "room_needs_me", "get_room_context", "room_read_request", "room_request_reply", "room_post_message", "room_read_result", "room_record_verification"]) {
+    assert.ok(namesOf(review).includes(name), `Review needs ${name}`);
+  }
+  for (const name of ["room_propose_work", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
+  const work = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=work")).json();
+  assert.equal(work.result.focus, "work");
+  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim"]) assert.ok(namesOf(work).includes(name));
+  const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
+  assert.ok(namesOf(conversation).includes("room_read_messages"));
+  assert.ok(!namesOf(conversation).includes("room_record_verification"));
+  const automation = await (await rpc(origin, "tools/list", { focus: "automation", aliases: 1 }, owner.secret)).json();
+  assert.ok(namesOf(automation).includes("webhook_subscribe"));
+  assert.equal(automation.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
+  const precedence = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret, "?focus=work")).json();
+  assert.equal(precedence.result.focus, "review");
+  for (const params of [{ focus: "unknown" }, { focus: "" }, { focus: null }, { focus: [] }, { focus: "toString" }, { profile: "full", focus: "review" }]) {
+    const body = await (await rpc(origin, "tools/list", params, owner.secret)).json();
+    assert.equal(body.error.data.reason, "invalid_arguments");
+  }
+  const invalidQuery = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=unknown")).json();
+  assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
+  const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
+  assert.equal(defaultAgain.result.focus, undefined);
+  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
+  assert.equal(full.result.focus, undefined);
+  assert.ok(namesOf(full).includes("room_propose_work"));
+  // Discovery must not issue commands, set tiers, or persist a selected mode.
+  assert.equal(JSON.stringify(store.room(roomId).state), before);
+  const readonly = await (await rpc(origin, "tools/list", { focus: "review" }, reader.secret)).json();
+  assert.ok(namesOf(readonly).includes("room_read_result"));
+  assert.ok(!namesOf(readonly).includes("room_record_verification"));
+  const denied = await call(origin, "room_post_message", { roomId, body: "Not authorized by discovery" }, reader.secret);
+  assert.equal(denied.body.result.isError, true);
+  assert.equal(denied.value.code, "agent_readonly");
+  // A tool omitted by a focus is still callable under the existing policy.
+  const posted = await call(origin, "room_propose_work", { roomId, workItemId: "off-focus-work", title: "Still available outside review focus", definitionOfDone: "Demonstrate direct invocation", accountableMemberId: owner.identityId, mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false }, owner.secret);
+  assert.equal(posted.body.result.isError, undefined);
+});
