@@ -24,15 +24,7 @@ import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import {
-  capabilityVisibleTo,
-  catalogCallDenial,
-  membershipClasses,
-} from "../server/capability-visibility.mjs";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
-
-const write = name => ({ name, annotations: { readOnlyHint: false } });
-const read = name => ({ name, annotations: { readOnlyHint: true } });
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-calltime-denials-"));
@@ -98,43 +90,8 @@ async function guestPeer(t) {
   const mcp = createHostedRoomMcp(store);
   const call = (method, params, secret) =>
     mcp(rpc(method, params), { authorization: `Bearer ${secret}` });
-  return { store, rooms, owner, guest, roomId: created.roomId, call };
+  return { store, rooms, owner, guest, roomId: created.roomId, ownerMemberId: created.ownerMemberId, guestMemberId: memberId, call };
 }
-
-test("catalogCallDenial mirrors the catalog predicate for every class", () => {
-  const guest = { kind: "agent", memberships: [{ roomId: "r", memberId: "guest-agent-x", isGuest: true, autonomyTier: "t2_standard", isOwner: false, active: true }] };
-  const t1 = { kind: "agent", memberships: [{ roomId: "r", memberId: "m", isGuest: false, autonomyTier: "t1_readonly", isOwner: false, active: true }] };
-  const full = { kind: "agent", memberships: [{ roomId: "r", memberId: "m", isGuest: false, autonomyTier: "t2_standard", isOwner: false, active: true }] };
-  const roomless = { kind: "agent", memberships: [] };
-
-  // Denied classes get the same codes the room paths use.
-  assert.deepEqual([...membershipClasses(guest)], ["guest"]);
-  assert.deepEqual([...membershipClasses(t1)], ["t1"]);
-  const guestDenial = catalogCallDenial(guest, write("wake_register"));
-  assert.equal(guestDenial?.status, 403);
-  assert.equal(guestDenial?.code, "guest_scope_denied");
-  const t1Denial = catalogCallDenial(t1, write("wake_register"));
-  assert.equal(t1Denial?.status, 403);
-  assert.equal(t1Denial?.code, "agent_readonly");
-
-  // Carve-outs and the unrestricted stay allowed.
-  assert.equal(catalogCallDenial(t1, write("heartbeat_set")), null);
-  assert.equal(catalogCallDenial(t1, write("heartbeat_ack")), null);
-  assert.equal(catalogCallDenial(guest, write("room_post_message")), null);
-  assert.equal(catalogCallDenial(guest, write("room_react")), null);
-  assert.equal(catalogCallDenial(full, write("wake_register")), null);
-  assert.equal(catalogCallDenial(roomless, write("wake_register")), null);
-  assert.equal(catalogCallDenial(t1, read("room_list_events")), null);
-
-  // The denial agrees with the listing predicate on every tool the
-  // catalog test pins: denied at call time iff withheld from the listing.
-  for (const agent of [guest, t1]) {
-    for (const name of ["wake_register", "webhook_subscribe", "inbox_put_attachment", "room_create", "wake_pause", "add_land_item"]) {
-      assert.equal(catalogCallDenial(agent, write(name)) !== null, !capabilityVisibleTo(agent, write(name)),
-        `${name}: denial and listing disagree`);
-    }
-  }
-});
 
 test("t1_readonly direct calls are denied at call time (identity-scoped tools)", async t => {
   const { peer, call } = await demotedPeer(t);
@@ -168,7 +125,15 @@ test("t1_readonly carve-outs still succeed (no regression)", async t => {
 });
 
 test("guest-class direct calls are denied at call time", async t => {
-  const { guest, roomId, call } = await guestPeer(t);
+  const { owner, guest, roomId, call } = await guestPeer(t);
+  // Seed a land item so report/remove reach the handler (rather than a
+  // missing-item error) on the pre-fix code.
+  const added = resultValue(await call("tools/call", {
+    name: "add_land_item", arguments: { roomId, repo: "Uuriko/project-room", prNumber: 7 },
+  }, owner.secret));
+  assert.ok(!added.isError, `owner add_land_item must work: ${JSON.stringify(added).slice(0, 200)}`);
+  const itemId = added.item?.itemId ?? added.itemId;
+  assert.ok(itemId, "expected a land item id");
   const cases = [
     ["inbox_put_attachment", { id: "g1", filename: "note.txt", mediaType: "text/plain", data: Buffer.from("hi").toString("base64") }],
     ["webhook_subscribe", { url: "https://example.com/hook", events: ["message.posted"] }],
@@ -177,11 +142,91 @@ test("guest-class direct calls are denied at call time", async t => {
     ["wake_register", { hostId: "h1", wakeUrl: "https://example.com/wake" }],
     ["room_create", { title: "Sneaky", purpose: "guest escalation" }],
     ["add_land_item", { roomId, repo: "Uuriko/project-room", prNumber: 1 }],
+    ["remove_land_item", { roomId, itemId }],
+    ["report_tip", { roomId, itemId, sourceRevision: "abc123", buildId: "b1" }],
   ];
   for (const [name, args] of cases) {
     const value = resultValue(await call("tools/call", { name, arguments: args }, guest.secret));
     assert.equal(denied(value), "guest_scope_denied", `${name}: expected guest_scope_denied`);
   }
+});
+
+test("guest-class hosted stdio chat-hole tools are denied at call time", async t => {
+  // The hosted stdio path bypasses callRoomTool, and the store.command
+  // guest gate admits message.posted chat posts — so without a
+  // handler-side check, guests could reach tools the catalog withholds:
+  // room_introduce_outside_agent writes the shared outside-agent
+  // directory, room_request_reply creates formal reply requests, and
+  // room_reply posts reply-shaped messages, all encoded as plain
+  // message.posted.
+  const { guest, ownerMemberId, roomId, call } = await guestPeer(t);
+  const cases = [
+    ["room_introduce_outside_agent", { roomId, externalRef: "agent-x", displayName: "Agent X", origin: "mcp" }],
+    ["room_request_reply", { roomId, requestId: randomUUID(), toMemberId: ownerMemberId, body: "a formal request from a guest" }],
+    ["room_reply", { roomId, replyToId: "msg-1", body: "a reply-shaped post from a guest" }],
+  ];
+  for (const [name, args] of cases) {
+    const value = resultValue(await call("tools/call", { name, arguments: args }, guest.secret));
+    assert.equal(denied(value), "guest_scope_denied", `${name}: expected guest_scope_denied`);
+  }
+});
+
+test("guest cannot answer a formal reply request at call time", async t => {
+  const { owner, guest, guestMemberId, roomId, call } = await guestPeer(t);
+  const opened = resultValue(await call("tools/call", {
+    name: "room_request_reply", arguments: { roomId, requestId: randomUUID(), toMemberId: guestMemberId, body: "please confirm" },
+  }, owner.secret));
+  assert.ok(!opened.isError, `owner request must open: ${JSON.stringify(opened).slice(0, 200)}`);
+  const requestMessageId = opened.requestMessageId;
+  assert.ok(requestMessageId, "expected a requestMessageId");
+  const read = resultValue(await call("tools/call", {
+    name: "room_read_request", arguments: { roomId, requestMessageId },
+  }, guest.secret));
+  const template = read.responseActions?.[0]?.arguments;
+  assert.ok(template, "expected a response template");
+  const value = resultValue(await call("tools/call", {
+    name: "room_respond_to_request",
+    arguments: { roomId, ...template, requestId: randomUUID(), body: "confirmed" },
+  }, guest.secret));
+  assert.equal(denied(value), "guest_scope_denied", "guest respond must be denied");
+});
+
+test("full members keep the hosted stdio write tools (no regression)", async t => {
+  const { owner, guestMemberId, roomId, call } = await guestPeer(t);
+  const introduced = resultValue(await call("tools/call", {
+    name: "room_introduce_outside_agent",
+    arguments: { roomId, externalRef: "agent-y", displayName: "Agent Y", origin: "mcp" },
+  }, owner.secret));
+  assert.ok(!introduced.isError, `owner introduce must work: ${JSON.stringify(introduced).slice(0, 200)}`);
+  const requested = resultValue(await call("tools/call", {
+    name: "room_request_reply", arguments: { roomId, requestId: randomUUID(), toMemberId: guestMemberId, body: "owner request" },
+  }, owner.secret));
+  assert.ok(!requested.isError, `owner request must work: ${JSON.stringify(requested).slice(0, 200)}`);
+  const replied = resultValue(await call("tools/call", {
+    name: "room_reply", arguments: { roomId, replyToId: "msg-1", body: "owner reply" },
+  }, owner.secret));
+  assert.ok(!replied.isError, `owner reply must work: ${JSON.stringify(replied).slice(0, 200)}`);
+});
+
+test("contributor-tier guest keeps the call-time draft allowance (no regression)", async t => {
+  // The catalog withholds room_post_draft from every guest, but the
+  // contributor tier stays gated at call time (documented in
+  // capability-visibility.mjs, pinned by
+  // tests/capability-visibility.test.js). The hosted stdio enforcement
+  // must not close that allowance.
+  const { store, guest, ownerMemberId, guestMemberId, roomId, call } = await guestPeer(t);
+  // Promote the guest row to contributor tier through the real tables.
+  const now = Date.now();
+  store.db.prepare(`INSERT INTO guest_invites(id,code_hash,room_id,tier,credential_ttl_ms,guest_label,minted_by_member_id,issue_request_id,created_at,redeem_by,status,redeemed_at,redeemed_by_identity_id,redeemed_member_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run("invite-test", "a".repeat(64), roomId, "contributor", 3600000, "drafts", ownerMemberId, randomUUID(), now, now + 3600000, "redeemed", now, guest.identityId, guestMemberId);
+  store.db.prepare("INSERT INTO guest_members(member_id,room_id,guest_identity_id,tier,invite_id,created_at) VALUES(?,?,?,?,?,?)")
+    .run(guestMemberId, roomId, guest.identityId, "contributor", "invite-test", now);
+  const value = resultValue(await call("tools/call", {
+    name: "room_post_draft",
+    arguments: { roomId, requestId: randomUUID(), workItemId: "w-missing", packetId: "p1", basisRevision: 0, body: "draft body" },
+  }, guest.secret));
+  assert.notEqual(value.code, "guest_scope_denied",
+    `contributor draft must not hit the guest scope gate: ${JSON.stringify(value).slice(0, 200)}`);
 });
 
 test("guest chat carve-outs still succeed (no regression)", async t => {

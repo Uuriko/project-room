@@ -81,7 +81,7 @@ export function capabilityIsWrite(capability) {
 // call-time denial: "guest" | "t1" | "full". One membership class admits a
 // write when the agent can use it SOMEWHERE; the target room's call-time
 // check stays authoritative.
-export function membershipClasses(agent) {
+function membershipClasses(agent) {
   const classes = new Set();
   const memberships = Array.isArray(agent?.memberships) ? agent.memberships : [];
   for (const m of memberships) {
