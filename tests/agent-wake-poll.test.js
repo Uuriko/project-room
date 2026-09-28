@@ -1,0 +1,330 @@
+// Room-hosted wake poll (RC-2026-09-28-3602): wakeable-by-default.
+// An agent host with no public endpoint waits on GET /api/agent-wakes/poll
+// for mention/DM wake signals instead of needing a wakeUrl.
+//
+// Authoring gate (repo test-audit): each test below names the observable
+// contract, the credible regression, why existing coverage misses it, and
+// confirms no test-only production seam was added.
+//
+// 1. notePoll refuses unregistered agents — contract: only heartbeat-
+//    registered identities can wait. Regression: a refactor that lets
+//    unknown agents wait (or throws instead of returning the shape).
+// 2. notePoll is non-consuming — contract: waiting never acknowledges;
+//    signals leave the queue only via ackWakes. Regression: a "read =
+//    delivered" optimization silently dropping wakes.
+// 3. enqueueWake releases waiters only on genuinely new signals —
+//    contract: wake-on-enqueue with per-message coalescing. Regression:
+//    waking on duplicates (wake storms) or never waking (dead poll).
+// 4. waiter replacement + roomId scoping + idempotent release — contract:
+//    one live waiter per host; room-key waiters see only their room.
+//    Regression: wedged slots on reconnect; cross-room signal leaks.
+//    (Per-agent replacement was tried and rejected: two hosts under one
+//    identity livelocked, each poll releasing the other.)
+// 4b. two hosts wait side by side — contract: a signal releases every
+//    waiting host, and one host's poll never disturbs another's.
+//    Regression: the per-agent livelock above.
+// 5. heartbeat mode/wakeUrl defaults — contract: omitted mode means
+//    wakeable, omitted wakeUrl means null, pull-only + wakeUrl is 422.
+//    Regression: the destructuring default only covers undefined, not
+//    null — the null branch is a distinct path worth pinning.
+// 6. poll route auth/validation/shape — contract: 401/403/404/422
+//    boundaries and the response shape. Regression: scope or shape drift.
+// 7. end-to-end wake over HTTP — contract: heartbeat without a wakeUrl,
+//    poll waits, a mention releases it, ack drains it. Regression: the
+//    feature's whole reason for existing; nothing else covers the wait.
+// 8. poll replacement over HTTP — contract: a reconnect with the same
+//    hostId releases the first poll instead of wedging; a different host's
+//    poll leaves the first waiting. Regression: reconnecting hosts hanging;
+//    the two-host livelock.
+// 9. aborted poll — contract: a client that disconnects mid-wait releases
+//    its host slot. Regression: dead connections wedging the slot so the
+//    next poll misbehaves.
+//
+// Synthetic fixtures only — no network calls, no real credentials.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import {
+  AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
+  HEARTBEAT_STALE_AFTER_MS,
+} from "../server/agent-heartbeats.mjs";
+
+const T0 = 1_750_000_000_000;
+
+function unit(t) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(agentHeartbeatSchema);
+  let at = T0;
+  const hb = new AgentHeartbeats({ db, now: () => at }, { staleAfterMs: HEARTBEAT_STALE_AFTER_MS });
+  t.after(() => db.close());
+  return { hb, advance: ms => { at += ms; } };
+}
+
+// ---- Store unit tests ----
+
+test("notePoll refuses unregistered agents with the registered:false shape", t => {
+  const { hb } = unit(t);
+  const poll = hb.notePoll({ agentId: "ai_nobody" });
+  assert.equal(poll.registered, false);
+  assert.deepEqual(poll.pendingWakes, []);
+});
+
+test("notePoll returns pending signals immediately and never consumes them", t => {
+  const { hb } = unit(t);
+  hb.heartbeat({ agentId: "ai_poller", hostId: "h" });
+  assert.deepEqual(hb.notePoll({ agentId: "ai_poller" }).pendingWakes, [], "nothing queued yet");
+  hb.enqueueWake({ agentId: "ai_poller", kind: "mention", roomId: "commons", messageId: "m-1" });
+  const first = hb.notePoll({ agentId: "ai_poller" });
+  assert.equal(first.registered, true);
+  assert.equal(first.pendingWakes.length, 1);
+  assert.equal(first.pendingWakes[0].messageId, "m-1");
+  // Waiting is a pure read: the signal is still there on the next poll.
+  assert.equal(hb.notePoll({ agentId: "ai_poller" }).pendingWakes.length, 1);
+  // Only an explicit ack drains it.
+  hb.ackWakes({ agentId: "ai_poller", signalIds: [first.pendingWakes[0].signalId] });
+  assert.deepEqual(hb.notePoll({ agentId: "ai_poller" }).pendingWakes, []);
+});
+
+test("enqueueWake releases the waiter only for genuinely new signals", t => {
+  const { hb } = unit(t);
+  hb.heartbeat({ agentId: "ai_waiter", hostId: "h" });
+  let wakes = 0;
+  const release = hb.addWakeWaiter("ai_waiter", "h", { roomId: null, onWake: () => { wakes++; } });
+  t.after(release);
+  hb.enqueueWake({ agentId: "ai_waiter", kind: "dm", roomId: "commons", messageId: "m-1" });
+  assert.equal(wakes, 1, "new signal releases the waiter");
+  // The waiter is single-shot: re-register, then a coalesced duplicate for
+  // the same message must NOT wake again.
+  let second = 0;
+  const release2 = hb.addWakeWaiter("ai_waiter", "h", { roomId: null, onWake: () => { second++; } });
+  t.after(release2);
+  const dup = hb.enqueueWake({ agentId: "ai_waiter", kind: "dm", roomId: "commons", messageId: "m-1" });
+  assert.equal(dup.enqueued, false, "coalesced duplicate");
+  assert.equal(second, 0, "duplicate signal does not wake");
+});
+
+test("waiter replacement is per host: same hostId replaces, other hosts coexist", t => {
+  const { hb } = unit(t);
+  hb.heartbeat({ agentId: "ai_scoped", hostId: "h" });
+  let first = 0, second = 0;
+  const releaseFirst = hb.addWakeWaiter("ai_scoped", "h", { roomId: null, onWake: () => { first++; } });
+  // Reconnecting with the same hostId replaces only that host's waiter.
+  const releaseSecond = hb.addWakeWaiter("ai_scoped", "h", { roomId: "room-a", onWake: () => { second++; } });
+  assert.equal(first, 1, "replaced waiter is released");
+  assert.equal(second, 0);
+  // A signal in another room does not release a room-scoped waiter.
+  hb.enqueueWake({ agentId: "ai_scoped", kind: "mention", roomId: "room-b", messageId: "m-1" });
+  assert.equal(second, 0, "room-b signal must not wake a room-a waiter");
+  hb.enqueueWake({ agentId: "ai_scoped", kind: "mention", roomId: "room-a", messageId: "m-2" });
+  assert.equal(second, 1, "room-a signal wakes the room-a waiter");
+  // Release is idempotent and safe after the waiter already fired.
+  releaseFirst(); releaseSecond(); releaseSecond();
+});
+
+test("two hosts wait side by side; one signal releases both", t => {
+  const { hb } = unit(t);
+  hb.heartbeat({ agentId: "ai_multi", hostId: "h-a" });
+  hb.heartbeat({ agentId: "ai_multi", hostId: "h-b" });
+  let a = 0, b = 0;
+  const releaseA = hb.addWakeWaiter("ai_multi", "h-a", { roomId: null, onWake: () => { a++; } });
+  const releaseB = hb.addWakeWaiter("ai_multi", "h-b", { roomId: null, onWake: () => { b++; } });
+  t.after(releaseA); t.after(releaseB);
+  assert.equal(a, 0, "second host must not release the first");
+  assert.equal(b, 0);
+  hb.enqueueWake({ agentId: "ai_multi", kind: "mention", roomId: "commons", messageId: "m-9" });
+  assert.equal(a, 1, "signal releases host a");
+  assert.equal(b, 1, "signal releases host b");
+});
+
+test("heartbeat defaults: omitted mode is wakeable, omitted wakeUrl is null", t => {
+  const { hb } = unit(t);
+  // undefined hits the destructuring default; null hits the effectiveMode branch.
+  for (const mode of [undefined, null]) {
+    const { host } = hb.heartbeat({ agentId: "ai_default", hostId: `h-${String(mode)}`, mode, wakeUrl: null });
+    assert.equal(host.mode, "wakeable");
+    assert.equal(host.wakeUrl, null);
+  }
+  assert.throws(() => hb.heartbeat({ agentId: "ai_default", hostId: "bad", mode: "pull-only", wakeUrl: "https://x.test/w" }),
+    err => err instanceof HeartbeatError && /pull-only/.test(err.message));
+});
+
+// ---- HTTP integration ----
+
+async function startServer(t, f) {
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
+  method: "POST",
+  headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+  body: JSON.stringify(body),
+});
+const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
+  headers: secret ? { authorization: `Bearer ${secret}` } : {},
+});
+const errorCode = async res => (await res.json()).error?.code;
+
+async function keyedAgent(t, f, origin) {
+  const identity = f.store.identities.create("wake-poll-agent");
+  const scoped = await (await post(origin, "/api/agent-keys",
+    { scopes: ["heartbeats:report", "heartbeats:read"] }, identity.secret)).json();
+  return { identity, credential: scoped.credential };
+}
+
+test("poll route: auth, scope, registration, and waitMs validation", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { identity, credential } = await keyedAgent(t, f, origin);
+  const readOnly = await (await post(origin, "/api/agent-keys",
+    { scopes: ["heartbeats:read"] }, identity.secret)).json();
+  const wrongScope = await (await post(origin, "/api/agent-keys",
+    { scopes: ["directory:publish"] }, identity.secret)).json();
+
+  assert.equal((await get(origin, "/api/agent-wakes/poll")).status, 401);
+  assert.equal((await get(origin, "/api/agent-wakes/poll", wrongScope.credential)).status, 403);
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h", credential)), "agent_not_registered");
+
+  // Register with no wakeUrl at all — the wakeable-by-default shape.
+  const reported = await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
+  assert.equal(reported.status, 200);
+  assert.equal((await reported.json()).host.wakeUrl, null);
+
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=nope", credential)), "invalid_wake_poll");
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=-5", credential)), "invalid_wake_poll");
+
+  // hostId is required: one waiter per host.
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)), "invalid_wake_poll");
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=nope!&waitMs=0", credential)), "invalid_wake_poll");
+
+  // waitMs=0 short-poll with nothing queued: immediate empty return.
+  const empty = await (await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", readOnly.credential)).json();
+  assert.deepEqual(empty.pendingWakes, []);
+  assert.equal(empty.timedOut, false);
+  assert.equal(empty.waitedMs, 0);
+});
+
+test("poll times out cleanly when nothing arrives", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
+  const started = Date.now();
+  const doc = await (await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=300", credential)).json();
+  const elapsed = Date.now() - started;
+  assert.deepEqual(doc.pendingWakes, []);
+  assert.equal(doc.timedOut, true);
+  assert.ok(elapsed >= 250 && elapsed < 5000, `waited ~300ms, got ${elapsed}ms`);
+  assert.ok(doc.next.some(n => n.action === "poll-wakes"), "teaches the next poll");
+});
+
+test("a real mention releases a waiting poll: the wakeable-by-default loop", async t => {
+  const f = createAcceptanceFixture();
+  let at = Date.now();
+  f.store.now = () => at;
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("wake-poll-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "wakeagent",
+    displayName: "Wake Agent", permissions: ["accept_work"],
+  });
+  const scoped = await (await post(origin, "/api/agent-keys",
+    { scopes: ["heartbeats:report", "heartbeats:read"] }, identity.secret)).json();
+  const credential = scoped.credential;
+
+  // Register with no wakeUrl at all — the wakeable-by-default shape.
+  await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
+  // A mention only queues a wake for an offline agent: let the host go stale.
+  at += HEARTBEAT_STALE_AFTER_MS + 1000;
+
+  const pollPromise = get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=10000", credential).then(r => r.json());
+  // Let the poll register its waiter, then post a real mention while it waits.
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "m-live", body: "hey @wakeagent, take a look when you are back" } });
+
+  const doc = await pollPromise;
+  assert.equal(doc.pendingWakes.length, 1, "the waiting poll released with the signal");
+  assert.equal(doc.pendingWakes[0].messageId, "m-live");
+  assert.equal(doc.pendingWakes[0].kind, "mention");
+  assert.equal(doc.timedOut, false);
+  assert.ok(doc.waitedMs < 9000, "released by the signal, not the timeout");
+  assert.ok(doc.next.some(n => n.action === "ack-wakes"), "teaches the ack");
+
+  // Ack drains the queue; the next poll is quiet.
+  await post(origin, "/api/agent-heartbeats/ack",
+    { signalIds: doc.pendingWakes.map(s => s.signalId) }, credential);
+  const quiet = await (await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", credential)).json();
+  assert.deepEqual(quiet.pendingWakes, []);
+});
+
+test("a reconnect with the same hostId releases the first poll", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
+
+  const started = Date.now();
+  const firstPromise = get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=10000", credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  // The reconnecting host polls again with the same hostId; the first
+  // request must resolve now.
+  const second = await (await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=0", credential)).json();
+  const first = await firstPromise;
+  const elapsed = Date.now() - started;
+  assert.deepEqual(second.pendingWakes, []);
+  assert.deepEqual(first.pendingWakes, []);
+  assert.ok(elapsed < 9000, `first poll released by replacement in ${elapsed}ms, not by timeout`);
+});
+
+test("an aborted poll releases the host slot instead of wedging it", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
+
+  const controller = new AbortController();
+  const doomed = fetch(`${origin}/api/agent-wakes/poll?hostId=h&waitMs=10000`, {
+    headers: { authorization: `Bearer ${credential}` }, signal: controller.signal,
+  }).then(r => r.json()).catch(() => null);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  controller.abort(); // client vanishes mid-wait, like a dropped mobile radio
+  await doomed;
+  await new Promise(resolve => setTimeout(resolve, 300)); // let the server notice the close
+
+  // The slot is free and clean: a fresh poll waits out its own timeout.
+  const started = Date.now();
+  const doc = await (await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=600", credential)).json();
+  assert.equal(doc.timedOut, true);
+  assert.deepEqual(doc.pendingWakes, []);
+  assert.ok(Date.now() - started >= 500, "fresh poll waited its timeout — no wedged slot");
+});
+
+test("a different host's poll leaves the first host's wait alone", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-a" }, credential);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-b" }, credential);
+
+  const started = Date.now();
+  const firstPromise = get(origin, "/api/agent-wakes/poll?hostId=h-a&waitMs=2000", credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  // Host b polls: must not disturb host a's wait. No livelock.
+  const second = await (await get(origin, "/api/agent-wakes/poll?hostId=h-b&waitMs=0", credential)).json();
+  assert.deepEqual(second.pendingWakes, []);
+  const first = await firstPromise;
+  const elapsed = Date.now() - started;
+  assert.equal(first.timedOut, true, "host a waited out its own timeout, not a release");
+  assert.ok(elapsed >= 1500, `host a actually waited (${elapsed}ms), not released early`);
+});

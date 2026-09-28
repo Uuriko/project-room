@@ -1,10 +1,14 @@
-// Wakeable agent presence (RC-2026-09-18-051) + push wake path (RC-2026-09-24-203).
+// Wakeable agent presence (RC-2026-09-18-051) + push wake path
+// (RC-2026-09-24-203) + wakeable-by-default (RC-2026-09-28-3602).
 //
 // A durable registry of agent host heartbeats. Each agent identity runs zero
 // or more hosts; every host reports a mode:
 //
-//   wakeable  - the host registers an https wake URL and accepts wake pings
-//               when it is mentioned or DM'd while away;
+//   wakeable  - the default (RC-2026-09-28-3602). The host needs no public
+//               endpoint: it waits on the room-hosted wake poll
+//               (GET /api/agent-wakes/poll), which releases as soon as a
+//               queued mention/DM signal lands. A host may additionally
+//               register an https wake URL for true-push pings;
 //   pull-only - the host polls on its own cadence; queued wake signals are
 //               delivered on its next heartbeat instead of a ping.
 //
@@ -14,7 +18,9 @@
 // reported. Wake signals are a durable queue: mentioning or DM'ing an
 // offline registered agent enqueues one signal per message (coalesced on
 // agent+message), and the host collects pending signals on its next
-// heartbeat and acknowledges them once handled.
+// heartbeat — or immediately through the wake poll — and acknowledges them
+// once handled. Waiting on the poll consumes nothing: signals are
+// acknowledged explicitly via acknowledgeWake().
 //
 // RC-2026-09-24-203 adds the push wake path: a host may declare its poll
 // cadence and register a pushNotification subscription (url + opaque token
@@ -175,6 +181,13 @@ export class AgentHeartbeats {
     this.pushDnsResolvers = null;
     // Fire-and-forget push POSTs in flight; flushPushes() awaits them.
     this._pushInflight = [];
+    // RC-2026-09-28-3602: in-process wake waiters for the room-hosted poll.
+    // agentId+hostId -> { roomId, onWake }. One waiter per host: a second
+    // waiter with the same hostId releases the first (it resolves
+    // immediately so a reconnecting host never wedges the slot), while a
+    // different host's wait is never disturbed. In-memory only — a restart
+    // drops waiters, never the durable signals they wait on.
+    this._wakeWaiters = new Map();
   }
 
   now() { return this.store.now(); }
@@ -208,15 +221,24 @@ export class AgentHeartbeats {
     checkAgentId(agentId);
     checkHostId(hostId);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
-    check(MODES.includes(mode), 422, "invalid_heartbeat",
+    // RC-2026-09-28-3602: wakeable is the default; mode may be null when the
+    // caller omits it. An explicitly invalid value still fails.
+    const effectiveMode = mode === undefined || mode === null ? "wakeable" : mode;
+    check(MODES.includes(effectiveMode), 422, "invalid_heartbeat",
       `mode must be one of ${MODES.join(", ")}`);
     if (cadenceSeconds !== null && cadenceSeconds !== undefined) checkCadenceSeconds(cadenceSeconds);
     const push = (pushNotification === null || pushNotification === undefined)
       ? null : checkPushNotification(pushNotification);
+    // RC-2026-09-28-3602: wakeUrl is optional for wakeable hosts — without
+    // one the host is reached through the room-hosted wake poll; with one
+    // it also gets the true-push journal fan-out. pull-only stays
+    // self-driven: no push URL.
     let url = null;
-    if (mode === "wakeable") {
-      try { url = validateWebhookUrl(wakeUrl); }
-      catch (error) { fail(422, "invalid_heartbeat", `wakeable hosts must register a wake URL: ${error.message}`); }
+    if (effectiveMode === "wakeable") {
+      if (wakeUrl !== null && wakeUrl !== undefined) {
+        try { url = validateWebhookUrl(wakeUrl); }
+        catch (error) { fail(422, "invalid_heartbeat", `invalid wakeUrl: ${error.message}`); }
+      }
     } else if (wakeUrl !== null && wakeUrl !== undefined) {
       fail(422, "invalid_heartbeat", "pull-only hosts cannot register a wake URL");
     }
@@ -227,7 +249,7 @@ export class AgentHeartbeats {
       ON CONFLICT(agent_id, host_id) DO UPDATE SET mode=excluded.mode,
         wake_url=excluded.wake_url, last_seen_at=excluded.last_seen_at,
         updated_at=excluded.updated_at`)
-      .run(agentId, hostId, mode, url, at, at, at);
+      .run(agentId, hostId, effectiveMode, url, at, at, at);
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
@@ -256,9 +278,10 @@ export class AgentHeartbeats {
     const reachableUntil = host.lastSeenAt + windowMs;
     // "push": wakeable host, usable push subscription, inside the window.
     // "poller": inside the window but no usable push. "none": stale.
+    // RC-2026-09-28-3602: effectiveMode — mode defaults to wakeable.
     const reachability = Object.freeze({
       mode: at > reachableUntil ? "none"
-        : (mode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
+        : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
     return Object.freeze({
@@ -427,6 +450,9 @@ export class AgentHeartbeats {
       VALUES (?, ?, ?, ?, ?, ?, NULL)`).run(signalId, agentId, kind, roomId, messageId, at);
     const row = this.db.prepare(
       "SELECT * FROM agent_wake_signals WHERE agent_id=? AND message_id=?").get(agentId, messageId);
+    // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
+    // poll waiter (coalesced duplicates don't — nothing new arrived).
+    if (applied.changes > 0) this._releaseWakeWaiter(agentId, roomId);
     return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
   }
 
@@ -440,6 +466,66 @@ export class AgentHeartbeats {
       .all(agentId, roomId, roomId, limit).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit }) ?? [];
     return Object.freeze([...messages, ...work].sort((a, b) => a.createdAt - b.createdAt).slice(0, limit));
+  }
+
+  // RC-2026-09-28-3602: room-hosted wake poll — a synchronous, durable,
+  // non-consuming read of the agent's pending wake signals. When called
+  // before any wait, it returns the current pending set immediately (so
+  // the HTTP wait layer can release instantly on a signal that landed
+  // between requests); called after a wait it returns the fresh set.
+  // Registration is established by heartbeat(), so notePoll refuses
+  // unregistered agents the same way presence reads report them
+  // "unregistered" — an unknown agent has nothing to wait on. This never
+  // acknowledges: signals leave the queue only through ackWakes().
+  notePoll({ agentId, roomId = null }) {
+    checkAgentId(agentId);
+    const known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
+    if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]) });
+    return Object.freeze({
+      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
+    });
+  }
+
+  // RC-2026-09-28-3602: register one in-process waiter per HOST for the
+  // agent's next wake signal. Returns a release function (idempotent).
+  // onWake fires when enqueueWake lands a NEW signal matching the waiter's
+  // roomId filter (null matches every room). Reconnecting with the same
+  // hostId replaces only that host's waiter, so a stale slot never wedges
+  // a host — and a second host's wait is never disturbed (per-agent
+  // replacement caused a two-host livelock: each poll released the other
+  // and neither ever waited).
+  addWakeWaiter(agentId, hostId, { roomId = null, onWake }) {
+    checkAgentId(agentId);
+    checkHostId(hostId);
+    check(typeof onWake === "function", 500, "invalid_wake_waiter", "onWake must be a function");
+    const key = `${agentId} ${hostId}`;
+    const previous = this._wakeWaiters.get(key);
+    const entry = { roomId, onWake };
+    this._wakeWaiters.set(key, entry);
+    if (previous && previous !== entry) {
+      try { previous.onWake(); } catch { /* a throwing waiter must not break the new one */ }
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this._wakeWaiters.get(key) === entry) this._wakeWaiters.delete(key);
+    };
+  }
+
+  // Release every waiter held by the agent's hosts when a new signal lands
+  // (roomId-scoped). Never throws — the wake path must not fail the
+  // message post.
+  _releaseWakeWaiter(agentId, roomId) {
+    try {
+      const prefix = `${agentId}\0`;
+      for (const [key, waiter] of this._wakeWaiters) {
+        if (!key.startsWith(prefix)) continue;
+        if (waiter.roomId !== null && waiter.roomId !== roomId) continue;
+        this._wakeWaiters.delete(key);
+        waiter.onWake();
+      }
+    } catch { /* waiters are best-effort; the durable queue is the contract */ }
   }
 
   // Effective presence for an agent: online when any host was seen inside
@@ -492,4 +578,4 @@ export class AgentHeartbeats {
     return Object.freeze({ woken: true, enqueued, signal });
   }
 }
-export { MODES, WAKE_KINDS, STATUSES };
+export { MODES, WAKE_KINDS, STATUSES, HOST_ID_PATTERN };
