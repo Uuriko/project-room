@@ -127,13 +127,14 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const help = f.store.command(f.keys.owner, 'commons', { id: 'browser-help-open', type: T.WORK_HELP_UPDATED,
     data: { workItemId, expectedRevision: basis, expectedHelpRevision: 0, status: 'open',
       scope: 'Suggest one additional guide improvement in this Room.', expiresAt: new Date(Date.now() + 3600000).toISOString() } });
-  await page.locator(`[data-event-record-id="${help.event.id}"]`).waitFor({ state: 'attached' });
+  // Observe the applied receipt without opening history and stealing composer focus.
+  await page.waitForFunction(sequence => Number(document.querySelector('#event-count').textContent) >= sequence, help.sequence);
   const invitations = await call(helper, 'room_list_work', { focus: 'help_wanted' }, true);
   assert.equal(invitations.work.find(item => item.id === workItemId)?.help.canOffer, true);
   assert.equal((await call(helper, 'room_read_work', { workItemId }, true)).help.help.eventId, help.event.id);
   const withdrawn = f.store.command(f.keys.owner, 'commons', { id: 'browser-help-withdraw', type: T.WORK_HELP_UPDATED,
     data: { workItemId, expectedRevision: basis, expectedHelpRevision: 1, status: 'withdrawn' } });
-  await page.locator(`[data-event-record-id="${withdrawn.event.id}"]`).waitFor({ state: 'attached' });
+  await page.waitForFunction(sequence => Number(document.querySelector('#event-count').textContent) >= sequence, withdrawn.sequence);
   assert.equal((await call(helper, 'room_list_work', { focus: 'help_wanted' }, true)).work.some(item => item.id === workItemId), false);
   assert.equal(await page.locator('#message-input').inputValue(), unsent);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-input');

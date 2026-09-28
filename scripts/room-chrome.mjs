@@ -61,10 +61,23 @@ export async function openCatchUpPanel(page, panelId) {
 export async function openSettings(page, panelId) {
   const dialog = page.locator("#settings-dialog");
   if (!(await dialog.evaluate(node => node.open))) {
-    await page.locator("#topbar-settings").click();
+    await clickChrome(page, "#topbar-settings");
   }
   await dialog.waitFor({ state: "visible" });
-  if (panelId) await page.locator(`#${panelId}`).evaluate(node => { node.open = true; });
+  if (panelId) {
+    const panel = page.locator(`#${panelId}`);
+    const ancestorIds = await panel.evaluate(node => {
+      const ids = [];
+      for (let parent = node.parentElement; parent && parent.id !== "settings-dialog"; parent = parent.parentElement) {
+        if (parent.tagName === "DETAILS") ids.unshift(parent.id);
+      }
+      return ids;
+    });
+    for (const id of [...ancestorIds, panelId]) {
+      const details = page.locator(`#${id}`);
+      if (!(await details.evaluate(node => node.open))) await details.locator(":scope > summary").click();
+    }
+  }
 }
 
 // Settings is a modal: anything it is left open over cannot be clicked. A
@@ -101,7 +114,12 @@ export async function clickChrome(page, selector) {
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
   }
-  if (['#invite-people-button', '#connect-agent-button', '#invite-agents-button', '#room-actions-open'].includes(selector)) {
+  if (['#topbar-activity', '#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
+    await ensureSidebarClosed(page);
+    const more = page.locator('#room-more');
+    if (!(await more.evaluate(node => node.open))) await more.locator(':scope > summary').click();
+  }
+  if (['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].includes(selector)) {
     if (await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
     if (selector !== '#room-actions-open' && await page.locator('#invite-navigation').isVisible()
       && !(await page.locator('#invite-navigation').evaluate(node => node.open))) {

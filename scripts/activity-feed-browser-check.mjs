@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createRoomServer } from "../server/http.mjs";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
+import { clickChrome } from "./room-chrome.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 for (const mobile of [false, true]) {
@@ -36,13 +37,22 @@ for (const mobile of [false, true]) {
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
 
+    // Secondary navigation stays collapsed while chat is immediately usable.
+    assert.equal(await page.locator("#room-more").evaluate(node => node.open), false);
+    assert.equal(await page.locator("#topbar-activity").isVisible(), false);
+    await page.locator("#room-more > summary").focus();
+    await page.keyboard.press("Enter");
+    await page.locator("#topbar-activity").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#room-more > summary").evaluate(node => node === document.activeElement), true);
+    await page.locator("#room-more > summary").click();
     // The Activity badge counts the two unread items.
     const activityBadge = page.locator("#activity-count");
     await activityBadge.waitFor({ state: "visible" });
     assert.equal(await activityBadge.textContent(), "2");
 
     // The dialog lists both items; the Mentions filter narrows to one.
-    await page.locator("#topbar-activity").click();
+    await clickChrome(page, "#topbar-activity");
     const dialog = page.locator("#activity-dialog");
     await dialog.waitFor({ state: "visible" });
     await page.locator("#activity-list .activity-item").first().waitFor();
@@ -58,10 +68,10 @@ for (const mobile of [false, true]) {
     await page.waitForFunction(() => location.hash.startsWith("#pr-record/message/mention-owner"));
     await dialog.waitFor({ state: "hidden" });
     // Mark all read clears the badge.
-    await page.locator("#topbar-activity").click();
+    await clickChrome(page, "#topbar-activity");
     await dialog.waitFor({ state: "visible" });
     await page.locator("#activity-read-all").click();
-    await activityBadge.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.querySelector("#activity-count").hidden);
     await page.keyboard.press("Escape");
     await capture("read");
 
@@ -71,7 +81,7 @@ for (const mobile of [false, true]) {
     const saveButton = target.locator('[data-message-action="save"]');
     await saveButton.click();
     const laterBadge = page.locator("#later-count");
-    await laterBadge.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.querySelector("#later-count").textContent === "1");
     assert.equal(await laterBadge.textContent(), "1");
     // The menu label flips to Unsave while the message is saved.
     await target.locator(".message-more > summary").click();
@@ -79,13 +89,13 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("Escape");
 
     // The Later dialog lists the saved message; Unsave clears it.
-    await page.locator("#topbar-later").click();
+    await clickChrome(page, "#topbar-later");
     const laterDialog = page.locator("#later-dialog");
     await laterDialog.waitFor({ state: "visible" });
     await page.locator("#later-list .later-item").first().waitFor();
     assert.equal(await page.locator("#later-list .later-item").count(), 1);
     await page.locator('#later-list [data-unsave-message]').click();
-    await laterBadge.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.querySelector("#later-count").hidden);
     await page.keyboard.press("Escape");
 
     // Mark unread rewinds the read horizon: the "New messages" divider
@@ -93,8 +103,9 @@ for (const mobile of [false, true]) {
     const unreadTarget = page.locator('[data-message-record-id="mention-owner"]');
     await unreadTarget.locator(".message-more > summary").click();
     await unreadTarget.locator('[data-message-action="mark-unread"]').click();
-    const divider = page.locator('.chat-divider.unread', { hasText: "New messages" });
-    await divider.first().waitFor({ state: "visible" });
+    // Another unread divider may already exist before the asynchronous horizon
+    // write finishes. Wait for this action's specific message, not that old one.
+    await unreadTarget.locator('.chat-divider.unread', { hasText: "New messages" }).waitFor({ state: "visible" });
     // The divider renders at the top of the marked message's own element.
     const dividerInside = await page.evaluate(() => {
       const node = document.querySelector('[data-message-record-id="mention-owner"]');
@@ -162,13 +173,12 @@ for (const mobile of [false, true]) {
     const target = page.locator('[data-message-record-id="mention-owner"]');
     await target.focus();
     await page.keyboard.press("u");
-    const divider = page.locator('.chat-divider.unread', { hasText: "New messages" });
-    await divider.first().waitFor({ state: "visible" });
+    await page.locator('.chat-divider.unread', { hasText: "New messages" }).first().waitFor({ state: "visible" });
 
     // The room-actions palette lists Activity and Later entries (desktop:
     // the palette button is hidden on small screens).
     if (!mobile) {
-      await page.locator("#room-actions-open").click();
+      await clickChrome(page, "#room-actions-open");
       const actionsDialog = page.locator("#room-actions-dialog");
       await actionsDialog.waitFor({ state: "visible" });
       await page.locator("#room-actions-query").fill("activity");

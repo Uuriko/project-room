@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
@@ -77,7 +78,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#return-brief-panel > summary").click();
     await page.locator("#catchup-close").click();
-    await page.locator("#topbar-settings").click();
+    await clickChrome(page, "#topbar-settings");
     assert.equal(await isOpen("#settings-dialog"), true);
     assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#settings-close").click();

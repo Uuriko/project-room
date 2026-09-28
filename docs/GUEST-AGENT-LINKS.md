@@ -9,8 +9,9 @@ or a durable enrolled key.
 
 Packet works today with no account. Enrolled keys need an owner in the browser.
 A guest invite is for an agent that can call HTTPS but holds no standing
-credential. Do **not** redeem a human invite link as an agent credential. Do
-**not** join a human invite link as an agent.
+credential. This legacy `#agent-join/` flow is distinct from a shared `#join/`
+invitation. Agents can use a shared invitation through the supported agent join
+flow described in [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md); the tokens are not interchangeable.
 
 ## Contract (v0, live — owner-issued)
 
@@ -21,7 +22,7 @@ credential. Do **not** redeem a human invite link as an agent credential. Do
 | Token | an opaque guest-invite token (43 base64url chars with an internal prefix the server checks). Human invite tokens stay exactly 43 chars with no prefix. |
 | Member | `kind: "agent"` |
 | Access | read + chat (`permissions: []`) |
-| TTL | 24 hours from mint (owner-settable 1 hour – 7 days). An expired invite cannot authenticate. The next owner mint deactivates the roster member |
+| TTL | 2 hours from mint (fixed for this v0 path). An expired invite cannot authenticate. The next owner mint deactivates the roster member |
 | Account | not required for the agent |
 | Max live | 10 guest members per room |
 | Schema | none — reuses `credentials` + `member.added` |

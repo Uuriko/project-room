@@ -1,0 +1,1061 @@
+{
+  "synthetic": true,
+  "label": "SYNTHETIC FIXTURES — ring-detection shapes only. No real addresses, amounts, timestamps, or identities.",
+  "source_note": "Motifs shaped on the published Wazz (@WazzCrypto) Robinhood-Chain serial-rugpull forensic report (2026-09-28, see ~/workspace/wazz-watchlist/WATCHLIST.md): collector fan-in (179.88 ETH, 98 DRAFT wallets, 3s), distributor fan-out (20 ETH in, 15.98 ETH batched to 50 addresses, 16s pass-through), deed-distribution sell-off (92 addresses sold 130.75 ETH into the pool), plus rapid pass-through and burst-timing motifs. The report published only truncated address prefixes; every id here is invented (SYNTH-*). Amounts and timestamps are invented. Nothing in this file is evidence about any real person, wallet, or chain activity.",
+  "honesty_rule": "A detector finding on these fixtures proves the detector recognizes the SHAPE. It proves nothing about any real-world entity. The watchlist honesty rule travels with this file: addresses are evidence, never identities.",
+  "generated": "deterministic seeded generator (seed 2905); regenerate with /tmp/gen-wazz-rings.mjs if needed",
+  "fixtures": {
+    "collector_fan_in": {
+      "synthetic": true,
+      "description": "collector fan-in motif: 24 synthetic wallets fund one collector inside a 3s burst; proceeds bridge out and part returns (re-seed loop). Scaled from the reported 98-wallet / 3s / 179.88 ETH shape.",
+      "nodes": [
+        {
+          "id": "SYNTH-COLL-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-BRIDGE-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-CASH-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-W-001",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-002",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-003",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-004",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-005",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-006",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-007",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-008",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-009",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-010",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-011",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-012",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-013",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-014",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-015",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-016",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-017",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-018",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-019",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-020",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-021",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-022",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-023",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        },
+        {
+          "id": "SYNTH-W-024",
+          "attributes": {
+            "inviter": "SYNTH-INV-01",
+            "device": "SYNTH-DEV-01",
+            "payout": "SYNTH-COLL-01"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-W-001",
+          "to": "SYNTH-COLL-01",
+          "amount": 7.207064743250173,
+          "ts": 1786000002883
+        },
+        {
+          "from": "SYNTH-W-002",
+          "to": "SYNTH-COLL-01",
+          "amount": 8.725791934749946,
+          "ts": 1786000002896
+        },
+        {
+          "from": "SYNTH-W-003",
+          "to": "SYNTH-COLL-01",
+          "amount": 7.7483444245291615,
+          "ts": 1786000001316
+        },
+        {
+          "from": "SYNTH-W-004",
+          "to": "SYNTH-COLL-01",
+          "amount": 6.225730898429514,
+          "ts": 1786000002249
+        },
+        {
+          "from": "SYNTH-W-005",
+          "to": "SYNTH-COLL-01",
+          "amount": 6.835685732697922,
+          "ts": 1786000000023
+        },
+        {
+          "from": "SYNTH-W-006",
+          "to": "SYNTH-COLL-01",
+          "amount": 1.740318507300838,
+          "ts": 1786000002468
+        },
+        {
+          "from": "SYNTH-W-007",
+          "to": "SYNTH-COLL-01",
+          "amount": 8.170057300091749,
+          "ts": 1786000002433
+        },
+        {
+          "from": "SYNTH-W-008",
+          "to": "SYNTH-COLL-01",
+          "amount": 2.863981247816226,
+          "ts": 1786000000900
+        },
+        {
+          "from": "SYNTH-W-009",
+          "to": "SYNTH-COLL-01",
+          "amount": 4.082345010285426,
+          "ts": 1786000001355
+        },
+        {
+          "from": "SYNTH-W-010",
+          "to": "SYNTH-COLL-01",
+          "amount": 1.0599527359287966,
+          "ts": 1786000002267
+        },
+        {
+          "from": "SYNTH-W-011",
+          "to": "SYNTH-COLL-01",
+          "amount": 8.127015117149341,
+          "ts": 1786000002046
+        },
+        {
+          "from": "SYNTH-W-012",
+          "to": "SYNTH-COLL-01",
+          "amount": 1.8245325092340505,
+          "ts": 1786000000567
+        },
+        {
+          "from": "SYNTH-W-013",
+          "to": "SYNTH-COLL-01",
+          "amount": 7.088177206967108,
+          "ts": 1786000002632
+        },
+        {
+          "from": "SYNTH-W-014",
+          "to": "SYNTH-COLL-01",
+          "amount": 3.8412265790818383,
+          "ts": 1786000001146
+        },
+        {
+          "from": "SYNTH-W-015",
+          "to": "SYNTH-COLL-01",
+          "amount": 4.014490128967208,
+          "ts": 1786000001375
+        },
+        {
+          "from": "SYNTH-W-016",
+          "to": "SYNTH-COLL-01",
+          "amount": 2.949350357963401,
+          "ts": 1786000001821
+        },
+        {
+          "from": "SYNTH-W-017",
+          "to": "SYNTH-COLL-01",
+          "amount": 1.039361953753681,
+          "ts": 1786000001507
+        },
+        {
+          "from": "SYNTH-W-018",
+          "to": "SYNTH-COLL-01",
+          "amount": 1.3189868928487352,
+          "ts": 1786000001143
+        },
+        {
+          "from": "SYNTH-W-019",
+          "to": "SYNTH-COLL-01",
+          "amount": 2.500515938503908,
+          "ts": 1786000001775
+        },
+        {
+          "from": "SYNTH-W-020",
+          "to": "SYNTH-COLL-01",
+          "amount": 2.5371398932939115,
+          "ts": 1786000000434
+        },
+        {
+          "from": "SYNTH-W-021",
+          "to": "SYNTH-COLL-01",
+          "amount": 8.6204485928735,
+          "ts": 1786000000022
+        },
+        {
+          "from": "SYNTH-W-022",
+          "to": "SYNTH-COLL-01",
+          "amount": 5.265958996613491,
+          "ts": 1786000000418
+        },
+        {
+          "from": "SYNTH-W-023",
+          "to": "SYNTH-COLL-01",
+          "amount": 6.413625958102581,
+          "ts": 1786000001767
+        },
+        {
+          "from": "SYNTH-W-024",
+          "to": "SYNTH-COLL-01",
+          "amount": 5.322209360228018,
+          "ts": 1786000002577
+        },
+        {
+          "from": "SYNTH-COLL-01",
+          "to": "SYNTH-BRIDGE-01",
+          "amount": 120.5,
+          "ts": 1786086400000
+        },
+        {
+          "from": "SYNTH-BRIDGE-01",
+          "to": "SYNTH-CASH-01",
+          "amount": 119.8,
+          "ts": 1786086405000
+        },
+        {
+          "from": "SYNTH-CASH-01",
+          "to": "SYNTH-COLL-01",
+          "amount": 40,
+          "ts": 1786086412000
+        }
+      ]
+    },
+    "distributor_fan_out": {
+      "synthetic": true,
+      "description": "distributor fan-out motif: one key receives 20 units, then batches to 12 addresses within a 16s pass-through. Scaled from the reported 20-in / 15.98-out to 50 / 16s shape.",
+      "nodes": [
+        {
+          "id": "SYNTH-FUND-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-DIST-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-D-001",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-002",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-003",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-004",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-005",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-006",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-007",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-008",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-009",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-010",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-011",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        },
+        {
+          "id": "SYNTH-D-012",
+          "attributes": {
+            "inviter": "SYNTH-INV-02"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-FUND-01",
+          "to": "SYNTH-DIST-01",
+          "amount": 20,
+          "ts": 1786000000000
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-001",
+          "amount": 1.0394546988138251,
+          "ts": 1786000016805
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-002",
+          "amount": 1.2408039573304372,
+          "ts": 1786000002718
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-003",
+          "amount": 1.6256402140136996,
+          "ts": 1786000017766
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-004",
+          "amount": 1.9262018210376621,
+          "ts": 1786000011831
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-005",
+          "amount": 0.6865320206557084,
+          "ts": 1786000005027
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-006",
+          "amount": 1.5536497836251044,
+          "ts": 1786000006638
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-007",
+          "amount": 1.2356953624336493,
+          "ts": 1786000015946
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-008",
+          "amount": 0.594242572828309,
+          "ts": 1786000016365
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-009",
+          "amount": 1.8815681940790119,
+          "ts": 1786000013707
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-010",
+          "amount": 0.6451427937229829,
+          "ts": 1786000014005
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-011",
+          "amount": 1.010149002312752,
+          "ts": 1786000010092
+        },
+        {
+          "from": "SYNTH-DIST-01",
+          "to": "SYNTH-D-012",
+          "amount": 1.1596775058003503,
+          "ts": 1786000002762
+        }
+      ]
+    },
+    "deed_selloff_set": {
+      "synthetic": true,
+      "description": "deed-distribution sell-off motif: 10 funded addresses sell into the pool in lockstep within 60s. Scaled from the reported 92-into-pool shape.",
+      "nodes": [
+        {
+          "id": "SYNTH-POOL-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-DEED-001",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-002",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-003",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-004",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-005",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-006",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-007",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-008",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-009",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        },
+        {
+          "id": "SYNTH-DEED-010",
+          "attributes": {
+            "inviter": "SYNTH-INV-03"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-DEED-001",
+          "to": "SYNTH-POOL-01",
+          "amount": 1.3578337612365532,
+          "ts": 1786000028271
+        },
+        {
+          "from": "SYNTH-DEED-002",
+          "to": "SYNTH-POOL-01",
+          "amount": 3.49156938916611,
+          "ts": 1786000030741
+        },
+        {
+          "from": "SYNTH-DEED-003",
+          "to": "SYNTH-POOL-01",
+          "amount": 2.272711563796136,
+          "ts": 1786000007601
+        },
+        {
+          "from": "SYNTH-DEED-004",
+          "to": "SYNTH-POOL-01",
+          "amount": 0.96003999121489,
+          "ts": 1786000040661
+        },
+        {
+          "from": "SYNTH-DEED-005",
+          "to": "SYNTH-POOL-01",
+          "amount": 2.4766417034327244,
+          "ts": 1786000025584
+        },
+        {
+          "from": "SYNTH-DEED-006",
+          "to": "SYNTH-POOL-01",
+          "amount": 2.1457758432933014,
+          "ts": 1786000054707
+        },
+        {
+          "from": "SYNTH-DEED-007",
+          "to": "SYNTH-POOL-01",
+          "amount": 1.0991964818440363,
+          "ts": 1786000036230
+        },
+        {
+          "from": "SYNTH-DEED-008",
+          "to": "SYNTH-POOL-01",
+          "amount": 1.2755882026979646,
+          "ts": 1786000035499
+        },
+        {
+          "from": "SYNTH-DEED-009",
+          "to": "SYNTH-POOL-01",
+          "amount": 3.1295435916304326,
+          "ts": 1786000001183
+        },
+        {
+          "from": "SYNTH-DEED-010",
+          "to": "SYNTH-POOL-01",
+          "amount": 2.360752470773064,
+          "ts": 1786000047349
+        }
+      ]
+    },
+    "rapid_pass_through": {
+      "synthetic": true,
+      "description": "rapid pass-through motif: funds hop through 4 nodes 800ms apart — a single fast chain, no hub, no cluster. Expected: no finding (single-shape, below multi-signal threshold).",
+      "nodes": [
+        {
+          "id": "SYNTH-PT-01",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-PT-02",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-PT-03",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-PT-04",
+          "attributes": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-PT-01",
+          "to": "SYNTH-PT-02",
+          "amount": 15,
+          "ts": 1786000000800
+        },
+        {
+          "from": "SYNTH-PT-02",
+          "to": "SYNTH-PT-03",
+          "amount": 15,
+          "ts": 1786000001600
+        },
+        {
+          "from": "SYNTH-PT-03",
+          "to": "SYNTH-PT-04",
+          "amount": 15,
+          "ts": 1786000002400
+        }
+      ]
+    },
+    "burst_timing": {
+      "synthetic": true,
+      "description": "burst timing motif: 15 transfers between unrelated pairs inside 45s — synchrony with no shared entity. Expected: burst signal only, excluded by the multi-signal rule (a single signal never flags).",
+      "nodes": [
+        {
+          "id": "SYNTH-B-01A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-01B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-02A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-02B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-03A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-03B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-04A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-04B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-05A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-05B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-06A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-06B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-07A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-07B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-08A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-08B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-09A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-09B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-10A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-10B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-11A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-11B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-12A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-12B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-13A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-13B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-14A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-14B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-15A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-B-15B",
+          "attributes": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-B-01A",
+          "to": "SYNTH-B-01B",
+          "amount": 1.9930602082484683,
+          "ts": 1786000031790
+        },
+        {
+          "from": "SYNTH-B-02A",
+          "to": "SYNTH-B-02B",
+          "amount": 4.888873197878186,
+          "ts": 1786000024927
+        },
+        {
+          "from": "SYNTH-B-03A",
+          "to": "SYNTH-B-03B",
+          "amount": 3.4804869667536056,
+          "ts": 1786000014393
+        },
+        {
+          "from": "SYNTH-B-04A",
+          "to": "SYNTH-B-04B",
+          "amount": 1.3811827665572907,
+          "ts": 1786000034820
+        },
+        {
+          "from": "SYNTH-B-05A",
+          "to": "SYNTH-B-05B",
+          "amount": 2.9854918493356055,
+          "ts": 1786000032241
+        },
+        {
+          "from": "SYNTH-B-06A",
+          "to": "SYNTH-B-06B",
+          "amount": 4.719195463424174,
+          "ts": 1786000010348
+        },
+        {
+          "from": "SYNTH-B-07A",
+          "to": "SYNTH-B-07B",
+          "amount": 1.2893250053698782,
+          "ts": 1786000036668
+        },
+        {
+          "from": "SYNTH-B-08A",
+          "to": "SYNTH-B-08B",
+          "amount": 2.9586685670812933,
+          "ts": 1786000024368
+        },
+        {
+          "from": "SYNTH-B-09A",
+          "to": "SYNTH-B-09B",
+          "amount": 1.140421724803942,
+          "ts": 1786000036141
+        },
+        {
+          "from": "SYNTH-B-10A",
+          "to": "SYNTH-B-10B",
+          "amount": 0.8476121190691422,
+          "ts": 1786000003198
+        },
+        {
+          "from": "SYNTH-B-11A",
+          "to": "SYNTH-B-11B",
+          "amount": 0.9860877160383796,
+          "ts": 1786000023402
+        },
+        {
+          "from": "SYNTH-B-12A",
+          "to": "SYNTH-B-12B",
+          "amount": 1.9363952645270133,
+          "ts": 1786000038769
+        },
+        {
+          "from": "SYNTH-B-13A",
+          "to": "SYNTH-B-13B",
+          "amount": 2.792813874544955,
+          "ts": 1786000010117
+        },
+        {
+          "from": "SYNTH-B-14A",
+          "to": "SYNTH-B-14B",
+          "amount": 3.6640336589720257,
+          "ts": 1786000040836
+        },
+        {
+          "from": "SYNTH-B-15A",
+          "to": "SYNTH-B-15B",
+          "amount": 1.7563218839728842,
+          "ts": 1786000033660
+        }
+      ]
+    },
+    "honest_control": {
+      "synthetic": true,
+      "description": "negative control: 8 organic transfers between distinct pairs spread over ~3 days, no shared attributes. Expected: zero signals, zero findings.",
+      "nodes": [
+        {
+          "id": "SYNTH-H-01A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-01B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-02A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-02B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-03A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-03B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-04A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-04B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-05A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-05B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-06A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-06B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-07A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-07B",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-08A",
+          "attributes": {}
+        },
+        {
+          "id": "SYNTH-H-08B",
+          "attributes": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "SYNTH-H-01A",
+          "to": "SYNTH-H-01B",
+          "amount": 2.488064528204531,
+          "ts": 1786000009916
+        },
+        {
+          "from": "SYNTH-H-02A",
+          "to": "SYNTH-H-02B",
+          "amount": 6.318501594159054,
+          "ts": 1786000365870
+        },
+        {
+          "from": "SYNTH-H-03A",
+          "to": "SYNTH-H-03B",
+          "amount": 9.8425731700112,
+          "ts": 1786000669549
+        },
+        {
+          "from": "SYNTH-H-04A",
+          "to": "SYNTH-H-04B",
+          "amount": 6.473546984360342,
+          "ts": 1786001023916
+        },
+        {
+          "from": "SYNTH-H-05A",
+          "to": "SYNTH-H-05B",
+          "amount": 7.237516406102812,
+          "ts": 1786001307201
+        },
+        {
+          "from": "SYNTH-H-06A",
+          "to": "SYNTH-H-06B",
+          "amount": 1.1847746969129773,
+          "ts": 1786001649032
+        },
+        {
+          "from": "SYNTH-H-07A",
+          "to": "SYNTH-H-07B",
+          "amount": 8.285950187261193,
+          "ts": 1786001957256
+        },
+        {
+          "from": "SYNTH-H-08A",
+          "to": "SYNTH-H-08B",
+          "amount": 10.03619081202717,
+          "ts": 1786002286945
+        }
+      ]
+    }
+  }
+}

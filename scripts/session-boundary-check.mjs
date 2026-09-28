@@ -12,7 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
 import { fillAccessKey } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
   ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH }
@@ -753,6 +753,8 @@ test("record identities and fragments remain collision-safe and legacy work link
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
   await login(page, origin, owner, "Room owner");
   await page.locator('[data-work-record-id="work-legacy"]').waitFor();
+  // Include the on-demand history records in the DOM identity checks.
+  await openSettings(page, "record-panel");
 
   const duplicates = await page.evaluate(() => {
     const counts = new Map();
@@ -782,6 +784,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="list"] [data-reaction="\u2764\uFE0F"]').getAttribute("title"), /Alex \(duplicate-a\).*Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
+  await closeSettings(page);
   await openSearch(page);
   await page.locator("#message-search").fill("First Alex identity message");
   assert.match(await page.locator("#search-list").textContent(), /Alex \(duplicate-a\)/);

@@ -20,8 +20,31 @@ export function livePublicMcpTools() {
 // agent's grants/tiers do not admit is ABSENT from the returned catalog —
 // never present-but-denying. Omit it for the public/unfiltered lists
 // (server card, join surface), which stay full by design.
-export function listedMcpTools(profile = "core", aliases = false, agent = null) {
-  const source = profile === "full"
+const FOCUS_COMMON_TOOLS = [
+  "room_check_access", "room_needs_me", "get_room_context", "room_read_request",
+  "room_list_requests", "room_reply", "room_respond_to_request", "room_request_reply", "room_post_message"
+];
+
+// Actor-selected discovery views, not permission or execution profiles. Include
+// advanced tools from the full catalog without changing direct-call availability.
+export const MCP_TOOL_FOCUSES = Object.freeze({
+  conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "room_list_peer_dms", "dm_posted"],
+  work: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
+    "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
+    "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
+    "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim",
+    "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
+  review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
+    "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],
+  automation: ["wake_register", "wake_clear", "wake_pause", "wake_resume", "heartbeat_set",
+    "heartbeat_get", "heartbeat_ack", "webhook_subscribe", "webhook_list", "webhook_unsubscribe"]
+});
+
+export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
+  const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
+  const source = focusedNames
+    ? hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name))
+    : profile === "full"
     ? hostedMcpToolDefs
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
   const tools = source.map(entry => {
