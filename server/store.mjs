@@ -74,6 +74,7 @@ import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 durable registry (additive, unfenced).
+import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -939,6 +940,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
       this.db.exec(boardV2Schema);
+      // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers
+      // (emissary_drops, emissary_invite_attribution, emissary_idempotency,
+      // emissary_journal) — purely additive, IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Applied here so upgrades, store-only
+      // fixtures, and the recovery audit see the tables; the module also
+      // ensures its schema lazily on first use.
+      this.db.exec(EMISSARY_LURE_SCHEMA);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
