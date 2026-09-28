@@ -45,7 +45,10 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   const option = page.locator(`#message-to-select option[value="${jordan}"]`);
   assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
   await ensurePeopleOpen(page);
-  assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan));
+  assert.equal(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), "Jordan");
+  await page.locator(`[data-member-record-id="${jordan}"] .member-profile > summary`).click();
+  assert.match(await page.locator(`[data-member-record-id="${jordan}"] .member-profile-body`).innerText(), new RegExp(jordan), "exact identity remains available on demand");
+  await page.locator(`[data-member-record-id="${jordan}"] .member-profile > summary`).click();
   // On a phone the People rail is an overlay; leaving it up covers the search
   // control in the top bar.
   await ensureSidebarClosed(page);
@@ -61,6 +64,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
   assert.equal(await reply.evaluate(node => node === document.activeElement), true, 'background identity change preserves action focus');
   assert.match(await record('naming-root').locator('.message-meta strong').textContent(), new RegExp(jordan));
   assert.match(await next.textContent(), new RegExp(jordan));
+  assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan), 'duplicate names remain distinguishable in the rail');
   send('owner', 'member.access_changed', { memberId: duplicate, expectedMemberRevision: 0, active: false, permissions: [] });
   await page.waitForFunction(id => document.querySelector(`[data-member-record-id="${id}"]`).textContent.includes('access revoked'), duplicate);
   assert.match(await directed.textContent(), new RegExp(jordan), 'inactive names remain relevant to historical attribution');

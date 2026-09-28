@@ -1998,16 +1998,27 @@ sweep_pr_evidence() {
 # after the window start that names the task-id alongside receipt,
 # heartbeat, status, or landing language is evidence of a live lane —
 # suppress the strike and note loudly instead of nudging or releasing.
-# Room-watch own posts are excluded (the strike nudge itself names the
-# task). The window is strict (>) on purpose: activity exactly at the
+# The window is strict (>) on purpose: activity exactly at the
 # strike instant does not count, matching the machine heartbeat
 # boundary (room-protocol-mutation W7).
+# 2026-09-28 (RC-2026-09-28-3110): the machine's own RECLAIM-stamped
+# posts (strike-one/strike-two nudges, duplicate refusals,
+# illegal-transition rejections) are excluded. The strike-one nudge
+# names the task and carries strike/heartbeat/status language, and it
+# lands strictly after strike_one_at — without the exclusion it counts
+# as lane activity and self-suppresses strike-two
+# (RC-2026-09-27-2742: nudge at 10:02:25Z vs strike at 10:02:24Z).
+# Only lane-authored comments count as activity. The exclusion keys on
+# the machine stamps, never on the lane tag: quill-s2 also posts real
+# lane-authored claims and heartbeats, which must keep counting.
 human_board_activity() { # $1 = comments JSON, $2 = task_id, $3 = window-start ISO -> 0 on activity
   local comments="$1" task_id="$2" ws="$3"
   printf '%s' "$comments" | jq -e --arg t "$task_id" --arg ws "$ws" '
     [ .[]
       | select((.created_at // "") > $ws)
       | select((.body // "") | test("^\\[room-watch\\]") | not)
+      | select((.body // "")
+               | test("<!-- room:(strike-one|strike-two|duplicate-refusal|illegal-rejection):") | not)
       | select((.body // "") | test($t + "\\b"))
       | select((.body // "")
                | test("(?i)receipt|merged|done|status|heartbeat|strike|landed|shipped|complete|closeout"))]
@@ -2052,10 +2063,14 @@ deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable
   #   1. a VALIDATED receipt on the board naming the task (anchored to a
   #      real merged PR — see validated_receipt_tasks), or
   #   2. a merged PR whose title/body names the task-id, or
-  #   3. (2026-09-27 RC-2026-09-27-2726) a merged PR whose changed files
-  #      cover at least half the claim files — the deliverables landed
-  #      even though no receipt or TASK-ID line names the task. A
-  #      drive-by touch of one file among many is not a landing.
+  #   3. (2026-09-27 RC-2026-09-27-2726; tightened 2026-09-28
+  #      RC-2026-09-28-3110) a merged PR that (a) merged AFTER the claim
+  #      was opened and (b) touched the claim's core file — the first
+  #      file in the claim's files list, the primary deliverable. A
+  #      pre-claim PR, or one touching only peripheral files, is not a
+  #      landed deliverable: RC-2026-09-28-2873 was suppressed by PRs
+  #      #1128/#1146, merged a day before the claim and touching 5/10
+  #      listed files but never the core server/emissary-lure.mjs.
   local task_id="$1" st="$2"
   sweep_pr_evidence
   local prs="$_SWEEP_PRS_JSON" prfiles="$_SWEEP_PRFILES_JSON"
@@ -2069,16 +2084,19 @@ deliverable_landed() { # $1 = task_id, $2 = state JSON -> 0 when the deliverable
        | length > 0' >/dev/null; then
     return 0
   fi
-  local files n best
+  local files n claim_at core
   files="$(printf '%s' "$st" | jq -c --arg t "$task_id" '[.tasks[] | select(.task_id == $t)] | .[0].files // []')"
   n="$(printf '%s' "$files" | jq 'length')"
   [ "$n" -gt 0 ] || return 1
-  best="$(jq -n --argjson files "$files" --argjson fmap "$prfiles" '
-    [$fmap | to_entries[] | .value
-     | . as $pf | [$files[] | . as $f | select($pf | index($f))] | length]
-    | max // 0')"
-  [ "$best" -gt 0 ] && [ "$((best * 2))" -ge "$n" ] && return 0
-  return 1
+  claim_at="$(printf '%s' "$st" | jq -r --arg t "$task_id" '[.tasks[] | select(.task_id == $t)] | .[0].claim_at // empty')"
+  [ -n "$claim_at" ] || return 1
+  core="$(printf '%s' "$files" | jq -r '.[0]')"
+  printf '%s' "$prs" | jq -e --arg core "$core" --arg ca "$claim_at" --argjson fmap "$prfiles" '
+    [.[] | select(.merged_at != null)
+     | select((.merged_at // "") > $ca)
+     | (.number | tostring) as $num
+     | select(($fmap[$num] // []) | index($core))]
+    | length > 0' >/dev/null
 }
 
 sweep_decide() { # $1 = state JSON, $2 = now epoch, $3 = comments JSON -> dry-run plan or live posts

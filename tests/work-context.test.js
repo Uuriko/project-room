@@ -137,6 +137,13 @@ test("selected handoff tracks exact corrections/reviews while preserving human d
   const complete = version => mutate(producer, T.WORK_COMPLETED, { summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: version, producerId: "producer", nextAction: "Review exact version", signedEvidence: f.signEvidence() });
   await complete("v1");
   let context = await reviewer.workContext("test-handoff");
+  // Selected context must match the human card without rewriting the session ledger.
+  assert.equal(context.work.state, "completed");
+  assert.equal(context.work.status, "queued");
+  assert.equal(context.work.displayStatus, "done");
+  assert.equal(context.accessSummary.budget.sessionStatus, "queued");
+  assert.match(workContextMarkdown(context), /Session display status: done/);
+  assert.match(workContextMarkdown(context), /Recorded session controls[^\n]+"status":"queued"/);
   assert.equal(context.next.action, "verify"); assert.equal(context.next.addressedToViewer, true);
   await mutate(reviewer, T.VERIFICATION_RECORDED, { result: "fail", completionEventId: context.work.receipt.eventId, evidenceVersion: "v1", summary: "Synthetic correction needed", nextAction: "Revise" });
   assert.equal((await producer.workContext("test-handoff")).work.blocker.reason, "Synthetic correction needed");
@@ -369,6 +376,8 @@ test("selected resume preserves worker continuity without exposing attempt histo
   mutate({ action: "set_status", status: "processing", environment: "ATTEMPT-ENVIRONMENT-SENTINEL" });
   const running = await read("running");
   assert.equal(running.resume.continuity.attempt, 1);
+  assert.equal(running.work.status, "processing");
+  assert.equal(running.work.displayStatus, "processing");
   now += SESSION_HEARTBEAT_STALE_MS + 1;
   const stale = await read("unknown");
   assert.match(workContextMarkdown(stale), /Process state is unknown/);
