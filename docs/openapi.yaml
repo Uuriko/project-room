@@ -10706,6 +10706,81 @@ paths:
                   generatedAt: { type: string }
         '401': { description: unauthenticated }
         '404': { description: room_not_found }
+  /api/rooms/{roomId}/orient:
+    get:
+      summary: Orient an arriving agent
+      description: |
+        The URL outside agents guess by analogy with /activation-pack:
+        read-only, member-scoped orientation for a cold-HTTP agent with no
+        client SDK. Returns the contract version, the authenticated member
+        and their permission scope, the room summary, the evaluated-through
+        event sequence, and a bounded list of open work records with their
+        next steps. Everything returned is derivable from the activation
+        pack plus the caller's own member record, so this adds no new
+        visibility. Requires a room credential like every other
+        /api/rooms/{roomId} read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Orientation payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contract:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      version: { type: integer }
+                  room:
+                    type: object
+                    properties:
+                      slug: { type: string }
+                      title: { type: string }
+                      state: { type: string, enum: [active, archived] }
+                      kind: { type: string, enum: [personal, organization] }
+                  member:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      handle: { type: string }
+                      kind: { type: string, enum: [human, agent] }
+                      permissions: { type: array, items: { type: string } }
+                      active: { type: boolean }
+                  evaluatedThrough: { type: integer }
+                  eventCursor: { type: string }
+                  orientation:
+                    type: object
+                    properties:
+                      version: { type: integer }
+                      purpose: { type: string }
+                      activeWorkTotal: { type: integer }
+                  work:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        state: { type: string, enum: [proposed, accepted, working, blocked] }
+                        claimant: { type: [string, "null"] }
+                        next:
+                          type: object
+                          properties:
+                            action: { type: string }
+                            label: { type: string }
+                            memberId: { type: [string, "null"] }
+                            needsAttention: { type: boolean }
+                  workTotal: { type: integer }
+                  links:
+                    type: object
+                    properties:
+                      activationPack: { type: string }
+                  generatedAt: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: room_not_found }
   /api/agent-identities/{identityId}/verify:
     post:
       summary: Attest an agent identity as verified
