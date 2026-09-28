@@ -7,9 +7,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createFeedbackStore, validateFeedback, dedupKey, normalizePath, routeForSeverity, FeedbackError,
+  createFeedbackStore, validateFeedback, normalizePath, routeForSeverity, FeedbackError,
   MARK_FILING_COST, MARK_ACCEPT_REWARD, MARK_APPEAL_COST, MARK_MERGE_BONUS,
-  MARK_REVIEWER_CONFIRMED, MARK_REVIEWER_MISVERDICT, APPEAL_WINDOW_MS,
+  MARK_REVIEWER_CONFIRMED, APPEAL_WINDOW_MS,
 } from "../server/feedback-store.mjs";
 
 const goodFiling = (over = {}) => ({

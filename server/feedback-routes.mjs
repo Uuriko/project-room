@@ -89,7 +89,7 @@ const readMethod = method => method === "GET" || method === "HEAD";
 
 export function handleFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
   feedbackStore, limiter, helpers }) {
-  const { json, reject, body } = helpers;
+  const { reject } = helpers;
   try {
     return dispatchFeedbackCore({ req, res, store, roomId, auth, feedbackRoute, feedbackId,
       feedbackStore, limiter, helpers });
@@ -229,6 +229,6 @@ export async function handleFeedback(options) {
 // promoted items that never ship go stale (precision signal, no Mark
 // penalty). Wire to a scheduler when the metrics dashboard slice lands
 // (docs/feedback-endpoint.md §6); until then it is available but unscheduled.
-export function sweepFeedbackVerdicts(feedbackStore = defaultStore) {
+export function sweepFeedbackVerdicts(feedbackStore) {
   return feedbackStore.settleVerdicts();
 }
