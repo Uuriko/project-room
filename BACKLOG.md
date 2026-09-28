@@ -11,7 +11,6 @@ Item format (one line each):
 Optional trailers: `· blocked on: ...` `· claimed: RC-...` `· shipped as: #NNNN`
 
 ## ready
-- [ ] BL-002 · openapi.yaml drift check · scope: docs/openapi.yaml vs server routes · accept: script reports zero drift or opens a PR · files: docs/openapi.yaml, scripts/openapi-method-accuracy.mjs
 - [ ] BL-003 · telegram_live_status docs · scope: document the merged SQLite telegram_live_status table · accept: docs/ section merged · files: docs/
 - [ ] BL-005 · Ralph burndown loop · scope: S4 night-shift loop (cron + worker template, cap 2) · accept: cron live, first burndown PR opened · files: scripts/room · unblocked: S2 shipped as #1086
 
@@ -22,3 +21,5 @@ Optional trailers: `· blocked on: ...` `· claimed: RC-...` `· shipped as: #NN
 - [x] BL-000 · OTel delivery tracing R1 · shipped as #1082
 - [x] BL-000 · live file-claim registry S1 · shipped as #1084
 - [x] BL-001 · kb/ durable memory seed · scope: create kb/ with index.md, notes/, plans/, decisions/ + 3 seed notes from AGENTS.md lessons · accept: kb/ merged, ROOM-PROTOCOL.md §4d documents the write/read conventions · files: kb/, docs/ROOM-PROTOCOL.md · shipped as: #1085
+
+- [x] BL-002 · openapi.yaml drift check · scope: docs/openapi.yaml vs server routes · accept: script reports zero drift or opens a PR · files: docs/openapi.yaml, scripts/openapi-method-accuracy.mjs · evidence: docs/ROOM-RELIABILITY-FOLLOWTHROUGH.md

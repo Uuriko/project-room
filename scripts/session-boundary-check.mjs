@@ -746,13 +746,27 @@ test("record identities and fragments remain collision-safe and legacy work link
       accountableMemberId: "duplicate-a", verifierMemberId: "duplicate-b", independentVerificationRequired: true
     }
   }));
-  const { browser, origin, owner, duplicateA } = await startRoom(t, {
+  const { browser, origin, owner, duplicateA, send } = await startRoom(t, {
     events: seed,
     prepare({ store }) { return { duplicateA: store.issueAccessKey("commons", "duplicate-a") }; }
   });
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
   await login(page, origin, owner, "Room owner");
   await page.locator('[data-work-record-id="work-legacy"]').waitFor();
+  // A caller-controlled message ID must not alias the work row's reuse key.
+  const collisionBody = "A message remains distinct from the work card";
+  const assertCollisionRecords = async () => {
+    const message = page.locator('[data-message-record-id="work:list"]');
+    assert.equal(await message.locator('.message-body').count(), 1, "message body survives a colliding work key");
+    assert.equal(await message.locator('.message-body').textContent(), collisionBody);
+    assert.equal(await page.locator('[data-work-record-id="list"] h3').textContent(), "Collision work list");
+  };
+  const collision = send(owner, T.MESSAGE_POSTED, { messageId: "work:list", body: collisionBody });
+  await page.waitForFunction(sequence => Number(document.querySelector('#event-count').textContent) >= sequence, collision.sequence);
+  await assertCollisionRecords();
+  const following = send(owner, T.MESSAGE_POSTED, { messageId: "after-work-key-collision", body: "A later arrival preserves both records" });
+  await page.waitForFunction(sequence => Number(document.querySelector('#event-count').textContent) >= sequence, following.sequence);
+  await assertCollisionRecords();
   // Include the on-demand history records in the DOM identity checks.
   await openSettings(page, "record-panel");
 
