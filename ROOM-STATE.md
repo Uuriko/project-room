@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T00:29:05Z · board: Uuriko/project-room#1160 · watermark: 5861253434 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ec4d56d952e038bf6c07ffa28b486ca4326955c518ddc6cb67308a844fef5d0b -->
+<!-- generated: 2026-09-28T00:30:34Z · board: Uuriko/project-room#1160 · watermark: 5861269121 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=ec4d56d952e038bf6c07ffa28b486ca4326955c518ddc6cb67308a844fef5d0b -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -82,5 +82,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=60 threshold=1500 rotation_due=no watcher=active open_claims=8 prose_open=0 unfenced_prose=0 files_claimed=24 overlap_files=0 watermark=5861253434
+board_comments=63 threshold=1500 rotation_due=no watcher=active open_claims=8 prose_open=0 unfenced_prose=0 files_claimed=24 overlap_files=0 watermark=5861269121
 
