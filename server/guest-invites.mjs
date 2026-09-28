@@ -11,6 +11,7 @@
 // (guest_invites + guest_members tables, IF NOT EXISTS, no schema version
 // bump), following the wake-queue / heartbeat additive pattern.
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
+import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -285,6 +286,16 @@ export class GuestInvites {
     return row.tier;
   }
 
+  // Direct guest admission and reactivation do not pass through
+  // RoomStore.command's MEMBER_ADDED budget gate. Keep the same active-seat
+  // ceiling, and reserve room-event capacity for the event about to land.
+  admissionBudget(room) {
+    if (room.sequence >= PILOT_LIMITS.eventsPerRoom
+      || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
+      fail(409, "pilot_limit", "Bounded pilot capacity reached; no guest was admitted");
+    }
+  }
+
   // Journaled guest-seat deactivation shared by the expiry sweep and the LRU
   // accumulation-cap eviction: builds the MEMBER_ACCESS_CHANGED event
   // directly (the self-serve redemption pattern) with the sponsoring owner
@@ -293,6 +304,8 @@ export class GuestInvites {
   // every deactivation flavor leaves the same wake. Returns the refreshed
   // room ({ sequence, state }).
   deactivateGuestSeat(roomId, room, actorMemberId, member, eventId) {
+    // Expiry and eviction end access. Like RoomStore.command's cleanup
+    // exception, allow this deactivation even at the event ceiling.
     const incoming = event({
       id: eventId, idempotencyKey: eventId, roomId, actorId: actorMemberId,
       type: T.MEMBER_ACCESS_CHANGED, at: new Date(this.store.now()).toISOString(),
@@ -384,6 +397,7 @@ export class GuestInvites {
   reactivateGuestSeat(roomId, room, actorMemberId, inviteId, member) {
     const now = this.store.now();
     const eventId = `guest-invite-reactivate-${hash(`${member.id}:${inviteId}`).slice(0, 40)}`;
+    this.admissionBudget(room);
     const incoming = event({
       id: eventId, idempotencyKey: eventId, roomId, actorId: actorMemberId,
       type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
@@ -559,6 +573,7 @@ export class GuestInvites {
         // Self-serve redemption: no owner token is present, so the event is
         // built directly (the joinAgent pattern) with the minting owner as
         // the actor — the journal always shows who sponsored the guest.
+        this.admissionBudget(room);
         const now = this.store.now();
         const eventId = `guest-invite-${row.id}`;
         const incoming = event({
@@ -745,6 +760,7 @@ export class GuestInvites {
         if (this.db.prepare("SELECT COUNT(*) n FROM guest_selfserve WHERE room_id=?").get(roomId).n >= GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM) {
           room = this.evictLruSelfServeSeat(roomId, room, ownerId, now);
         }
+        this.admissionBudget(room);
         const incoming = event({
           id: `guest-selfserve-${keyHash.slice(0, 40)}`,
           idempotencyKey: `guest-selfserve-${keyHash.slice(0, 40)}`,

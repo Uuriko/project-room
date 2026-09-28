@@ -353,3 +353,46 @@ test("panic revoke immediately invalidates a self-serve guest credential", async
   assert.equal(after.status, 401);
   assert.equal((await after.json()).error.code, "unauthenticated");
 });
+
+// The self-serve route writes member events without going through store.command.
+// A signed card must not consume a 101st active seat or overflow room history.
+test("self-serve admission refuses a full room without writing a member or pass", async t => {
+  const { request, store } = await serve(t);
+  const ownerKey = store.issueAccessKey(ROOM, "owner");
+  for (let i = 0; i < 99; i++) store.command(ownerKey, ROOM, {
+    id: `fill-room-${i}`, type: "member.added",
+    data: { memberId: `fill-${i}`, displayName: `Member ${i}`, kind: "human", permissions: [] }
+  });
+  const before = store.room(ROOM).sequence;
+  const count = Object.values(store.room(ROOM).state.members).filter(member => member.active !== false).length;
+  assert.equal(count, 100);
+  const { card } = signedCard(ROOM);
+  const denied = await postJoin(request, card);
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error.code, "pilot_limit");
+  assert.equal(store.room(ROOM).sequence, before);
+  assert.equal(Object.values(store.room(ROOM).state.members).filter(member => member.active !== false).length, 100);
+});
+
+// Returning guests use member.access_changed rather than member.added.
+// Reactivation also consumes a seat and must stop at the same ceiling.
+test("self-serve reactivation refuses a full room and keeps the old pass revoked", async t => {
+  const { request, store } = await serve(t);
+  const { card, keyPair } = signedCard(ROOM);
+  const first = await (await postJoin(request, card)).json();
+  const ownerKey = store.issueAccessKey(ROOM, "owner");
+  store.command(ownerKey, ROOM, { id: "deactivate-before-cap", type: "member.access_changed",
+    data: { memberId: first.member.id, expectedMemberRevision: 0, active: false, permissions: [] } });
+  for (let i = 0; i < 99; i++) store.command(ownerKey, ROOM, {
+    id: `reactivate-fill-${i}`, type: "member.added",
+    data: { memberId: `react-fill-${i}`, displayName: `Member ${i}`, kind: "human", permissions: [] }
+  });
+  const before = store.room(ROOM).sequence;
+  const { card: again } = signedCard(ROOM, { keyPair });
+  const denied = await postJoin(request, again);
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error.code, "pilot_limit");
+  assert.equal(store.room(ROOM).sequence, before);
+  assert.equal(store.db.prepare("SELECT revoked FROM credentials WHERE hash=?")
+    .get(createHash("sha256").update(first.token).digest("hex")).revoked, 1);
+});
