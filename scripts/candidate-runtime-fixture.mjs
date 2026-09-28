@@ -94,6 +94,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
   paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
+  paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
   paths.add('server/pins.mjs');
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
   paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
