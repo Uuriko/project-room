@@ -43,6 +43,7 @@ import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
+import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
@@ -2898,12 +2899,35 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // keyed on a field the caller chooses.
         rate(`access-request:${remoteAddress}`, 20);
         const data = await body(req);
-        // referredBy ("who referred you?") is optional: older API clients
-        // still send the 6-field shape, which keeps working.
-        const fields = ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"];
-        const withReferral = [...fields.slice(0, 5), "referredBy", "requestId"];
-        if (!exact(data, fields) && !exact(data, withReferral)) {
-          reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId are the accepted fields");
+        // RC-2026-09-28-3410: the old exact() gate demanded all six keys and
+        // answered every violation with one static "accepted fields" list, so
+        // a fresh agent could not self-diagnose (this burned a real newcomer).
+        // The gate now ports the MCP structured-argument shape
+        // ({missing, unexpected, invalid}) down to HTTP, and its
+        // required/optional set aligns with the service
+        // (server/access-requests.mjs): note may be omitted or null
+        // (RC-2026-09-18-025); requestId omitted is minted by the service —
+        // send one when retrying so the retry is idempotent.
+        const diagnosis = diagnoseArguments({
+          required: ["roomId", "identityId", "displayName", "requestedPermissions"],
+          properties: {
+            roomId: { type: "string" },
+            identityId: { type: "string" },
+            displayName: { type: "string" },
+            requestedPermissions: { type: "array" },
+            note: { type: ["string", "null"] },
+            referredBy: { type: "string" },
+            requestId: { type: "string" },
+          },
+          additionalProperties: false,
+        }, data);
+        if (diagnosis) {
+          const parts = [];
+          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
+          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
+          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
+          reject(422, "invalid_request",
+            `Invalid access request (${parts.join("; ")}). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.`);
         }
         // Burs-IA steal A1: filing an access request is a cold-start step — the
         // response teaches the status-poll path and the expected decision
