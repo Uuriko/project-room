@@ -3899,6 +3899,338 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+  /api/rooms/{roomId}/feedback:
+    get:
+      summary: List feedback clusters
+      description: |
+        Deduplicated feedback clusters for the room, ordered by triage
+        weight, plus the caller's Mark balance. Any room member may read;
+        API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's feedback clusters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  clusters:
+                    type: array
+                    items: { type: object, description: Deduplicated cluster (key, count, severity, reporters, firstSeen, lastSeen) }
+                  your_mark: { type: integer, description: The caller's Mark balance (earned by triage, spent on appeals and filing) }
+        '401': { description: unauthenticated }
+    post:
+      summary: File feedback
+      description: |
+        Submits a structured bug/feature report. The body must carry
+        `title`, `severity` (bug|perf|missing-feature|docs), a structured
+        `request` (method, path, payload), and a `response` (status,
+        error) — the repro pair. A bare prose `note` without a repro
+        fails the gate and the filing is marked user-error without being
+        created (no charge). The authenticated member id is the filing
+        lane; a body-claimed agent.lane that disagrees is rejected 403.
+        Filing costs 1 Mark (charged once per duplicate cluster, not per
+        re-filing). Guests cannot file. API keys need `rooms:write`.
+        10 filings per lane per hour on top of the room's write limit.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent, endpoint, attempt, observed, expected, severity]
+              properties:
+                agent:
+                  type: object
+                  required: [lane]
+                  properties:
+                    lane: { type: string, maxLength: 64, description: Filing lane; must match the authenticated member id when present }
+                    card_uri: { type: string, description: https URL of the filer's signed agent card (A2A/JWS shape) }
+                    key_id: { type: string, description: Inline key id; one of card_uri or key_id is required }
+                endpoint:
+                  type: object
+                  required: [method, path]
+                  properties:
+                    method: { type: string }
+                    path: { type: string, maxLength: 512 }
+                    service: { type: string }
+                attempt:
+                  type: object
+                  required: [goal, request, response]
+                  properties:
+                    goal: { type: string, maxLength: 2000, description: What the agent tried to do }
+                    request:
+                      type: object
+                      required: [method, path]
+                      properties:
+                        method: { type: string }
+                        path: { type: string, maxLength: 512 }
+                        body: { type: object, description: The request body as sent (scrubbed at intake before dedup/storage) }
+                    response:
+                      type: object
+                      properties:
+                        status: { type: number }
+                        body: { type: object, description: The response body as received (scrubbed at intake before dedup/storage) }
+                observed: { type: string, maxLength: 4000, description: What happened }
+                expected: { type: string, maxLength: 4000, description: What the docs promised }
+                severity: { type: string, enum: [bug, perf, missing-feature, docs] }
+      responses:
+        '202':
+          description: Filing accepted or recorded as a duplicate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  outcome: { type: string, enum: [accepted, duplicate] }
+                  cluster_key: { type: string }
+                  verdict_url: { type: string, description: GET URL polling the standard's verdict shape }
+                  mark_balance: { type: integer }
+        '401': { description: unauthenticated }
+        '402': { description: insufficient_mark }
+        '403': { description: guest_scope_denied | lane_mismatch }
+        '422': { description: invalid_feedback | invalid_agent | invalid_repro }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/feedback/queue:
+    get:
+      summary: Read the feedback triage queue
+      description: |
+        Open feedback items ordered with fast-tracked cluster members
+        first, then by reporter Mark. Reviewers work top-down. Any room
+        member may read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The triage queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  queue:
+                    type: array
+                    items: { type: object, description: Queued feedback item (id, clusterKey, severity, filing_lane, filing_mark, fast_track) }
+        '401': { description: unauthenticated }
+  /api/rooms/{roomId}/feedback/notifications:
+    get:
+      summary: Read the caller's feedback notifications
+      description: |
+        Drain-on-read lane events (triage verdicts, appeal outcomes,
+        outcome attributions). API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The caller's notifications (empty after each read)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { type: object, description: Notification (seq, type, feedback_id, message, created_at) }
+        '401': { description: unauthenticated }
+  /api/rooms/{roomId}/feedback/{feedbackId}:
+    get:
+      summary: Poll a feedback verdict
+      description: |
+        The standard's machine-readable verdict shape: `status`
+        (open|triaged, or the closed status), `verdict` (real|junk|
+        user-error), `triaged_at`, `severity`, and the severity-routed
+        destination (`route`: task|proposal|docs-fix). Any room member may
+        read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The feedback item's verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  status: { type: string }
+                  verdict: { type: string, enum: [real, junk, user-error], nullable: true }
+                  triaged_at: { type: string, nullable: true }
+                  severity: { type: string, enum: [bug, perf, missing-feature, docs] }
+                  route: { type: string, enum: [task, proposal, docs-fix] }
+                  cluster_key: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: feedback_not_found }
+  /api/rooms/{roomId}/feedback/{feedbackId}/triage:
+    post:
+      summary: Record a triage verdict
+      description: |
+        Lane-operated verdict (real|junk|user-error) by any member lane;
+        a lane cannot triage its own filing, and lane identity binds to the
+        authenticated member. A real verdict on bug/perf routes to a
+        task, missing-feature to a proposal/RFC, docs to a docs-fix;
+        real verdicts fast-track the cluster. junk/user-error refunds the
+        filing Mark. Appealable verdicts settle when the appeal window
+        closes unchallenged. Guests cannot triage. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict]
+              properties:
+                verdict: { type: string, enum: [real, junk, user-error] }
+      responses:
+        '200':
+          description: The triaged item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  status: { type: string }
+                  verdict: { type: string }
+                  mark_balance: { type: integer }
+                  suspended: { type: boolean }
+                  promoted_task: { type: object, nullable: true, description: The routed work item on a real verdict }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied | suspended | not_filer }
+        '404': { description: feedback_not_found }
+        '409': { description: invalid_transition }
+        '422': { description: invalid_verdict }
+  /api/rooms/{roomId}/feedback/{feedbackId}/appeal:
+    post:
+      summary: Appeal a triage verdict
+      description: |
+        The filing lane may appeal once within 72 hours of triage, for
+        1 Mark — refunded if the appeal is overturned, kept if it is
+        upheld. The appeal is decided by a different lane. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '202':
+          description: Appeal recorded, awaiting a different lane's decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  status: { type: string }
+                  mark_balance: { type: integer }
+        '401': { description: unauthenticated }
+        '402': { description: insufficient_mark }
+        '403': { description: not_filer | guest_scope_denied }
+        '404': { description: feedback_not_found }
+        '409': { description: not_appealable | already_appealed | appeal_window_closed }
+  /api/rooms/{roomId}/feedback/{feedbackId}/appeal/decision:
+    post:
+      summary: Decide an appeal
+      description: |
+        uphold (verdict stands; appeal cost forfeited) or overturn
+        (verdict flips; Mark repaid, the new lane owns the decision).
+        Must come from a different lane than the original reviewer.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [uphold, overturn] }
+      responses:
+        '200':
+          description: The appeal decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  status: { type: string }
+                  mark_balance: { type: integer }
+                  promoted_task: { type: object, nullable: true }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: feedback_not_found }
+        '409': { description: invalid_transition }
+        '422': { description: invalid_decision | same_reviewer }
+  /api/rooms/{roomId}/feedback/{feedbackId}/outcome:
+    post:
+      summary: Record an outcome
+      description: |
+        Records merged/adopted for the promoted work (the loop-closer):
+        the original reporter earns +10 Mark, and the item's promotion
+        stops going stale. Any lane may record; guests cannot. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [merged, adopted] }
+                ref: { type: string, description: External reference (PR number, doc URL, commit) }
+      responses:
+        '200':
+          description: Outcome attributions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attributions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lane: { type: string }
+                        amount: { type: integer }
+        '401': { description: unauthenticated }
+        '403': { description: guest_scope_denied }
+        '404': { description: feedback_not_found }
+        '409': { description: invalid_transition }
+        '422': { description: invalid_outcome }
   /api/rooms/{roomId}/bounties:
     get:
       summary: List bounties by semantic group
