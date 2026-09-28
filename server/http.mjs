@@ -533,6 +533,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
+  // Owner delegates (server/owner-delegates.mjs) need no parallel auth path:
+  // store.authenticate stamps the delegate flag on the member copy whenever
+  // the identity holds an active per-room grant, so route handlers keep
+  // their own authorization and a delegate only passes gates that name the
+  // delegate flag explicitly.
+  function roomAuth(selected, roomId, fence) {
+    return selected.mode === "account"
+      ? store.authenticateAccountSession(selected.token, roomId, fence)
+      : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+  }
   function roomCredentials(req, url) {
     const bearerToken = bearer(req);
     if (bearerToken) return { token: bearerToken, bearer: true, mode: "room" };
@@ -2342,8 +2352,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest invite mint fields");
         const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
-          : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, data.roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         protectWrite(req, auth, selected.bearer);
@@ -2983,9 +2992,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const action = landAdd ? "add_land_item" : landList ? "list_land_queue" : landRemove ? "remove_land_item" : "report_tip";
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = selected.mode === "account"
-          ? store.authenticateAccountSession(selected.token, roomId, fence)
-          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (auth.kind === "api-key") {
@@ -3041,9 +3048,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const writing = req.method === "POST";
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = selected.mode === "account"
-          ? store.authenticateAccountSession(selected.token, roomId, fence)
-          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (auth.kind === "api-key") {
@@ -3086,6 +3091,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const delegationGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/grant$/.exec(url.pathname);
       const delegationRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation\/revoke$/.exec(url.pathname);
       const delegationListMatch = /^\/api\/rooms\/([^/]{1,384})\/membership-delegation$/.exec(url.pathname);
+      // Owner delegates (server/owner-delegates.mjs): per-room grants that
+      // let an agent identity act with the owner's authority. Grant, revoke,
+      // and list are owner-only; the holder can never grant further.
+      const ownerDelegateGrantMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates\/grant$/.exec(url.pathname);
+      const ownerDelegateRevokeMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates\/revoke$/.exec(url.pathname);
+      const ownerDelegateListMatch = /^\/api\/rooms\/([^/]{1,384})\/owner-delegates$/.exec(url.pathname);
       // Attention: DELETE /api/rooms/:roomId/saved/:messageId unsaves one message.
       const savedDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/saved\/([^/]{1,384})$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
@@ -3232,13 +3243,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
@@ -3252,7 +3263,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list"
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -3262,8 +3273,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : memberDeactivateMatch ? "member-deactivate"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
-      const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-        : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+      const auth = roomAuth(selected, roomId, fence);
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
@@ -4073,6 +4083,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.delegation.revokeEffective(selected.token, roomId, data, fence));
+      }
+      // Owner delegates (server/owner-delegates.mjs): per-room grants that
+      // let an agent identity act with the owner's authority. Grant, revoke,
+      // and list are owner-only; the holder can never grant further.
+      if (route === "owner-delegate-list" && req.method === "GET") {
+        return json(res, 200, { roomId, grants: store.ownerDelegates.list(selected.token, roomId, fence) });
+      }
+      if (route === "owner-delegate-grant" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.ownerDelegates.grant(selected.token, roomId, data, fence));
+      }
+      if (route === "owner-delegate-revoke" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        return json(res, 200, store.ownerDelegates.revoke(selected.token, roomId, data, fence));
       }
       if (route === "ownership-transfer" && req.method === "POST") {
         // Agent room ownership, appointment path: the current room owner

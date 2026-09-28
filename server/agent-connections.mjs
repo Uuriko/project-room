@@ -51,6 +51,10 @@ export class AgentConnections {
   constructor(store) { this.store = store; this.db = store.db; }
   row(roomId, memberId) { return this.db.prepare("SELECT * FROM agent_connections WHERE room_id=? AND member_id=?").get(roomId, memberId); }
   owner(token, roomId, binding) {
+    // Owner delegates (server/owner-delegates.mjs) arrive via
+    // store.authenticate with the delegate flag stamped on the member copy.
+    // Mutation paths that are account-bound by schema (sponsor) still
+    // refuse delegates below.
     const auth = this.store.authenticate(token, roomId, binding);
     // #597/#643: owner-by-id — the owner capability follows the owner identity,
     // not the credential flavor: an agent owner manages connections on their identity
@@ -58,8 +62,8 @@ export class AgentConnections {
     // account required) — a raw access key must not mint agent credentials.
     // The mutation path additionally requires a signed-in account session —
     // connection sponsorship is account-bound by schema.
-    if (auth.member?.id !== this.store.room(roomId).state.room.ownerId
-      || !auth.member.permissions.includes("manage_members")) {
+    if (!auth.delegate && (auth.member?.id !== this.store.room(roomId).state.room.ownerId
+      || !auth.member.permissions.includes("manage_members"))) {
       fail(403, "owner_required", "Only the room owner can manage agent connections");
     }
     if (auth.member.kind === "human" && (!auth.account || auth.kind !== "session")) {

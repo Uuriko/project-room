@@ -55,6 +55,7 @@ import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
+import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
@@ -722,6 +723,7 @@ export class RoomStore {
     this.identities = new AgentIdentities(this);
     this.delegation = new MembershipDelegation(this);
     this.delegationJournal = new MembershipDelegationJournal(this);
+    this.ownerDelegates = new OwnerDelegates(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
@@ -1124,6 +1126,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // to the table, and the grant journal's grant→revoke transitions plus
       // the owner-only grant rule are the integrity gate.
       this.db.exec(membershipDelegationSchema);
+      // Owner delegates (server/owner-delegates.mjs): persisted per-room
+      // grants. Purely additive, intentionally outside the writer fence like
+      // membership_delegation_grants above — older writers have no code path
+      // to the tables, and the owner-only grant rule is the integrity gate.
+      this.db.exec(ownerDelegateSchema);
       const hadDelegationJournal = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='membership_delegation_journal'").get();
       this.db.exec(membershipDelegationJournalSchema);
       if (!hadDelegationJournal) this.delegationJournal.baseline();
@@ -2449,10 +2456,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (isIdentitySecret(token)) {
       const resolved = this.identities.resolveIdentityAuth(token, roomId);
       if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      // Owner delegates (server/owner-delegates.mjs): an active per-room
+      // grant stamps a COPY of the member — never the shared authority
+      // object — so the explicit delegate gates downstream can recognize
+      // it. The grant resolves only while the identity is linked to an
+      // active member record (resolveIdentityLink) and revoked_at IS NULL
+      // (hasGrant); revocation takes effect on the next request.
+      const delegate = this.ownerDelegates.hasGrant(roomId, resolved.identityId);
+      const member = delegate ? { ...resolved.member, delegatedOwner: true } : resolved.member;
       return {
-        account: null, member: resolved.member, roomId, identityId: resolved.identityId,
+        account: null, member, roomId, identityId: resolved.identityId,
         credentialHash: hash(token), credentialScope: "room", kind: "identity",
-        expiresAt: null, csrf: null, sessionBinding: null
+        delegate, expiresAt: null, csrf: null, sessionBinding: null
       };
     }
     if (typeof token !== "string" || !isRoomAccessToken(token)) {

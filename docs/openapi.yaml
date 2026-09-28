@@ -2101,6 +2101,75 @@ paths:
         '403': { description: access_denied (owner only) }
         '404': { description: not_found (no active grant) }
         '422': { description: invalid_request }
+  /api/rooms/{roomId}/owner-delegates:
+    get:
+      summary: List owner-delegation grants (owner)
+      description: >-
+        Owner-only. Lists the agent identities currently holding an
+        owner-delegation grant in this room. A grant lets the holder's
+        identity secret act with the owner's authority on the routes that
+        name the delegate flag explicitly (guest-invite mint, agent invites,
+        access review). The grant binds to the identity, requires an active
+        member link in the room, is revocable, and can never be re-granted
+        by the holder.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: The room's active owner-delegation grants }
+        '403': { description: access_denied (owner only) }
+  /api/rooms/{roomId}/owner-delegates/grant:
+    post:
+      summary: Grant owner delegation to an agent identity (owner)
+      description: >-
+        Owner-only. Grants an agent identity linked into this room the right
+        to act with the owner's authority on delegate-gated routes. The grant
+        is per-room, persisted, revocable, and binds to the identity (not the
+        member record); it resolves only while the identity links to an
+        active member. The holder can never grant to anyone else — there is
+        no self-grant and no transitive grant. Ownership transfer, credential
+        management, human-session impersonation, and spend allowance stay
+        strictly owner-only and never name the delegate flag.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: Agent identity id (ai_...), linked into this room }
+      responses:
+        '200': { description: The granted owner-delegation grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no such linked agent identity) }
+        '409': { description: grant_active (already granted) or already_owner }
+        '422': { description: invalid_request }
+  /api/rooms/{roomId}/owner-delegates/revoke:
+    post:
+      summary: Revoke owner delegation from an agent identity (owner)
+      description: >-
+        Owner-only. Revokes an active owner-delegation grant. Revocation is
+        strictly top-down and takes effect on the next authenticated request:
+        after revocation the identity's delegate-gated calls fail exactly as
+        before the grant.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: Agent identity id (ai_...) }
+      responses:
+        '200': { description: The revoked grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no active grant) }
+        '422': { description: invalid_request }
   /api/rooms/{roomId}/ownership/transfer:
     post:
       summary: Transfer room ownership (owner)

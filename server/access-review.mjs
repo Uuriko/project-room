@@ -21,9 +21,11 @@ const isGuest = member => member.role === "guest" || isGuestAgentMemberId(member
 // the owner identity, not the member kind — an agent owner holds full
 // authority, including manage_members.
 export function accessReviewOwner(store, token, roomId, binding) {
+  // Owner delegates (server/owner-delegates.mjs) arrive via
+  // store.authenticate with the delegate flag stamped on the member copy.
   const auth = store.authenticate(token, roomId, binding);
-  if (auth.member.id !== store.room(roomId).state.room.ownerId
-    || !auth.member.permissions.includes("manage_members")) {
+  if (!auth.delegate && (auth.member.id !== store.room(roomId).state.room.ownerId
+    || !auth.member.permissions.includes("manage_members"))) {
     fail(403, "owner_required", "Only the room owner can read the access review");
   }
   return auth;
