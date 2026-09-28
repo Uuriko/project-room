@@ -673,3 +673,18 @@ for (const scenario of ["revoked credential", "demoted agent"]) test(`collab ref
   assert.equal(result.body.error.code, scenario === "revoked credential" ? "unauthenticated" : "agent_readonly");
   assert.deepEqual(f.store.collab.listThreadNotes("commons", "slow-upload"), []);
 });
+
+test("405s on collab routes carry the RFC 9110 Allow header", async t => {
+  // P2 QA (2026-09-28): 405 responses omitted Allow, forcing agents to guess
+  // the valid methods. Pins the header at the real HTTP boundary.
+  const f = setup(t);
+  await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const getOnPostOnly = await fetch(f.origin + base + "/assignments/no-such-id/release", { headers: bearer(f.humanKey) });
+  assert.equal(getOnPostOnly.status, 405);
+  assert.equal(getOnPostOnly.headers.get("allow"), "POST");
+  assert.equal((await getOnPostOnly.json()).error.code, "method_not_allowed");
+  const deleteOnGetPost = await fetch(f.origin + base + "/assignments", { method: "DELETE", headers: bearer(f.humanKey) });
+  assert.equal(deleteOnGetPost.status, 405);
+  assert.equal(deleteOnGetPost.headers.get("allow"), "GET, POST");
+});
