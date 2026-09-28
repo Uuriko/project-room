@@ -19,7 +19,7 @@ The behavioral regression protects unchanged historical DOM, hidden history, fre
 
 ## Combined release
 
-Includes source histories from PRs 1176, 1180, 1181, 1183, 1184, 1187, 1190, 1191 and 1193, plus merged 1194. Conflicts preserve both receipt/generation ledgers and recovery coverage. The pitch generator now uses the actual room-scoped receipt schema; a real MCP regression caught the original incompatible column lookup. Discovery copy distinguishes immediate links, GX passes and self-service, preserves identity reuse, and describes signature verification accurately.
+Includes source histories from PRs 1176, 1180, 1181, 1183, 1184, 1187, 1190, 1191 and 1193, plus merged 1194 and the reviewed handoff from 1195. Conflicts preserve both receipt/generation ledgers and recovery coverage. The pitch generator now uses the actual room-scoped receipt schema; a real MCP regression caught the original incompatible column lookup. Discovery copy distinguishes immediate links, GX passes and self-service, preserves identity reuse, and describes signature verification accurately.
 
 Paid-work offers are draft quotes, not collected revenue. Recruitment generators return artifacts and do not publish them. Ring-detection libraries are offline simulations, not runtime enforcement. Guest capability PR1148 remains held with concrete unresolved writable-schema, recovery and actual Worker rollback validation gaps; it is not silently included.
 
