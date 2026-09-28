@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T17:28:50Z · board: Uuriko/project-room#1160 · watermark: 5874849552 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=388d4044b8650bcd9ae17c0fefe19483cba2e9f0b90712ef79e17702546ca1d5 -->
+<!-- generated: 2026-09-28T18:01:57Z · board: Uuriko/project-room#1160 · watermark: 5875463056 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=8f62fdc01c803b48d0e6d5b212c0e75f125ce42b7c7254f238655df973d03940 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -154,7 +154,6 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-28-2905 | jill | working | 2026-09-28T17:29:07Z | server/emissary-ringdetect.mjs, server/emissary-lure-guard.mjs, tests/fixtures/wazz-rings.json, tests/emissary-ringdetect.test.js, tests/emissary-lure-guard.test.js
 RC-2026-09-28-2903 | jillianai | working | 2026-09-28T21:00:09Z | src/events.js, server/store.mjs, server/private-reply-admission.mjs, tests/reply-requests.test.js, tests/dm-privacy.test.js
 RC-2026-09-27-2852 | jillianai | working | 2026-09-28T21:47:38Z | server/guest-invites.mjs, tests/guest-join.test.js, tests/guest-invite-flow.test.js
 RC-2026-09-27-2853 | jillianai | working | 2026-09-28T21:47:39Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
@@ -205,5 +204,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=215 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=66 overlap_files=16 watermark=5874849552
+board_comments=219 threshold=1500 rotation_due=no watcher=active open_claims=27 prose_open=0 unfenced_prose=0 files_claimed=66 overlap_files=16 watermark=5875463056
 
