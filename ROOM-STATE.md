@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T01:28:32Z · board: Uuriko/project-room#1160 · watermark: 5861443752 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=bec9f8c53ab6a0f17e8d2ad78a466e4bb28893f3beac436658fafff4b24a8806 -->
+<!-- generated: 2026-09-28T01:58:56Z · board: Uuriko/project-room#1160 · watermark: 5861956808 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=505ff18bdff743f9c22b723436f3d06e6d0922be31b51bcc1989b4c54dae0e2d -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -9,12 +9,9 @@ RC-2026-09-27-005 | instinct | working | 2026-09-28T02:04:39Z | server/referral-
 RC-2026-09-27-2732 | jill | working | 2026-09-28T06:26:42Z | server boot/config validation, agent-card signing path
 RC-2026-09-27-2729 | jill | working | 2026-09-28T06:28:11Z | server/agent-plugin-routes.mjs, server/agent-plugin-manifest.mjs, webhook secret store
 RC-2026-09-27-2728 | jill | working | 2026-09-28T06:28:17Z | server/grants.mjs, server/schema additions, authz scope-check path
-RC-2026-09-27-2731 | jill | working | 2026-09-28T06:53:47Z | MCP tool surface, agent capability listing endpoint
 
 ## file-claims
 file | lane | task-id | state
-MCP tool surface | jill | RC-2026-09-27-2731 | working
-agent capability listing endpoint | jill | RC-2026-09-27-2731 | working
 agent-card signing path | jill | RC-2026-09-27-2732 | working
 authz scope-check path | jill | RC-2026-09-27-2728 | working
 cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
@@ -42,12 +39,10 @@ file | lanes | task-ids
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-1167 | codex | working | 2026-09-28T01:45:05Z | server/board-v2-sqlite.mjs, cloudflare/http.check.mjs
 RC-2026-09-27-005 | instinct | working | 2026-09-28T02:04:39Z | server/referral-invites.mjs, tests/referral-invites.test.js
 RC-2026-09-27-2732 | jill | working | 2026-09-28T06:26:42Z | server boot/config validation, agent-card signing path
 RC-2026-09-27-2729 | jill | working | 2026-09-28T06:28:11Z | server/agent-plugin-routes.mjs, server/agent-plugin-manifest.mjs, webhook secret store
 RC-2026-09-27-2728 | jill | working | 2026-09-28T06:28:17Z | server/grants.mjs, server/schema additions, authz scope-check path
-RC-2026-09-27-2731 | jill | working | 2026-09-28T06:53:47Z | MCP tool surface, agent capability listing endpoint
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -58,6 +53,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-27-2731 | 3de14c827d096900f54472d08f8b5d3e3b5b5ae7 | 5861944034
 RC-2026-09-27-2730 | f9ce76b236c1027b20ff49470b5728b5cc67ffe3 | 5861418879
 unknown | none | 5860766531
 RC-2026-09-27-2726 | a33d701f08768456cf45a9b45b0c2180cb1937ef | 5860744551
@@ -67,7 +63,6 @@ unknown | none | 5860668320
 unknown | none | 5860628779
 unknown | none | 5860622565
 RC-2026-09-27-2723 | 642e8856 | 5860576321
-RC-2026-09-27-2723 | 642e8856 | 5860575948
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -77,5 +72,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=65 threshold=1500 rotation_due=no watcher=active open_claims=7 prose_open=0 unfenced_prose=0 files_claimed=22 overlap_files=0 watermark=5861443752
+board_comments=67 threshold=1500 rotation_due=no watcher=active open_claims=6 prose_open=0 unfenced_prose=0 files_claimed=20 overlap_files=0 watermark=5861956808
 
