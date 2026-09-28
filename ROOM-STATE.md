@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-28T19:28:55Z · board: Uuriko/project-room#1160 · watermark: 5876967288 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=afcccc37f67945a821d1fbefc198f5b8ed961853bddaf85fff92bd4938576147 -->
+<!-- generated: 2026-09-28T19:59:29Z · board: Uuriko/project-room#1160 · watermark: 5877337208 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=c110b32a9838ca9181e5c4b1e5e02e8db751d0533969af0688b4c1c581996d8a -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,12 +32,17 @@ RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-even
 
 ## file-claims
 file | lane | task-id | state
+AGENTS.md | jill | RC-2026-09-28-2961 | working
 cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
-deploy/agent-discovery.mjs | jill | RC-2026-09-28-2972 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-28-2961 | working
+deploy/agent-discovery.mjs | jill | RC-2026-09-28-2981 | working
+docs/AGENT-QUICKSTART.md | jill | RC-2026-09-28-2981 | working
+docs/AGENT-WORK-LIFECYCLE.md | jill | RC-2026-09-28-2981 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
+docs/GUEST-AGENT-LINKS.md | jill | RC-2026-09-28-2961 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2871 | working
-docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-2972 | working
+docs/SWARM-PLUG-IN.md | jill | RC-2026-09-28-2961 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 scripts/runtime-package.mjs | jill | RC-2026-09-28-2873 | working
@@ -60,7 +65,6 @@ server/http.mjs | jillianai | RC-2026-09-28-2878 | working
 server/http.mjs | jillianai | RC-2026-09-28-2879 | submitted
 server/http.mjs | jillianai | RC-2026-09-28-2880 | working
 server/mcp-hosted-tools.mjs | jill | RC-2026-09-28-2873 | working
-server/mcp-http.mjs | jill | RC-2026-09-28-2971 | working
 server/mcp-room-profile.mjs | jill | RC-2026-09-28-2873 | working
 server/moderation.mjs | jillianai | RC-2026-09-27-2861 | working
 server/notifications.mjs | jillianai | RC-2026-09-28-2880 | working
@@ -82,10 +86,13 @@ server/store.mjs | jillianai | RC-2026-09-28-2879 | submitted
 server/store.mjs | jillianai | RC-2026-09-28-2880 | working
 server/store.mjs | jillianai | RC-2026-09-28-2903 | working
 server/thread-mutes.mjs | jillianai | RC-2026-09-28-2866 | working
+server/work-claim-routes.mjs | jill | RC-2026-09-28-2981 | working
+server/work-claims.mjs | jill | RC-2026-09-28-2981 | working
 server/work-context.mjs | jillianai | RC-2026-09-28-2876 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2875 | working
 server/work-discussion.mjs | jillianai | RC-2026-09-28-2876 | working
 server/writer-fence.mjs | jill | RC-2026-09-28-2873 | working
+src/agent-error.mjs | jill | RC-2026-09-28-2981 | working
 src/app.js | jillianai | RC-2026-09-28-2879 | submitted
 src/events.js | jillianai | RC-2026-09-28-2874 | working
 src/events.js | jillianai | RC-2026-09-28-2877 | working
@@ -95,6 +102,7 @@ src/room-mcp-join.js | jill | RC-2026-09-28-2873 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
+tests/agent-access-requests-http.test.js | jill | RC-2026-09-28-2961 | working
 tests/command-catalog.test.js | jillianai | RC-2026-09-28-2871 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/decision-register.test.js | jillianai | RC-2026-09-28-2879 | submitted
@@ -123,10 +131,11 @@ tests/reply-requests.test.js | jillianai | RC-2026-09-28-2903 | working
 tests/return-brief.test.js | jillianai | RC-2026-09-28-2868 | working
 tests/room-activation-pack.test.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/room-file-history-visibility.test.js | jillianai | RC-2026-09-27-2863 | working
-tests/room-mcp-join.test.js | jill | RC-2026-09-28-2971 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2877 | working
 tests/room-orientation.test.js | jillianai | RC-2026-09-28-2879 | submitted
 tests/thread-options.test.js | jillianai | RC-2026-09-28-2866 | working
+tests/work-claim-leases.test.js | jill | RC-2026-09-28-2981 | working
+tests/work-claims.test.js | jill | RC-2026-09-28-2981 | working
 tests/work-context.test.js | jillianai | RC-2026-09-28-2876 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875 | working
 tests/work-discussion.test.js | jillianai | RC-2026-09-28-2876 | working
@@ -134,6 +143,7 @@ workspace/bounty-tournaments/BOARD.md | jill | RC-2026-09-27-2742 | working
 
 ## overlap-warnings
 file | lanes | task-ids
+deploy/agent-discovery.mjs | jill | RC-2026-09-28-2961, RC-2026-09-28-2981
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870, RC-2026-09-28-2871
 docs/openapi.yaml | jillianai | RC-2026-09-28-2870, RC-2026-09-28-2871
 server/activity.mjs | jillianai | RC-2026-09-28-2865, RC-2026-09-28-2880
@@ -174,8 +184,8 @@ RC-2026-09-28-2877 | jillianai | working | 2026-09-28T21:47:51Z | src/events.js,
 RC-2026-09-28-2878 | jillianai | working | 2026-09-28T21:47:52Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
 RC-2026-09-28-2880 | jillianai | working | 2026-09-28T21:47:53Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-28T21:47:54Z | src/events.js, tests/dm-privacy.test.js
-RC-2026-09-28-2971 | jill | working | 2026-09-29T01:28:37Z | server/mcp-http.mjs, tests/room-mcp-join.test.js
-RC-2026-09-28-2972 | jill | working | 2026-09-29T01:28:40Z | docs/SWARM-PLUG-IN.md, deploy/agent-discovery.mjs
+RC-2026-09-28-2981 | jill | working | 2026-09-29T01:29:28Z | server/work-claims.mjs, server/work-claim-routes.mjs, src/agent-error.mjs, tests/work-claims.test.js, tests/work-claim-leases.test.js, docs/AGENT-WORK-LIFECYCLE.md, docs/AGENT-QUICKSTART.md, deploy/agent-discovery.mjs
+RC-2026-09-28-2961 | jill | working | 2026-09-29T01:29:33Z | deploy/agent-discovery.mjs, docs/SWARM-PLUG-IN.md, docs/GUEST-AGENT-LINKS.md, AGENTS.md, tests/agent-access-requests-http.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -186,6 +196,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-28-2973 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877337208
+RC-2026-09-28-2972 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877336767
+RC-2026-09-28-2971 | e3a0751cb593bfbb9b0b2aaab382698e8f6fc460 | 5877336220
 RC-2026-09-28-2905 | 96c2a0a44 | 5875798626
 unknown | 85783c2081eaa39e7436989505a319ee12b4ac86 | 5869046049
 RC-2026-09-28-2902 | 13052eb23d3efe1c127dd9d1d3043ef1449edbea | 5866242339
@@ -193,9 +206,6 @@ RC-2026-09-28-2901 | none | 5865869469
 unknown | none | 5865335154
 RC-2026-09-27-2743 | none | 5865296561
 RC-2026-09-27-2743 | 8150d17870068bdef10fd587e0547b91a24cb5c9 | 5865244359
-RC-2026-09-27-1165 | 2746d43cbe253fde19f90dcc529ce6f393aa4a82 | 5865173096
-RC-2026-09-27-2860 | e4e4a7772fe0083eba3e1421c17f45ed5755f546 | 5864436660
-RC-2026-09-27-2728 | 52d7ef79a321 | 5862811810
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -205,5 +215,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=225 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=65 overlap_files=16 watermark=5876967288
+board_comments=239 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=73 overlap_files=17 watermark=5877337208
 
