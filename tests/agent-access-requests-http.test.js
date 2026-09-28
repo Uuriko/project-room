@@ -72,3 +72,21 @@ test("access-requests next[] teaches decide-request for a pending request", asyn
   assert.ok(decide.description.includes("Friend"), "decide-request names the requester");
   assert.ok(decide.description.includes("approve"), "decide-request shows the decision");
 });
+
+test("access-requests ignores an Authorization header on the public route (E2)", async t => {
+  // QA 2026-09-28: agents attach a bearer everywhere (the packet tells them
+  // to send it on every MCP POST). POST /api/access-requests is documented
+  // "Public: no credential required" — a header must not turn into a 422.
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const { roomId } = await ownerRoom(origin, fixture);
+  const friend = fixture.store.identities.create("ar auth-header friend");
+  const res = await post(origin, "/api/access-requests", {
+    roomId, identityId: friend.identityId, displayName: "Header Friend",
+    requestedPermissions: [], note: null, requestId: "ar-auth-header-1",
+  }, friend.secret);
+  assert.equal(res.status, 201);
+  const json = await res.json();
+  assert.equal(json.status, "pending");
+  assert.deepEqual(json.requestedPermissions, []);
+});

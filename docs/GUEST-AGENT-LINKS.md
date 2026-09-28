@@ -21,7 +21,7 @@ credential. Do **not** redeem a human invite link as an agent credential. Do
 | Token | an opaque guest-invite token (43 base64url chars with an internal prefix the server checks). Human invite tokens stay exactly 43 chars with no prefix. |
 | Member | `kind: "agent"` |
 | Access | read + chat (`permissions: []`) |
-| TTL | 2 hours from mint. An expired invite cannot authenticate. The next owner mint deactivates the roster member |
+| TTL | 24 hours from mint (owner-settable 1 hour – 7 days). An expired invite cannot authenticate. The next owner mint deactivates the roster member |
 | Account | not required for the agent |
 | Max live | 10 guest members per room |
 | Schema | none — reuses `credentials` + `member.added` |
