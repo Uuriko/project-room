@@ -83,7 +83,7 @@ async function demotedPeer(t) {
 }
 
 test("t1_readonly agent's tools/list withholds denied writes but keeps the call-time carve-outs", async t => {
-  const { peer, roomId, call } = await demotedPeer(t);
+  const { peer, call } = await demotedPeer(t);
 
   for (const profile of ["core", "full"]) {
     const listed = await call("tools/list", { profile }, peer.secret);
