@@ -173,7 +173,7 @@ for (const mobile of [false, true]) {
     const target = page.locator('[data-message-record-id="mention-owner"]');
     await target.focus();
     await page.keyboard.press("u");
-    await divider.first().waitFor({ state: "visible" });
+    await page.locator('.chat-divider.unread', { hasText: "New messages" }).first().waitFor({ state: "visible" });
 
     // The room-actions palette lists Activity and Later entries (desktop:
     // the palette button is hidden on small screens).
