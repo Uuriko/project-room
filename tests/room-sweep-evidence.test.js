@@ -88,11 +88,43 @@ test("merged PR touching unrelated files does not suppress strike-one", () => {
   assert.match(out, new RegExp(`PLAN: strike-one nudge for ${T900}`));
 });
 
-test("a drive-by touch of one file among many is not a landing", () => {
+test("a drive-by touch of one peripheral file among many is not a landing", () => {
   const out = sweepPlan(
     [header, claim(T900, "server/a.mjs,server/b.mjs,server/c.mjs")],
     "2026-09-27T21:00:00Z",
     { ROOM_TEST_PRS_JSON: PRS,
+      ROOM_TEST_PR_FILES_JSON: JSON.stringify({ 2000: ["server/b.mjs"] }) });
+  assert.match(out, new RegExp(`PLAN: strike-one nudge for ${T900}`));
+});
+
+test("a post-claim touch of the core file among many is a landing", () => {
+  // 2026-09-28 (RC-2026-09-28-3110): criterion-3 tightened — a merged PR
+  // that merged after the claim opened and touched the claim's core file
+  // (first in the files list) is a landed deliverable, even when the
+  // claim lists more files.
+  const out = sweepPlan(
+    [header, claim(T900, "server/a.mjs,server/b.mjs,server/c.mjs")],
+    "2026-09-27T21:00:00Z",
+    { ROOM_TEST_PRS_JSON: PRS,
+      ROOM_TEST_PR_FILES_JSON: JSON.stringify({ 2000: ["server/a.mjs"] }) });
+  assert.match(out, new RegExp(
+    `strike-one suppressed for ${T900}: deliverable already landed`));
+  assert.doesNotMatch(out, new RegExp(`PLAN: strike-one nudge for ${T900}`));
+});
+
+test("a pre-claim merged PR touching the core file is not a landing", () => {
+  // 2026-09-28 (RC-2026-09-28-3110): RC-2026-09-28-2873 was suppressed by
+  // PRs #1128/#1146, merged a day before the claim. A PR that merged
+  // before the claim opened cannot be the claim's deliverable.
+  const early = JSON.stringify([{
+    number: 2000, merged_at: "2026-09-27T17:00:00Z",
+    merge_commit_sha: "abc123def456",
+    title: "fix a", body: "no task ref",
+  }]);
+  const out = sweepPlan(
+    [header, claim(T900, "server/a.mjs,server/b.mjs,server/c.mjs")],
+    "2026-09-27T21:00:00Z",
+    { ROOM_TEST_PRS_JSON: early,
       ROOM_TEST_PR_FILES_JSON: JSON.stringify({ 2000: ["server/a.mjs"] }) });
   assert.match(out, new RegExp(`PLAN: strike-one nudge for ${T900}`));
 });
@@ -148,6 +180,27 @@ test("prose STATUS exactly at the strike instant does not suppress strike-two", 
      strikeOne(T902, "2026-09-27T20:30:00Z", "2026-09-27T20:30:00Z"), status],
     "2026-09-28T01:00:00Z");
   assert.match(out, new RegExp(`PLAN: strike-two release for ${T902}`));
+});
+
+test("the production-format strike-one nudge does not self-suppress strike-two", () => {
+  // 2026-09-28 (RC-2026-09-28-3110): RC-2026-09-27-2742's strike-two was
+  // self-suppressed. The real nudge is authored as [quill-s2] (not
+  // [room-watch]), names the task, carries strike/heartbeat/status
+  // language, and lands strictly after strike_one_at — human_board_activity
+  // counted it as lane activity. Machine-stamped comments must never
+  // count; only lane-authored activity suppresses.
+  const prodNudge = {
+    id: 3, created_at: "2026-09-27T20:30:01Z", updated_at: "2026-09-27T20:30:01Z",
+    body: `[quill-s2]RECLAIM (strike 1): @instinct \u2014 lease on ${T902} expired, ` +
+      `no heartbeat seen. Please post STATUS within 4h or the claim releases. ` +
+      `(quill-s2, scheduled, quill)\n\n<!-- room:strike-one:${T902}:2026-09-27T20:30:00Z -->\n\n` +
+      `· claim:${T902} · lane:instinct`,
+  };
+  const out = sweepPlan(
+    [header, claim(T902, "server/c.mjs"), prodNudge],
+    "2026-09-28T01:00:00Z");
+  assert.match(out, new RegExp(`PLAN: strike-two release for ${T902}`));
+  assert.doesNotMatch(out, new RegExp(`strike-two suppressed for ${T902}`));
 });
 
 test("genuine silence after strike-one still releases (strike-two semantics unchanged)", () => {
