@@ -1,0 +1,2659 @@
+{
+  "synthetic": true,
+  "generated_at": "2026-09-27T00:00:00Z",
+  "provenance": "Synthetic fixtures shaped on the published Wazz (@WazzCrypto) serial-rugpull forensic report (2026-09-27), as transferred in EMISSARY-RESEARCH.md §K. Every address, timestamp, and count below is INVENTED for detector validation (IB-002); none of these are chain data. Transferred analysis — design rationale, not evidence. Report-derived shapes mirrored: collector fan-in (98 wallets, ~3s), distributor fan-out (one key -> 50 addresses, ~16s pass-through), deed-distribution sell-off (creator fee capture), cash-out leg. Full real addresses were never published (truncated to 0x9d06…/0xf268… in coverage); fixture addresses are synthetic tokens and must never be presented as real accounts.",
+  "fixtures": [
+    {
+      "name": "collector-fan-in",
+      "synthetic": true,
+      "description": "98 wallets fan in to one collector hub within 3 seconds (mirrors the reported 98-wallet / 179.88 ETH / 3s sweep)",
+      "identities": [
+        {
+          "external_id": "synth:wallet-a-000",
+          "created_at": 1790467200000,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-001",
+          "created_at": 1790467200030,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-002",
+          "created_at": 1790467200061,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-003",
+          "created_at": 1790467200091,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-004",
+          "created_at": 1790467200122,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-005",
+          "created_at": 1790467200153,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-006",
+          "created_at": 1790467200183,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-007",
+          "created_at": 1790467200214,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-008",
+          "created_at": 1790467200244,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-009",
+          "created_at": 1790467200275,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-010",
+          "created_at": 1790467200306,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-011",
+          "created_at": 1790467200336,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-012",
+          "created_at": 1790467200367,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-013",
+          "created_at": 1790467200397,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-014",
+          "created_at": 1790467200428,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-015",
+          "created_at": 1790467200459,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-016",
+          "created_at": 1790467200489,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-017",
+          "created_at": 1790467200520,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-018",
+          "created_at": 1790467200551,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-019",
+          "created_at": 1790467200581,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-020",
+          "created_at": 1790467200612,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-021",
+          "created_at": 1790467200642,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-022",
+          "created_at": 1790467200673,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-023",
+          "created_at": 1790467200704,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-024",
+          "created_at": 1790467200734,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-025",
+          "created_at": 1790467200765,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-026",
+          "created_at": 1790467200795,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-027",
+          "created_at": 1790467200826,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-028",
+          "created_at": 1790467200857,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-029",
+          "created_at": 1790467200887,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-030",
+          "created_at": 1790467200918,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-031",
+          "created_at": 1790467200948,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-032",
+          "created_at": 1790467200979,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-033",
+          "created_at": 1790467201010,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-034",
+          "created_at": 1790467201040,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-035",
+          "created_at": 1790467201071,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-036",
+          "created_at": 1790467201102,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-037",
+          "created_at": 1790467201132,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-038",
+          "created_at": 1790467201163,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-039",
+          "created_at": 1790467201193,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-040",
+          "created_at": 1790467201224,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-041",
+          "created_at": 1790467201255,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-042",
+          "created_at": 1790467201285,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-043",
+          "created_at": 1790467201316,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-044",
+          "created_at": 1790467201346,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-045",
+          "created_at": 1790467201377,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-046",
+          "created_at": 1790467201408,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-047",
+          "created_at": 1790467201438,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-048",
+          "created_at": 1790467201469,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-049",
+          "created_at": 1790467201500,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-050",
+          "created_at": 1790467201530,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-051",
+          "created_at": 1790467201561,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-052",
+          "created_at": 1790467201591,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-053",
+          "created_at": 1790467201622,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-054",
+          "created_at": 1790467201653,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-055",
+          "created_at": 1790467201683,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-056",
+          "created_at": 1790467201714,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-057",
+          "created_at": 1790467201744,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-058",
+          "created_at": 1790467201775,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-059",
+          "created_at": 1790467201806,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-060",
+          "created_at": 1790467201836,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-061",
+          "created_at": 1790467201867,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-062",
+          "created_at": 1790467201897,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-063",
+          "created_at": 1790467201928,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-064",
+          "created_at": 1790467201959,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-065",
+          "created_at": 1790467201989,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-066",
+          "created_at": 1790467202020,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-067",
+          "created_at": 1790467202051,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-068",
+          "created_at": 1790467202081,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-069",
+          "created_at": 1790467202112,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-070",
+          "created_at": 1790467202142,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-071",
+          "created_at": 1790467202173,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-072",
+          "created_at": 1790467202204,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-073",
+          "created_at": 1790467202234,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-074",
+          "created_at": 1790467202265,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-075",
+          "created_at": 1790467202295,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-076",
+          "created_at": 1790467202326,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-077",
+          "created_at": 1790467202357,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-078",
+          "created_at": 1790467202387,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-079",
+          "created_at": 1790467202418,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-080",
+          "created_at": 1790467202448,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-081",
+          "created_at": 1790467202479,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-082",
+          "created_at": 1790467202510,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-083",
+          "created_at": 1790467202540,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-084",
+          "created_at": 1790467202571,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-085",
+          "created_at": 1790467202602,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-086",
+          "created_at": 1790467202632,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-087",
+          "created_at": 1790467202663,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-088",
+          "created_at": 1790467202693,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-8",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-089",
+          "created_at": 1790467202724,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-9",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-090",
+          "created_at": 1790467202755,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-0",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-091",
+          "created_at": 1790467202785,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-1",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-092",
+          "created_at": 1790467202816,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-2",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-093",
+          "created_at": 1790467202846,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-3",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-094",
+          "created_at": 1790467202877,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-4",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-095",
+          "created_at": 1790467202908,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-5",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-096",
+          "created_at": 1790467202938,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-6",
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "external_id": "synth:wallet-a-097",
+          "created_at": 1790467202969,
+          "inviter_member_id": null,
+          "payout_address": "synth:collector-hub",
+          "device_fingerprint": "synth:device-a-7",
+          "campaign_id": "synth-deed-launch"
+        }
+      ],
+      "receipts": [
+        {
+          "receipt_id": "synth:receipt-a-0",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-000",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205000,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-1",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-001",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205030,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-2",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-002",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205061,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-3",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-003",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205091,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-4",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-004",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205122,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-5",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-005",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205153,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-6",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-006",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205183,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-7",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-007",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205214,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-8",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-008",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205244,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-9",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-009",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205275,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-10",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-010",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205306,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-11",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-011",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205336,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-12",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-012",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205367,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-13",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-013",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205397,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-14",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-014",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205428,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-15",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-015",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205459,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-16",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-016",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205489,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-17",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-017",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205520,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-18",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-018",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205551,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-19",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-019",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205581,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-20",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-020",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205612,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-21",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-021",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205642,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-22",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-022",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205673,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-23",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-023",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205704,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-24",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-024",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205734,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-25",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-025",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205765,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-26",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-026",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205795,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-27",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-027",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205826,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-28",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-028",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205857,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-29",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-029",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205887,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-30",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-030",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205918,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-31",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-031",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205948,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-32",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-032",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467205979,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-33",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-033",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206010,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-34",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-034",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206040,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-35",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-035",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206071,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-36",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-036",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206102,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-37",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-037",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206132,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-38",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-038",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206163,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-39",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-039",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206193,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-40",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-040",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206224,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-41",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-041",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206255,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-42",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-042",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206285,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-43",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-043",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206316,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-44",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-044",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206346,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-45",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-045",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206377,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-46",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-046",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206408,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-47",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-047",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206438,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-48",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-048",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206469,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-49",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-049",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206500,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-50",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-050",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206530,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-51",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-051",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206561,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-52",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-052",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206591,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-53",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-053",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206622,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-54",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-054",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206653,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-55",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-055",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206683,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-56",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-056",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206714,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-57",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-057",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206744,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-58",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-058",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206775,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-59",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-059",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206806,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-60",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-060",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206836,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-61",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-061",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206867,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-62",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-062",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206897,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-63",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-063",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206928,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-64",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-064",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206959,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-65",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-065",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467206989,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-66",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-066",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207020,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-67",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-067",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207051,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-68",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-068",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207081,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-69",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-069",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207112,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-70",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-070",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207142,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-71",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-071",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207173,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-72",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-072",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207204,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-73",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-073",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207234,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-74",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-074",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207265,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-75",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-075",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207295,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-76",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-076",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207326,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-77",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-077",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207357,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-78",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-078",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207387,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-79",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-079",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207418,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-80",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-080",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207448,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-81",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-081",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207479,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-82",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-082",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207510,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-83",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-083",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207540,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-84",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-084",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207571,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-85",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-085",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207602,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-86",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-086",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207632,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-87",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-087",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207663,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-88",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-088",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207693,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-89",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-089",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207724,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-90",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-090",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207755,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-91",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-091",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207785,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-92",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-092",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207816,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-93",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-093",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207846,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-94",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-094",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207877,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-95",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-095",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207908,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-96",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-096",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207938,
+          "campaign_id": "synth-deed-launch"
+        },
+        {
+          "receipt_id": "synth:receipt-a-97",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-a-097",
+          "payout_address": "synth:collector-hub",
+          "created_at": 1790467207969,
+          "campaign_id": "synth-deed-launch"
+        }
+      ],
+      "funding": [],
+      "expected": {
+        "flagged_rings": 1,
+        "min_signals": [
+          "shared_attribute_cluster",
+          "temporal_synchrony",
+          "reward_concentration"
+        ],
+        "excluded": 0
+      }
+    },
+    {
+      "name": "distributor-fanout-refund",
+      "synthetic": true,
+      "description": "distributor hub funds 50 wallets within 16s; collector of prior launch funds the distributor (refund loop); creator fee vault is the fan-in hub",
+      "identities": [
+        {
+          "external_id": "synth:wallet-b-000",
+          "created_at": 1790470800000,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-0",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-001",
+          "created_at": 1790470800320,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-1",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-002",
+          "created_at": 1790470800640,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-2",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-003",
+          "created_at": 1790470800960,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-3",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-004",
+          "created_at": 1790470801280,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-4",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-005",
+          "created_at": 1790470801600,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-5",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-006",
+          "created_at": 1790470801920,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-6",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-007",
+          "created_at": 1790470802240,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-7",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-008",
+          "created_at": 1790470802560,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-8",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-009",
+          "created_at": 1790470802880,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-9",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-010",
+          "created_at": 1790470803200,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-10",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-011",
+          "created_at": 1790470803520,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-11",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-012",
+          "created_at": 1790470803840,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-12",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-013",
+          "created_at": 1790470804160,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-13",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-014",
+          "created_at": 1790470804480,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-14",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-015",
+          "created_at": 1790470804800,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-15",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-016",
+          "created_at": 1790470805120,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-16",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-017",
+          "created_at": 1790470805440,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-17",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-018",
+          "created_at": 1790470805760,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-18",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-019",
+          "created_at": 1790470806080,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-19",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-020",
+          "created_at": 1790470806400,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-20",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-021",
+          "created_at": 1790470806720,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-21",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-022",
+          "created_at": 1790470807040,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-22",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-023",
+          "created_at": 1790470807360,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-23",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-024",
+          "created_at": 1790470807680,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-24",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-025",
+          "created_at": 1790470808000,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-25",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-026",
+          "created_at": 1790470808320,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-26",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-027",
+          "created_at": 1790470808640,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-27",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-028",
+          "created_at": 1790470808960,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-28",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-029",
+          "created_at": 1790470809280,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-29",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-030",
+          "created_at": 1790470809600,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-30",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-031",
+          "created_at": 1790470809920,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-31",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-032",
+          "created_at": 1790470810240,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-32",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-033",
+          "created_at": 1790470810560,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-33",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-034",
+          "created_at": 1790470810880,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-34",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-035",
+          "created_at": 1790470811200,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-35",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-036",
+          "created_at": 1790470811520,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-36",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-037",
+          "created_at": 1790470811840,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-37",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-038",
+          "created_at": 1790470812160,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-38",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-039",
+          "created_at": 1790470812480,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-39",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-040",
+          "created_at": 1790470812800,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-40",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-041",
+          "created_at": 1790470813120,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-41",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-042",
+          "created_at": 1790470813440,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-42",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-043",
+          "created_at": 1790470813760,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-43",
+          "device_fingerprint": "synth:device-b-1",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-044",
+          "created_at": 1790470814080,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-44",
+          "device_fingerprint": "synth:device-b-2",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-045",
+          "created_at": 1790470814400,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-45",
+          "device_fingerprint": "synth:device-b-3",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-046",
+          "created_at": 1790470814720,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-46",
+          "device_fingerprint": "synth:device-b-4",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-047",
+          "created_at": 1790470815040,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-47",
+          "device_fingerprint": "synth:device-b-5",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-048",
+          "created_at": 1790470815360,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-48",
+          "device_fingerprint": "synth:device-b-6",
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "external_id": "synth:wallet-b-049",
+          "created_at": 1790470815680,
+          "inviter_member_id": "synth:distributor-hub",
+          "payout_address": "synth:trader-wallet-b-49",
+          "device_fingerprint": "synth:device-b-0",
+          "campaign_id": "synth-deed-launch-2"
+        }
+      ],
+      "receipts": [
+        {
+          "receipt_id": "synth:receipt-b-0",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-000",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470860000,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-1",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-001",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470860320,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-2",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-002",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470860640,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-3",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-003",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470860960,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-4",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-004",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470861280,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-5",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-005",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470861600,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-6",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-006",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470861920,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-7",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-007",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470862240,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-8",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-008",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470862560,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-9",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-009",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470862880,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-10",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-010",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470863200,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-11",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-011",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470863520,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-12",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-012",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470863840,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-13",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-013",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470864160,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-14",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-014",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470864480,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-15",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-015",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470864800,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-16",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-016",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470865120,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-17",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-017",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470865440,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-18",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-018",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470865760,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-19",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-019",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470866080,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-20",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-020",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470866400,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-21",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-021",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470866720,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-22",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-022",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470867040,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-23",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-023",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470867360,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-24",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-024",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470867680,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-25",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-025",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470868000,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-26",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-026",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470868320,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-27",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-027",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470868640,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-28",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-028",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470868960,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-29",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-029",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470869280,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-30",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-030",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470869600,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-31",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-031",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470869920,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-32",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-032",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470870240,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-33",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-033",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470870560,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-34",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-034",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470870880,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-35",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-035",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470871200,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-36",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-036",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470871520,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-37",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-037",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470871840,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-38",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-038",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470872160,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-39",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-039",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470872480,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-40",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-040",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470872800,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-41",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-041",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470873120,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-42",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-042",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470873440,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-43",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-043",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470873760,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-44",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-044",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470874080,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-45",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-045",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470874400,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-46",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-046",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470874720,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-47",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-047",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470875040,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-48",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-048",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470875360,
+          "campaign_id": "synth-deed-launch-2"
+        },
+        {
+          "receipt_id": "synth:receipt-b-49",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-b-049",
+          "payout_address": "synth:creator-fee-vault",
+          "created_at": 1790470875680,
+          "campaign_id": "synth-deed-launch-2"
+        }
+      ],
+      "funding": [
+        {
+          "from_address": "synth:collector-hub",
+          "to_address": "synth:distributor-hub",
+          "created_at": 1790470700000,
+          "campaign_id": "synth-deed-launch-2",
+          "note": "synthetic mirror of the reported launch-N collector -> launch-N+1 funding-key edge"
+        }
+      ],
+      "expected": {
+        "flagged_rings": 1,
+        "min_signals": [
+          "shared_attribute_cluster",
+          "temporal_synchrony",
+          "reward_concentration",
+          "serial_refunding"
+        ],
+        "excluded": 0
+      }
+    },
+    {
+      "name": "organic-control",
+      "synthetic": true,
+      "description": "10 organic wallets created over 7 days with distinct payout addresses and inviters — must produce zero flagged rings",
+      "identities": [
+        {
+          "external_id": "synth:wallet-c-000",
+          "created_at": 1790467200000,
+          "inviter_member_id": "synth:inviter-c-0",
+          "payout_address": "synth:organic-wallet-c-0",
+          "device_fingerprint": "synth:device-c-0",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-001",
+          "created_at": 1790527680000,
+          "inviter_member_id": "synth:inviter-c-1",
+          "payout_address": "synth:organic-wallet-c-1",
+          "device_fingerprint": "synth:device-c-1",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-002",
+          "created_at": 1790588160000,
+          "inviter_member_id": "synth:inviter-c-2",
+          "payout_address": "synth:organic-wallet-c-2",
+          "device_fingerprint": "synth:device-c-2",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-003",
+          "created_at": 1790648640000,
+          "inviter_member_id": "synth:inviter-c-3",
+          "payout_address": "synth:organic-wallet-c-3",
+          "device_fingerprint": "synth:device-c-3",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-004",
+          "created_at": 1790709120000,
+          "inviter_member_id": "synth:inviter-c-4",
+          "payout_address": "synth:organic-wallet-c-4",
+          "device_fingerprint": "synth:device-c-4",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-005",
+          "created_at": 1790769600000,
+          "inviter_member_id": "synth:inviter-c-5",
+          "payout_address": "synth:organic-wallet-c-5",
+          "device_fingerprint": "synth:device-c-5",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-006",
+          "created_at": 1790830080000,
+          "inviter_member_id": "synth:inviter-c-6",
+          "payout_address": "synth:organic-wallet-c-6",
+          "device_fingerprint": "synth:device-c-6",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-007",
+          "created_at": 1790890560000,
+          "inviter_member_id": "synth:inviter-c-7",
+          "payout_address": "synth:organic-wallet-c-7",
+          "device_fingerprint": "synth:device-c-7",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-008",
+          "created_at": 1790951040000,
+          "inviter_member_id": "synth:inviter-c-8",
+          "payout_address": "synth:organic-wallet-c-8",
+          "device_fingerprint": "synth:device-c-8",
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "external_id": "synth:wallet-c-009",
+          "created_at": 1791011520000,
+          "inviter_member_id": "synth:inviter-c-9",
+          "payout_address": "synth:organic-wallet-c-9",
+          "device_fingerprint": "synth:device-c-9",
+          "campaign_id": "synth-organic-campaign"
+        }
+      ],
+      "receipts": [
+        {
+          "receipt_id": "synth:receipt-c-0",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-000",
+          "payout_address": "synth:organic-wallet-c-0",
+          "created_at": 1790470800000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-1",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-001",
+          "payout_address": "synth:organic-wallet-c-1",
+          "created_at": 1790531280000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-2",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-002",
+          "payout_address": "synth:organic-wallet-c-2",
+          "created_at": 1790591760000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-3",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-003",
+          "payout_address": "synth:organic-wallet-c-3",
+          "created_at": 1790652240000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-4",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-004",
+          "payout_address": "synth:organic-wallet-c-4",
+          "created_at": 1790712720000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-5",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-005",
+          "payout_address": "synth:organic-wallet-c-5",
+          "created_at": 1790773200000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-6",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-006",
+          "payout_address": "synth:organic-wallet-c-6",
+          "created_at": 1790833680000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-7",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-007",
+          "payout_address": "synth:organic-wallet-c-7",
+          "created_at": 1790894160000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-8",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-008",
+          "payout_address": "synth:organic-wallet-c-8",
+          "created_at": 1790954640000,
+          "campaign_id": "synth-organic-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-c-9",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-c-009",
+          "payout_address": "synth:organic-wallet-c-9",
+          "created_at": 1791015120000,
+          "campaign_id": "synth-organic-campaign"
+        }
+      ],
+      "funding": [],
+      "expected": {
+        "flagged_rings": 0,
+        "excluded": 10
+      }
+    },
+    {
+      "name": "single-signal-exclusion",
+      "synthetic": true,
+      "description": "3 wallets share one payout address but are created days apart with no burst and no fan-in — must be excluded with reason, never flagged",
+      "identities": [
+        {
+          "external_id": "synth:wallet-d-0",
+          "created_at": 1790467200000,
+          "inviter_member_id": null,
+          "payout_address": "synth:shared-payout-d",
+          "device_fingerprint": "synth:device-d-0",
+          "campaign_id": "synth-quiet-campaign"
+        },
+        {
+          "external_id": "synth:wallet-d-1",
+          "created_at": 1790553600000,
+          "inviter_member_id": null,
+          "payout_address": "synth:shared-payout-d",
+          "device_fingerprint": "synth:device-d-1",
+          "campaign_id": "synth-quiet-campaign"
+        },
+        {
+          "external_id": "synth:wallet-d-2",
+          "created_at": 1790640000000,
+          "inviter_member_id": null,
+          "payout_address": "synth:shared-payout-d",
+          "device_fingerprint": "synth:device-d-2",
+          "campaign_id": "synth-quiet-campaign"
+        }
+      ],
+      "receipts": [
+        {
+          "receipt_id": "synth:receipt-d-0",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-d-0",
+          "payout_address": "synth:own-wallet-d-0",
+          "created_at": 1790470800000,
+          "campaign_id": "synth-quiet-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-d-1",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-d-1",
+          "payout_address": "synth:own-wallet-d-1",
+          "created_at": 1790557200000,
+          "campaign_id": "synth-quiet-campaign"
+        },
+        {
+          "receipt_id": "synth:receipt-d-2",
+          "kind": "payout",
+          "worker_external_id": "synth:wallet-d-2",
+          "payout_address": "synth:own-wallet-d-2",
+          "created_at": 1790643600000,
+          "campaign_id": "synth-quiet-campaign"
+        }
+      ],
+      "funding": [],
+      "expected": {
+        "flagged_rings": 0,
+        "excluded": 1,
+        "exclusion_reason_contains": "single-signal exclusion"
+      }
+    }
+  ]
+}
