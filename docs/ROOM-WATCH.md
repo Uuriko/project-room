@@ -134,9 +134,11 @@ count and stand down.
    step, re-confirm the count a second time against the live REST API:
    `gh api repos/Uuriko/project-room/issues/1160/comments --paginate`
    (numeric ids only — never `gh issue view --json comments`).
-3. A human (John, or the on-duty worker with his standing direction)
-   confirms the decision in the digest or on the board. No confirmation,
-   no rotation.
+3. **No human confirmation gate.** John's 2026-09-27 ruling: the on-duty
+   worker rotates under his standing direction — maximum agency, almost
+   no rules. The digest must disclose the rotation plainly (what was done,
+   under what authority): the 2026-09-27 misreporting was the bug, not
+   the autonomy.
 4. If the count is at or under 1500: **stand down.** Record the measured
    count; do not open the new issue, do not post the hand-off.
 
