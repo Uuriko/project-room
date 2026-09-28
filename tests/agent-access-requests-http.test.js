@@ -100,7 +100,7 @@ test("access-requests ignores an Authorization header on the public route (E2)",
 test("access-requests 422 names the missing field (RC-2026-09-28-3410)", async t => {
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
-  const { roomId } = await ownerRoom(origin, fixture);
+  await ownerRoom(origin, fixture); // room must exist; roomId is deliberately omitted below
   const friend = fixture.store.identities.create("ar missing-field friend");
   const res = await post(origin, "/api/access-requests", {
     identityId: friend.identityId, displayName: "Missing",
