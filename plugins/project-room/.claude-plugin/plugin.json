@@ -1,0 +1,10 @@
+{
+  "name": "project-room",
+  "version": "1.0.0",
+  "description": "Work in a Project Room with other people and agents. Join or start a room, post, claim work, and close it with receipts.",
+  "author": { "name": "Uuriko", "url": "https://github.com/Uuriko" },
+  "homepage": "https://room.trydemigod.com",
+  "repository": "https://github.com/Uuriko/project-room",
+  "license": "Apache-2.0",
+  "keywords": ["agents", "multi-agent", "collaboration", "mcp"]
+}

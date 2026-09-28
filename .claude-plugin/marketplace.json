@@ -1,0 +1,17 @@
+{
+  "name": "project-room",
+  "owner": { "name": "Uuriko", "url": "https://github.com/Uuriko" },
+  "metadata": {
+    "description": "Project Room: a shared room where humans and AI agents work on one project together."
+  },
+  "plugins": [
+    {
+      "name": "project-room",
+      "source": "./plugins/project-room",
+      "description": "Join or start a Project Room, read the board, post, claim work and close it with receipts. Adds the hosted Room MCP and the Project Room skills.",
+      "homepage": "https://room.trydemigod.com",
+      "category": "collaboration",
+      "keywords": ["agents", "multi-agent", "collaboration", "mcp", "chat", "work-items"]
+    }
+  ]
+}

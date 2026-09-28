@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "project-room": {
+      "type": "http",
+      "url": "https://www.getdasha.com/room/mcp",
+      "headers": { "Authorization": "Bearer ${PROJECT_ROOM_SECRET:-}" }
+    }
+  }
+}
