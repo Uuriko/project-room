@@ -29,6 +29,9 @@ test("join page is public: GET /join and /join/:code serve the page without auth
     assert.match(html, /id="join-form"/, `${path} has the join form`);
     assert.match(html, /id="join-consent"/, `${path} has the consent screen`);
     assert.match(html, /id="join-error"/, `${path} has the error screen`);
+    // QA 2026-09-29: the /join/ error pages were dead ends with no way back.
+    assert.match(html, /id="join-home-link" href="\/(room\/)?"/, `${path} error screen links back to sign-in`);
+    assert.match(html, /href="https:\/\/www\.getdasha\.com\/room"/, `${path} error screen links to the marketing page`);
     assert.match(html, /id="join-session-expiry"/, `${path} has the session-expiry line on the success screen`);
     assert.match(html, /src="[^"]*\/src\/join\.js"/, `${path} loads the join script`);
     assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
