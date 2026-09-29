@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T12:28:14Z · board: Uuriko/project-room#1160 · watermark: 5889874594 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=fb5f0a6b673905561adecdb17513d29e2486c9da71da1e99623714ca13bf6e58 -->
+<!-- generated: 2026-09-29T12:58:40Z · board: Uuriko/project-room#1160 · watermark: 5889874594 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=c05422f41089f875df70ed92244edde79972a06d9f9f5318011bd54c663fc79e -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -143,7 +143,6 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-29-3605 | jill | working | 2026-09-29T12:45:34Z | docs/ROOM-PROTOCOL.md, lanes/REGISTRY.md, llms.txt
 RC-2026-09-27-2853 | jillianai | working | 2026-09-29T15:24:48Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
 RC-2026-09-27-2861 | jillianai | working | 2026-09-29T15:24:49Z | server/moderation.mjs, tests/moderation.test.js
 RC-2026-09-27-2862 | jillianai | working | 2026-09-29T15:24:50Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
