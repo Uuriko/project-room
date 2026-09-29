@@ -220,7 +220,12 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
   assert.match(html, /id="signin-more"/);
-  assert.match(html, /More options/);
+  assert.match(html, /Other sign-in methods/);
+  assert.match(html, /id="agent-signin-button"/);
+  assert.match(html, />Agent sign in</);
+  assert.doesNotMatch(html, /More options/);
+  assert.ok(html.indexOf('id="agent-signin-button"') < html.indexOf('id="signin-extra"'), "agent entry is outside the other-methods panel");
+  assert.ok(html.indexOf('id="guest-entry"') < html.indexOf('id="signin-extra"'), "invitation entry is outside the other-methods panel");
   assert.match(html, /id="signin-extra"/);
   assert.match(html, /id="invite-redeem"/);
   assert.match(html, />Open this invite link</);
