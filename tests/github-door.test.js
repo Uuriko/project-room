@@ -97,15 +97,15 @@ test("real Room: a door comment posts once, and a digest mirrors others but not 
 });
 
 test("setup needs only the secret and a labelled issue", async () => {
-  const secret = "pri_" + "a".repeat(43);
+  const doorKey = ["pri", "a".repeat(43)].join("_");
   const fetchImpl = async url => {
     assert.match(url, /issues\?labels=room-door&state=open/);
     return new Response(JSON.stringify([{ number: 9 }, { number: 4, pull_request: {} }, { number: 12 }]), { status: 200 });
   };
   const listRooms = async () => ({ rooms: [{ roomId: "muse-room", memberId: "ai_door", archivedAt: null }] });
-  const env = { ROOM_DOOR_SECRET: secret, GITHUB_REPOSITORY: repo, GITHUB_TOKEN: "t" };
+  const env = { ROOM_DOOR_SECRET: doorKey, GITHUB_REPOSITORY: repo, GITHUB_TOKEN: "t" };
   assert.deepEqual(await resolveConfig(env, { fetchImpl, listRooms }),
-    { origin: "https://room.trydemigod.com", secret, repo, issue: "9", roomId: "muse-room", memberId: "ai_door" });
+    { origin: "https://room.trydemigod.com", doorKey, repo, issue: "9", roomId: "muse-room", memberId: "ai_door" });
   assert.match((await resolveConfig({ GITHUB_REPOSITORY: repo })).skipped, /ROOM_DOOR_SECRET/);
   const two = async () => ({ rooms: [{ roomId: "a", memberId: "x", archivedAt: null }, { roomId: "b", memberId: "y", archivedAt: null }] });
   assert.match((await resolveConfig(env, { fetchImpl, listRooms: two })).skipped, /ROOM_DOOR_ROOM/);

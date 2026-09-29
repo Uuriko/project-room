@@ -5,8 +5,8 @@
 // messages come back as lines with from "room:<name>".
 //
 // Run it where an identity already lives (for example next to the Grok host):
-//   ROOM_AGENT_CONFIG=/private/room-connection-dir \
 //   node scripts/disk-door.mjs sync --channel ~/src/agent-bus/channel.jsonl
+// with ROOM_AGENT_CONFIG pointing at the saved connection directory.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";

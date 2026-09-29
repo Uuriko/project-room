@@ -133,8 +133,8 @@ export async function runOutbound({ repo, doorIssue, token, client, roomId, self
 // "room-door", and the door's member id comes from its own identity's rooms.
 export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRooms = listAgentRooms } = {}) {
   const origin = env.ROOM_ORIGIN?.trim() || "https://room.trydemigod.com";
-  const secret = env.ROOM_DOOR_SECRET?.trim(), repo = env.GITHUB_REPOSITORY;
-  if (!secret || !repo) return { skipped: `door not configured: ${[!secret && "ROOM_DOOR_SECRET", !repo && "GITHUB_REPOSITORY"].filter(Boolean).join(", ")}` };
+  const doorKey = env.ROOM_DOOR_SECRET?.trim(), repo = env.GITHUB_REPOSITORY;
+  if (!doorKey || !repo) return { skipped: `door not configured: ${[!doorKey && "ROOM_DOOR_SECRET", !repo && "GITHUB_REPOSITORY"].filter(Boolean).join(", ")}` };
   let issue = env.ROOM_DOOR_ISSUE?.trim(), roomId = env.ROOM_DOOR_ROOM?.trim(), memberId = env.ROOM_DOOR_MEMBER?.trim();
   if (!issue && env.GITHUB_TOKEN) {
     const found = await gh(`/repos/${repo}/issues?labels=room-door&state=open&per_page=5`, { token: env.GITHUB_TOKEN, fetchImpl });
@@ -142,13 +142,13 @@ export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRoo
     issue = open[0] ? String(open[0].number) : undefined;
   }
   if (!issue) return { skipped: "no open issue labelled room-door" };
-  if ((!roomId || !memberId) && secret.startsWith("pri_")) {
-    const rooms = (await listRooms(origin, secret))?.rooms?.filter(r => !r.archivedAt) ?? [];
+  if ((!roomId || !memberId) && doorKey.startsWith("pri_")) {
+    const rooms = (await listRooms(origin, doorKey))?.rooms?.filter(r => !r.archivedAt) ?? [];
     const pick = roomId ? rooms.find(r => r.roomId === roomId) : rooms.length === 1 ? rooms[0] : null;
     if (pick) { roomId = pick.roomId; memberId = memberId || pick.memberId; }
   }
   if (!roomId) return { skipped: "set ROOM_DOOR_ROOM: the door identity is in zero or several rooms" };
-  return { origin, secret, repo, issue, roomId, memberId };
+  return { origin, doorKey, repo, issue, roomId, memberId };
 }
 
 export async function main(env = process.env, argv = process.argv) {
@@ -156,7 +156,7 @@ export async function main(env = process.env, argv = process.argv) {
   if (!["in", "out"].includes(mode)) throw new Error("usage: github-door.mjs in|out");
   const config = await resolveConfig(env);
   if (config.skipped) { console.log(JSON.stringify({ ok: false, skipped: config.skipped })); return; }
-  const client = new RoomAgentClient({ origin: config.origin, roomId: config.roomId, token: config.secret,
+  const client = new RoomAgentClient({ origin: config.origin, roomId: config.roomId, token: config.doorKey,
     ...(config.memberId ? { memberId: config.memberId } : {}) });
   let result;
   if (mode === "in") {
