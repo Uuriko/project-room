@@ -176,6 +176,18 @@ test('unconfigured Google button returns to usable sign-in with an announced una
   assert.equal(new URL(f.page.url()).searchParams.has('google'), false, 'one-shot failure query is scrubbed');
   assert.equal(await f.page.locator('#auth-error').getAttribute('role'), 'alert');
   assert.equal(await f.page.locator('[data-signin-form="password"]').isVisible(), true);
+  await f.page.locator('[data-forgot-password]').click();
+  assert.equal(await f.page.locator('[data-signin-form="password"]').isVisible(), false);
+  assert.doesNotMatch(await f.page.locator('#auth-error').innerText(), /below/i, 'provider failure does not point at fields hidden by recovery');
+  await f.page.locator('[data-reset-password]').click();
+  const form = f.page.locator('[data-signin-form="reset-request"]');
+  await form.locator('[name="email"]').fill(email);
+  const recovery = f.page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/reset/request');
+  await form.locator('button[type="submit"]').click();
+  assert.equal((await recovery).status(), 200);
+  await f.page.locator('[data-signin-panel]').filter({ hasText: 'check your email' }).waitFor();
+  assert.equal(f.delivered.length, 1, 'provider failure leaves actual password recovery usable');
+  assert.equal(f.delivered[0].purpose, 'password-reset');
   await f.page.reload();
   assert.equal(await f.page.locator('#auth-error').isVisible(), false, 'reload does not resurrect the old error');
 });

@@ -9,11 +9,12 @@ export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/__test-password-reset-provision') {
+      const originalPassword = crypto.randomUUID();
       this.store.createAccount('worker-reset-owner');
       this.store.accountLogins.linkPasswordMethod('worker-reset-owner', {
-        email: 'worker-reset@example.test', verifier: hashPassword('original-worker-password')
+        email: 'worker-reset@example.test', verifier: hashPassword(originalPassword)
       });
-      return Response.json(this.store.accountLogins.issuePasswordResetCode({ email: 'worker-reset@example.test' }));
+      return Response.json({ ...this.store.accountLogins.issuePasswordResetCode({ email: 'worker-reset@example.test' }), originalPassword });
     }
     if (url.pathname === '/__test-password-reset-state') {
       return Response.json(this.store.db.prepare('SELECT attempts, consumed_at FROM account_magic_codes').get() ?? null);

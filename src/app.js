@@ -74,8 +74,8 @@ function googleErrorFromLocation() {
 }
 const initialGoogleFailed = googleErrorFromLocation();
 const googleSigninFailureMessage = initialGoogleFailed === "unavailable"
-  ? "Google sign-in isn’t available here yet. Sign in with email and password below."
-  : "Google sign-in didn’t finish. Try again, or sign in with email and password below.";
+  ? "Google sign-in isn’t available here yet. Choose another way to sign in."
+  : "Google sign-in didn’t finish. Try again or choose another way to sign in.";
 if (initialGoogleFailed) {
   const url = new URL(location.href);
   url.searchParams.delete("google");

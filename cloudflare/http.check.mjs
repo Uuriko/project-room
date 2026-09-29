@@ -538,7 +538,7 @@ test('Workers password reset commits failed attempts, consumes once and requires
   try {
     const proof = await json(await call('/__test-password-reset-provision'));
     const slot = await freshSlot();
-    const body = { email: proof.email, code: proof.code, newPassword: 'replacement-worker-password', sessionRevision: slot.view.sessionRevision };
+    const body = { email: proof.email, code: proof.code, newPassword: randomUUID(), sessionRevision: slot.view.sessionRevision };
     const invalid = await json(await call('/api/auth/password/reset/consume', { ...body, code: 'wrong-reset-proof' }, slot.headers), 401);
     assert.equal(invalid.error.code, 'invalid_password_reset');
     assert.deepEqual(await json(await call('/__test-password-reset-state')), { attempts: 1, consumed_at: null },
@@ -548,7 +548,7 @@ test('Workers password reset commits failed attempts, consumes once and requires
     assert.equal((await json(await call('/api/account-session', null, slot.headers))).authenticated, false);
     assert.equal((await json(await call('/api/auth/password/reset/consume', body, slot.headers), 401)).error.code, 'invalid_password_reset');
     const loginSlot = await freshSlot();
-    const loginBody = { email: proof.email, password: 'original-worker-password', sessionRevision: loginSlot.view.sessionRevision };
+    const loginBody = { email: proof.email, password: proof.originalPassword, sessionRevision: loginSlot.view.sessionRevision };
     await json(await call('/api/auth/password/login', loginBody, loginSlot.headers), 401);
     const login = await call('/api/auth/password/login', { ...loginBody, password: body.newPassword }, loginSlot.headers);
     const session = await json(login);
