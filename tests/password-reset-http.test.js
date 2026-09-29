@@ -6,6 +6,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { hashPassword, verifyPassword } from "../src/password-auth.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { request as httpRequest } from "node:http";
 
 async function fixture(t, configured = true, { noticeFails = false } = {}) {
   const store = new RoomStore(":memory:");
@@ -142,4 +143,68 @@ test("completion notification failure does not turn a committed reset into an un
   assert.deepEqual(await response.json(), { status: "password_reset", signInRequired: true });
   assert.equal(verifyPassword("replacement-password", f.store.accountLogins.readPasswordVerifier("reset-owner")), true);
   assert.equal((await f.post(consumePath, slot, body)).status, 401);
+});
+
+for (const mutation of ["logout", "rotate login slot"]) {
+  test(`a held reset body cannot consume proof after concurrent ${mutation}`, { timeout: 5000 }, async t => {
+    const f = await fixture(t), slot = await f.openSlot();
+    const loggedIn = await f.post("/api/account-session", slot, { accountAccessKey: f.store.issueAccountAccessKey("reset-owner"), expectedSessionRevision: slot.view.sessionRevision });
+    slot.cookie = /account_session=([^;]+)/.exec(loggedIn.headers.get("set-cookie"))[1]; slot.view = await loggedIn.json();
+    await f.post(requestPath, slot, { email: "owner@example.com" });
+    const delivery = f.sent[0], payload = JSON.stringify(proofBody(delivery, slot));
+    const original = f.store.accountSessionSlot.bind(f.store);
+    let sawRead; const slotRead = new Promise(resolve => { sawRead = resolve; });
+    let armed = true;
+    f.store.accountSessionSlot = (...args) => {
+      const value = original(...args);
+      if (armed && args[0] === slot.cookie) { armed = false; sawRead(); }
+      return value;
+    };
+    let held;
+    const result = new Promise((resolve, reject) => {
+      held = httpRequest(f.origin + consumePath, { method: "POST", headers: {
+        Origin: f.origin, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload),
+        Cookie: `account_session=${slot.cookie}`, "X-CSRF-Token": slot.view.csrf
+      } }, response => {
+        let text = ""; response.setEncoding("utf8"); response.on("data", chunk => { text += chunk; });
+        response.on("end", () => resolve({ status: response.statusCode, body: JSON.parse(text) }));
+      });
+      held.on("error", reject); held.write(payload.slice(0, 1));
+    });
+    t.after(() => held.destroy());
+    await slotRead;
+    if (mutation === "logout") {
+      const logout = await fetch(f.origin + "/api/account-session", { method: "DELETE", headers: {
+        Origin: f.origin, "Content-Type": "application/json", Cookie: `account_session=${slot.cookie}`, "X-CSRF-Token": slot.view.csrf
+      }, body: JSON.stringify({ expectedSessionRevision: slot.view.sessionRevision }) });
+      assert.equal(logout.status, 200);
+    } else {
+      const rotated = await f.post("/api/account-session", slot, { accountAccessKey: f.store.issueAccountAccessKey("unrelated"), expectedSessionRevision: slot.view.sessionRevision });
+      assert.equal(rotated.status, 201);
+      assert.notEqual(/account_session=([^;]+)/.exec(rotated.headers.get("set-cookie"))[1], slot.cookie);
+    }
+    held.end(payload.slice(1));
+    const refused = await result;
+    assert.ok([401, 403, 409].includes(refused.status), `stale body must be refused, got ${refused.status}`);
+    assert.equal(verifyPassword("original-password", f.store.accountLogins.readPasswordVerifier("reset-owner")), true);
+    assert.equal(f.store.db.prepare("SELECT consumed_at FROM account_magic_codes").get().consumed_at, null);
+    const fresh = await f.openSlot();
+    assert.equal((await f.post(consumePath, fresh, proofBody(delivery, fresh))).status, 200, "fresh browser slot can still redeem unburned proof");
+  });
+}
+
+test("invalid reset proofs still commit bounded attempts inside the slot freshness transaction", async t => {
+  const f = await fixture(t), slot = await f.openSlot();
+  await f.post(requestPath, slot, { email: "owner@example.com" });
+  const delivery = f.sent[0];
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const response = await f.post(consumePath, slot, { ...proofBody(delivery, slot), code: "incorrect-reset-proof" });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error.code, "invalid_password_reset");
+    const row = f.store.db.prepare("SELECT attempts FROM account_magic_codes").get();
+    if (attempt < 5) assert.equal(row.attempts, attempt);
+    else assert.equal(row, undefined);
+  }
+  assert.equal((await f.post(consumePath, slot, proofBody(delivery, slot))).status, 401);
+  assert.equal(verifyPassword("original-password", f.store.accountLogins.readPasswordVerifier("reset-owner")), true);
 });

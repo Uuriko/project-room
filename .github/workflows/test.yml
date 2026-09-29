@@ -83,7 +83,7 @@ jobs:
         run: node scripts/host-isolation-preflight.mjs
       - run: npm test 2>&1 | tee /tmp/test-output.log; test ${PIPESTATUS[0]} -eq 0
       - name: Report failures to PR
-        if: failure()
+        if: failure() && github.event_name == 'pull_request'
         run: |
           FAILS=$(grep -E "^✖" /tmp/test-output.log | head -10 || echo "no ✖ lines")
           DETAILS=$(grep -B3 -A20 "^✖" /tmp/test-output.log | head -80 || echo "no details")
@@ -98,9 +98,10 @@ jobs:
           \`\`\`
           $DETAILS
           \`\`\`"
-          gh pr comment 1207 --repo Uuriko/project-room --body "$BODY" || echo "comment failed"
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body "$BODY" || echo "comment failed"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} 2>&1 | tee /tmp/test-output.log; test ${PIPESTATUS[0]} -eq 0
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v4

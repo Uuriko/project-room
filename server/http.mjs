@@ -1030,15 +1030,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
           return json(res, 200, { status: "sent" });
         }
-        if (!Number.isSafeInteger(data.sessionRevision) || data.sessionRevision !== slot.sessionRevision) reject(409, "stale_session_revision", "The browser session changed; refresh before resetting");
-        let authenticated = null;
-        try { authenticated = store.authenticateAccountSession(slotToken); }
-        catch (error) { if (error.status !== 401) throw error; }
-        const target = store.accountLogins.passwordResetAccount(normalized);
-        if (authenticated && authenticated.account.id !== target?.accountId) reject(409, "reset_account_mismatch", "This reset is for another account. Sign out before continuing.");
+        const verifyResetSlot = () => {
+          const currentSlot = store.accountSessionSlot(slotToken);
+          protectWrite(req, currentSlot, false);
+          if (!Number.isSafeInteger(data.sessionRevision) || data.sessionRevision !== currentSlot.sessionRevision) reject(409, "stale_session_revision", "The browser session changed; refresh before resetting");
+          let authenticated = null;
+          try { authenticated = store.authenticateAccountSession(slotToken); }
+          catch (error) { if (error.status !== 401) throw error; }
+          const target = store.accountLogins.passwordResetAccount(normalized);
+          if (authenticated && authenticated.account.id !== target?.accountId) reject(409, "reset_account_mismatch", "This reset is for another account. Sign out before continuing.");
+        };
+        // The body may have been held while another tab changed this slot.
+        verifyResetSlot();
         const policy = checkPasswordPolicy(data.newPassword);
         if (policy) reject(422, policy.code, policy.message);
-        store.accountLogins.resetPassword({ email: normalized, code: data.code, verifier: hashPassword(data.newPassword) });
+        const verifier = hashPassword(data.newPassword);
+        const resetFailure = store.transaction(() => {
+          // Recheck inside the writer fence so another process cannot change
+          // the browser slot between authorization and proof consumption.
+          verifyResetSlot();
+          try { store.accountLogins.resetPassword({ email: normalized, code: data.code, verifier }); }
+          catch (error) {
+            // Invalid proof attempts deliberately persist their bounded counter.
+            if (error instanceof ServiceError && error.code === "invalid_password_reset") return error;
+            throw error;
+          }
+          return null;
+        });
+        if (resetFailure) throw resetFailure;
         // Notification failure cannot undo a committed password change or
         // turn a used proof into a second mutation. Never include secrets.
         try { await magicMailer.sendPasswordResetNotice?.({ to: normalized }); } catch { /* Password is already reset. */ }
@@ -1131,13 +1150,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
           reject(422, "invalid_password_change", "The current and new passwords are required");
         }
+        const verifyChangeSession = () => store.authenticateAccountSession(slotToken, null, session.sessionBinding);
+        verifyChangeSession();
         const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
         if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
           reject(401, "invalid_credentials", "The current password is incorrect");
         }
         const policy = checkPasswordPolicy(data.newPassword);
         if (policy) reject(422, policy.code, policy.message);
-        store.accountLogins.setPasswordVerifier(session.account.id, hashPassword(data.newPassword));
+        const replacementVerifier = hashPassword(data.newPassword);
+        store.transaction(() => {
+          verifyChangeSession();
+          if (store.accountLogins.readPasswordVerifier(session.account.id) !== verifier) {
+            reject(409, "password_changed", "The password changed; retry with the current password");
+          }
+          store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
+        });
         return json(res, 200, { status: "ok" });
       }
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
