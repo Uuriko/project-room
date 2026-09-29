@@ -329,11 +329,11 @@ test("auto-approve: empty request and no rule stay pending without a note", asyn
   assert.equal(pending.pendingNote, undefined);
 });
 
-test("auto-approve: config rejects manage_members, decide, manage_claims", async t => {
+test("auto-approve: config rejects elevated permissions (manage_members, decide, manage_claims, write_external, invite_member)", async t => {
   const { requests, ownerToken } = setup(t);
-  for (const forbidden of ["manage_members", "decide", "manage_claims"]) {
+  for (const forbidden of ["manage_members", "decide", "manage_claims", "write_external", "invite_member"]) {
     assert.throws(() => requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", forbidden] }),
-      err => err.status === 422 && /never grant administration/.test(err.message),
+      err => err.status === 422 && /never grant elevated/.test(err.message),
       `expected 422 for ${forbidden}`);
   }
   // Unknown names and duplicates also 422 with a teaching message.
