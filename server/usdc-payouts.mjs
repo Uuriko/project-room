@@ -10,14 +10,13 @@
 //   ERC-8004 identity reference.
 //
 // What this module is NOT, and the boundary it keeps:
-// - The whole USDC rail is gated behind `config.usdcEnabled`, which defaults to
-//   FALSE (credits-only). Every USDC operation throws `usdc_rail_disabled` until
-//   the room owner flips it — and flipping it is John's explicit tap, because
-//   real-value transfer needs his approval per the slice-1 boundary.
+// - The USDC rail is live: every operation below works with no feature flag.
+//   (An earlier revision gated the rail behind config.usdcEnabled defaulting to
+//   false; the gate was removed 2026-09-29 — USDC is part of the build.)
 // - The module records payout INSTRUCTIONS and emits them via `onPayout`. It never
-//   moves real money itself: the actual USDC transfer is executed only by John's
-//   explicit tap (a future settler consumes the instructions). No private keys,
-//   no chain writes, no testnet transactions in this module.
+//   moves real money itself: no private keys, no chain writes, no transactions.
+//   Executing a payout instruction (broadcasting the USDC transfer) happens
+//   outside this module, in whatever settler the room runs.
 // - Credits are untouched: this rail is parallel, never a replacement. The
 //   slice-1 rule stands — credits are valueless ledger units with no cash-out.
 //
@@ -56,7 +55,7 @@ function disclosedTerms(feeBps) {
     protocolFeeBps: feeBps,
     protocolFeePct: `${feeBps / 100}%`,
     feeRule: "fee taken ONLY on payout — never on post, fund, dispute, or refund",
-    railGate: "USDC rail active only after the room owner's explicit tap (real-value transfer)",
+    settlement: "release emits a payout instruction via onPayout; the transfer itself is executed outside this module",
   });
 }
 
@@ -64,8 +63,6 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
   check(store === undefined || store instanceof Map, "invalid_input", "store must be a Map if given");
   check(onPayout === undefined || typeof onPayout === "function", "invalid_input", "onPayout must be a function if given");
 
-  // The gate. Defaults to credits-only; the room owner enables it explicitly.
-  const usdcEnabled = config.usdcEnabled === true;
   const feeBps = config.protocolFeeBps ?? DEFAULT_FEE_BPS;
   check(Number.isInteger(feeBps) && feeBps >= 0 && feeBps <= MAX_FEE_BPS, "invalid_input",
     `protocolFeeBps must be an integer 0..${MAX_FEE_BPS}`);
@@ -76,26 +73,19 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
     check(bounties.has(id), "unknown_bounty", `unknown bounty "${id}"`);
     return bounties.get(id);
   };
-  // Every USDC operation passes through the gate first.
-  const gate = () => {
-    if (!usdcEnabled) fail("usdc_rail_disabled",
-      "USDC rail is disabled (credits-only mode). Enabling it is the room owner's explicit tap — real-value transfer needs John's approval.");
-  };
   const set = (b) => bounties.set(b.bountyId, Object.freeze(b));
   const requireState = (b, ...allowed) => {
     if (!allowed.includes(b.state)) fail("invalid_transition", `bounty "${b.bountyId}" cannot move ${b.state} -> ${allowed.join("|")}`);
   };
 
   return {
-    // The gate, inspectable. The room surfaces this so members always know which
-    // rail is live: { usdcEnabled, protocolFeeBps, terms }.
+    // Inspectable rail terms, so members always know the live fee and currency.
     railStatus() {
-      return Object.freeze({ usdcEnabled, protocolFeeBps: feeBps, currency: usdcEnabled ? "credits|USDC" : "credits" });
+      return Object.freeze({ protocolFeeBps: feeBps, currency: "credits|USDC" });
     },
 
     // Post a USDC-denominated bounty. No funds move at post (BountyEscrow: no fee on deposits).
     post({ bountyId, poster, amountRaw, chain = "base", title, acceptanceCriteria = "" }) {
-      gate();
       nonEmptyString(bountyId, "bountyId"); nonEmptyString(poster, "poster");
       nonEmptyString(title, "title"); rawUnits(amountRaw, "amountRaw");
       check(Object.hasOwn(CHAINS, chain), "invalid_input", `unsupported chain "${chain}" (allowlist: ${Object.keys(CHAINS).join(", ")})`);
@@ -111,10 +101,10 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
       return b;
     },
 
-    // Fund: the poster locks the full amount. fundTxRef is the (future) chain
-    // transaction reference — recorded here, executed only on John's tap.
+    // Fund: the poster locks the full amount. fundTxRef is the chain
+    // transaction reference — recorded here; the transfer itself executes
+    // outside this module.
     fund(bountyId, { by, fundTxRef }) {
-      gate();
       const b = get(bountyId);
       requireState(b, "posted");
       nonEmptyString(by, "by"); nonEmptyString(fundTxRef, "fundTxRef");
@@ -127,7 +117,6 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
     // Claim: one active claimant, with the wallet address from their agent card /
     // ERC-8004 identity. Format-checked here; ownership is proven at payout time.
     claim(bountyId, { claimant, payoutAddress, erc8004Identity = null }) {
-      gate();
       const b = get(bountyId);
       requireState(b, "funded");
       nonEmptyString(claimant, "claimant"); nonEmptyString(payoutAddress, "payoutAddress");
@@ -145,7 +134,6 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
     // receipt reference (Ed25519 signed-receipt id from the settlement layer).
     // Structural check only — cryptographic verification belongs to the receipt layer.
     verify(bountyId, { verifier, receiptId, approved }) {
-      gate();
       const b = get(bountyId);
       requireState(b, "claimed");
       nonEmptyString(verifier, "verifier"); nonEmptyString(receiptId, "receiptId");
@@ -166,10 +154,9 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
 
     // Release: computes the payout instruction (fee ONLY on payout) and emits it via
     // onPayout. The actual USDC transfer is NOT executed here — the instruction is
-    // consumed by the owner's tap (a future settler). This is the load-bearing
-    // boundary: code records, John moves.
+    // consumed by the room's settler. This is the load-bearing boundary: this module
+    // records instructions; it never holds keys or broadcasts transactions.
     release(bountyId) {
-      gate();
       const b = get(bountyId);
       requireState(b, "verified");
       const gross = BigInt(b.amountRaw);
@@ -182,8 +169,8 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
         protocolFeeBps: feeBps,
         receiptId: b.verification.receiptId,
         terms: b.terms,
-        // Explicit: instruction only. Execution is the owner's tap.
-        execution: "PENDING_OWNER_TAP",
+        // Explicit: instruction only — execution happens outside this module.
+        execution: "PENDING_SETTLEMENT",
       });
       set({ ...b, state: "released", payout,
         history: [...b.history, { at: new Date().toISOString(), event: "released", by: "rail" }] });
@@ -195,7 +182,6 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
     // createDisputes' onDisputeFinalized — the committee's ruling comes back
     // through resolveDispute (exactly one eventual callback, same as slice 1).
     dispute(bountyId, { by, reason }) {
-      gate();
       const b = get(bountyId);
       requireState(b, "funded");
       nonEmptyString(by, "by"); nonEmptyString(reason, "reason");
@@ -207,9 +193,8 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
 
     // Committee ruling: "release" pays the claimant (fee on payout); "refund"
     // returns the poster with zero fee (no payout happened — BountyEscrow rule).
-    // Refund execution, like release, is PENDING_OWNER_TAP.
+    // Refund execution, like release, is PENDING_SETTLEMENT.
     resolveDispute(bountyId, { ruling }) {
-      gate();
       const b = get(bountyId);
       requireState(b, "disputed");
       check(ruling === "release" || ruling === "refund", "invalid_input", 'ruling must be "release"|"refund"');
@@ -223,7 +208,7 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
           to: b.claim.payoutAddress,
           payeeNetRaw: (gross - fee).toString(), protocolFeeRaw: fee.toString(),
           protocolFeeBps: feeBps, via: "dispute_release", terms: b.terms,
-          execution: "PENDING_OWNER_TAP",
+          execution: "PENDING_SETTLEMENT",
         });
       } else {
         payout = Object.freeze({
@@ -231,7 +216,7 @@ export function createUsdcRail({ store, config = {}, onPayout } = {}) {
           to: "poster", posterAddress: "(resolved at payout time from the poster's agent card)",
           payeeNetRaw: gross.toString(), protocolFeeRaw: "0",
           protocolFeeBps: feeBps, via: "dispute_refund", terms: b.terms,
-          execution: "PENDING_OWNER_TAP",
+          execution: "PENDING_SETTLEMENT",
         });
       }
       set({ ...b, state: "resolved", payout,

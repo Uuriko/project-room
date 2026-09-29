@@ -1,10 +1,9 @@
 // USDC payout rail tests — authoring gate answers:
-// 1. Contracts guarded: the rail gate (credits-only default — the load-bearing
-//    boundary), the escrow lifecycle, fee-only-on-payout, PENDING_OWNER_TAP
-//    (the module never moves money), payout-address format checks, illegal
-//    transitions, and the fee cap.
-// 2. Credible regressions: someone flips usdcEnabled default to true; fee math
-//    changes; release starts executing transfers; dispute refund takes a fee.
+// 1. Contracts guarded: the escrow lifecycle, fee-only-on-payout, PENDING_SETTLEMENT
+//    (the module never moves money — instructions only), payout-address format
+//    checks, illegal transitions, and the fee cap.
+// 2. Credible regressions: someone re-adds a rail gate; fee math changes;
+//    release starts executing transfers; dispute refund takes a fee.
 // 3. No existing coverage: new module, owns its boundary.
 // 4. No production seam: pure module, caller-owned store/config/callback.
 import test from "node:test";
@@ -14,7 +13,6 @@ import { createUsdcRail, UsdcRailError, DEFAULT_FEE_BPS, MAX_FEE_BPS } from "../
 const throwsCode = (fn, code) =>
   assert.throws(fn, (e) => e instanceof UsdcRailError && e.code === code);
 
-const ENABLED = { usdcEnabled: true };
 const EVM_ADDR = "0x1234567890abcdef1234567890abcdef12345678";
 const SOL_ADDR = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -28,23 +26,23 @@ function toVerified(rail, id = "b1") {
   return rail.verify(id, { verifier: "carol", receiptId: "rcpt_1", approved: true });
 }
 
-test("rail gate: credits-only by default — every USDC op throws usdc_rail_disabled", () => {
+test("rail is live with no config — USDC ops work out of the box", () => {
   const rail = createUsdcRail(); // no config at all
-  assert.equal(rail.railStatus().usdcEnabled, false);
-  assert.equal(rail.railStatus().currency, "credits");
-  throwsCode(() => rail.post({ bountyId: "b1", poster: "a", amountRaw: "1", title: "t" }), "usdc_rail_disabled");
-  throwsCode(() => rail.fund("b1", { by: "a", fundTxRef: "x" }), "usdc_rail_disabled");
-  throwsCode(() => rail.release("b1"), "usdc_rail_disabled");
-  throwsCode(() => rail.dispute("b1", { by: "a", reason: "r" }), "usdc_rail_disabled");
+  assert.equal(rail.railStatus().currency, "credits|USDC");
+  const b = rail.post({ bountyId: "b1", poster: "a", amountRaw: "1", title: "t" });
+  assert.equal(b.state, "posted");
+  assert.equal(b.currency, "USDC");
 });
 
-test("rail gate: explicit usdcEnabled:false is also credits-only", () => {
+test("a legacy usdcEnabled key in config is ignored — the rail stays live", () => {
   const rail = createUsdcRail({ config: { usdcEnabled: false } });
-  throwsCode(() => rail.post({ bountyId: "b1", poster: "a", amountRaw: "1", title: "t" }), "usdc_rail_disabled");
+  assert.equal(rail.railStatus().currency, "credits|USDC");
+  const b = rail.post({ bountyId: "b1", poster: "a", amountRaw: "1", title: "t" });
+  assert.equal(b.state, "posted");
 });
 
 test("post carries disclosed terms: 2% default fee, fee-only-on-payout rule", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   const b = posted(rail);
   assert.equal(b.state, "posted");
   assert.equal(b.currency, "USDC");
@@ -55,28 +53,28 @@ test("post carries disclosed terms: 2% default fee, fee-only-on-payout rule", ()
 });
 
 test("protocol fee is room-configurable within the 10% cap", () => {
-  const rail = createUsdcRail({ config: { usdcEnabled: true, protocolFeeBps: 50 } });
+  const rail = createUsdcRail({ config: { protocolFeeBps: 50 } });
   assert.equal(posted(rail).terms.protocolFeeBps, 50);
-  assert.throws(() => createUsdcRail({ config: { usdcEnabled: true, protocolFeeBps: MAX_FEE_BPS + 1 } }),
+  assert.throws(() => createUsdcRail({ config: { protocolFeeBps: MAX_FEE_BPS + 1 } }),
     (e) => e instanceof UsdcRailError && e.code === "invalid_input");
 });
 
 test("full lifecycle: post -> fund -> claim -> verify -> release; fee only on payout", () => {
   const payouts = [];
-  const rail = createUsdcRail({ config: ENABLED, onPayout: (p) => payouts.push(p) });
+  const rail = createUsdcRail({ onPayout: (p) => payouts.push(p) });
   toVerified(rail);
   const p = rail.release("b1");
   assert.equal(rail.get("b1").state, "released");
   assert.equal(p.payeeNetRaw, "980000"); // 2% of 1,000,000
   assert.equal(p.protocolFeeRaw, "20000");
   assert.equal(p.to, EVM_ADDR);
-  assert.equal(p.execution, "PENDING_OWNER_TAP"); // instruction only — John moves the money
+  assert.equal(p.execution, "PENDING_SETTLEMENT"); // instruction only — execution happens outside this module
   assert.equal(payouts.length, 1);
   assert.equal(payouts[0], p);
 });
 
 test("claim validates the payout address format per chain", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   posted(rail);
   rail.fund("b1", { by: "alice", fundTxRef: "tx_1" });
   throwsCode(() => rail.claim("b1", { claimant: "bob", payoutAddress: "not-an-address" }), "invalid_input");
@@ -86,7 +84,7 @@ test("claim validates the payout address format per chain", () => {
 });
 
 test("solana bounties use the Solana USDC mint and base58 addresses", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   const b = rail.post({ bountyId: "s1", poster: "alice", amountRaw: "5000000", title: "t", chain: "solana" });
   assert.equal(b.asset, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   rail.fund("s1", { by: "alice", fundTxRef: "tx_s" });
@@ -95,7 +93,7 @@ test("solana bounties use the Solana USDC mint and base58 addresses", () => {
 });
 
 test("verifier must be distinct from the claimant (separation of duties)", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   posted(rail);
   rail.fund("b1", { by: "alice", fundTxRef: "tx_1" });
   rail.claim("b1", { claimant: "bob", payoutAddress: EVM_ADDR });
@@ -103,7 +101,7 @@ test("verifier must be distinct from the claimant (separation of duties)", () =>
 });
 
 test("rejected verification returns the bounty to funded (claimant can re-submit)", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   posted(rail);
   rail.fund("b1", { by: "alice", fundTxRef: "tx_1" });
   rail.claim("b1", { claimant: "bob", payoutAddress: EVM_ADDR });
@@ -113,7 +111,7 @@ test("rejected verification returns the bounty to funded (claimant can re-submit
 });
 
 test("dispute freezes a funded bounty; committee release pays, refund takes no fee", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   posted(rail, "d1");
   rail.fund("d1", { by: "alice", fundTxRef: "tx_1" });
   rail.dispute("d1", { by: "alice", reason: "no deliverable" });
@@ -123,12 +121,12 @@ test("dispute freezes a funded bounty; committee release pays, refund takes no f
   const refund = rail.resolveDispute("d1", { ruling: "refund" });
   assert.equal(refund.payeeNetRaw, "1000000");
   assert.equal(refund.protocolFeeRaw, "0"); // no payout happened — no fee (BountyEscrow rule)
-  assert.equal(refund.execution, "PENDING_OWNER_TAP");
+  assert.equal(refund.execution, "PENDING_SETTLEMENT");
   assert.equal(rail.get("d1").state, "resolved");
 });
 
 test("illegal transitions are rejected", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   posted(rail);
   throwsCode(() => rail.claim("b1", { claimant: "b", payoutAddress: EVM_ADDR }), "invalid_transition"); // not funded
   throwsCode(() => rail.release("b1"), "invalid_transition"); // not verified
@@ -137,7 +135,7 @@ test("illegal transitions are rejected", () => {
 });
 
 test("amounts are raw-unit integer strings — floats rejected", () => {
-  const rail = createUsdcRail({ config: ENABLED });
+  const rail = createUsdcRail();
   for (const bad of ["1.5", "0x10", "-1", "1,000", ""]) {
     throwsCode(() => rail.post({ bountyId: `b-${bad}`, poster: "a", amountRaw: bad, title: "t" }), "invalid_input");
   }
