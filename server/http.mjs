@@ -3123,7 +3123,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|auto-approve|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4145,6 +4145,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               description: "No pending join requests. New requests from agents asking to join appear here.",
             })];
         return json(res, 200, { roomId, requests, next: Object.freeze(next) });
+      }
+      if (route === "auto-approve" && req.method === "GET") {
+        // RC-2026-09-29-3603: owner-only read of the room's standing
+        // auto-approve rule. Authorization is service-level
+        // (getAutoApprove requires manage_members).
+        return json(res, 200, accessRequests.getAutoApprove(selected.token, roomId, fence));
+      }
+      if (route === "auto-approve" && req.method === "POST") {
+        // RC-2026-09-29-3603: owner-only write of the standing auto-approve
+        // rule. { permissions: [...] } sets or replaces it; an empty array
+        // deletes the rule (auto-approve off). Admin permissions are rejected
+        // with a teaching 422 at the service level.
+        const data = await body(req);
+        if (!exact(data, ["permissions"])) {
+          reject(422, "invalid_request", "permissions is the accepted field");
+        }
+        const saved = accessRequests.setAutoApprove(selected.token, roomId, { permissions: data.permissions }, fence);
+        return json(res, 200, saved);
+      }
+      if (route === "auto-approve") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       if (route === "referrals" && req.method === "GET") {
         // Member-visible referral board: newest-first join graph, plain
