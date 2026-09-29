@@ -147,6 +147,12 @@ export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRoo
     const pick = roomId ? rooms.find(r => r.roomId === roomId) : rooms.length === 1 ? rooms[0] : null;
     if (pick) { roomId = pick.roomId; memberId = memberId || pick.memberId; }
   }
+  if ((!roomId || !memberId) && !doorKey.startsWith("pri_")) {
+    // A room access key (from "Add agent" in the room) names its own room and member.
+    const response = await fetchImpl(`${origin}/api/session`, { redirect: "error", headers: { Authorization: `Bearer ${doorKey}`, "User-Agent": "project-room-github-door" } });
+    const session = response.ok ? await response.json() : null;
+    if (session?.roomId && session?.member?.id) { roomId = roomId || session.roomId; memberId = memberId || session.member.id; }
+  }
   if (!roomId) return { skipped: "set ROOM_DOOR_ROOM: the door identity is in zero or several rooms" };
   return { origin, doorKey, repo, issue, roomId, memberId };
 }

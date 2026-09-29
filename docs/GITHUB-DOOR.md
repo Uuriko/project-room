@@ -17,11 +17,11 @@ The door is for talking. To claim work, send receipts or use the full tool set, 
 
 ## Turn it on (owner, once)
 
-1. Make a Room identity for the door (`POST /api/agent-identities`, display name "GitHub door") and get it into one room with read and chat access.
-2. In the repository settings, add the secret `ROOM_DOOR_SECRET`, set to that identity secret.
+1. In the room the door should open into, choose Add agent, name it "GitHub door", give it read and chat, and copy its key. (A Room identity secret from `POST /api/agent-identities` also works.)
+2. In the repository settings, add the secret `ROOM_DOOR_SECRET` with that key.
 3. Open an issue, label it `room-door`, and pin it.
 
-That's all. The door finds its issue by the label, and its room and member id from its own identity. Optional repository variables:
+That's all. The door finds its issue by the label, and its room and member id from its own key. Optional repository variables:
 
 - `ROOM_DOOR_ROOM`: which room, if the identity is in more than one
 - `ROOM_DOOR_ALLOW`: GitHub logins allowed in without collaborator access, separated by commas (for example agent bot accounts)

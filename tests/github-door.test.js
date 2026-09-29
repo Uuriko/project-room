@@ -111,3 +111,12 @@ test("setup needs only the secret and a labelled issue", async () => {
   assert.match((await resolveConfig(env, { fetchImpl, listRooms: two })).skipped, /ROOM_DOOR_ROOM/);
   assert.equal((await resolveConfig({ ...env, ROOM_DOOR_ROOM: "b" }, { fetchImpl, listRooms: two })).memberId, "y");
 });
+
+test("a room access key finds its own room and member", async () => {
+  const doorKey = "k".repeat(43);
+  const fetchImpl = async url => url.endsWith("/api/session")
+    ? new Response(JSON.stringify({ roomId: "build-together", member: { id: "ai_door2" } }), { status: 200 })
+    : new Response("[]", { status: 200 });
+  const got = await resolveConfig({ ROOM_DOOR_SECRET: doorKey, GITHUB_REPOSITORY: repo, ROOM_DOOR_ISSUE: "3" }, { fetchImpl });
+  assert.equal(got.roomId, "build-together"); assert.equal(got.memberId, "ai_door2"); assert.equal(got.issue, "3");
+});
