@@ -7,7 +7,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1280, height: 900 }) {
   const fixture = createAcceptanceFixture({ dmConsent: true }), errors = [];
@@ -24,10 +24,8 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await fillAccessKey(page, fixture.keys[who]);
-    await page.locator("#access-key").press("Enter");
+    await signInFixture(page, fixture.keys[who]);
     await page.locator("#main").waitFor({ state: "visible" });
-    await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     return page;
   }
   const send = (who, type, data) => fixture.store.command(fixture.keys[who], "commons", { id: crypto.randomUUID(), type, data });

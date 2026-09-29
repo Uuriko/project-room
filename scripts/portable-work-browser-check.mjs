@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -32,8 +32,7 @@ for (const mobile of [false, true]) {
     const touchEmulation = mobile ? await context.newCDPSession(page) : null;
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/commands")) writes.push(request.postDataJSON()); });
-    await page.goto(origin); await fillAccessKey(page, f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
     const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
     const before = snapshot();
@@ -200,8 +199,7 @@ for (const mobile of [false, true]) {
     assert.equal(confirmations, 1, "a closed portable draft alone warns before sign-out");
     assert.equal(await page.locator("#packet-preview").inputValue(), "");
     assert.equal(await page.locator("#portable-status").textContent(), "");
-    await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-    await page.locator("#main").waitFor({ state: "visible" }); await open(true);
+    await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); await open(true);
     assert.equal(await page.locator("#portable-result").inputValue(), "", "sign-out cleared the private draft and retry map");
     await page.locator("#portable-close").click(); await open();
     assert.equal(await page.locator("#packet-copy").isDisabled(), true, "sign-out cannot cancel an already issued system write");

@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`thread options ${label}: mute button and also-send-to-channel`, { timeout: 90000 }, async t => {
@@ -36,8 +36,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(page, owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
     // Open the thread view from the thread link on the root message.

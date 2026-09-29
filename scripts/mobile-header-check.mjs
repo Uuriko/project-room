@@ -7,7 +7,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
@@ -30,8 +30,7 @@ async function setup(t, viewport) {
 async function signIn(fixture, page, origin) {
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, fixture.keys.owner);
-  await page.getByLabel("Room key", { exact: true }).press("Enter");
+  await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
 }
 

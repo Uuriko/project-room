@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { closeSettings, openSettings } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
@@ -25,16 +25,15 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   const items = () => f.store.room("commons").state.workItems;
   const openForm = async () => { await openComposerOptions(page); await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" }); await page.locator("#work-options").evaluate(el => { el.open = true; }); };
   const login = async (key, view = viewport) => {
     const other = await browser.newPage({ viewport: view, reducedMotion: "reduce" }); other.setDefaultTimeout(8000); other.on("pageerror", error => errors.push(error.message));
-    await other.goto(`http://127.0.0.1:${server.address().port}`); await fillAccessKey(other, key);
-    await other.getByRole("button", { name: "Enter room", exact: true }).click(); await other.locator("#main").waitFor({ state: "visible" }); return other;
+    await other.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(other, key);
+    await other.locator("#main").waitFor({ state: "visible" }); return other;
   };
   const openDialog = async p => { await openSettings(p, "room-about"); await p.locator("#room-instructions-open").click(); await p.locator("#room-instructions-dialog").waitFor({ state: "visible" }); };
   const policy = () => f.store.room("commons").state.room.policy;

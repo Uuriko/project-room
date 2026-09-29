@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, touch = false) {
   const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store, streamInterval: 60 });
@@ -34,8 +34,7 @@ async function setup(t, touch = false) {
   const errors = [], requests = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => requests.push(`${request.url()} ${request.postData() ?? ''}`));
-  await page.goto(origin); await fillAccessKey(page, fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await page.goto(origin); await signInFixture(page, fixture.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
   await clickChrome(page, "#invite-people-button");
   return { fixture, origin, page, errors, requests };
@@ -55,7 +54,7 @@ async function settle(page) {
 async function capture(page, name) {
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/invitation-note-${name}.png`,
-    mask: [page.locator('#access-key'), page.locator('#share-link-url'), page.locator('#share-note-preview')], maskColor: '#263341' });
+    mask: [page.locator('#share-link-url'), page.locator('#share-note-preview')], maskColor: '#263341' });
 }
 
 for (const touch of [false, true]) test(`optional invitation note ${touch ? 'mobile' : 'desktop'}: exact, private, keyboard-friendly composition`, { timeout: 45000 }, async t => {

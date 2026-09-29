@@ -466,7 +466,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (retryable && retryHadFocus && [document.body, $("#join-link-retry")].includes(document.activeElement)) $("#join-link-retry").focus();
     }
   }
-  for (const [id, mode] of [["#join-account-signin", "login"], ["#join-account-create", "signup"]]) {
+  for (const [id, mode] of [["#join-account-signin", "magic"]]) {
     $(id).addEventListener("click", () => {
       if (joining) return;
       $("#join-account-choices").hidden = true; $("#join-link-form").hidden = true;

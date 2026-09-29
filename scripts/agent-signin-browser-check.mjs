@@ -61,10 +61,10 @@ test("visible entry choices open focused flows without hiding pending agent sign
     assert.equal(await page.locator("[data-agent-create-room]").isVisible(), true);
 
     await page.locator("#agent-auth-back").click();
-    await page.locator("#signin-more").click();
-    assert.equal(await page.locator("#signin-extra").isVisible(), true);
+    await page.locator("#email-signin").click();
+    assert.equal(await page.locator('#email-auth-panel [data-signin-form="magic-request"]').isVisible(), true);
     assert.equal(await page.locator("#agent-auth-step").isVisible(), false);
-    assert.equal(await page.locator("#access-key").isVisible(), false);
+    assert.equal(await page.locator("#access-key, #signin-support-root, #signin-more, #signin-extra").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.close();
   }

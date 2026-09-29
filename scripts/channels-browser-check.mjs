@@ -8,7 +8,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -28,8 +28,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   t.after(() => { assert.deepEqual(errors, [], "no page errors"); assert.deepEqual(outside, [], "no outside requests"); });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   if (viewport.width < 700) await page.locator("#sidebar-toggle").click();
   await page.locator('#channel-list [data-channel]').first().waitFor({ state: "visible" });

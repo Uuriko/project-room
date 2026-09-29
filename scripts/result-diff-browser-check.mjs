@@ -8,7 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 
 async function setup(t, width) {
@@ -50,8 +50,7 @@ async function setup(t, width) {
     await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     const page = await context.newPage(); page.setDefaultTimeout(8000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(origin); await fillAccessKey(page, f.keys[actor]);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await signInFixture(page, f.keys[actor]);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   }

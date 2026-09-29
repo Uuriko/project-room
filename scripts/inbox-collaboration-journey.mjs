@@ -11,7 +11,7 @@ import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 export async function createInboxCollaborationJourney({ mobile = false } = {}) {
   const sample = await createInboxSandbox(), { store, provider } = sample;
@@ -57,8 +57,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       });
       const p = await context.newPage(); p.setDefaultTimeout(9000);
       p.on("pageerror", error => errors.push(error.message)); p.on("dialog", d => d.accept());
-      await p.goto(url); await fillAccessKey(p, key); await p.locator('#auth-form button[type="submit"]').click();
-      return p;
+      await p.goto(url); await signInFixture(p, key); return p;
     }
     const capture = async (name, p = page) => {
       assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

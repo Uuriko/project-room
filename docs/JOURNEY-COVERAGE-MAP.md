@@ -260,7 +260,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "owner-access-review",
-      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash — identically from the route and the CLI.",
+      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash \u2014 identically from the route and the CLI.",
       "evidence": {
         "unit": [
           "tests/access-review.test.js"
@@ -424,6 +424,26 @@ carry the claim, and the remaining tiers stay visibly open.
         "browser": [
           "scripts/channels-browser-check.mjs"
         ]
+      }
+    },
+    {
+      "id": "human-signin-navigation",
+      "claim": "People can sign in with Google or email, request a sign-in link or use a password, and return from the email step on mobile without interrupting pending authentication.",
+      "evidence": {
+        "unit": [
+          "tests/auth-signin-ui.test.js",
+          "tests/magic-links-http.test.js",
+          "tests/password-http.test.js",
+          "tests/google-oauth-http.test.js"
+        ],
+        "browser": [
+          "scripts/email-password-browser-check.mjs",
+          "scripts/magic-link-browser-check.mjs",
+          "scripts/mobile-signin-history-browser-check.mjs",
+          "scripts/invitation-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
       }
     }
   ]

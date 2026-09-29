@@ -4,7 +4,7 @@ import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { chromium } from "playwright";
 import { RoomAgentClient } from "../client/room-agent.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 const [ownerPath, stage, targetId, output] = process.argv.slice(2);
 if (process.argv.length !== 6 || !["select", "adopt"].includes(stage)) throw new Error("Supply fixture owner path, select/adopt, exact offer/message ID, and a new evidence directory.");
@@ -20,8 +20,8 @@ try {
   page.setDefaultTimeout(10000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => new URL(route.request().url()).origin === config.origin ? route.continue() : route.abort());
-  await page.goto(config.origin); await fillAccessKey(page, config.token);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
+  await page.goto(config.origin); await signInFixture(page, config.token);
+  await page.locator("#main").waitFor();
   await page.locator("#message-input").fill("Keep this unrelated owner draft.");
   if (stage === "select") {
     assert.equal(before.state.helpOffers[targetId]?.offererId, "helper");

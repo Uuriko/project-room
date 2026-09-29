@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage } from './runtime-package.mjs';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
@@ -39,8 +39,8 @@ for (const touch of [false, true]) test(`live client upgrade preserves pending o
     await start(oldPath);
     const context = await browser.newContext({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 }, isMobile: touch, hasTouch: touch });
     const page = await context.newPage(); page.setDefaultTimeout(8000); page.on('dialog', dialog => dialog.accept());
-    await page.goto(`http://127.0.0.1:${port}`); await fillAccessKey(page, fixture.keys.owner);
-    await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.goto(`http://127.0.0.1:${port}`); await signInFixture(page, fixture.keys.owner);
+    await page.locator('#main').waitFor({ state: 'visible' });
     const box = page.locator('#remember-drafts');
     if (await box.count()) {
       if (!(await box.isVisible())) await page.locator('#composer-options > summary').click();

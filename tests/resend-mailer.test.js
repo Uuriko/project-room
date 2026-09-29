@@ -3,6 +3,7 @@
 // the mailer seam stays honestly unconfigured. No network, no real key.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { resendMagicLinkSend, magicLinkMailerFromEnv } from "../server/resend-mailer.mjs";
 
 test("resendMagicLinkSend returns null without an API key", () => {
@@ -86,4 +87,30 @@ test("magicLinkMailerFromEnv defaults the From address", async () => {
   await send({ to: "user@example.com", code: "999999" });
   const body = JSON.parse(calls[0].body);
   assert.ok(body.from.includes("noreply@"), "default From is a noreply address");
+});
+
+test("magic email links retain the trusted app path and validated new-tab context", async () => {
+  const messages = [];
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>",
+    fetchFn: async (_, options) => { messages.push(JSON.parse(options.body)); return { ok: true }; } });
+  for (const returnTo of ["/?room=commons", "/?account=1#invite/" + "A".repeat(43), "/#join/" + "B".repeat(43) + "/message/msg-1", "/#code/ABC-DEF-GHJ", "/#join/ABC-DEF-GHJ"]) {
+    let captured;
+    const mailer = createMagicLinkMailer({ baseUrl: "https://room.example/room", send: async payload => { captured = payload; await send(payload); } });
+    await mailer.sendMagicLink({ to: "person+test@example.com", code: "safe-code", returnTo });
+    const link = new URL(messages.at(-1).text.split("\n")[2]);
+    assert.equal(captured.link, link.href, "captured delivery URL is the same URL sent through Resend");
+    const target = new URL(returnTo, "https://unused.example");
+    assert.equal(link.origin, "https://room.example");
+    assert.equal(link.pathname, "/room/");
+    assert.equal(link.hash, target.hash);
+    assert.equal(link.searchParams.get("room"), target.searchParams.get("room"));
+    assert.equal(link.searchParams.get("account"), target.searchParams.get("account"));
+    assert.equal(link.searchParams.get("magic"), "safe-code");
+    assert.equal(link.searchParams.get("email"), "person+test@example.com");
+  }
+  const count = messages.length;
+  for (const returnTo of ["//evil.example/", "https://evil.example/", "/?magic=override", "/#join/bad"]) {
+    await assert.rejects(() => send({ to: "person@example.com", code: "safe-code", baseUrl: "https://room.example/room", returnTo }), /Invalid magic-link return target/);
+  }
+  assert.equal(messages.length, count, "invalid targets never call the delivery transport");
 });

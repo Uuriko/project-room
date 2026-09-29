@@ -4,7 +4,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 for (const width of [390, 1440]) test(`new account setup saves answers, resumes, skips and reopens at ${width}px`, async t => {
   const f = createAcceptanceFixture(), account = f.store.accountForMember('commons', 'owner');
   f.store.db.prepare('UPDATE accounts SET onboarded=0 WHERE id=?').run(account.id);
@@ -14,8 +14,7 @@ for (const width of [390, 1440]) test(`new account setup saves answers, resumes,
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();
-  const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
+  await page.goto(origin + '/?account=1'); await signInFixture(page, key); const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
   await page.locator('#setup-name').fill('Morgan'); await page.locator('#setup-purpose').selectOption('team');
   await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   await dialog.getByRole('heading', { name: 'Connect your email' }).waitFor();
@@ -64,8 +63,7 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
     const url = new URL(route.request().url()); assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
     return route.fulfill({ status: 302, headers: { Location: config.redirectUri + '?state=' + url.searchParams.get('state') + '&code=fixture-code' }, body: '' });
   });
-  await page.goto(origin + '/?account=1'); await fillAccessKey(page, key); await page.locator('#auth-form button[type=submit]').click();
-  const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
+  await page.goto(origin + '/?account=1'); await signInFixture(page, key); const dialog = page.locator('#account-setup-dialog'); await dialog.waitFor({ state: 'visible' });
   await page.locator('#setup-name').fill('Morgan'); await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });

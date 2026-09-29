@@ -6,7 +6,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 import { roomTrust } from "../src/events.js";
 
@@ -32,8 +32,7 @@ async function setup(t, viewport) {
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(page, key);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, key);
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   };

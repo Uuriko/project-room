@@ -1,3 +1,5 @@
+import { buildMagicLinkUrl } from "./magic-links.mjs";
+
 // Resend mail sender for magic-link sign-in codes.
 //
 // Plugs into the magic-link mailer seam (server/magic-links.mjs): the Room
@@ -19,7 +21,7 @@ const isNonEmptyString = value => typeof value === "string" && value.length > 0;
 // Returns null when no API key is configured (mailer stays unconfigured).
 export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
   if (!isNonEmptyString(apiKey) || !isNonEmptyString(from)) return null;
-  return async ({ to, code, expiresAt, baseUrl } = {}) => {
+  return async ({ to, code, expiresAt, baseUrl, returnTo } = {}) => {
     if (!isNonEmptyString(to) || !isNonEmptyString(code)) {
       throw new Error("resendMagicLinkSend requires a recipient and a code");
     }
@@ -30,9 +32,7 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
     // on load. The code stays single-use with a 15-minute expiry, and the
     // plaintext code remains in the body as a fallback for clients that
     // don't render links.
-    const link = isNonEmptyString(baseUrl)
-      ? `${baseUrl.replace(/\/+$/, "")}/?magic=${encodeURIComponent(code)}&email=${encodeURIComponent(to)}`
-      : null;
+    const link = buildMagicLinkUrl({ baseUrl, to, code, returnTo });
     const subject = "Your Project Room sign-in link";
     const text = link
       ? `Sign in to Project Room:\n\n${link}\n\n` +

@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) {
   const label = touch ? "touch" : "desktop";
@@ -27,10 +27,8 @@ for (const touch of [false, true]) {
     page.setDefaultTimeout(8000);
     const errors = []; page.on("pageerror", e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await fillAccessKey(page, fixture.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
-    await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");

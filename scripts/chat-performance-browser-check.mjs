@@ -8,7 +8,7 @@ import { rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 import { openSettings } from './room-chrome.mjs';
 
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
@@ -37,9 +37,8 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/request-runs')) runReads++; });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await fillAccessKey(page, f.keys.owner);
+  await signInFixture(page, f.keys.owner);
   const initialRuns = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/request-runs'));
-  await page.locator('#auth-form button[type=submit]').click();
   await page.locator('[data-message-record-id="first-question"]').waitFor();
   await initialRuns;
   await page.waitForTimeout(200);

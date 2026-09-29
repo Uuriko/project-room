@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 
 for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'desktop'}: visible next step, opt-in export and no writes`, { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
@@ -28,8 +28,7 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
   const page = await context.newPage(); page.setDefaultTimeout(12000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
   const card = page.locator('[data-work-record-id="test-handoff"]');
   const handoff = card.locator('[data-work-handoff]'); await handoff.waitFor({ state: 'visible' });
   assert.match(await handoff.innerText(), /Check escaped separators/);

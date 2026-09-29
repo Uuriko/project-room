@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
 
 async function setup(t) {
@@ -29,8 +29,7 @@ async function setup(t) {
   });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" });
   t.after(() => { assert.deepEqual(errors, [], "no page errors"); assert.deepEqual(outside, []); });
   return { ...f, page };
 }

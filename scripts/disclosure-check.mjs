@@ -12,7 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen } from "./room-chrome.mjs";
 
 test("background updates preserve open disclosures, focus, draft and recipient", { timeout: 90000 }, async t => {
@@ -44,8 +44,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   const login = async (p, key) => {
     await p.goto(origin);
     await p.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(p, key);
-    await p.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(p, key);
     await p.locator("#main").waitFor({ state: "visible" });
   };
   await login(page, owner); await login(other, human);

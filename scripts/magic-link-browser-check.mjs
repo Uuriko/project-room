@@ -79,6 +79,6 @@ test("magic link: replay of a consumed link does not sign in", { timeout: 60000 
   await second.goto(target, { waitUntil: "networkidle" });
   await second.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await second.locator("#identity-label").isVisible(), false, "identity label stays hidden while signed out");
-  const status = await second.locator("[data-signin-status]").textContent();
+  const status = await second.locator("#auth-link-error").textContent();
   assert.match(status || "", /not valid|expired/i, "replay shows an invalid/expired message");
 });

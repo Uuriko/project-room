@@ -1,66 +1,16 @@
-// Multi-method sign-in / create-account surface (slice 7, RC-2026-09-17-016).
-//
-// Mounts into the auth panel next to the existing Google button and the
-// room/account key forms: email+password (create account or sign in), email
-// magic link, passkey, and recovery code, plus a GitHub OAuth button.
-// Browser flows use the cookie slot: this module never reads the HttpOnly
-// account cookie — it posts { ..., sessionRevision } with the CSRF token
-// from the account session, and the server resolves the slot from the
-// cookie (signInSlotToken in server/http.mjs). OAuth buttons drive the
-// start routes with fetch + manual redirect so the CSRF header rides along
-// and unconfigured providers surface an honest message instead of raw JSON.
-import { base64urlToBytes, bytesToBase64url, escapeHtml } from "./account-settings-ui.js";
+// Email sign-in uses a delivered single-use link. The account cookie stays
+// HttpOnly; authentication writes use the current browser slot and CSRF token.
+import { escapeHtml } from "./account-settings-ui.js";
 
-// Convert the server's authentication options into a PublicKeyCredentialRequestOptions.
-export function toAuthenticationPublicKey(options) {
-  return {
-    challenge: base64urlToBytes(options.challenge),
-    rpId: options.rpId,
-    allowCredentials: (options.allowCredentials ?? []).map(credential => ({
-      ...credential,
-      id: base64urlToBytes(credential.id)
-    })),
-    userVerification: options.userVerification,
-    timeout: options.timeout
-  };
-}
-
-// Encode the get() credential for POST /api/auth/passkey/authenticate/finish.
-export function toAuthenticationResponse(credential) {
-  const response = credential.response ?? {};
-  return {
-    id: credential.id,
-    rawId: bytesToBase64url(credential.rawId),
-    type: credential.type,
-    response: {
-      authenticatorData: bytesToBase64url(response.authenticatorData),
-      clientDataJSON: bytesToBase64url(response.clientDataJSON),
-      signature: bytesToBase64url(response.signature),
-      userHandle: response.userHandle == null ? null : bytesToBase64url(response.userHandle)
-    }
-  };
-}
-
-const METHOD_LABELS = { password: "Email + password", magic: "Magic link", passkey: "Passkey", recovery: "Recovery code" };
-
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart, onMagicLinkFailure }) {
-  let container = null;
-  let activeMethod = null;
-  let passwordMode = "signup"; // or "login"
-  // Email may be kept across the create/sign-in toggle. The password is never
-  // stored and never written back into the input, so only the browser's
-  // password manager can offer a value.
-  let passwordFields = { email: "" };
-  let emailPanel = null;
-  let passwordHost = "chooser";
-  let magicPhase = "request"; // or "code"
-  let magicEmail = "";
-  let magicManualCode = false; // link-first: code entry is an opt-in fallback
-  let busy = false;
-
-  const statusNode = () => (passwordHost === "email" ? emailPanel?.querySelector?.("[data-signin-status]") : null)
-    ?? container?.querySelector("[data-signin-status]") ?? null;
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch }) {
+  let container = null, emailPanel = null;
+  let emailHost = false, emailMethod = "magic", passwordMode = "login", passwordEmail = "";
+  let magicPhase = "request", magicEmail = "", busy = false;
+  let magicManualCode = false, pendingLink = null, statusText = "", statusError = false;
+  const surface = () => emailHost ? emailPanel : container;
+  const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
+    statusText = text; statusError = error;
     const node = statusNode();
     if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
   }
@@ -69,236 +19,154 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     return accountClient.currentSession("signing in");
   }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
-  const failureText = error => error?.message || "Couldn\u2019t sign in. Try again.";
-
-  function shellHtml() {
-    return `<p class="form-hint">Choose another sign-in method.</p>
-      <div class="auth-oauth-row">
-        <button type="button" class="button secondary" data-oauth="github">Continue with GitHub</button>
-      </div>
-      <div class="auth-methods" role="group" aria-label="Other sign-in methods">
-        ${Object.entries(METHOD_LABELS).map(([method, label]) =>
-          `<button type="button" class="button ghost" data-method="${method}" aria-pressed="${method === activeMethod}">${label}</button>`).join("")}
-      </div>
-      <div data-signin-panel>${panelHtml()}</div>
-      <p class="status form-status" role="alert" data-signin-status></p>`;
-  }
+  const authApi = async (session, path, data) => {
+    const generation = accountClient.generation;
+    const owns = () => accountClient.owns(generation, session);
+    try {
+      const view = await api(session, path, data);
+      if (!owns()) throw Object.assign(new Error("The browser account changed. Sign in again."), { status: 409, code: "auth_view_changed" });
+      return view;
+    } catch (error) {
+      const uncertain = !Number.isSafeInteger(error.status)
+        || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code);
+      if (uncertain && owns()) {
+        accountClient.invalidate(generation, session);
+        await onSignInUncertain?.();
+      }
+      throw error;
+    }
+  };
+  const failureText = error => error?.message || "Couldn’t sign in. Try again.";
   function panelHtml() {
-    if (activeMethod === "password") return passwordHtml();
-    if (activeMethod === "magic") return magicHtml();
-    if (activeMethod === "passkey") return passkeyHtml();
-    if (activeMethod === "recovery") return recoveryHtml();
-    return "";
-  }
-  function passwordHtml() {
-    const signup = passwordMode === "signup";
-    return `<form data-signin-form="password" autocomplete="on">
-      ${passwordHost === "email" ? `<h2 class="auth-email-title">${signup ? "Create account" : "Sign in"}</h2>` : `<div class="auth-method-tabs" role="group" aria-label="Create account or sign in">
-        <button type="button" class="button ghost" data-password-mode="signup" aria-pressed="${signup}">Create account</button>
-        <button type="button" class="button ghost" data-password-mode="login" aria-pressed="${!signup}">Sign in</button>
-      </div>`}
-      <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(passwordFields.email)}"></label>
-      <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
-      ${passwordHost === "email" ? `<p class="form-hint"><button type="button" class="text-button" data-password-mode="${signup ? "login" : "signup"}">${signup ? "Sign in" : "Create account"}</button></p>` : ""}
-    </form>`;
-  }
-  function magicHtml() {
-    if (magicPhase === "code") return `<form data-signin-form="magic-code" autocomplete="on">
-      <p class="form-hint">We emailed a <strong>sign-in link</strong> to ${escapeHtml(magicEmail)}. Click the link in the email — no typing needed. It expires in 15 minutes.</p>
-      ${magicManualCode
-        ? `<label>Sign-in code <input name="code" type="text" required autocomplete="one-time-code" inputmode="text" maxlength="128" placeholder="Paste the code"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>`
-        : ``}
-      <button type="button" class="text-button" data-magic-manual-code>${magicManualCode ? "Hide the code field" : "Or enter the code manually instead"}</button>
+    if (emailMethod === "password") {
+      const signup = passwordMode === "signup";
+      return `<form data-signin-form="password" autocomplete="on">
+        <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(passwordEmail)}"></label>
+        <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}"></label>
+        <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
+        <button type="button" class="text-button" data-password-mode="${signup ? "login" : "signup"}">${signup ? "Sign in" : "Create account"}</button>
+        <button type="button" class="text-button" data-email-method="magic">Email me a sign-in link</button>
+      </form>`;
+    }
+    if (pendingLink) return `<p class="form-hint">This link is for a different account.</p>
+      <button type="button" class="button primary" data-magic-switch ${busy ? "disabled" : ""}>Switch account</button>`;
+    if (magicPhase === "sent") return `<form data-signin-form="magic-code" autocomplete="on">
+      <p class="form-hint">Check ${escapeHtml(magicEmail)} for your sign-in link.</p>
+      ${magicManualCode ? `<label>Sign-in code <input name="code" required autocomplete="one-time-code" maxlength="128"></label><button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>` : ""}
+      <button type="button" class="text-button" data-magic-manual-code>${magicManualCode ? "Hide code" : "Use a code instead"}</button>
       <button type="button" class="text-button" data-magic-restart>Use a different email</button>
     </form>`;
     return `<form data-signin-form="magic-request" autocomplete="on">
       <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(magicEmail)}"></label>
       <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Email me a sign-in link</button>
+      <button type="button" class="text-button" data-email-method="password">Use a password</button>
     </form>`;
   }
-  function passkeyHtml() {
-    const supported = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.PublicKeyCredential;
-    return `<form data-signin-form="passkey">
-      ${supported ? "" : `<p class="form-hint">This browser doesn\u2019t support passkeys.</p>`}
-      <button class="button primary" type="submit" ${busy || !supported ? "disabled" : ""}>Sign in with passkey</button>
-    </form>`;
+  function render() {
+    const node = surface();
+    if (node) node.innerHTML = `<div data-signin-panel>${panelHtml()}</div><p class="status form-status" role="alert" data-signin-status></p>`;
+    setStatus(statusText, statusError);
   }
-  function recoveryHtml() {
-    return `<form data-signin-form="recovery" autocomplete="on">
-      <p class="form-hint">Lost your other sign-in methods? Use one of your single-use recovery codes.</p>
-      <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254"></label>
-      <label>Recovery code <input name="code" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="xxxxxx-xxxxxx"></label>
-      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>
-    </form>`;
-  }
-
-  function render() { if (container) container.innerHTML = shellHtml(); }
-  function renderPanel() {
-    if (!container) return;
-    const panel = container.querySelector("[data-signin-panel]");
-    if (panel) panel.innerHTML = panelHtml();
-    else render();
-  }
-  function paintPassword() {
-    if (passwordHost === "email" && emailPanel) {
-      emailPanel.hidden = false;
-      let formHost = emailPanel.querySelector?.("[data-email-form]");
-      if (!formHost) {
-        emailPanel.innerHTML = `<div data-email-form></div><p class="status form-status" role="alert" data-signin-status></p>`;
-        formHost = emailPanel.querySelector?.("[data-email-form]");
-      }
-      if (formHost) formHost.innerHTML = passwordHtml();
-      else emailPanel.innerHTML = passwordHtml();
-      return;
-    }
-    renderPanel();
-  }
-  function paintBusySurface() {
-    if (activeMethod === "password" && passwordHost === "email") paintPassword();
-    else renderPanel();
-  }
-
-  function readForm(form) {
-    const values = {};
-    for (const input of form.querySelectorAll("input[name]")) values[input.name] = input.value;
-    return values;
-  }
-
+  const paintBusySurface = render;
   async function finish(view) {
     const session = view?.session ?? view;
-    if (!session?.authenticated || !session?.account) { setStatus("Sign-in didn\u2019t complete. Try again.", true); return; }
+    if (!session?.authenticated || !session?.account) throw new Error("Sign-in didn\u2019t complete. Try again.");
     setStatus("");
     await onSignedIn(session);
   }
 
   async function withBusy(fn) {
     if (busy) return;
-    busy = true; paintBusySurface(); setStatus("");
+    busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
     catch (error) { setStatus(failureText(error), true); }
-    finally { busy = false; paintBusySurface(); }
+    finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
   }
 
+  async function redeem(email, code) {
+    try {
+      const session = await authedSession();
+      const view = await authApi(session, "/api/auth/magic/consume", { email, code, sessionRevision: session.sessionRevision });
+      await finish(view);
+    } catch (error) {
+      if (error.code === "magic_account_mismatch") pendingLink = { email, code };
+      throw error;
+    }
+  }
   const onClick = async event => {
-    const methodButton = event.target?.closest?.("[data-method]");
-    if (methodButton) {
-      activeMethod = activeMethod === methodButton.dataset.method ? null : methodButton.dataset.method;
-      render();
-      return;
+    if (busy) return;
+    const method = event.target?.closest?.("[data-email-method]");
+    const mode = event.target?.closest?.("[data-password-mode]");
+    if (method || mode) {
+      const currentEmail = surface()?.querySelector('[name="email"]')?.value;
+      if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
+      if (method) emailMethod = method.dataset.emailMethod === "password" ? "password" : "magic";
+      if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
+      pendingLink = null; magicPhase = "request"; setStatus(""); render();
+      surface()?.querySelector('[name="email"]')?.focus(); return;
     }
-    const modeButton = event.target?.closest?.("[data-password-mode]");
-    if (modeButton) {
-      if (busy) return;
-      const form = modeButton.closest?.("form") ?? container?.querySelector('[data-signin-form="password"]');
-      if (form) passwordFields = { email: form.querySelector('[name="email"]')?.value ?? "" };
-      passwordMode = modeButton.dataset.passwordMode;
-      if (emailPanel?.contains?.(modeButton)) passwordHost = "email";
-      paintPassword();
-      setStatus("");
-      if (passwordHost === "email") emailPanel?.querySelector('[name="email"]')?.focus();
-      return;
-    }
-    if (event.target?.closest?.("[data-magic-restart]")) {
-      magicPhase = "request";
-      magicManualCode = false;
-      renderPanel();
+    if (event.target?.closest?.("[data-magic-switch]")) {
+      if (!pendingLink || onAccountSwitch?.() !== true) return;
+      const link = pendingLink;
+      await withBusy(async () => {
+        let ended;
+        try { ended = await accountClient.logout(); }
+        catch (error) {
+          if (!accountClient.session) await onSignInUncertain?.();
+          throw error;
+        }
+        if (!ended) throw new Error("The browser account changed. Sign in again.");
+        await onSignInUncertain?.();
+        if (accountClient.session?.authenticated) throw new Error("The browser account changed. Sign in again.");
+        pendingLink = null;
+        await redeem(link.email, link.code);
+      });
       return;
     }
     if (event.target?.closest?.("[data-magic-manual-code]")) {
-      magicManualCode = !magicManualCode;
-      renderPanel();
-      return;
+      magicManualCode = !magicManualCode; render(); return;
     }
-    const oauthButton = event.target?.closest?.("[data-oauth]");
-    if (oauthButton) {
-      // Stash a live invitation before navigating: the OAuth round-trip
-      // drops the #invite/ fragment, and this is the only moment the
-      // secret may touch sessionStorage.
-      try { await onOAuthStart?.(); } catch {}
-      // Direct navigation: the start route 302-redirects to GitHub when
-      // configured and serves an honest HTML landing page when it is not.
-      window.location.assign("/api/auth/github/start");
-    }
+    if (!event.target?.closest?.("[data-magic-restart]")) return;
+    magicPhase = "request"; magicManualCode = false; pendingLink = null; setStatus("");
+    render();
+    surface()?.querySelector('[name="email"]')?.focus();
   };
-
   const onSubmit = async event => {
-    const form = event.target?.closest?.("[data-signin-form]");
+    const form = event.target?.closest?.('[data-signin-form]');
     if (!form || !(container?.contains?.(form) || emailPanel?.contains?.(form))) return;
     event.preventDefault();
-    const kind = form.dataset.signinForm;
-    if (kind === "password") {
-      const { email, password } = readForm(form);
-      passwordFields = { email };
-      if (passwordMode === "signup" && (password.length < 10 || password.length > 256)) {
-        setStatus("Use 10–256 characters for your password.", true);
-        const input = form.querySelector('[name="password"]');
-        const status = statusNode();
-        if (status) { status.id = `auth-${passwordHost}-password-error`; input?.setAttribute("aria-describedby", status.id); }
-        input?.setAttribute("aria-invalid", "true");
-        input?.focus();
-        return;
+    if (busy) return;
+    if (form.dataset.signinForm === "password") {
+      const fields = Object.fromEntries([...form.querySelectorAll('input[name]')].map(input => [input.name, input.value]));
+      passwordEmail = fields.email?.trim() ?? "";
+      if (passwordMode === "signup" && (fields.password?.length < 10 || fields.password?.length > 256)) {
+        setStatus("Use 10–256 characters for your password.", true); return;
       }
+      if (await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
-        const view = await api(session, `/api/auth/password/${passwordMode}`,
-          { email: email.trim(), password, sessionRevision: session.sessionRevision });
+        const view = await authApi(session, `/api/auth/password/${passwordMode}`, { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
-      });
-      return;
+      }); return;
     }
-    if (kind === "magic-request") {
-      const { email } = readForm(form);
-      await withBusy(async () => {
-        const session = await authedSession();
-        const reply = await api(session, "/api/auth/magic/request", { email: email.trim() });
-        if (reply?.status === "unavailable") { setStatus(reply.message || "Email delivery isn\u2019t configured on this Room.", true); return; }
-        magicEmail = email.trim();
-        magicPhase = "code";
-        magicManualCode = false;
-        renderPanel();
-        setStatus("");
-      });
-      return;
+    if (form.dataset.signinForm === "magic-code") {
+      const code = [...form.querySelectorAll('input[name]')].find(input => input.name === "code")?.value?.trim() ?? "";
+      if (!magicManualCode || !code || await beforeSignIn?.() === false) return;
+      await withBusy(() => redeem(magicEmail, code)); return;
     }
-    if (kind === "magic-code") {
-      const { code } = readForm(form);
-      await withBusy(async () => {
-        const session = await authedSession();
-        const view = await api(session, "/api/auth/magic/consume",
-          { email: magicEmail, code: code.trim(), sessionRevision: session.sessionRevision });
-        await finish(view);
-      });
-      return;
-    }
-    if (kind === "passkey") {
-      await withBusy(async () => {
-        const session = await authedSession();
-        const options = await api(session, "/api/auth/passkey/authenticate/options", {});
-        const credential = await navigator.credentials.get({ publicKey: toAuthenticationPublicKey(options) });
-        if (!credential) throw new Error("No passkey was selected.");
-        const view = await api(session, "/api/auth/passkey/authenticate/finish",
-          { challengeId: options.challengeId, response: toAuthenticationResponse(credential), sessionRevision: session.sessionRevision });
-        await finish(view);
-      });
-      return;
-    }
-    if (kind === "recovery") {
-      const { email, code } = readForm(form);
-      await withBusy(async () => {
-        const session = await authedSession();
-        const reply = await api(session, "/api/auth/recovery-codes/redeem",
-          { email: email.trim(), code: code.trim(), sessionRevision: session.sessionRevision });
-        await finish(reply);
-      });
-    }
+    if (form.dataset.signinForm !== "magic-request") return;
+    const email = [...form.querySelectorAll('input[name]')].find(input => input.name === "email")?.value?.trim() ?? "";
+    magicEmail = email;
+    await withBusy(async () => {
+      const session = await authedSession();
+      const returnTo = onMagicLinkRequest?.();
+      const reply = await api(session, "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
+      if (reply?.status === "unavailable") { setStatus(reply.message || "Email delivery isn’t configured on this Room.", true); return; }
+      if (reply?.status !== "sent") throw new Error("Couldn’t send the sign-in link. Try again.");
+      magicPhase = "sent"; magicManualCode = false;
+      render();
+    });
   };
-
-  // One-tap magic link: the sign-in email links to ?magic=<code>&email=<addr>.
-  // Redeem it immediately on load so the tap signs the user in with no
-  // typing. The params are stripped from the URL before any network call
-  // so the single-use code doesn't linger in history.
   async function consumeMagicLinkFromUrl() {
     let params;
     try { params = new URLSearchParams(window.location.search); }
@@ -311,88 +179,58 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const rest = params.toString();
     const clean = window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash;
     try { window.history.replaceState(null, "", clean); } catch { /* ignore */ }
-    if (accountClient.session?.authenticated) return;
-    activeMethod = "magic";
+    if (await beforeSignIn?.() === false) return;
     magicEmail = email;
-    magicPhase = "code";
-    renderPanel();
+    magicPhase = "sent";
+    render();
     setStatus("Signing you in…");
-    // The status line above lives inside the collapsed "More options" panel,
-    // so a failed redemption would leave the user staring at Welcome with no
-    // indication the link failed. Report the failure to the host too, so first
-    // paint can surface it visibly (QAX-002).
+    // The host makes redemption failures visible even before email entry opens.
     let linkFailure = null;
     await withBusy(async () => {
       try {
-        const session = await authedSession();
-        const view = await api(session, "/api/auth/magic/consume",
-          { email, code, sessionRevision: session.sessionRevision });
-        const signed = view?.session ?? view;
-        if (!signed?.authenticated || !signed?.account) throw new Error("Sign-in didn\u2019t complete. Try again.");
-        await finish(view);
+        await redeem(email, code);
       } catch (error) {
         linkFailure = failureText(error);
         throw error;
       }
     });
-    if (linkFailure && !accountClient.session?.authenticated) onMagicLinkFailure?.(linkFailure);
+    if (linkFailure) onMagicLinkFailure?.(linkFailure);
   }
 
   function bind(node) {
     node.addEventListener("click", onClick);
     node.addEventListener("submit", onSubmit);
   }
-
   return {
-    showPassword(mode) {
-      if (busy) return;
-      passwordHost = "chooser";
-      activeMethod = "password"; passwordMode = mode === "login" ? "login" : "signup";
-      render();
+    canLeave() { return !busy; },
+    showMagic() {
+      if (busy) return false;
+      emailHost = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
     },
-    // The welcome email step shares the invitation account form.
-    openEmail(mode, panel) {
+    openEmail(_mode, panel) {
       if (busy) return false;
       if (panel) emailPanel = panel;
-      passwordHost = "email";
-      activeMethod = "password";
-      passwordMode = mode === "login" ? "login" : "signup";
-      if (emailPanel && !emailPanel.dataset.bound) {
-        bind(emailPanel);
-        emailPanel.dataset.bound = "1";
+      emailHost = true; emailMethod = "magic";
+      if (emailPanel) {
+        emailPanel.hidden = false;
+        if (!emailPanel.dataset.bound) { bind(emailPanel); emailPanel.dataset.bound = "1"; }
       }
-      paintPassword();
-      return true;
+      render(); return true;
     },
     closeEmail() {
       if (busy) return false;
-      passwordFields = { email: emailPanel?.querySelector('[name="email"]')?.value ?? passwordFields.email };
       if (emailPanel) { emailPanel.hidden = true; emailPanel.innerHTML = ""; }
-      passwordHost = "chooser";
-      activeMethod = null;
-      render();
-      return true;
+      emailHost = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
     },
-    // Sign-out. Drops every in-memory auth field, including any password that
-    // was only held for the request that just finished.
     clear() {
-      passwordFields = { email: "" };
-      passwordMode = "signup";
-      passwordHost = "chooser";
-      activeMethod = null;
-      magicPhase = "request";
-      magicEmail = "";
-      magicManualCode = false;
-      busy = false;
+      magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; statusText = ""; passwordEmail = ""; passwordMode = "login"; emailMethod = "magic"; busy = false;
+      onBusyChange?.(false);
       if (emailPanel) { emailPanel.hidden = true; emailPanel.innerHTML = ""; }
-      render();
+      emailHost = false; render();
     },
     mount(target) {
-      container = target;
-      render();
-      container.addEventListener("click", onClick);
-      container.addEventListener("submit", onSubmit);
-      void consumeMagicLinkFromUrl();
+      container = target; render(); bind(container);
+      return consumeMagicLinkFromUrl();
     }
   };
 }

@@ -39,7 +39,6 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /<strong>Paste the packet<\/strong>/);
   assert.match(html, /<strong>Guest invite<\/strong>/);
   assert.match(html, /<strong>Add agent<\/strong>/);
-  assert.match(html, /Never paste a room key into a chat\./);
   assert.match(html, /The room owner issues a short-lived guest invite for a one-off helper\./);
   assert.match(html, /enrolls a lasting agent with its own key\./);
   assert.match(html, /Works with Claude Code, Codex, OpenCode, Cursor/);

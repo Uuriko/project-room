@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 import { createRecoveryFixture } from './recovery-fixture.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 test('actual Node entrypoint pauses without touching populated data, then resumes the same Room in a browser', { timeout: 45000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-recovery-browser-'));
@@ -41,15 +41,14 @@ test('actual Node entrypoint pauses without touching populated data, then resume
   await page.screenshot({ path: 'test-results/recovery-paused-desktop.png' });
   assert.deepEqual(auditRecovery(fixture.store), before);
   await page.goto('about:blank'); await stop(); await start(false);
-  await page.goto(origin); await fillAccessKey(page, fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await page.goto(origin); await signInFixture(page, fixture.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(fixture.store.room('commons').sequence, fixture.cursor);
   const after = auditRecovery(fixture.store);
   assert.deepEqual(after.tables.filter(row => row.table !== 'credentials'), before.tables.filter(row => row.table !== 'credentials'));
-  await page.screenshot({ path: 'test-results/recovery-resumed-desktop.png', mask: [page.locator('#access-key')] });
+  await page.screenshot({ path: 'test-results/recovery-resumed-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-  await page.screenshot({ path: 'test-results/recovery-resumed-mobile-large-text.png', mask: [page.locator('#access-key')] });
+  await page.screenshot({ path: 'test-results/recovery-resumed-mobile-large-text.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 });

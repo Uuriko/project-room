@@ -204,3 +204,23 @@ test("invalid email is rejected with 422 and malformed bodies are refused", asyn
   });
   assert.equal(missing.status, 422);
 });
+
+test("magic email preserves invitation context and refuses unsafe targets before issuing a code", async t => {
+  const { origin, store, sent } = await startServer(t);
+  const slot = await openSlot(origin);
+  const request = returnTo => post(origin, "/api/auth/magic/request", { cookie: slot.cookie, csrf: slot.csrf,
+    body: { email: "target@example.com", returnTo } });
+  for (const returnTo of ["https://evil.example/", "//evil.example/", "/\\evil.example/", "/other", "/?next=https://evil.example", "/?magic=stolen", "/?email=other@example.com", "/?account=2", "/?room=../bad", "/?room=a&room=b", "/?room=bad\u0000id", "/#invite/" + "A".repeat(43) + "\u007f", "/#invite/short", "/#join/" + "A".repeat(43) + "/work/../bad", 123, null]) {
+    const response = await request(returnTo);
+    assert.equal(response.status, 422, String(returnTo));
+    assert.equal((await response.json()).error.code, "invalid_return_target");
+  }
+  assert.equal(sent.length, 0, "unsafe continuations never reach delivery");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM account_magic_codes").get().n, 0, "unsafe targets do not issue or burn sign-in codes");
+  const returnTo = "/?room=commons&account=1#join/" + "A".repeat(43) + "/work/task-1";
+  const response = await request(returnTo);
+  assert.equal(response.status, 200);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].returnTo, returnTo);
+  assert.equal((await consumeCode(origin, slot, "target@example.com", sent[0].code)).status, 201, "valid continuation keeps real code redemption intact");
+});

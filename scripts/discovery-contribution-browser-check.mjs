@@ -11,7 +11,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'touch' : 'desktop'}: reuse, fresh authority and changed evidence`, { timeout: 60000 }, async t => {
@@ -69,8 +69,8 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
-  await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  await page.locator('#main').waitFor({ state: 'visible' });
   const beforeDiscovery = auditRecovery(f.store).dataSha256;
   await openSearch(page);
   await page.locator('#message-search').fill('telescope');

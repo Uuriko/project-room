@@ -5,7 +5,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { openSearch, openSettings } from "./room-chrome.mjs";
 
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -26,8 +26,7 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await fillAccessKey(page, fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await signInFixture(page, fixture.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#clear-search').isVisible(), false);
   const layout = await page.evaluate(() => {

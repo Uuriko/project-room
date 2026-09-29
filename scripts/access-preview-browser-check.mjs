@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -30,8 +30,7 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
   for (let index = 1; index <= pending; index++) addRequest(index);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   return { ...f, page, errors, send, access, addRequest };
@@ -166,8 +165,7 @@ test("late owner attention page cannot return after signing in as a different me
   await page.locator("#session-menu-button").click();
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, f.keys.guest);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.guest);
   await page.locator("#main").waitFor({ state: "visible" });
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/needs-attention") && new URL(response.url()).searchParams.has("cursor"));
   release(); await delivered;

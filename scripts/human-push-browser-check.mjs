@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateVapidKeys } from "../server/web-push.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { closeSettings, openCatchUpPanel, openSettings } from "./room-chrome.mjs";
 
 const RECEIVER_PUBLIC = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
@@ -74,8 +74,7 @@ for (const mobile of [false, true]) {
     assert.equal(worker.status(), 200);
 
     await page.goto(origin);
-    await fillAccessKey(page, f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
     await openSettings(page);

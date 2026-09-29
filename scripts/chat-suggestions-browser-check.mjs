@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`chat suggestions ${name}: tap a reply, or turn a request into a task`, { timeout: 60000 }, async t => {
@@ -25,8 +25,7 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await fillAccessKey(page, f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
     const box = page.locator("#chat-suggestions");
@@ -67,8 +66,7 @@ test("an unanswered question offers Ask @Agent, which only prefills the mention"
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await fillAccessKey(page, f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
 
   const box = page.locator("#chat-suggestions");

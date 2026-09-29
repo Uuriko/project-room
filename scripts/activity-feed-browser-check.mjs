@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createRoomServer } from "../server/http.mjs";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -33,8 +33,7 @@ for (const mobile of [false, true]) {
     const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/activity-feed-${label}-${name}.png` }); };
 
     await page.goto(origin);
-    await fillAccessKey(page, f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
     // Secondary navigation stays collapsed while chat is immediately usable.
@@ -148,8 +147,7 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
 
     await page.goto(origin);
-    await fillAccessKey(page, f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await signInFixture(page, f.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
 
     // `g a` opens Activity from the keyboard.

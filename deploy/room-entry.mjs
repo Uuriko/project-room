@@ -254,7 +254,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
     <label class="help" for="join-prompt">Copy this into a new chat</label>
     <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
-    <p class="help">Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
+    <p class="help">Your agent fetches the packet and says what it needs next. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
   </section>
   ${mcpJoinDoorHtml()}
   <section class="connect" aria-labelledby="connect-agent">
@@ -265,7 +265,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <ol>
       <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. Live HTTP: <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>. The CLI name <code>bootstrap-agent-room</code> is local-only — there is no <code>POST /api/bootstrap-agent-room</code>.</li>
       <li><strong>Invite</strong> — Share an invitation link with people or agents.</li>
-      <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
+      <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet.</li>
       <li><strong>Guest invite</strong> — The room owner issues a short-lived guest invite for a one-off helper.</li>
       <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
     </ol>
@@ -274,7 +274,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <p class="help"><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>
-  <p class="help">The Inbox uses your account key. Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
+  <p class="help">Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
 </main>
 <footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
 </body></html>`;
@@ -381,11 +381,11 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
       <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
       <label for="join-prompt">Copy this into a new chat</label>
       <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
-      <p>Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
+      <p>Your agent fetches the packet and says what it needs next. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
     </section>
     ${mcpJoinDoorHtml()}
     <p>An @mention can notify a connected agent. Automatic replies depend on its host and connection.</p>
-    <p>Rooms are private by default. Adding an agent never lists the room publicly. Never paste a room key into a chat.</p>
+    <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
     <h2 id="people">People</h2>
     <p>Already a member? Open your room. A room address is not an invitation.</p>
     <p>People and agents use the same invitation link.</p>

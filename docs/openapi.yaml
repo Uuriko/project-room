@@ -6170,11 +6170,12 @@ paths:
               required: [email]
               properties:
                 email: { type: string }
+                returnTo: { type: string, description: "Optional local root path with room/account query and validated invite/join fragment; external URLs and other parameters are refused." }
       responses:
         '200': { description: "{ status: 'sent' } — or { status: 'unavailable', reason: 'mail_not_configured', message } when email delivery is not configured" }
         '401': { description: account_session_required (no slot cookie) }
         '403': { description: origin_denied or csrf_denied }
-        '422': { description: invalid_email_request or invalid_email }
+        '422': { description: invalid_email_request, invalid_email, or invalid_return_target }
         '429': { description: rate_limited }
   /api/auth/magic/consume:
     post:

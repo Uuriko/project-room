@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from './auth-signin.mjs';
+import { signInFixture } from './auth-signin.mjs';
 import { ensureSidebarOpen, ensureSidebarClosed, openSettings, closeSettings } from './room-chrome.mjs';
 
 for (const [width, account] of [[1440, false], [390, false], [320, false], [1440, true], [390, true]]) {
@@ -23,9 +23,7 @@ for (const [width, account] of [[1440, false], [390, false], [320, false], [1440
     fixture.store.completeOnboarding(accountId);
     const key = account ? fixture.store.issueAccountAccessKey(accountId) : fixture.keys.owner;
     await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
-    await fillAccessKey(page, key);
-    await page.locator(account ? '#auth-kind-account' : '#auth-kind-room').click();
-    await page.locator('#auth-form button[type=submit]').click();
+    await signInFixture(page, key);
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.locator('.room-topbar #session-menu').waitFor();
     assert.equal(await page.locator('.app-shell > .topbar').isVisible(), false);

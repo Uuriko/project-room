@@ -77,7 +77,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -919,14 +919,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, slot, false);
         if (url.pathname === "/api/auth/magic/request") {
           const data = await body(req);
-          if (!exact(data, ["email"]) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
           const normalized = normalizeEmail(data.email);
           if (!normalized) reject(422, "invalid_email", "A valid email address is required");
           rate(`magic-request:${remoteAddress}`, 5);
           magicEmailLimit(magicRequestEmailLimiter, normalized);
           if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
           const issued = store.accountLogins.issueMagicCode({ email: normalized });
-          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt });
+          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
           return json(res, 200, { status: "sent" });
         }
         const data = await body(req);

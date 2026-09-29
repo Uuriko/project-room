@@ -1,50 +1,17 @@
-// Unit tests for src/auth-signin-ui.js (slice 7, RC-2026-09-17-016):
-// WebAuthn ceremony transforms, shell rendering, and the wired sign-in
-// behavior against a stub AccountClient and a fake container. No DOM, no network.
+// Email link UI contracts against a strict AccountClient double.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toAuthenticationPublicKey, toAuthenticationResponse, createAuthSigninUI } from "../src/auth-signin-ui.js";
-
-test("toAuthenticationPublicKey decodes challenge and allowCredentials", () => {
-  const options = {
-    challenge: "dGVzdA", // "test"
-    rpId: "example.invalid",
-    allowCredentials: [{ type: "public-key", id: "Y3JlZA" }], // "cred"
-    userVerification: "preferred",
-    timeout: 60000
-  };
-  const publicKey = toAuthenticationPublicKey(options);
-  assert.equal(new TextDecoder().decode(publicKey.challenge), "test");
-  assert.equal(publicKey.rpId, "example.invalid");
-  assert.equal(new TextDecoder().decode(publicKey.allowCredentials[0].id), "cred");
-  assert.equal(publicKey.userVerification, "preferred");
-});
-
-test("toAuthenticationResponse encodes the assertion for the finish route", () => {
-  const credential = {
-    id: "cred-id", rawId: new TextEncoder().encode("cred").buffer, type: "public-key",
-    response: {
-      authenticatorData: new TextEncoder().encode("authData").buffer,
-      clientDataJSON: new TextEncoder().encode("clientData").buffer,
-      signature: new TextEncoder().encode("sig").buffer,
-      userHandle: null
-    }
-  };
-  const body = toAuthenticationResponse(credential);
-  assert.equal(body.id, "cred-id");
-  assert.equal(Buffer.from(body.rawId, "base64url").toString(), "cred");
-  assert.equal(Buffer.from(body.response.authenticatorData, "base64url").toString(), "authData");
-  assert.equal(body.response.userHandle, null);
-});
-
+import { createAuthSigninUI } from "../src/auth-signin-ui.js";
 function fakeContainer() {
   const listeners = {};
+  const status = { textContent: "", classList: { toggle() {} } };
   return {
+    status,
     innerHTML: "",
     listeners,
     addEventListener(name, fn) { (listeners[name] ??= []).push(fn); },
     removeEventListener(name, fn) { listeners[name] = (listeners[name] ?? []).filter(f => f !== fn); },
-    querySelector() { return null; },
+    querySelector(selector) { return selector === "[data-signin-status]" ? status : null; },
     contains() { return true; },
     fire(name, event) { for (const fn of listeners[name] ?? []) fn(event); }
   };
@@ -64,8 +31,11 @@ function stubClient(routes = {}) {
   const calls = [];
   return {
     calls,
-    session: { authenticated: false },
-    currentSession() { return { csrf: "c".repeat(64), sessionBinding: "b".repeat(64), sessionRevision: 1 }; },
+    generation: 0,
+    session: { authenticated: false, csrf: "c".repeat(64), sessionBinding: "b".repeat(64), sessionRevision: 1 },
+    currentSession() { return this.session; },
+    owns(generation, session) { return this.generation === generation && this.session === session; },
+    invalidate(generation, session) { if (!this.owns(generation, session)) return false; this.generation++; this.session = null; return true; },
     async request(path, { data } = {}) {
       calls.push({ path, data });
       const reply = routes[path];
@@ -89,181 +59,125 @@ function mount(routes = {}) {
   return { client, signins, container, ui };
 }
 
-test("mount renders the method chooser, GitHub button, and no form by default", () => {
+
+test("email entry exposes only a delivered-link request", () => {
   const { container } = mount();
-  assert.ok(container.innerHTML.includes("Choose another sign-in method."));
-  assert.ok(container.innerHTML.includes("Continue with GitHub"));
-  assert.ok(container.innerHTML.includes("Email + password"));
-  assert.ok(container.innerHTML.includes("Magic link"));
-  assert.ok(container.innerHTML.includes("Passkey"));
-  assert.ok(container.innerHTML.includes("Recovery code"));
-  assert.ok(!container.innerHTML.includes("data-signin-form"));
+  assert.match(container.innerHTML, /data-signin-form="magic-request"/);
+  assert.doesNotMatch(container.innerHTML, /type="password"|passkey|recovery|GitHub|data-method|name="code"/i);
 });
-
-test("choosing a method renders its form; choosing again closes it", () => {
-  const { container } = mount();
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  assert.ok(container.innerHTML.includes('data-signin-form="password"'));
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  assert.ok(!container.innerHTML.includes("data-signin-form"));
-});
-
-test("password signup posts email, password, and sessionRevision, then signs in", async () => {
-  const view = { authenticated: true, account: { id: "acct-1" } };
-  const { client, signins, container } = mount({ "/api/auth/password/signup": view });
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  await container.listeners.submit[0](submitForm("password", { email: "new@example.invalid", password: "fixture-password-1" }));
-  assert.equal(client.calls[0].path, "/api/auth/password/signup");
-  assert.equal(client.calls[0].data.email, "new@example.invalid");
-  assert.equal(client.calls[0].data.password, "fixture-password-1");
-  assert.equal(client.calls[0].data.sessionRevision, 1);
-  assert.equal(signins.length, 1);
-  assert.equal(signins[0].account.id, "acct-1");
-});
-
-test("password mode toggle switches between signup and login routes", async () => {
-  const view = { authenticated: true, account: { id: "acct-2" } };
-  const { client, container } = mount({ "/api/auth/password/login": view });
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  container.fire("click", clickOnDataset("password-mode", { passwordMode: "login" }));
-  await container.listeners.submit[0](submitForm("password", { email: "back@example.invalid", password: "fixture-password-2" }));
-  assert.equal(client.calls[0].path, "/api/auth/password/login");
-});
-
-test("magic request unavailable shows the server's honest message", async () => {
-  const { client, container } = mount({
-    "/api/auth/magic/request": { status: "unavailable", reason: "mail_not_configured", message: "Email delivery isn\u2019t configured." }
-  });
-  container.fire("click", clickOnDataset("method", { method: "magic" }));
+test("unconfigured delivery stays visible after pending state clears", async () => {
+  const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
-  assert.equal(client.calls[0].path, "/api/auth/magic/request");
-  // No code phase, no sign-in.
-  assert.ok(container.innerHTML.includes('data-signin-form="magic-request"'));
+  assert.equal(ui.canLeave(), true);
+  assert.equal(container.status.textContent, "Delivery unavailable");
+  assert.match(container.innerHTML, /role="alert"/);
 });
-
-test("magic request sent moves to the code phase, then consume signs in", async () => {
-  const view = { authenticated: true, account: { id: "acct-3" } };
-  const { client, signins, container } = mount({
-    "/api/auth/magic/request": { status: "sent" },
-    "/api/auth/magic/consume": view
-  });
-  container.fire("click", clickOnDataset("method", { method: "magic" }));
+test("delivered email offers verification code only after explicit selection", async () => {
+  const { container, client, signins } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { authenticated: true, account: { id: "a" } } });
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
-  assert.ok(container.innerHTML.includes('data-signin-form="magic-code"'));
-  await container.listeners.submit[0](submitForm("magic-code", { code: "12345678" }));
-  assert.equal(client.calls[1].path, "/api/auth/magic/consume");
-  assert.equal(client.calls[1].data.email, "m@example.invalid");
-  assert.equal(client.calls[1].data.code, "12345678");
-  assert.equal(client.calls[1].data.sessionRevision, 1);
-  assert.equal(signins.length, 1);
+  assert.match(container.innerHTML, /Check m@example.invalid/);
+  assert.doesNotMatch(container.innerHTML, /name="code"/);
+  await container.listeners.click[0](clickOnDataset("magic-manual-code"));
+  assert.match(container.innerHTML, /name="code"/);
+  await container.listeners.submit[0](submitForm("magic-code", { code: "synthetic-code" }));
+  assert.equal(client.calls[1].path, "/api/auth/magic/consume"); assert.equal(signins.length, 1);
+});
+test("email request carries the host's invitation destination without authenticating", async () => {
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); let signed = 0;
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onMagicLinkRequest: () => "/#invite/synthetic" });
+  const container = fakeContainer(); ui.mount(container);
+  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  assert.equal(client.calls[0].data.returnTo, "/#invite/synthetic"); assert.equal(signed, 0);
+});
+async function readyCode(ui, container) {
+  ui.showMagic();
+  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  await container.listeners.click[0](clickOnDataset("magic-manual-code"));
+}
+test("pending authentication prevents leaving until its actual result", async () => {
+  let release; const pending = new Promise(resolve => release = resolve); const lifecycle = [];
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": () => pending });
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, onBusyChange: value => lifecycle.push(value) });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container); lifecycle.length = 0;
+  const submission = container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
+  await Promise.resolve();
+  assert.equal(ui.canLeave(), false); assert.equal(ui.closeEmail(), false);
+  release({ authenticated: true, account: { id: "a" } }); await submission;
+  assert.deepEqual(lifecycle, [true, false]); assert.equal(ui.canLeave(), true);
+});
+test("declining authentication causes no consume request or pending lifecycle", async () => {
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); const lifecycle = [];
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false, onBusyChange: value => lifecycle.push(value) });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container); lifecycle.length = 0;
+  await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
+  assert.equal(client.calls.length, 1); assert.deepEqual(lifecycle, []);
+});
+test("lost consume result fences only the identity that issued it", async () => {
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { throw: { message: "Connection lost" } } });
+  let fenced = 0, signed = 0;
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
+  assert.equal(client.session, null); assert.equal(fenced, 1); assert.equal(signed, 0);
+});
+test("late consume cannot complete or clear a replacement identity", async () => {
+  let release; const pending = new Promise(resolve => release = resolve);
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": () => pending }); let signed = 0, fenced = 0;
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  const submission = container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const replacement = { authenticated: true, account: { id: "new" } }; client.generation++; client.session = replacement;
+  release({ authenticated: true, account: { id: "old" } }); await submission;
+  assert.equal(client.session, replacement); assert.equal(signed, 0); assert.equal(fenced, 0);
+});
+test("different-account rejection offers an explicit switch without logging out automatically", async () => {
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); let logouts = 0;
+  client.request = async path => { if (path.endsWith("request")) return { status: "sent" }; throw Object.assign(new Error("Different account"), { status: 409, code: "magic_account_mismatch" }); };
+  client.logout = async () => { logouts++; };
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, onAccountSwitch: () => false });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
+  assert.match(container.innerHTML, /data-magic-switch/);
+  await container.listeners.click[0](clickOnDataset("magic-switch")); assert.equal(logouts, 0);
 });
 
-test("recovery redeem posts email/code/sessionRevision and unwraps the session", async () => {
-  const session = { authenticated: true, account: { id: "acct-4" } };
-  const { client, signins, container } = mount({ "/api/auth/recovery-codes/redeem": { remaining: 7, session } });
-  container.fire("click", clickOnDataset("method", { method: "recovery" }));
-  await container.listeners.submit[0](submitForm("recovery", { email: "r@example.invalid", code: "abcdef-ghijkl" }));
-  assert.equal(client.calls[0].path, "/api/auth/recovery-codes/redeem");
-  assert.equal(client.calls[0].data.email, "r@example.invalid");
-  assert.equal(signins.length, 1);
-  assert.equal(signins[0].account.id, "acct-4");
-});
-
-test("passkey flow drives navigator.credentials.get and the finish route", async () => {
-  const options = { challengeId: "chal-1", challenge: "dGVzdA", rpId: "example.invalid",
-    allowCredentials: [], userVerification: "preferred", timeout: 60000 };
-  const view = { authenticated: true, account: { id: "acct-5" } };
-  const credential = {
-    id: "cred-1", rawId: new TextEncoder().encode("cred").buffer, type: "public-key",
-    response: {
-      authenticatorData: new TextEncoder().encode("a").buffer,
-      clientDataJSON: new TextEncoder().encode("c").buffer,
-      signature: new TextEncoder().encode("s").buffer,
-      userHandle: null
-    }
+test("confirmed different-account switch logs out once and retries the unburned link", async () => {
+  const client = stubClient(); let consumes = 0, logouts = 0, reconciled = 0, signed = 0; const codes = [];
+  client.request = async (path, { data }) => {
+    if (path.endsWith("request")) return { status: "sent" };
+    codes.push(data.code);
+    if (++consumes === 1) throw Object.assign(new Error("Different account"), { status: 409, code: "magic_account_mismatch" });
+    return { authenticated: true, account: { id: "target" } };
   };
-  const { client, signins, container } = mount({
-    "/api/auth/passkey/authenticate/options": options,
-    "/api/auth/passkey/authenticate/finish": view
-  });
-  const saw = [];
-  // Node ships a getter-only navigator; defineProperty is the way in.
-  Object.defineProperty(globalThis, "navigator", { value: { credentials: { get: async request => { saw.push(request); return credential; } } }, configurable: true });
-  Object.defineProperty(globalThis, "window", { value: {}, configurable: true });
-  try {
-    container.fire("click", clickOnDataset("method", { method: "passkey" }));
-    await container.listeners.submit[0](submitForm("passkey"));
-  } finally { delete globalThis.navigator; delete globalThis.window; }
-  assert.equal(client.calls[0].path, "/api/auth/passkey/authenticate/options");
-  assert.equal(saw.length, 1);
-  assert.equal(new TextDecoder().decode(saw[0].publicKey.challenge), "test");
-  assert.equal(client.calls[1].path, "/api/auth/passkey/authenticate/finish");
-  assert.equal(client.calls[1].data.challengeId, "chal-1");
-  assert.equal(client.calls[1].data.response.id, "cred-1");
-  assert.equal(signins.length, 1);
+  client.logout = async () => { logouts++; client.generation++; client.session = { authenticated: false, sessionRevision: 2 }; return client.session; };
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onAccountSwitch: () => true, onSignInUncertain: () => reconciled++ });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  await container.listeners.submit[0](submitForm("magic-code", { code: "same-unburned-code" }));
+  await container.listeners.click[0](clickOnDataset("magic-switch"));
+  assert.equal(logouts, 1); assert.equal(reconciled, 1); assert.equal(consumes, 2); assert.equal(signed, 1);
+  assert.deepEqual(codes, ["same-unburned-code", "same-unburned-code"]);
 });
 
-test("magic request panel asks for a link, not a code", async () => {
-  const { container } = mount();
-  container.fire("click", clickOnDataset("method", { method: "magic" }));
-  assert.ok(container.innerHTML.includes("Email me a sign-in link"), "request button offers a link");
-  assert.ok(!container.innerHTML.includes("Email me a sign-in code"), "no code-first wording remains");
-});
-
-test("magic code phase is link-first with manual code as an opt-in fallback", async () => {
-  const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
-  container.fire("click", clickOnDataset("method", { method: "magic" }));
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
-  const html = container.innerHTML;
-  assert.ok(html.includes("sign-in link"), "panel tells the user to click the link");
-  assert.ok(html.includes("no typing needed"), "panel promises zero typing");
-  assert.ok(!html.includes('name="code"'), "code input hidden by default");
-  assert.ok(html.includes("data-magic-manual-code"), "manual-code toggle offered");
-  assert.ok(html.includes("Or enter the code manually instead"), "fallback framed as secondary");
-});
-
-test("magic manual-code toggle reveals and hides the code field", async () => {
-  const view = { authenticated: true, account: { id: "acct-magic" } };
-  const { client, signins, container } = mount({
-    "/api/auth/magic/request": { status: "sent" },
-    "/api/auth/magic/consume": view
-  });
-  container.fire("click", clickOnDataset("method", { method: "magic" }));
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
-  container.fire("click", clickOnDataset("magic-manual-code"));
-  assert.ok(container.innerHTML.includes('name="code"'), "toggle reveals the code field");
-  assert.ok(container.innerHTML.includes("Hide the code field"), "toggle label flips");
-  await container.listeners.submit[0](submitForm("magic-code", { code: "12345678" }));
-  assert.equal(client.calls[1].path, "/api/auth/magic/consume");
-  assert.equal(signins.length, 1);
-  container.fire("click", clickOnDataset("magic-manual-code"));
-  assert.ok(!container.innerHTML.includes('name="code"'), "toggle hides the code field again");
-});
-
-test("password markup never includes a password value, and clear() drops the email form", () => {
-  const { container, ui } = mount();
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  assert.match(container.innerHTML, /autocomplete="new-password"/);
-  assert.doesNotMatch(container.innerHTML, /name="password"[^>]*\svalue=/);
-  container.fire("click", clickOnDataset("password-mode", { passwordMode: "login" }));
+test("contextual password login and creation use the guarded authentication routes", async () => {
+  const { ui, container, client, signins } = mount({ "/api/auth/password/login": { authenticated: true, account: { id: "a" } }, "/api/auth/password/signup": { authenticated: true, account: { id: "b" } } });
+  await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "password" }));
   assert.match(container.innerHTML, /autocomplete="current-password"/);
-  assert.doesNotMatch(container.innerHTML, /name="password"[^>]*\svalue=/);
-  const panel = { hidden: false, innerHTML: "leftover", dataset: {}, addEventListener() {} };
-  ui.openEmail("login", panel);
-  assert.equal(panel.hidden, false);
-  assert.match(panel.innerHTML, /autocomplete="current-password"/);
-  assert.doesNotMatch(panel.innerHTML, /name="password"[^>]*\svalue=/);
-  ui.clear();
-  assert.equal(panel.hidden, true);
-  assert.equal(panel.innerHTML, "");
-  assert.doesNotMatch(container.innerHTML, /name="password"/);
+  await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));
+  assert.equal(client.calls[0].path, "/api/auth/password/login");
+  assert.doesNotMatch(container.innerHTML, /value="synthetic-password"/);
+  await container.listeners.click[0](clickOnDataset("password-mode", { passwordMode: "signup" }));
+  assert.match(container.innerHTML, /autocomplete="new-password"/);
+  await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));
+  assert.equal(client.calls[1].path, "/api/auth/password/signup"); assert.equal(signins.length, 2);
+  await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
+  assert.match(container.innerHTML, /data-signin-form="magic-request"/); ui.clear();
+  assert.doesNotMatch(container.innerHTML, /p@example.invalid/);
 });
-
-test("sign-in failure does not call onSignedIn", async () => {
-  const { signins, container } = mount({
-    "/api/auth/password/signup": { throw: { code: "email_in_use", message: "That email is already on an account." } }
-  });
-  container.fire("click", clickOnDataset("method", { method: "password" }));
-  await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "fixture-password-3" }));
-  assert.equal(signins.length, 0);
+test("declining password authentication sends no request", async () => {
+  const client = stubClient(); const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false });
+  const container = fakeContainer(); ui.mount(container);
+  await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "password" }));
+  await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));
+  assert.equal(client.calls.length, 0); assert.equal(ui.canLeave(), true);
 });

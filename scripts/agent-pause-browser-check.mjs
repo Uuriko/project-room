@@ -1,4 +1,3 @@
-import { clickChrome } from "./room-chrome.mjs";
 import { openMemberProfile } from "./room-chrome.mjs";
 // C6: owner-facing Pause, Resume and Remove for agent members in the People
 // panel. Pause/Resume act on the agent's wake-queue pause row through
@@ -15,7 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen } from "./room-chrome.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
@@ -46,8 +45,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   page.on("dialog", dialog => { dialogs.push(dialog.type()); dialog.dismiss(); });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await fillAccessKey(page, owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
   await ensurePeopleOpen(page);
   const row = page.locator('#presence-list .presence-member[data-member-record-id="codex"]');
@@ -62,15 +60,11 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   assert.equal(await ownerRow.locator(".member-actions").count(), 0);
   assert.equal(await row.locator(".pause-chip").count(), 0);
 
-  // The owner gives either kind of member the same additional-admin role.
-  // The invitation explains where it lives and opens People on mobile too.
+  // The owner gives either kind of member the same additional-admin role
+  // through People, including on mobile.
   for (const [target, mobile] of [[row, false], [guestRow, true]]) {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-    await clickChrome(page, "#invite-people-button");
-    assert.match(await page.locator("#share-link-dialog").textContent(), /After the person or agent joins/);
-    await page.locator("#share-link-admins").click();
-    await page.locator("#share-link-dialog").waitFor({ state: "hidden" });
-    await page.locator("#room-sidebar").waitFor({ state: "visible" });
+    await ensurePeopleOpen(page);
     await openMemberProfile(page, await target.getAttribute("data-member-record-id"));
     await target.getByText("Room capabilities", { exact: true }).click();
     const admin = target.locator("[data-member-admin]");

@@ -202,9 +202,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Muse app or WhatsApp/);
   assert.match(html, /id="agent-access-hint"/);
   assert.match(html, /id="inbox-heading"/);
-  assert.match(html, /id="auth-kind-room"/);
-  assert.match(html, /id="access-key-reveal"/);
-  assert.match(html, /Paste your key/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
   assert.match(html, /id="room-tools"/);
@@ -217,16 +214,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Message #general/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
-  assert.match(html, /id="signin-more"/);
-  assert.match(html, /Other sign-in methods/);
   assert.match(html, /id="agent-signin-button"/);
   assert.match(html, />Agent sign in</);
   assert.doesNotMatch(html, /More options/);
-  assert.ok(html.indexOf('id="agent-signin-button"') < html.indexOf('id="signin-extra"'), "agent entry is outside the other-methods panel");
-  assert.match(html, /id="signin-extra"/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);
-  assert.match(html, /id="auth-kind-hint"/);
   assert.match(html, /id="clear-session-menu"/);
   assert.match(html, /id="room-sidebar"/);
   assert.match(html, /id="channel-list"/);
@@ -236,7 +228,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-route"/);
   assert.match(html, /id="agent-host-snippets"/);
   assert.match(html, /id="agent-capabilities"/);
-  assert.match(html, /Chat packet — no Room key/);
   assert.match(html, /id="agent-copy-checklist"/);
   assert.match(html, /id="agent-key-later"/);
   assert.match(html, /id="agent-connect-advanced"/);
@@ -287,11 +278,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /reactionPills/);
   assert.doesNotMatch(app, /details class="reactions"/);
   assert.doesNotMatch(app, /reaction-menu/);
-  assert.match(html, /id="session-hint"/);
-  assert.match(html, /id="session-restore"/);
-  assert.match(html, /id="reopen-last-room"/);
-  assert.match(html, /id="continue-account"/);
-  assert.match(html, /id="clear-session"/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.doesNotMatch(html, /<details id="people-panel"[^>]*>[\s\S]*?id="connect-agent-button"/);

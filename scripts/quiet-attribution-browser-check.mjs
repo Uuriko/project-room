@@ -5,7 +5,7 @@ import { rmSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen, ensureSidebarClosed, openSearch } from "./room-chrome.mjs";
 
 for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
@@ -32,8 +32,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' }), errors = [];
   page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await fillAccessKey(page, f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
-  await page.locator('#main').waitFor({ state: 'visible' });
+  await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
   const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
   const directed = record('naming-directed').locator('.audience-chip');

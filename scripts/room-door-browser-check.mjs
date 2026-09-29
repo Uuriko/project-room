@@ -82,7 +82,6 @@ for (const touch of [false, true]) {
     assert.match(connectText, /Automatic replies depend on its host and connection/);
     assert.match(connectText, /Add Room as MCP/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
-    assert.match(connectText, /Never paste a room key into a chat/);
     assert.match(connectText, /Types for this Room only/);
     assert.match(connectText, /Not a public agent store/);
     assert.match(connectText, /Claude Code/);

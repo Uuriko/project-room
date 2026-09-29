@@ -450,26 +450,18 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .attention-hint { color: var(--muted); font-size: .85rem; }
 #attention-status:empty { display: none; }
 .auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
-#session-hint { margin: .75rem 0 0; color: var(--muted); font-size: .85rem; }
 #session-restore { display: grid; gap: .45rem; margin: 1.25rem 0 0; }
 #session-restore[hidden] { display: none; }
 #session-restore .button { width: 100%; }
-#signin-more { display: block; margin: 1.25rem auto 0; min-height: 44px; font-size: .8rem; font-weight: 500; color: var(--muted); }
-#signin-more:hover { color: var(--text); }
-#signin-extra { margin-top: .5rem; }
 .auth-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .5rem; margin-top: .5rem; }
 .auth-methods .button { min-width: 0; }
 .auth-oauth-row .button { width: 100%; }
 [data-signin-panel]:not(:empty) { margin-top: 1rem; }
-.signin-support { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.signin-support > summary { min-height: 44px; color: var(--muted); }
-#signin-extra[hidden] { display: none; }
 .auth-kind { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1rem; }
 .auth-kind .button { flex: 1 1 8rem; width: auto; min-width: 0; }
 .auth-kind .button[aria-pressed="true"] { border-color: var(--blue); color: var(--text); background: rgb(255 255 255 / 6%); }
 .auth-kind .button.suggested { box-shadow: inset 0 0 0 1px var(--amber); }
 .key-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; align-items: center; width: 100%; min-width: 0; }
-#access-key-reveal { width: auto; }
 .app-shell:has(#auth-panel:not([hidden])) #identity-label,
 .app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
 .auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
@@ -1453,7 +1445,6 @@ summary { overflow-wrap: anywhere; }
 #email-auth-step #email-auth-panel { margin-top: 0; }
 #email-auth-back { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0; padding: .6rem; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
-#auth-panel > #signin-more { margin-top: 1rem; }
 .join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
 .join-agent[open] > summary { margin-bottom: .75rem; }
 

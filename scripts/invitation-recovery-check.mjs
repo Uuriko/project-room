@@ -7,7 +7,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { fillAccessKey } from "./auth-signin.mjs";
+import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, { touch = false, clipboard = false } = {}) {
   const fixture = createAcceptanceFixture();
@@ -46,8 +46,7 @@ async function setup(t, { touch = false, clipboard = false } = {}) {
 async function ownerPage(page, origin, fixture) {
   await page.goto(origin);
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
-  await fillAccessKey(page, fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await signInFixture(page, fixture.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
   await clickChrome(page, "#invite-people-button");
 }
@@ -65,7 +64,7 @@ async function settleRendering(page) {
 async function capture(page, name) {
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/invitation-recovery-${name}.png`,
-    mask: [page.locator('#access-key'), page.locator('#share-link-url')] });
+    mask: [page.locator('#share-link-url')] });
 }
 
 for (const maxJoins of [1, 10]) test(`two tabs joining an invitation (${maxJoins} places) review and reuse the winning guest`, { timeout: 45000 }, async t => {

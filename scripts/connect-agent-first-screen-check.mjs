@@ -52,7 +52,6 @@ for (const touch of [false, true]) {
     assert.ok(await page.locator('#join-agent-title').isVisible(), 'agent instructions remain discoverable');
 
     // The secondary disclosure contains the agent path.
-    assert.equal(await page.locator('#signin-extra').isVisible(), false, 'help does not open with agent sign in');
     assert.equal(await page.locator('#agent-signin-button').getAttribute('aria-expanded'), 'true');
 
     // 3. It names the host actually being served, not a written-down address.
@@ -73,7 +72,9 @@ for (const touch of [false, true]) {
     await page.locator('#join-agent-status').filter({ hasText: 'Copied' }).waitFor();
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), text, 'the clipboard holds what was shown');
 
-    assert.equal(await page.locator('#join-agent-packet').getAttribute('href'), `${origin}/llms.txt`);
+    const instructions = page.locator('#agent-auth-step a[href="/llms.txt"]');
+    assert.equal(await instructions.isVisible(), true);
+    assert.equal(await instructions.getAttribute('href'), '/llms.txt');
 
     // The packet the prompt sends an agent to has to actually answer.
     const response = await page.request.get(`${origin}/llms.txt`);
