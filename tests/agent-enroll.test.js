@@ -3,21 +3,26 @@
 //
 // Authoring-gate answers:
 // 1. Protects the new public enrollment contract: one call mints an identity
-//    (credential shown once), a 24h guest-scoped rak_ key, discovery URLs,
-//    and starter tasks; repeats are idempotent (no duplicate identity, no
-//    re-issued secrets); the guest key is confined to guest scopes; the
-//    endpoint is rate-limited and validates input.
-// 2. Credible regressions: scope widening on the guest key (privilege
-//    escalation), idempotency loss (duplicate identities/secrets on retry),
-//    secret re-display on duplicate, rate-limit removal (enrollment spam),
-//    feed outage failing enrollment.
+//    (whose credential is NEVER revealed — red-team HIGH RC-2026-09-29-3604),
+//    a 24h guest-scoped rak_ key, discovery URLs, and starter tasks; repeats
+//    are idempotent (no duplicate identity, no re-issued secrets); the guest
+//    key is confined to guest scopes and cannot mint privileged keys; the
+//    endpoint is rate-limited and validates input; registered lane names are
+//    reserved (409 + alternative); an optional roomId files an access request
+//    inline and surfaces an auto-approval as membership.
+// 2. Credible regressions: credential leak in the response (the parked
+//    HIGH), scope widening on the guest key (privilege escalation), guest
+//    token used to mint keys, lane name-squatting, idempotency loss,
+//    rate-limit removal (enrollment spam), feed outage failing enrollment.
 // 3. No existing coverage: new module, new route. Scope enforcement on the
 //    plug-in routes themselves is owned by tests/agent-plugin-http.test.js;
 //    here we prove the enroll route only ever issues the guest scope set and
 //    that the real route auth honors it.
 // 4. No test-only production seams: the deps (enrollments Map, buildFeed,
-//    now, rate) are the wiring's own injection points, also used by the
-//    production mount.
+//    now, rate, accessRequests) are the wiring's own injection points, also
+//    used by the production mount. The approved-roomJoin stub implements only
+//    the single request() method the module calls; the pending path runs
+//    against the real AccessRequests.
 //
 // Boundary: the REAL RoomStore (SQLite identity minting with hash-only
 // secret storage, real rak_ issuance/verification) and the REAL
@@ -30,7 +35,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore, ServiceError } from "../server/store.mjs";
-import { createAgentEnrollRoutes, ENROLL_GUEST_SCOPES, ENROLL_GUEST_TTL_MS } from "../server/agent-enroll.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { accessRequestSchema } from "../server/access-requests.mjs";
+import { createAgentEnrollRoutes, ENROLL_GUEST_SCOPES, ENROLL_GUEST_TTL_MS, ENROLL_ROOM_PERMISSIONS, RESERVED_LANE_NAMES } from "../server/agent-enroll.mjs";
 import { createAgentPluginRoutes } from "../server/agent-plugin-routes.mjs";
 
 // --- http.mjs locals, mirrored exactly (server/http.mjs) ---
@@ -97,7 +104,11 @@ test("enroll mints identity + scoped guest key + starter tasks in one call", asy
   assert.equal(e.type, "agent_enrollment");
   assert.equal(e.duplicate, false);
   assert.match(e.identityId, /^ai_/);
-  assert.match(e.credential, /^pri_/);
+  // Red-team HIGH (RC-2026-09-29-3604): the identity credential is never
+  // revealed — no `credential` field at all, and no pri_ string anywhere in
+  // the serialized body. The guest token is the only usable credential.
+  assert.ok(!("credential" in e), "no credential field in the response");
+  assert.ok(!JSON.stringify(e).includes("pri_"), "no identity credential anywhere in the response");
   assert.match(e.guestToken, /^rak_/);
   assert.deepEqual(e.guestTokenScopes, [...ENROLL_GUEST_SCOPES]);
   assert.equal(e.guestTokenExpiresAt, T0 + ENROLL_GUEST_TTL_MS);
@@ -110,9 +121,11 @@ test("enroll mints identity + scoped guest key + starter tasks in one call", asy
   assert.ok(e.discovery.agentCard.startsWith(ORIGIN));
   assert.ok(e.discovery.opportunities.startsWith(ORIGIN));
   assert.equal(e.next.length, 3);
-  // The identity secret is stored hash-only, like POST /api/agent-identities.
+  // The identity secret is stored hash-only, like POST /api/agent-identities —
+  // and it is never exposed by this route.
   const row = h.store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(e.identityId);
-  assert.ok(row && !row.secret_hash.includes(e.credential.slice(4, 12)));
+  assert.ok(row && typeof row.secret_hash === "string" && row.secret_hash.length > 0);
+  assert.ok(!row.secret_hash.includes("pri_"));
 });
 
 test("second call with the same name is idempotent: no duplicate identity, no re-issued secrets", async t => {
@@ -125,7 +138,7 @@ test("second call with the same name is idempotent: no duplicate identity, no re
   const e = second.res.jsonValue;
   assert.equal(e.duplicate, true);
   assert.equal(e.identityId, first.res.jsonValue.identityId);
-  assert.equal(e.credential, null, "credential is shown once, never re-issued");
+  assert.ok(!("credential" in e), "no credential field on duplicates either");
   assert.equal(e.guestToken, null, "guest token is shown once, never re-issued");
   assert.equal(h.identityCount(), 1, "no duplicate identity row");
 });
@@ -138,7 +151,7 @@ test("same requestId retries the same enrollment without new secrets", async t =
   assert.equal(retry.res.statusCode, 200);
   assert.equal(retry.res.jsonValue.duplicate, true);
   assert.equal(retry.res.jsonValue.identityId, first.res.jsonValue.identityId);
-  assert.equal(retry.res.jsonValue.credential, null);
+  assert.ok(!("credential" in retry.res.jsonValue));
   assert.equal(h.identityCount(), 1);
 });
 
@@ -256,4 +269,154 @@ test("store-layer failures surface with their status, not a 500", async () => {
   } catch (e) { error = e; }
   assert.equal(error?.status, 409);
   assert.equal(error?.code, "pilot_limit");
+});
+
+// --- Red-team HIGH (RC-2026-09-29-3604): no credential in the response ---
+
+test("the guest token cannot mint privileged keys: POST /api/agent-keys rejects it", async t => {
+  const h = harness(t);
+  const { res } = await h.call("POST", "/api/agents/enroll", { name: "Keyless Guest" });
+  const guestToken = res.jsonValue.guestToken;
+  // The old response handed over the identity credential (pri_), which could
+  // POST /api/agent-keys with arbitrary scopes — minting privileged keys in
+  // one call. The guest token must fail that route at auth, not at
+  // validation: it is not an identity secret.
+  const plugin = createAgentPluginRoutes({ ...h.deps, rate: () => {} });
+  const pres = {};
+  let error = null;
+  try {
+    await plugin(
+      { method: "POST", headers: { authorization: `Bearer ${guestToken}` },
+        parsedBody: { scopes: ["webhooks:manage"], label: "escalation" } },
+      pres,
+      { url: new URL("/api/agent-keys", "http://127.0.0.1"), remoteAddress: "127.0.0.1" },
+    );
+  } catch (e) { error = e; }
+  assert.ok(error, "expected the key-issuance route to reject the guest token");
+  assert.equal(error.status, 403);
+  assert.equal(error.code, "insufficient_scope");
+  // And no key was minted for the guest identity.
+  assert.equal(h.store.agentPlugin.listApiKeys(res.jsonValue.identityId).length, 1);
+});
+
+test("reserved lane names are rejected with 409 and an alternative (case-insensitive)", async t => {
+  const h = harness(t);
+  for (const name of ["quill", "QUILL", "Quill", "Jillian", "JILLIAN", "codex", "quill-s2", "GrokBot", "INSTINCT"]) {
+    const { error } = await h.call("POST", "/api/agents/enroll", { name });
+    assert.equal(error?.status, 409, name);
+    assert.equal(error?.code, "name_reserved", name);
+    assert.match(error?.message, /reserved for a registered lane/, name);
+    assert.match(error?.message, new RegExp(`${name}-agent`), name);
+  }
+  assert.equal(h.identityCount(), 0, "no identity minted for reserved names");
+  // Near-misses that are not lane names still enroll.
+  const ok = await h.call("POST", "/api/agents/enroll", { name: "quilliam" });
+  assert.equal(ok.res.statusCode, 201);
+});
+
+test("RESERVED_LANE_NAMES stays in sync with lanes/REGISTRY.md", async () => {
+  const { readFileSync } = await import("node:fs");
+  const registry = readFileSync(new URL("../lanes/REGISTRY.md", import.meta.url), "utf8");
+  const lanes = [...registry.matchAll(/^\| ([A-Za-z0-9_-]+) \|/gm)]
+    .map(m => m[1]).filter(name => name !== "Lane");
+  assert.ok(lanes.length > 0, "expected lane rows in the registry table");
+  for (const lane of lanes) {
+    assert.ok(RESERVED_LANE_NAMES.some(r => r.toLowerCase() === lane.toLowerCase()),
+      `lane "${lane}" from REGISTRY.md must be reserved`);
+  }
+});
+
+// --- Optional roomId: inline access request ---
+
+function roomHarness(t) {
+  const h = harness(t);
+  h.store.initialize(initialRoom("commons"));
+  h.store.db.exec(accessRequestSchema);
+  return h;
+}
+
+test("roomId files an access request inline: pending without an auto-approve rule", async t => {
+  const h = roomHarness(t);
+  const { res } = await h.call("POST", "/api/agents/enroll",
+    { name: "Room Joiner", requestId: "enroll-room-1", roomId: "commons" });
+  assert.equal(res.statusCode, 201);
+  const join = res.jsonValue.roomJoin;
+  assert.ok(join, "roomJoin present");
+  assert.equal(join.roomId, "commons");
+  assert.equal(join.status, "pending");
+  assert.ok(join.requestId);
+  assert.ok(join.pollPath.includes(join.requestId));
+  // The request row really exists, asking for the guest-worker set.
+  const row = h.store.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(join.requestId);
+  assert.ok(row);
+  assert.deepEqual(JSON.parse(row.requested_permissions), [...ENROLL_ROOM_PERMISSIONS]);
+  assert.equal(row.status, "pending");
+});
+
+test("roomId duplicate enrollment does not file a second access request", async t => {
+  const h = roomHarness(t);
+  const first = await h.call("POST", "/api/agents/enroll",
+    { name: "Room Rejoiner", requestId: "enroll-room-2", roomId: "commons" });
+  const second = await h.call("POST", "/api/agents/enroll",
+    { name: "Room Rejoiner", requestId: "enroll-room-2", roomId: "commons" });
+  assert.equal(second.res.statusCode, 200);
+  assert.equal(second.res.jsonValue.roomJoin.requestId, first.res.jsonValue.roomJoin.requestId);
+  const n = h.store.db.prepare("SELECT count(*) AS n FROM access_requests").get().n;
+  assert.equal(n, 1, "one access request, not two");
+});
+
+test("roomId surfaces an auto-approval as membership (approved shape)", async t => {
+  const h = harness(t);
+  // Narrow double: implements exactly the request() method the module calls,
+  // returning the approved shape from the auto-approve slice. The pending
+  // path above runs against the real AccessRequests.
+  const stubAccessRequests = {
+    request: (roomId, opts) => ({
+      requestId: opts.requestId,
+      roomId,
+      identityId: opts.identityId,
+      displayName: opts.displayName,
+      requestedPermissions: opts.requestedPermissions,
+      status: "approved",
+      decidedBy: "auto-approve",
+      decidedAt: T0,
+      memberId: opts.identityId,
+      grantedPermissions: [...opts.requestedPermissions],
+    }),
+  };
+  const handle = createAgentEnrollRoutes({ ...h.deps, accessRequests: stubAccessRequests });
+  const res = {};
+  await handle(
+    { method: "POST", headers: {}, parsedBody: { name: "Auto Member", roomId: "commons" } },
+    res,
+    { url: new URL("/api/agents/enroll", "http://127.0.0.1"), remoteAddress: "127.0.0.1" },
+  );
+  assert.equal(res.statusCode, 201);
+  const join = res.jsonValue.roomJoin;
+  assert.equal(join.status, "approved");
+  assert.equal(join.memberId, res.jsonValue.identityId);
+  assert.deepEqual(join.grantedPermissions, [...ENROLL_ROOM_PERMISSIONS]);
+});
+
+test("roomId for an unknown room is a 404, not a 500", async t => {
+  const h = roomHarness(t);
+  const { error } = await h.call("POST", "/api/agents/enroll",
+    { name: "Lost Joiner", roomId: "no-such-room" });
+  assert.equal(error?.status, 404);
+});
+
+test("roomId validates like the other optional fields", async t => {
+  const h = harness(t);
+  for (const [payload, label] of [
+    [{ name: "Ok", roomId: 42 }, "non-string roomId"],
+    [{ name: "Ok", roomId: "" }, "empty roomId"],
+    [{ name: "Ok", roomId: "x".repeat(385) }, "roomId too long"],
+    [{ name: "Ok", roomId: "commons", bogus: 1 }, "unknown field alongside roomId"],
+  ]) {
+    const { error } = await h.call("POST", "/api/agents/enroll", payload);
+    assert.equal(error?.status, 422, label);
+  }
+  // Without roomId the response carries no roomJoin.
+  const { res } = await h.call("POST", "/api/agents/enroll", { name: "No Room" });
+  assert.equal(res.jsonValue.roomJoin, null);
 });
