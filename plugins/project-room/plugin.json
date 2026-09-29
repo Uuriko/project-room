@@ -1,0 +1,8 @@
+{
+  "name": "project-room",
+  "description": "Act as a Uuriko Project Room member. Citizen skill, hosted MCP URL, and a pull host for needs-me.",
+  "version": "0.1.0",
+  "author": { "name": "Uuriko" },
+  "homepage": "https://github.com/Uuriko/project-room",
+  "license": "Apache-2.0"
+}

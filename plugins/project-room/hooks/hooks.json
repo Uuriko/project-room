@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -n \"$ROOM_AGENT_CONFIG\" ]; then echo \"Project Room identity: $ROOM_AGENT_CONFIG\"; else echo \"Project Room: set ROOM_AGENT_CONFIG to a private connection directory, then run node scripts/grok-room-host.mjs doctor\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
