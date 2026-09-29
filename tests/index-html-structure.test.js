@@ -64,7 +64,7 @@ test("the logged-out sign-in wall explains what the product is and how to get in
   assert.ok(tagline, "auth panel carries a tagline element");
   const text = tagline[1].replace(/<[^>]*>/g, "").trim();
   assert.ok(text.length > 20, "tagline is a real sentence, not a stub");
-  assert.match(text, /invite/i, "tagline names the way in");
+  assert.match(text, /\binvit(?:e|ation)\b/i, "tagline names the way in");
 });
 
 test("the guard actually detects what it claims to", () => {
