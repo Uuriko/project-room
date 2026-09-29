@@ -120,6 +120,9 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
     } catch {
       presence = "heartbeat_failed";
     }
+    const rooms = attention.cursor?.rooms && typeof attention.cursor.rooms === "object"
+      ? Object.keys(attention.cursor.rooms)
+      : [connection.roomId];
     return {
       ok: true,
       code: "credential_accepted",
@@ -131,7 +134,10 @@ export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
       hasMore: attention.hasMore,
       hostId,
       pendingWakes,
-      presence
+      presence,
+      listening: presence === "pull-only" ? "pull-only" : presence,
+      executeDefault: false,
+      rooms
     };
   } catch (error) {
     const code = error instanceof ConnectionError || error instanceof GrokHostError ? error.code : "doctor_failed";

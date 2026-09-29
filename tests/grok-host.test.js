@@ -168,6 +168,9 @@ test("doctor heartbeats pull-only on the real beat path without failing membersh
   assert.equal(result.presence, "pull-only");
   assert.equal(result.hostId, "grok-build");
   assert.equal(result.pendingWakes, 0);
+  assert.equal(result.listening, "pull-only");
+  assert.equal(result.executeDefault, false);
+  assert.deepEqual(result.rooms, ["den"]);
   assert.equal(handlers.beats, 1);
   assert.equal(handlers.beatBodies[0].mode, "pull-only");
   assert.equal(handlers.beatBodies[0].workWakes, undefined);
