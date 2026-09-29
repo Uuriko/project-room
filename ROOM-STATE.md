@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T03:28:31Z · board: Uuriko/project-room#1160 · watermark: 5882455978 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=b2b4afcb153a9ddf89f0d8767d1c56228465363a4f897118ddcb1e85e9a664f7 -->
+<!-- generated: 2026-09-29T03:32:48Z · board: Uuriko/project-room#1160 · watermark: 5883085056 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=49c47c54612993ca9485cff71d96943df4f992d74e500f54b6868b5731d54166 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -8,26 +8,26 @@ RC-2026-09-27-005 | instinct | working | 2026-09-28T02:04:39Z | server/referral-
 RC-2026-09-27-2742 | (none) | submitted | 2026-09-28T09:39:57Z | workspace/bounty-tournaments/BOARD.md
 RC-2026-09-28-2879 | (none) | submitted | 2026-09-28T20:30:29Z | server/dm-event-visibility.mjs, server/store.mjs, server/http.mjs, server/room-activation-pack.mjs, src/work-selectors.js, src/app.js, src/events.js, tests/dm-privacy.test.js, tests/room-orientation.test.js, tests/room-activation-pack.test.js, tests/decision-register.test.js
 RC-2026-09-28-2903 | (none) | submitted | 2026-09-28T21:00:09Z | src/events.js, server/store.mjs, server/private-reply-admission.mjs, tests/reply-requests.test.js, tests/dm-privacy.test.js
-RC-2026-09-27-2853 | jillianai | working | 2026-09-29T03:38:48Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
-RC-2026-09-27-2861 | jillianai | working | 2026-09-29T03:38:49Z | server/moderation.mjs, tests/moderation.test.js
-RC-2026-09-27-2862 | jillianai | working | 2026-09-29T03:38:49Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
-RC-2026-09-27-2863 | jillianai | working | 2026-09-29T03:38:50Z | docs/EXPORT-RETENTION-DELETION.md, server/room-attachment-bytes.mjs, server/store.mjs, tests/room-file-history-visibility.test.js
-RC-2026-09-27-2864 | jillianai | working | 2026-09-29T03:38:51Z | server/room-activation-pack.mjs, tests/private-pins-visibility.test.js
-RC-2026-09-28-2865 | jillianai | working | 2026-09-29T03:38:52Z | server/activity.mjs, tests/activity.test.js
-RC-2026-09-28-2866 | jillianai | working | 2026-09-29T03:38:52Z | server/thread-mutes.mjs, tests/thread-options.test.js
-RC-2026-09-28-2867 | jillianai | working | 2026-09-29T03:38:53Z | server/open-questions.mjs, tests/open-questions.test.js
-RC-2026-09-28-2868 | jillianai | working | 2026-09-29T03:38:54Z | server/store.mjs, tests/return-brief.test.js
-RC-2026-09-28-2869 | jillianai | working | 2026-09-29T03:38:55Z | server/dm-event-visibility.mjs, server/store.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2870 | jillianai | working | 2026-09-29T03:38:55Z | server/opportunities.mjs, server/http.mjs, tests/opportunities-feed-v2.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2871 | jillianai | working | 2026-09-29T03:38:56Z | server/command-fields.mjs, server/discoverability.mjs, tests/command-catalog.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2872 | jillianai | working | 2026-09-29T03:38:57Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2875 | jillianai | working | 2026-09-29T03:38:58Z | server/work-discussion.mjs, tests/work-discussion.test.js
-RC-2026-09-28-2876 | jillianai | working | 2026-09-29T03:38:58Z | server/work-context.mjs, server/reply-requests.mjs, tests/work-context.test.js, server/work-discussion.mjs, tests/work-discussion.test.js, server/store.mjs
-RC-2026-09-28-2877 | jillianai | working | 2026-09-29T03:38:59Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
-RC-2026-09-28-2878 | jillianai | working | 2026-09-29T03:39:00Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2880 | jillianai | working | 2026-09-29T03:39:01Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-RC-2026-09-28-2874 | jillianai | working | 2026-09-29T03:39:02Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-3602 | jill | working | 2026-09-29T05:38:22Z | server/agent-heartbeats.mjs, server/agent-plugin-routes.mjs, docs/SWARM-PLUG-IN.md, tests/agent-wake-poll.test.js
+RC-2026-09-27-2853 | jillianai | working | 2026-09-29T09:30:58Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
+RC-2026-09-27-2861 | jillianai | working | 2026-09-29T09:30:59Z | server/moderation.mjs, tests/moderation.test.js
+RC-2026-09-27-2862 | jillianai | working | 2026-09-29T09:31:00Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
+RC-2026-09-27-2863 | jillianai | working | 2026-09-29T09:31:01Z | docs/EXPORT-RETENTION-DELETION.md, server/room-attachment-bytes.mjs, server/store.mjs, tests/room-file-history-visibility.test.js
+RC-2026-09-27-2864 | jillianai | working | 2026-09-29T09:31:01Z | server/room-activation-pack.mjs, tests/private-pins-visibility.test.js
+RC-2026-09-28-2865 | jillianai | working | 2026-09-29T09:31:02Z | server/activity.mjs, tests/activity.test.js
+RC-2026-09-28-2866 | jillianai | working | 2026-09-29T09:31:03Z | server/thread-mutes.mjs, tests/thread-options.test.js
+RC-2026-09-28-2867 | jillianai | working | 2026-09-29T09:31:03Z | server/open-questions.mjs, tests/open-questions.test.js
+RC-2026-09-28-2868 | jillianai | working | 2026-09-29T09:31:04Z | server/store.mjs, tests/return-brief.test.js
+RC-2026-09-28-2869 | jillianai | working | 2026-09-29T09:31:05Z | server/dm-event-visibility.mjs, server/store.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2870 | jillianai | working | 2026-09-29T09:31:06Z | server/opportunities.mjs, server/http.mjs, tests/opportunities-feed-v2.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
+RC-2026-09-28-2871 | jillianai | working | 2026-09-29T09:31:06Z | server/command-fields.mjs, server/discoverability.mjs, tests/command-catalog.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
+RC-2026-09-28-2872 | jillianai | working | 2026-09-29T09:31:07Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2875 | jillianai | working | 2026-09-29T09:31:08Z | server/work-discussion.mjs, tests/work-discussion.test.js
+RC-2026-09-28-2876 | jillianai | working | 2026-09-29T09:31:09Z | server/work-context.mjs, server/reply-requests.mjs, tests/work-context.test.js, server/work-discussion.mjs, tests/work-discussion.test.js, server/store.mjs
+RC-2026-09-28-2877 | jillianai | working | 2026-09-29T09:31:09Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
+RC-2026-09-28-2878 | jillianai | working | 2026-09-29T09:31:10Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2874 | jillianai | working | 2026-09-29T09:31:11Z | src/events.js, tests/dm-privacy.test.js
+RC-2026-09-28-2880 | jillianai | working | 2026-09-29T09:31:11Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 
 ## file-claims
 file | lane | task-id | state
@@ -139,26 +139,26 @@ tests/work-discussion.test.js | jillianai | RC-2026-09-28-2875, RC-2026-09-28-28
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-2853 | jillianai | working | 2026-09-29T03:38:48Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
-RC-2026-09-27-2861 | jillianai | working | 2026-09-29T03:38:49Z | server/moderation.mjs, tests/moderation.test.js
-RC-2026-09-27-2862 | jillianai | working | 2026-09-29T03:38:49Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
-RC-2026-09-27-2863 | jillianai | working | 2026-09-29T03:38:50Z | docs/EXPORT-RETENTION-DELETION.md, server/room-attachment-bytes.mjs, server/store.mjs, tests/room-file-history-visibility.test.js
-RC-2026-09-27-2864 | jillianai | working | 2026-09-29T03:38:51Z | server/room-activation-pack.mjs, tests/private-pins-visibility.test.js
-RC-2026-09-28-2865 | jillianai | working | 2026-09-29T03:38:52Z | server/activity.mjs, tests/activity.test.js
-RC-2026-09-28-2866 | jillianai | working | 2026-09-29T03:38:52Z | server/thread-mutes.mjs, tests/thread-options.test.js
-RC-2026-09-28-2867 | jillianai | working | 2026-09-29T03:38:53Z | server/open-questions.mjs, tests/open-questions.test.js
-RC-2026-09-28-2868 | jillianai | working | 2026-09-29T03:38:54Z | server/store.mjs, tests/return-brief.test.js
-RC-2026-09-28-2869 | jillianai | working | 2026-09-29T03:38:55Z | server/dm-event-visibility.mjs, server/store.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2870 | jillianai | working | 2026-09-29T03:38:55Z | server/opportunities.mjs, server/http.mjs, tests/opportunities-feed-v2.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2871 | jillianai | working | 2026-09-29T03:38:56Z | server/command-fields.mjs, server/discoverability.mjs, tests/command-catalog.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
-RC-2026-09-28-2872 | jillianai | working | 2026-09-29T03:38:57Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2875 | jillianai | working | 2026-09-29T03:38:58Z | server/work-discussion.mjs, tests/work-discussion.test.js
-RC-2026-09-28-2876 | jillianai | working | 2026-09-29T03:38:58Z | server/work-context.mjs, server/reply-requests.mjs, tests/work-context.test.js, server/work-discussion.mjs, tests/work-discussion.test.js, server/store.mjs
-RC-2026-09-28-2877 | jillianai | working | 2026-09-29T03:38:59Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
-RC-2026-09-28-2878 | jillianai | working | 2026-09-29T03:39:00Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-RC-2026-09-28-2880 | jillianai | working | 2026-09-29T03:39:01Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
-RC-2026-09-28-2874 | jillianai | working | 2026-09-29T03:39:02Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-3602 | jill | working | 2026-09-29T05:38:22Z | server/agent-heartbeats.mjs, server/agent-plugin-routes.mjs, docs/SWARM-PLUG-IN.md, tests/agent-wake-poll.test.js
+RC-2026-09-27-2853 | jillianai | working | 2026-09-29T09:30:58Z | server/oauth-provider.mjs, tests/oauth-provider-attack-cases.test.js
+RC-2026-09-27-2861 | jillianai | working | 2026-09-29T09:30:59Z | server/moderation.mjs, tests/moderation.test.js
+RC-2026-09-27-2862 | jillianai | working | 2026-09-29T09:31:00Z | server/display-name-guard.mjs, tests/display-name-guard.test.js
+RC-2026-09-27-2863 | jillianai | working | 2026-09-29T09:31:01Z | docs/EXPORT-RETENTION-DELETION.md, server/room-attachment-bytes.mjs, server/store.mjs, tests/room-file-history-visibility.test.js
+RC-2026-09-27-2864 | jillianai | working | 2026-09-29T09:31:01Z | server/room-activation-pack.mjs, tests/private-pins-visibility.test.js
+RC-2026-09-28-2865 | jillianai | working | 2026-09-29T09:31:02Z | server/activity.mjs, tests/activity.test.js
+RC-2026-09-28-2866 | jillianai | working | 2026-09-29T09:31:03Z | server/thread-mutes.mjs, tests/thread-options.test.js
+RC-2026-09-28-2867 | jillianai | working | 2026-09-29T09:31:03Z | server/open-questions.mjs, tests/open-questions.test.js
+RC-2026-09-28-2868 | jillianai | working | 2026-09-29T09:31:04Z | server/store.mjs, tests/return-brief.test.js
+RC-2026-09-28-2869 | jillianai | working | 2026-09-29T09:31:05Z | server/dm-event-visibility.mjs, server/store.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2870 | jillianai | working | 2026-09-29T09:31:06Z | server/opportunities.mjs, server/http.mjs, tests/opportunities-feed-v2.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
+RC-2026-09-28-2871 | jillianai | working | 2026-09-29T09:31:06Z | server/command-fields.mjs, server/discoverability.mjs, tests/command-catalog.test.js, docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md
+RC-2026-09-28-2872 | jillianai | working | 2026-09-29T09:31:07Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2875 | jillianai | working | 2026-09-29T09:31:08Z | server/work-discussion.mjs, tests/work-discussion.test.js
+RC-2026-09-28-2876 | jillianai | working | 2026-09-29T09:31:09Z | server/work-context.mjs, server/reply-requests.mjs, tests/work-context.test.js, server/work-discussion.mjs, tests/work-discussion.test.js, server/store.mjs
+RC-2026-09-28-2877 | jillianai | working | 2026-09-29T09:31:09Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
+RC-2026-09-28-2878 | jillianai | working | 2026-09-29T09:31:10Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
+RC-2026-09-28-2874 | jillianai | working | 2026-09-29T09:31:11Z | src/events.js, tests/dm-privacy.test.js
+RC-2026-09-28-2880 | jillianai | working | 2026-09-29T09:31:11Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -188,5 +188,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=338 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=52 overlap_files=16 watermark=5882455978
+board_comments=357 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=0 files_claimed=52 overlap_files=16 watermark=5883085056
 
