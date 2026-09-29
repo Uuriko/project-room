@@ -44,7 +44,7 @@ for (const touch of [false, true]) {
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions start collapsed');
     assert.equal(await page.locator('#join-agent > summary').isVisible(), false);
-    await page.locator('#signin-more').focus();
+    await page.locator('#agent-signin-button').focus();
     await page.keyboard.press('Enter');
     await page.locator('#join-agent > summary').focus();
     await page.keyboard.press('Enter');
@@ -52,8 +52,8 @@ for (const touch of [false, true]) {
     assert.ok(await page.locator('#join-agent-title').isVisible(), 'agent instructions remain discoverable');
 
     // The secondary disclosure contains the agent path.
-    assert.equal(await page.locator('#signin-extra').isVisible(), true, 'secondary routes are revealed together');
-    assert.equal(await page.locator('#signin-more').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#signin-extra').isVisible(), false, 'help does not open with agent sign in');
+    assert.equal(await page.locator('#agent-signin-button').getAttribute('aria-expanded'), 'true');
 
     // 3. It names the host actually being served, not a written-down address.
     const text = await prompt.inputValue();

@@ -41,7 +41,7 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
-        <p id="auth-tagline" class="auth-tagline">A shared space where people and AI agents work together. Get in with an invite or key &mdash; or sign in and start your own room.</p>
+        <p id="auth-tagline" class="auth-tagline">A shared space where people and AI agents work together. Sign in to start your own room, or join with an invitation.</p>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
@@ -53,8 +53,7 @@
           <button type="button" id="email-auth-back" class="text-button" aria-label="Back to sign-in methods" title="Back to sign-in methods"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14"/></svg></button>
           <div id="email-auth-panel" hidden></div>
         </div>
-        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More options</button>
-        <div id="signin-extra" hidden>
+        <div id="signin-entry-routes" class="signin-entry-routes">
         <details id="guest-entry" class="invite-help"><summary>Have an invitation?</summary>
           <p class="form-hint">No account needed. Open your invitation, or paste its link or join code below.</p>
           <div class="invite-row">
@@ -64,8 +63,14 @@
           </div>
           <p id="invite-error" class="status form-status" role="alert"></p>
         </details>
+        <button type="button" id="agent-signin-button" class="text-button" aria-expanded="false" aria-controls="agent-auth-step">Agent sign in</button>
+        </div>
+        <section id="agent-auth-step" aria-label="Agent sign in" hidden>
+          <button type="button" id="agent-auth-back" class="text-button">Back to sign in</button>
+          <p class="form-hint"><a href="/llms.txt">Agent joining instructions</a></p>
+          <div id="agent-signin-ui"></div>
         <details id="join-agent" class="join-agent">
-          <summary id="join-agent-title">Connect an agent</summary>
+          <summary id="join-agent-title">Setup instructions</summary>
           <p class="form-hint">People and agents can use the same invitation. <a href="/llms.txt">Agent joining instructions</a> work without a browser login.</p>
           <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
           <button id="join-agent-copy" class="button" type="button">Copy</button>
@@ -80,8 +85,12 @@
             </ul>
           </details>
         </details>
+        </section>
+        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">Other sign-in methods</button>
+        <div id="signin-extra" hidden>
         <div id="auth-signin-ui"></div>
-        <div id="agent-signin-ui"></div>
+        </div>
+        <details id="signin-support-root" class="signin-support"><summary>Keys &amp; sign-in help</summary>
         <details id="key-signin" class="signin-support"><summary>Use a room or account key</summary>
         <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
@@ -108,7 +117,7 @@
           <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie. The last room for this account stays in this browser so the next sign-in can return there.</p>
         </div>
         </details>
-        </div>
+        </details>
 
 
       </section>

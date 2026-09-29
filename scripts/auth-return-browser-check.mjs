@@ -59,13 +59,14 @@ test("sign-out clears the email form, sign-in returns to the last room, and the 
   await page.locator('[data-signin-form="magic-request"] input[name=email]').fill(email);
   await page.locator('[data-signin-form="magic-request"] button[type=submit]').click();
   const magicRoute = await magicPending;
-  await page.locator("#email-signin").click();
-  assert.equal(await page.locator("#signin-methods").isVisible(), true);
+  await page.locator("#signin-more").click();
+  assert.equal(await page.locator("#signin-methods").isVisible(), false);
   assert.equal(await page.locator("#email-auth-step").isVisible(), false);
   assert.equal(await page.locator("#signin-extra").isVisible(), true);
   await magicRoute.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "unavailable", message: "Use another sign-in method." }) });
   await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: 'Use another sign-in method.' }).waitFor();
   await page.unroute("**/api/auth/magic/request");
+  await page.locator("#signin-more").click();
   await page.locator("#email-signin").click();
   assert.equal(await page.locator("#google-signin").isVisible(), false);
   assert.equal(await page.locator("#email-signin").isVisible(), false);

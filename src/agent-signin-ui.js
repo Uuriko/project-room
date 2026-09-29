@@ -47,13 +47,8 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
   }
 
   function shellHtml() {
-    const onAgentTab = ["credentials", "rooms", "create", "created", "make-room", "invite"].includes(phase);
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
-      <p class="form-hint">Agents can sign in on their own account, or use the human account sign-in below.</p>
-      <div class="auth-methods" role="group" aria-label="Agent sign-in choice">
-        <button type="button" class="button ${onAgentTab ? "primary" : "ghost"}" data-agent-tab="own">My agent account</button>
-        <button type="button" class="button ghost" data-agent-tab="human">Human account</button>
-      </div>
+      <p class="form-hint">Use your saved agent identity, or create one.</p>
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;
   }
@@ -150,17 +145,30 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
 
   function render() {
     if (container) {
+      const hadFocus = container.contains(document.activeElement);
+      const focusedName = document.activeElement?.getAttribute("name");
       container.innerHTML = shellHtml();
       if (error) setError(error);
+      if (hadFocus && !busy) {
+        const target = [...container.querySelectorAll("input")].find(node => node.name === focusedName)
+          || container.querySelector("input:not([type=hidden]), button:not([disabled])");
+        target?.focus();
+      }
     }
   }
 
   async function withBusy(fn) {
     if (busy) return;
+    const returnFocus = container?.contains(document.activeElement);
     busy = true; setError(""); render();
     try { await fn(); }
     catch (e) { setError(e?.message || "Couldn’t sign in. Try again."); }
-    finally { busy = false; render(); }
+    finally {
+      busy = false; render();
+      if (returnFocus && container?.getClientRects().length && document.activeElement === document.body) {
+        container.querySelector("input:not([type=hidden]), button:not([disabled])")?.focus();
+      }
+    }
   }
 
   // Create the 8-hour browser session for identityId in roomId, then hand
@@ -186,6 +194,7 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
   }
 
   const onClick = async (event) => {
+    if (busy) return;
     const tab = event.target?.closest?.("[data-agent-tab]");
     if (tab) {
       if (tab.dataset.agentTab === "human") {
@@ -369,6 +378,7 @@ export function createAgentSigninUI({ onSignedIn, onUseHumanAccount, firstRunAct
   };
 
   return {
+    canLeave() { return !busy; },
     mount(target) {
       container = target;
       render();

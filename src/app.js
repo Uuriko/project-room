@@ -527,7 +527,7 @@ const signinUI = createAuthSigninUI({
   // paint can see it — above the sign-in panel, not behind the toggle.
   onMagicLinkFailure: message => {
     setFormStatus($("#auth-link-error"),
-      `${message} Request a new link with More options below, or sign in another way.`, true);
+      `${message} Request a new link from Other sign-in methods below, or sign in another way.`, true);
   },
   onSignedIn: async () => {
     await accountClient.restore();
@@ -562,7 +562,8 @@ const agentSigninUI = createAgentSigninUI({
   onUseHumanAccount: () => {
     // Agent chose the human path: hide agent UI, ensure human UI visible.
     // The human sign-in UI (signinUI) is already mounted; just scroll to it.
-    $("#auth-signin-ui")?.scrollIntoView({ block: "nearest" });
+    showSigninMethods();
+    $("#google-signin")?.focus();
   }
 });
 agentSigninUI.mount($("#agent-signin-ui"));
@@ -3124,7 +3125,7 @@ $("#invitation-accept").addEventListener("click", async () => {
   }
 });
 function focusSignin() {
-  const keyVisible = !$("#signin-extra").hidden && $("#key-signin").open;
+  const keyVisible = !$("#signin-support-root").hidden && $("#signin-support-root").open && $("#key-signin").open;
   const emailVisible = !$("#email-auth-step").hidden;
   const target = keyVisible ? $("#access-key") : emailVisible ? $("#email-auth-panel [name=email]") : $("#google-signin");
   target?.focus({ preventScroll: true });
@@ -3134,26 +3135,76 @@ function setSigninExtra(open) {
   if (!extra || !toggle) return;
   extra.hidden = !open;
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.textContent = open ? "Fewer options" : "More options";
+  toggle.textContent = open ? "Back to sign in" : "Other sign-in methods";
+  $("#signin-methods").hidden = open;
+  $("#signin-entry-routes").hidden = open;
+  $("#signin-support-root").hidden = open;
 }
 $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
-  setSigninExtra(extra ? extra.hidden : false);
+  const open = extra ? extra.hidden : false;
+  if (!agentSigninUI.canLeave() || !signinUI.closeEmail()) return;
+  showSigninMethods();
+  setSigninExtra(open);
 });
 function showSigninMethods() {
+  $("#guest-entry").open = false;
+  $("#agent-auth-step").hidden = true;
+  $("#agent-signin-button").setAttribute("aria-expanded", "false");
+  $("#signin-entry-routes").hidden = false;
   $("#signin-methods").hidden = false;
   $("#email-auth-step").hidden = true;
   $("#signin-more").hidden = false;
+  $("#signin-support-root").hidden = false;
 }
 function openEmailAuth(mode) {
+  if (!agentSigninUI.canLeave()) return;
   const panel = $("#email-auth-panel");
   if (!signinUI.openEmail(mode, panel)) return;
+  $("#agent-auth-step").hidden = true;
+  $("#agent-signin-button").setAttribute("aria-expanded", "false");
+  $("#guest-entry").open = false;
+  $("#signin-entry-routes").hidden = true;
   $("#signin-methods").hidden = true;
   $("#email-auth-step").hidden = false;
   $("#signin-more").hidden = true;
   setSigninExtra(false);
+  $("#signin-methods").hidden = true;
+  $("#signin-entry-routes").hidden = true;
+  $("#signin-support-root").hidden = true;
   panel?.querySelector('[name="email"]')?.focus();
 }
+function openAgentSignin() {
+  if (!signinUI.closeEmail()) return;
+  showSigninMethods();
+  setSigninExtra(false);
+  $("#guest-entry").open = false;
+  $("#signin-methods").hidden = true;
+  $("#signin-entry-routes").hidden = true;
+  $("#signin-more").hidden = true;
+  $("#signin-support-root").hidden = true;
+  $("#agent-auth-step").hidden = false;
+  $("#agent-signin-button").setAttribute("aria-expanded", "true");
+  ($("#agent-signin-ui input:not([type=hidden])") || $("#agent-auth-back"))?.focus();
+}
+$("#agent-signin-button").addEventListener("click", openAgentSignin);
+$("#agent-auth-back").addEventListener("click", () => {
+  if (!agentSigninUI.canLeave()) return;
+  showSigninMethods();
+  $("#agent-signin-button").focus();
+});
+$("#guest-entry").addEventListener("toggle", () => {
+  if ($("#guest-entry").open) {
+    if (!signinUI.closeEmail()) return;
+    $("#agent-auth-step").hidden = true;
+    $("#email-auth-step").hidden = true;
+    $("#agent-signin-button").setAttribute("aria-expanded", "false");
+    setSigninExtra(false);
+    $("#signin-methods").hidden = true;
+  } else if ($("#agent-auth-step").hidden && $("#email-auth-step").hidden) {
+    $("#signin-methods").hidden = false;
+  }
+});
 $("#email-auth-back")?.addEventListener("click", () => {
   if (!signinUI.closeEmail()) return;
   showSigninMethods();
@@ -3170,8 +3221,7 @@ $("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSes
 function revealAgentSigninLink() {
   if (location.hash !== "#join-agent") return;
   if (!signinUI.closeEmail()) return;
-  showSigninMethods();
-  setSigninExtra(true);
+  openAgentSignin();
   const details = $("#join-agent");
   if (details) details.open = true;
 }
@@ -3293,6 +3343,7 @@ $("#auth-form").addEventListener("submit", async e => {
     ? (requestedRoom ? "Check the account key and Room membership. Have a room key? Choose Room key." : "Check the account key and try again.")
     : "Check the access key and try again. If this is an account key, choose Account key." });
   if (state) revealLocationHash();
+  else if (!$("#auth-panel").hidden && $("#auth-error").textContent && document.activeElement === document.body) focusSignin();
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();

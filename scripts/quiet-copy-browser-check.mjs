@@ -34,7 +34,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     // GitHub/email/magic/passkey/recovery, and session restore stay collapsed.
     assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
     assert.equal(await page.locator("#google-signin").isVisible(), true);
-    assert.equal(await page.locator("#signin-more").textContent(), "More options");
+    assert.equal(await page.locator("#signin-more").textContent(), "Other sign-in methods");
     assert.equal(await page.locator("#signin-more").isVisible(), true);
     assert.equal(await page.locator("#signin-extra").isVisible(), false);
     assert.equal(await page.locator("#session-hint").isVisible(), false);
@@ -48,14 +48,16 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
     assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), false);
-    assert.equal(await page.locator("#guest-entry > summary").isVisible(), true);
+    assert.equal(await page.locator("#guest-entry > summary").isVisible(), false);
+    await page.locator("#signin-more").click();
+    await page.locator("#signin-support-root > summary").click();
     await page.locator("#key-signin > summary").click();
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
     assert.equal(await page.locator(".topbar").isVisible(), false, "healthy signed-out entry has no utility-only navbar");
     await page.reload();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#signin-more").click();
+    await page.locator("#signin-support-root > summary").click();
     await page.locator("#key-signin > summary").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
@@ -72,6 +74,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.getByLabel("Room key", { exact: true }).press("Enter");
     await page.waitForFunction(() => document.querySelector("#auth-error").textContent.includes("Check the access key"));
     assert.equal(await page.locator("#auth-error").isVisible(), true);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "failed key sign-in focuses the visible key field");
     assert.equal(await page.locator("#status").textContent(), "", "one authentication error region");
     await page.getByLabel("Room key", { exact: true }).fill(fixture.keys.owner);
     await page.getByLabel("Room key", { exact: true }).press("Enter");
@@ -115,8 +118,7 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.equal(await page.locator("#auth-title").textContent(), "Open room commons");
   assert.equal(await page.locator("#google-signin").isVisible(), true);
   assert.equal(await page.locator("#signin-extra").isVisible(), false);
-  await page.locator("#signin-more").click();
-  await page.locator("#signin-extra").waitFor({ state: "visible" });
+  await page.locator("#signin-support-root > summary").click();
   await page.locator("#key-signin > summary").click();
   assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);

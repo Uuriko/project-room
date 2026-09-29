@@ -18,7 +18,9 @@ export async function expandSigninMore(page) {
 
 export async function fillAccessKey(page, value) {
   const key = page.locator('#access-key');
-  await expandSigninMore(page);
+  const support = page.locator("#signin-support-root");
+  if (await support.isHidden()) await page.locator("#signin-more").click();
+  if (await support.count() && !(await support.evaluate(node => node.open))) await support.locator(":scope > summary").click();
   const keys = page.locator("#key-signin");
   if ((await keys.getAttribute("open")) === null) await keys.locator("summary").click();
   await key.waitFor({ state: 'visible' });

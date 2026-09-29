@@ -1501,3 +1501,11 @@ summary { overflow-wrap: anywhere; }
 .room-more-actions .topbar-button { display: flex; width: 100%; min-height: 44px; justify-content: space-between; text-align: left; }
 #room-permissions, #advanced-room-tools { margin-block: .75rem; }
 #room-permissions > summary, #advanced-room-tools > summary { min-height: 44px; cursor: pointer; padding-block: .65rem; }
+
+/* Visible entry routes, each opening a focused sign-in flow. */
+.signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
+.signin-entry-routes #guest-entry { margin: 0; }
+.signin-entry-routes #guest-entry > summary { color: var(--text); font-size: 1rem; }
+.signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }
+#agent-auth-step { margin-top: 1rem; }
+#agent-auth-back { min-height: 44px; }

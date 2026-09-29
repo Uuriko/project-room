@@ -36,9 +36,8 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await owner.locator("#main").waitFor({ state: "visible" });
 
   await guest.goto(origin);
-  await guest.locator("#signin-more").click();
   await guest.locator("#guest-entry > summary").click();
-  assert.equal(await guest.locator("#signin-extra").isVisible(), true);
+  assert.equal(await guest.locator("#signin-extra").isVisible(), false);
   // Invalid invite input must surface a visible inline error, not fail
   // silently (QA 2026-09-29: the error text was set on #invite-error but the
   // element stayed display:none because .visible was never added).
