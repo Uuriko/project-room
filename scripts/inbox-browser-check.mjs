@@ -1324,3 +1324,36 @@ for (const mobile of [false, true]) test(`late sample send ${mobile ? 'mobile' :
   assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
   assert.equal(await p.locator('#inbox-send-preview').isVisible(), false);
 });
+
+for (const target of ["account", "room"]) test(`fixture account sign-in waits for held ${target} startup before restoring its cookie slot`, { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), key = f.store.issueAccountAccessKey(account.id);
+  f.store.completeOnboarding(account.id);
+  const server = createRoomServer({ store: f.store });
+  const counts = { get: 0, post: 0 };
+  server.on("request", request => {
+    if (new URL(request.url, "http://fixture.invalid").pathname !== "/api/account-session") return;
+    if (request.method === "GET") counts.get++;
+    if (request.method === "POST") counts.post++;
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage();
+  let captured, release;
+  const held = new Promise(resolve => { captured = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  let first = true;
+  await page.route("**/api/account-session", async route => {
+    if (route.request().method() !== "GET" || !first) return route.continue();
+    first = false; captured(); await gate; await route.continue();
+  });
+  t.after(() => release());
+  const url = `http://127.0.0.1:${server.address().port}/?${target === "account" ? "account=1" : "room=commons"}`;
+  await page.goto(url, { waitUntil: "domcontentloaded" }); await held;
+  const login = signInFixture(page, key, { returnTo: url });
+  await page.waitForTimeout(150);
+  assert.deepEqual(counts, { get: 0, post: 0 }, "fixture setup cannot mint a competing slot or commit before browser startup finishes");
+  release(); const actual = await login;
+  assert.equal(actual.authenticated, true); assert.equal(actual.account.id, account.id);
+  assert.equal(counts.post, 1, "one actual credential commit");
+});

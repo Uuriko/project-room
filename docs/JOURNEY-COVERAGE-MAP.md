@@ -428,16 +428,19 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "human-signin-navigation",
-      "claim": "People can sign in with Google or email, request a sign-in link or use a password, and return from the email step on mobile without interrupting pending authentication.",
+      "claim": "People can sign in with Google or the visible email/password form, create an account, choose password reset or an email sign-in link under Forgot password, and navigate back on mobile without interrupting pending authentication. Reset links preserve invitation destinations and require fresh sign-in.",
       "evidence": {
         "unit": [
           "tests/auth-signin-ui.test.js",
           "tests/magic-links-http.test.js",
           "tests/password-http.test.js",
+          "tests/password-reset.test.js",
+          "tests/password-reset-http.test.js",
           "tests/google-oauth-http.test.js"
         ],
         "browser": [
           "scripts/email-password-browser-check.mjs",
+          "scripts/password-reset-browser-check.mjs",
           "scripts/magic-link-browser-check.mjs",
           "scripts/mobile-signin-history-browser-check.mjs",
           "scripts/invitation-check.mjs"

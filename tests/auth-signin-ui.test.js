@@ -60,10 +60,14 @@ function mount(routes = {}) {
 }
 
 
-test("email entry exposes only a delivered-link request", () => {
+test("primary entry exposes password sign-in and contextual recovery", async () => {
   const { container } = mount();
-  assert.match(container.innerHTML, /data-signin-form="magic-request"/);
-  assert.doesNotMatch(container.innerHTML, /type="password"|passkey|recovery|GitHub|data-method|name="code"/i);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  assert.match(container.innerHTML, /data-forgot-password/);
+  assert.doesNotMatch(container.innerHTML, /passkey|GitHub|name="code"/i);
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
+  assert.match(container.innerHTML, /data-reset-password/);
+  assert.match(container.innerHTML, /data-email-method="magic"/);
 });
 test("unconfigured delivery stays visible after pending state clears", async () => {
   const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
@@ -73,7 +77,8 @@ test("unconfigured delivery stays visible after pending state clears", async () 
   assert.match(container.innerHTML, /role="alert"/);
 });
 test("delivered email offers verification code only after explicit selection", async () => {
-  const { container, client, signins } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { authenticated: true, account: { id: "a" } } });
+  const { container, client, signins, ui } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { authenticated: true, account: { id: "a" } } });
+  ui.showMagic();
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
   assert.match(container.innerHTML, /Check m@example.invalid/);
   assert.doesNotMatch(container.innerHTML, /name="code"/);
@@ -194,3 +199,68 @@ for (const view of [{}, { authenticated: true, account: { id: "" } }, { session:
     assert.match(container.status.textContent, /didn.t complete/);
   });
 }
+
+async function resetForm(routes = {}, options = {}) {
+  const client = stubClient(routes), container = fakeContainer();
+  const previousWindow = globalThis.window;
+  const cleaned = [];
+  globalThis.window = { location: { search: '?reset=issued-reset&email=p%40example.invalid&room=studio', pathname: '/', hash: '#invite/retained' }, history: { replaceState: (_state, _title, url) => cleaned.push(url) } };
+  try {
+    const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => { throw new Error('Reset must not sign in'); }, ...options });
+    const result = await ui.mount(container);
+    assert.deepEqual(result, { pendingPasswordReset: true });
+    assert.deepEqual(cleaned, ['/?room=studio#invite/retained']);
+    assert.equal(client.calls.length, 0, 'opening email link is read-only');
+    assert.match(container.innerHTML, /data-signin-form="reset-consume"/);
+    return { client, container, ui };
+  } finally { globalThis.window = previousWindow; }
+}
+test('reset link only renders and scrubs; mismatched passwords do not consume', async () => {
+  const { client, container } = await resetForm();
+  await container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'different-password' }));
+  assert.equal(client.calls.length, 0); assert.match(container.status.textContent, /match/);
+});
+test('successful reset fences old identity and requires a new sign-in', async () => {
+  let reconciled = 0;
+  const { client, container } = await resetForm({ '/api/auth/password/reset/consume': { status: 'password_reset', signInRequired: true } }, { onPasswordResetComplete: () => reconciled++ });
+  await container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'synthetic-long-password' }));
+  assert.equal(client.session, null); assert.equal(reconciled, 1);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  assert.doesNotMatch(container.innerHTML, /synthetic-long-password|issued-reset/);
+  assert.equal(client.calls[0].data.code, 'issued-reset');
+});
+test('malformed reset success reconciles uncertain cookie without claiming completion', async () => {
+  let fenced = 0, complete = 0;
+  const { client, container } = await resetForm({ '/api/auth/password/reset/consume': {} }, { onSignInUncertain: () => fenced++, onPasswordResetComplete: () => complete++ });
+  await container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'synthetic-long-password' }));
+  assert.equal(client.session, null); assert.equal(fenced, 1); assert.equal(complete, 0);
+});
+test('pending reset blocks Back and view changes until actual reply', async () => {
+  let release; const pending = new Promise(resolve => release = resolve);
+  const { container, ui } = await resetForm({ '/api/auth/password/reset/consume': () => pending });
+  const submission = container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'synthetic-long-password' }));
+  await Promise.resolve(); assert.equal(ui.back(), false); assert.equal(ui.showView('forgot'), false);
+  release({ status: 'password_reset', signInRequired: true }); await submission;
+  assert.equal(ui.canLeave(), true);
+});
+
+test('reset for another account requires explicit switch and a fresh password entry', async () => {
+  let logouts = 0;
+  const { client, container } = await resetForm({}, { onAccountSwitch: () => true });
+  client.request = async () => { throw Object.assign(new Error('Different account'), { status: 409, code: 'reset_account_mismatch' }); };
+  client.logout = async () => { logouts++; client.generation++; client.session = { authenticated: false, sessionRevision: 2 }; return client.session; };
+  await container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'synthetic-long-password' }));
+  assert.equal(logouts, 0); assert.match(container.innerHTML, /data-magic-switch/);
+  await container.listeners.click[0](clickOnDataset('magic-switch'));
+  assert.equal(logouts, 1); assert.match(container.innerHTML, /data-signin-form="reset-consume"/);
+  assert.doesNotMatch(container.innerHTML, /synthetic-long-password/);
+});
+test('late reset response cannot fence a replacement account', async () => {
+  let release; const pending = new Promise(resolve => release = resolve); let completed = 0, fenced = 0;
+  const { client, container } = await resetForm({ '/api/auth/password/reset/consume': () => pending }, { onPasswordResetComplete: () => completed++, onSignInUncertain: () => fenced++ });
+  const submission = container.listeners.submit[0](submitForm('reset-consume', { newPassword: 'synthetic-long-password', confirmPassword: 'synthetic-long-password' }));
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const replacement = { authenticated: true, account: { id: 'new' } }; client.generation++; client.session = replacement;
+  release({ status: 'password_reset', signInRequired: true }); await submission;
+  assert.equal(client.session, replacement); assert.equal(completed, 0); assert.equal(fenced, 0);
+});

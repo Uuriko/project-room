@@ -1,6 +1,9 @@
 // Disposable loopback fixtures only. Real visible login keeps pending browser callbacks alive.
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { hashPassword } from "../src/password-auth.mjs";
+
+const fixtureLogins = new WeakMap();
 
 export async function signInFixtureInPlace(page, store, accessKey, roomId = "commons") {
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(new URL(page.url()).hostname));
@@ -8,12 +11,17 @@ export async function signInFixtureInPlace(page, store, accessKey, roomId = "com
   assert.equal(member.kind, "human");
   const account = store.accountForMember(roomId, member.id) ?? store.bindHumanAccount(roomId, member.id, `fixture-${member.id}`);
   store.completeOnboarding(account.id);
-  const email = `fixture-${member.id}@example.invalid`, password = "synthetic-replacement-password";
-  if (!store.accountLogins.findAccountByVerifiedEmail(email)) store.accountLogins.linkPasswordMethod(account.id, { email, verifier: hashPassword(password) });
+  let logins = fixtureLogins.get(store);
+  if (!logins) { logins = new Map(); fixtureLogins.set(store, logins); }
+  let login = logins.get(account.id);
+  if (!login) {
+    login = { email: `fixture-${member.id}@example.invalid`, password: randomUUID() };
+    store.accountLogins.linkPasswordMethod(account.id, { email: login.email, verifier: hashPassword(login.password) });
+    logins.set(account.id, login);
+  }
+  const { email, password } = login;
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#email-signin").click();
-  await page.locator('#email-auth-panel [data-email-method="password"]').click();
-  const form = page.locator('#email-auth-panel [data-signin-form="password"]');
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email);
   await form.locator('[name="password"]').fill(password);
   const reply = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");

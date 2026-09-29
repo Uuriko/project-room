@@ -1434,7 +1434,7 @@ summary { overflow-wrap: anywhere; }
 .land-checks-pending { background: #d29922; }
 .land-badge { font-size: .68rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem; }
 
-/* Welcome starts with two methods; the selected email form replaces them. */
+/* Email/password entry and focused recovery screens. */
 .app-shell:has(#auth-panel:not([hidden])) .topbar .brand { visibility: hidden; }
 .app-shell:has(#auth-panel:not([hidden])):has(#connection-status[data-state="signed-out"]) > .topbar:has(#session-menu.empty) { display: none; }
 .auth-panel #auth-title { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: clamp(1.5rem, 5vw, 1.9rem); font-weight: 400; letter-spacing: .09em; }
@@ -1442,7 +1442,7 @@ summary { overflow-wrap: anywhere; }
 .signin-methods .button { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; line-height: 1.4; padding: .75rem 1rem; margin: 0; }
 .signin-methods #google-signin { font-size: 1rem; padding: .75rem 1rem; margin: 0; }
 #email-auth-step #email-auth-panel { margin-top: 0; }
-#email-auth-back { display: inline-flex; align-items: center; gap: .35rem; min-height: 44px; margin: 0 0 .5rem; padding: .6rem 0; box-sizing: border-box; }
+[data-signin-back] { display: inline-flex; align-items: center; gap: .35rem; min-width: 44px; min-height: 44px; margin: 0 0 .5rem; padding: .6rem 0; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
 .join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
 .join-agent[open] > summary { margin-bottom: .75rem; }
@@ -1486,3 +1486,15 @@ summary { overflow-wrap: anywhere; }
 .signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }
 #agent-auth-step { margin-top: 1rem; }
 #agent-auth-back { min-height: 44px; }
+
+#auth-signin-ui form { display: grid; gap: .75rem; }
+#auth-signin-ui [data-signin-panel] { display: grid; gap: .75rem; }
+#auth-signin-ui [data-signin-form="password"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+[data-signin-form="password"] > label, [data-signin-form="password"] > button[type="submit"] { grid-column: 1 / -1; }
+
+/* Recovery uses one primary action with a quieter alternative below. */
+#auth-panel #auth-error:empty, #auth-panel #auth-link-error:empty { display: none; }
+#auth-signin-ui [data-signin-panel] { grid-template-columns: minmax(0, 1fr); margin-top: 0; }
+#auth-signin-ui [data-recovery-option] { width: 100%; min-height: 44px; margin: 0; }
+#auth-signin-ui [data-recovery-option="reset"].primary { font-size: 1rem; padding: .75rem 1rem; }
+#auth-signin-ui [data-recovery-option="magic"] { font-size: .9rem; justify-self: center; }

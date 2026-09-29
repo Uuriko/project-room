@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 // Start a room: the door's main button opens /?start=room. A new visitor sees
 // "Sign in to start your room", signs in, and lands inside their own room
 // instead of the Inbox. The intent is one-shot: a later visit without it keeps
@@ -36,8 +37,8 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   assert.doesNotMatch(page.url(), /start=room/, "the intent leaves the address bar");
 
   const email = "start-room@example.invalid";
-  await page.locator("#email-signin").click();
-  const form = page.locator('#email-auth-panel [data-signin-form="magic-request"]');
+  await openMagicSignin(page);
+  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
   await form.locator('[name="email"]').fill(email);
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/request");
   await form.locator('button[type="submit"]').click();

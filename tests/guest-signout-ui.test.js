@@ -9,7 +9,7 @@ async function fixture(t) {
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, {
       value: '', textContent: '', hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
-      classList: { toggle() {} }, addEventListener(type, handler) { this.handlers[type] = handler; },
+      attributes: {}, setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; }, classList: { toggle() {} }, addEventListener(type, handler) { this.handlers[type] = handler; },
       replaceChildren() {}, reset() {}, showModal() { this.open = true; },
       close() { this.open = false; this.handlers.close?.(); },
       focus() { document.activeElement = this; },

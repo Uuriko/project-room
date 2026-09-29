@@ -103,6 +103,8 @@ async function fillInvitationEmail(page, fixtureKey) {
   const email = fixtureLogins.get(fixtureKey);
   assert.ok(email, "test account has a synthetic email login");
   await page.locator("#invitation-email").click();
+  await page.locator("#invitation-methods [data-forgot-password]").click();
+  await page.locator('#invitation-methods [data-email-method="magic"]').click();
   const request = page.locator('#invitation-methods [data-signin-form="magic-request"]');
   await request.locator('[name="email"]').fill(email);
   await request.locator('button[type="submit"]').click();
@@ -435,19 +437,21 @@ test("successful email POST followed by a failed account restore fences private 
   await page.locator("#message-input").fill("Private draft before failed identity confirmation");
   await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
   await fillInvitationEmail(page, f.targetAccountKey);
-  let loginCommitted = false, restoreFailed = false;
+  let loginCommitted = false, restoreFailed = false, restoredFailure;
+  const failedRestore = new Promise(resolve => { restoredFailure = resolve; });
   await page.route("**/api/auth/magic/consume", async route => {
     const response = await route.fetch(); assert.equal(response.status(), 201);
     loginCommitted = true; await route.fulfill({ response });
   });
   await page.route("**/api/account-session", async route => {
     if (loginCommitted && route.request().method() === "GET") {
-      restoreFailed = true; await route.abort("failed");
+      restoreFailed = true; await route.abort("failed"); restoredFailure();
     } else await route.continue();
   });
   page.once("dialog", dialog => dialog.accept());
   await page.locator('#invitation-methods [data-signin-form="magic-code"] button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "hidden" });
+  await failedRestore;
   assert.equal(loginCommitted, true); assert.equal(restoreFailed, true);
   assert.equal(await page.locator("#message-input").inputValue(), "");
   assert.equal(f.store.db.prepare("SELECT status FROM membership_invitations WHERE id=?").get(f.invitationId).status, "pending");
@@ -459,6 +463,8 @@ test("delivered email link opens its intended invitation in a fresh browser tab"
   const context = await f.browser.newContext(); const opener = await context.newPage();
   await opener.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await opener.locator('#invitation-email').click();
+  await opener.locator('#invitation-methods [data-forgot-password]').click();
+  await opener.locator('#invitation-methods [data-email-method="magic"]').click();
   const form = opener.locator('#invitation-methods [data-signin-form="magic-request"]');
   const email = fixtureLogins.get(f.targetAccountKey);
   await form.locator('[name="email"]').fill(email);
@@ -484,7 +490,6 @@ test("a shared invitation retains its pending account signup across Escape and n
   const page = await (await f.browser.newContext()).newPage(); page.setDefaultTimeout(10000);
   await page.goto(`${f.origin}/#join/${token}`);
   await page.locator("#join-account-signin").click();
-  await page.locator('#join-account-auth [data-email-method="password"]').click();
   const form = page.locator('#join-account-auth [data-signin-form="password"]');
   await form.locator('[data-password-mode="signup"]').click();
   await form.locator('[name="email"]').fill("shared-pending-signup@example.invalid");

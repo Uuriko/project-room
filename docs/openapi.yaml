@@ -6357,6 +6357,61 @@ paths:
         '401': { description: invalid_credentials (wrong password, unknown email, or no password set — same shape) }
         '422': { description: invalid_login or invalid_email }
         '429': { description: rate_limited }
+  /api/auth/password/reset/request:
+    post:
+      summary: Email a purpose-bound password reset link
+      description: >-
+        Requires the browser account slot, Origin and CSRF. Responds identically
+        for existing and unknown emails. Configured delivery receives a single-use
+        15-minute reset proof; no password or account changes occur on request.
+        Optional returnTo has the same strict local validation as magic sign-in.
+      security:
+        - accountSession: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required: [email]
+              properties:
+                email: { type: string }
+                returnTo: { type: string }
+      responses:
+        '200': { description: "sent or honest mail_not_configured; no account-existence information" }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_email_request, invalid_email or invalid_return_target }
+        '429': { description: rate_limited }
+  /api/auth/password/reset/consume:
+    post:
+      summary: Set a new password after proving mailbox ownership
+      description: >-
+        Requires the account slot, Origin, CSRF and current sessionRevision.
+        Proof is password-reset-only, bound to the active password account,
+        current verifier and auth epoch. Expired, used or invalid proofs fail
+        identically. A signed-in foreign account is refused before proof use.
+        Success atomically changes the verifier, burns proof and revokes target
+        human account and Room credentials/sessions. Membership, invitation
+        authority epochs, unrelated accounts and agent identities remain intact.
+        Does not sign in or accept an invitation; fresh sign-in is required.
+      security:
+        - accountSession: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required: [email, code, newPassword, sessionRevision]
+              properties:
+                email: { type: string }
+                code: { type: string }
+                newPassword: { type: string, minLength: 10, maxLength: 256 }
+                sessionRevision: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: "{status: password_reset, signInRequired: true}; fresh sign-in required" }
+        '401': { description: account_session_required or invalid_password_reset }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: stale_session_revision or reset_account_mismatch; proof remains unused }
+        '422': { description: invalid_password_reset, invalid_email or password policy failure }
+        '429': { description: rate_limited }
   /api/auth/password/change:
     post:
       summary: Rotate the account password (slice 2)

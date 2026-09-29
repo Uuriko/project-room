@@ -1850,6 +1850,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
+  invalidateHumanAccountCredentials(accountId) {
+    return this.transaction(() => {
+      this.account(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
+        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
+        .run(accountId, accountId);
+      // Retain slot tombstones referenced by immutable invitation receipts.
+      this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+    });
+  }
   insertAccountCredential(accountId, expiresAt) {
     const count = this.db.prepare("SELECT count(*) AS n FROM account_credentials WHERE account_id=?").get(accountId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Account credential retention limit reached; administrator maintenance required");

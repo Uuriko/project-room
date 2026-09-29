@@ -69,9 +69,12 @@ function accountHomeFromLocation() {
 // silent bounce back to the login form.
 function googleErrorFromLocation() {
   const values = new URLSearchParams(location.search).getAll("google");
-  return values.length === 1 && values[0] === "error";
+  return values.length === 1 && ["error", "unavailable"].includes(values[0]) ? values[0] : null;
 }
 const initialGoogleFailed = googleErrorFromLocation();
+const googleSigninFailureMessage = initialGoogleFailed === "unavailable"
+  ? "Google sign-in isn’t available here yet. Sign in with email and password below."
+  : "Google sign-in didn’t finish. Try again, or sign in with email and password below.";
 if (initialGoogleFailed) {
   const url = new URL(location.href);
   url.searchParams.delete("google");
@@ -495,6 +498,8 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
 let humanAuthBusy = false;
+let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
+let resumeResetJourney = false;
 function ensureAccountSession() {
   if (accountClient.session) return Promise.resolve(accountClient.session);
   if (accountRestoreFlight) return accountRestoreFlight;
@@ -511,9 +516,29 @@ const accountSettingsUI = createAccountSettingsUI({ accountClient });
 const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
+  onViewChange: syncSigninView,
+  onBack: handleSigninBack,
+  onPasswordResetComplete: async () => {
+    endAccountAccess();
+    clearPrivateWorkspace();
+    await accountClient.restore();
+    const deferred = resetJourneyPending;
+    resetJourneyPending = false;
+    if (deferred && (initialInvitationFragment || initialJoinFragment)) resumeResetJourney = true;
+    else if (invitation.secret) renderInvitation();
+    else if (shareLinksUI.pendingFragment()) await shareLinksUI.resumeSignedIn();
+    else { showSigninMethods(); $("#auth-panel").hidden = false; }
+  },
   onBusyChange: value => {
     humanAuthBusy = value;
     shareLinksUI?.syncAccountSigninBusy();
+    if (!value && resumeResetJourney) {
+      resumeResetJourney = false;
+      queueMicrotask(() => {
+        if (initialInvitationFragment) openInvitation(initialInvitationFragment);
+        else shareLinksUI.open(initialJoinFragment);
+      });
+    }
     if (invitation.secret) {
       renderInvitation();
       if (!value && invitation.phase === "ready" && $("#invitation-methods").hidden
@@ -541,7 +566,7 @@ const signinUI = createAuthSigninUI({
   },
   // Keep failed emailed-link redemption visible when opening the email step.
   onMagicLinkFailure: message => {
-    if (invitation.secret) $("#invitation-email").click();
+    if (invitation.secret) { $("#invitation-email").click(); signinUI.showMagic(); }
     else openEmailAuth("magic", { recordHistory: false });
     setFormStatus($("#auth-link-error"),
       `${message} Request a new link or continue with Google.`, true);
@@ -578,6 +603,7 @@ const signinUI = createAuthSigninUI({
     await landAfterSignIn();
   }
 });
+const initialPasswordReset = new URLSearchParams(location.search).has("reset");
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -1281,6 +1307,7 @@ async function openInvitation(fragment) {
   queueMicrotask(() => $("#invitation-title").focus({ preventScroll: true }));
   if (!fragment.valid) return;
   await previewCurrentInvitation();
+  if (initialGoogleFailed && invitation.phase === "needs-account") setInvitationFeedback(googleSigninFailureMessage, true);
 }
 async function previewCurrentInvitation() {
   const { version, secret } = invitation;
@@ -2917,7 +2944,7 @@ $("#invitation-email").addEventListener("click", () => {
   $("#invitation-methods").hidden = false;
   $("#invitation-signin-choices").hidden = true;
   $("#invitation-signin-back").hidden = false;
-  signinUI.showMagic();
+  signinUI.showPassword();
 });
 $("#invitation-google").addEventListener("click", event => {
   if (!confirmInvitationSignin() || !signinUI.canLeave()) { event.preventDefault(); return; }
@@ -3038,41 +3065,49 @@ $("#invitation-accept").addEventListener("click", async () => {
     renderInvitation();
   }
 });
+function mainSigninHost() {
+  return $("#auth-panel").contains($("#auth-signin-ui"));
+}
 function focusSignin() {
-  const emailVisible = !$("#email-auth-step").hidden;
-  const target = emailVisible ? $("#email-auth-panel [name=email]") : $("#google-signin");
-  target?.focus({ preventScroll: true });
+  ($("#auth-signin-ui [name=email]") || $("#google-signin"))?.focus({ preventScroll: true });
+}
+function syncSigninView(view) {
+  const previous = signinView;
+  signinView = view;
+  if (!mainSigninHost()) return;
+  const auxiliary = !view.startsWith("password-");
+  if (!signinHistoryReplay && auxiliary && previous !== view) {
+    if (previous.startsWith("password-")) {
+      const base = { ...history.state };
+      delete base.roomSigninView; delete base.roomSigninStep;
+      history.replaceState(base, "", location.href);
+    }
+    const sameFlow = previous.startsWith("magic-") && view.startsWith("magic-")
+      || previous.startsWith("reset-") && view.startsWith("reset-");
+    history[sameFlow ? "replaceState" : "pushState"]({ ...history.state, roomSigninView: view }, "", location.href);
+  }
+  $(auxiliary ? "#email-auth-panel" : "#signin-controller").prepend($("#auth-signin-ui"));
+  $("#email-auth-panel").hidden = !auxiliary;
+  $("#email-auth-step").hidden = !auxiliary;
+  $("#signin-methods").hidden = auxiliary;
+  $("#signin-entry-routes").hidden = auxiliary;
 }
 function showSigninMethods() {
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
-  $("#signin-entry-routes").hidden = false;
-  $("#signin-methods").hidden = false;
-  $("#email-auth-step").hidden = true;
+  $("#signin-controller").prepend($("#auth-signin-ui"));
+  signinUI.showPassword();
+  syncSigninView("password-login");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
-  if (!agentSigninUI.canLeave()) return;
-  const panel = $("#email-auth-panel");
-  if (!signinUI.openEmail(mode, panel)) return;
-  if (recordHistory && $("#email-auth-step").hidden) {
-    // Reload renders the method chooser; its retained history entry must also
-    // represent that chooser before adding a fresh email step.
-    if (history.state?.roomSigninStep === "email") {
-      const entry = { ...history.state };
-      delete entry.roomSigninStep;
-      history.replaceState(entry, "", location.href);
-    }
-    history.pushState({ ...history.state, roomSigninStep: "email" }, "", location.href);
-  }
-  $("#agent-auth-step").hidden = true;
-  $("#agent-signin-button").setAttribute("aria-expanded", "false");
-  $("#signin-entry-routes").hidden = true;
-  $("#signin-methods").hidden = true;
-  $("#email-auth-step").hidden = false;
-  panel?.querySelector('[name="email"]')?.focus();
+  if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
+  signinHistoryReplay = !recordHistory;
+  try { mode === "password" ? signinUI.showPassword() : signinUI.showMagic(); }
+  finally { signinHistoryReplay = false; }
+  focusSignin();
 }
 function openAgentSignin() {
-  if (!signinUI.closeEmail()) return;
+  if (!signinUI.canLeave()) return;
   showSigninMethods();
   $("#signin-methods").hidden = true;
   $("#signin-entry-routes").hidden = true;
@@ -3082,31 +3117,24 @@ function openAgentSignin() {
 }
 $("#agent-signin-button").addEventListener("click", openAgentSignin);
 $("#agent-auth-back").addEventListener("click", () => {
-  if (!agentSigninUI.canLeave()) return;
+  if (!agentSigninUI.leave()) return;
   showSigninMethods();
   $("#agent-signin-button").focus();
 });
-function leaveEmailSignin() {
-  if (!signinUI.closeEmail()) return false;
-  showSigninMethods();
-  $("#email-signin").focus();
+function handleSigninBack() {
+  if (mainSigninHost() && history.state?.roomSigninView) {
+    history.back(); return false;
+  }
   return true;
 }
-$("#email-auth-back")?.addEventListener("click", () => {
-  if (!signinUI.canLeave()) return;
-  if (history.state?.roomSigninStep === "email") history.back();
-  else leaveEmailSignin();
-});
 window.addEventListener("popstate", event => {
-  if ($("#auth-panel").hidden) return;
-  if (event.state?.roomSigninStep === "email") {
-    openEmailAuth("magic", { recordHistory: false });
-  } else if (!$("#email-auth-step").hidden) {
-    if (!signinUI.canLeave()) history.forward();
-    else leaveEmailSignin();
-  }
+  if ($("#auth-panel").hidden || !mainSigninHost()) return;
+  if (!signinUI.canLeave()) { history.forward(); return; }
+  signinHistoryReplay = true;
+  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
+  finally { signinHistoryReplay = false; }
+  focusSignin();
 });
-$("#email-signin")?.addEventListener("click", () => openEmailAuth("magic"));
 // Keep the agent path discoverable without asking everyone to read setup
 // instructions. Existing links open the disclosure directly.
 function revealAgentSigninLink() {
@@ -3169,7 +3197,8 @@ $("#create-account-button")?.addEventListener("click", () => {
   $("#main").hidden = true;
   $("#auth-panel").hidden = false;
   configureAuthPanel(state?.room?.id);
-  $("#auth-title")?.focus?.();
+  signinUI.showPassword("signup");
+  focusSignin();
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && sessionMenu.classList.contains("open")) {
@@ -6332,7 +6361,7 @@ shareLinksUI = installShareLinks({ client, accountClient,
   onAccountSignin: mode => {
     // One sign-in controller and form, hosted in the invitation while needed.
     $(mode ? "#join-account-methods" : "#signin-controller").prepend($("#auth-signin-ui"));
-    if (mode) signinUI.showMagic();
+    if (mode) signinUI.showPassword();
     else clearPendingJoin(window.sessionStorage);
   },
   getState: () => state, getSession: () => session, setConnectionStatus,
@@ -6378,9 +6407,15 @@ configureAuthPanel();
     history.replaceState(history.state, "", location.pathname);
   }
 }
-if (initialInvitationFragment) openInvitation(initialInvitationFragment);
+if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialInvitationFragment);
 (async () => {
-  await initialSignin;
+  const initialResult = await initialSignin;
+  if (initialResult?.pendingPasswordReset) {
+    resetJourneyPending = true;
+    $("#auth-panel").hidden = false;
+    signinUI.focus();
+    return;
+  }
   if (startRoomFlight) await startRoomFlight;
   // Emailed-link authentication already owns its landing, including a newly
   // created room. Do not restore a second session over that completed journey.
@@ -6390,7 +6425,9 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     // Do not leave the initial session/connection progress labels running.
     $("#identity-label").textContent = "Room not open";
     setConnectionStatus("Not connected · invitation preview");
-    await shareLinksUI.open(initialJoinFragment); return;
+    await shareLinksUI.open(initialJoinFragment);
+    if (initialGoogleFailed) setFormStatus($("#join-link-status"), googleSigninFailureMessage, true);
+    return;
   }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation()) {
@@ -6413,7 +6450,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     if (!account?.authenticated) {
       $("#identity-label").textContent = "Not signed in";
       setFormStatus($("#auth-error"), initialGoogleFailed
-        ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or continue with email."
+        ? googleSigninFailureMessage
         : initialGitHubFailed
         ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
         : "");
@@ -6468,7 +6505,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), initialGoogleFailed
-    ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or continue with email."
+    ? googleSigninFailureMessage
     : initialGitHubFailed
     ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
     : signedOut

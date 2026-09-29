@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -73,10 +74,10 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
 
   // Email delivery failure has one local announcement owner through the
   // actual email sign-in screen; this local fixture has no mail provider.
-  await page.locator("#email-signin").click();
-  await page.locator('#email-auth-panel [name=email]').fill("a11y@example.test");
-  await page.locator('#email-auth-panel button[type=submit]').click();
-  const emailError = page.locator('#email-auth-panel [data-signin-status]');
+  await openMagicSignin(page);
+  await page.locator('#auth-signin-ui [name=email]').fill("a11y@example.test");
+  await page.locator('#auth-signin-ui button[type=submit]').click();
+  const emailError = page.locator('#auth-signin-ui [data-signin-status]');
   await emailError.filter({ hasText: /not configured|isn.t configured/i }).waitFor();
   assert.equal(await emailError.getAttribute("role"), "alert");
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
@@ -189,7 +190,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.evaluate(() => document.activeElement.id), "google-signin", "access end moves focus to sign-in");
+  assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "access end moves focus to the visible sign-in email");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
   await signInFixture(page, maya);

@@ -1,3 +1,4 @@
+import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.mjs";
 // Welcome, sign-out, and return-to-room checks for a new human account.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +45,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   page.on("pageerror", error => errors.push(error.stack || error.message));
   page.on("dialog", dialog => dialog.accept());
   const email = `return-${Date.now()}@example.invalid`;
-  const form = () => page.locator('#email-auth-panel [data-signin-form="magic-request"]');
+  const form = () => page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
   const redeemDeliveredLink = async () => {
     await page.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
     const delivery = sent.at(-1);
@@ -53,7 +54,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
     await page.goto(delivery.link);
   };
   const requestAndRedeem = async () => {
-    await page.locator("#email-signin").click();
+    await openMagicSignin(page);
     await form().locator('[name=email]').fill(email);
     await form().locator('button[type=submit]').click();
     await redeemDeliveredLink();
@@ -62,28 +63,29 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator("#google-signin").isVisible(), true);
   assert.equal(await page.locator("#email-auth-panel").isVisible(), false);
-  assert.equal(await page.locator("#email-signin").isVisible(), true);
+  assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
 
   let releaseMagic;
   const magicPending = new Promise(resolve => { releaseMagic = resolve; });
   await page.route("**/api/auth/magic/request", route => { releaseMagic(route); });
-  await page.locator("#email-signin").click();
+  await openMagicSignin(page);
   await form().locator('[name=email]').fill(email);
   await form().locator('button[type=submit]').click();
   const magicRoute = await magicPending;
-  await page.locator("#email-auth-back").click();
+  assert.equal(await page.locator("#auth-signin-ui [data-signin-back]").isDisabled(), true);
+  await page.keyboard.press("Escape");
   assert.equal(await page.locator("#email-auth-step").isVisible(), true, "pending request cannot hide its status");
   assert.equal(await page.locator("#signin-methods").isVisible(), false);
   await magicRoute.fulfill({ status: 200, json: { status: "unavailable", message: "Synthetic mail outage. Try again." } });
-  await page.locator('#email-auth-panel [data-signin-status]').filter({ hasText: 'Synthetic mail outage.' }).waitFor();
+  await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: 'Synthetic mail outage.' }).waitFor();
   await page.unroute("**/api/auth/magic/request");
-  await page.locator('#email-auth-back').click();
-  assert.equal(await page.evaluate(() => document.activeElement.id), 'email-signin');
-  await page.locator('#email-signin').click();
+  await backToPasswordSignin(page);
+  assert.equal(await page.locator('#auth-signin-ui [name=email]').evaluate(node => node === document.activeElement), true);
+  await openMagicSignin(page);
   assert.equal(await form().locator('[name=email]').inputValue(), email);
   assert.equal(await page.locator('#email-auth-panel input[type=password]').count(), 0);
   const assertCompactHeading = async () => {
-    const back = await page.locator("#email-auth-back").boundingBox();
+    const back = await page.locator("#auth-signin-ui [data-signin-back]").boundingBox();
     assert.ok(back.width >= 44 && back.height >= 44, "Back retains a usable target");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   };

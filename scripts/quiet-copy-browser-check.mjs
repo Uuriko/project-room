@@ -1,3 +1,4 @@
+import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Automated usability checks with synthetic identities, not human participant research.
 import test from "node:test";
@@ -34,17 +35,17 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     // A visitor starts with two human methods and a separate agent entry.
     assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
     assert.equal(await page.locator("#google-signin").isVisible(), true);
-    assert.equal(await page.locator("#email-signin").isVisible(), true);
+    assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
-    await page.locator("#email-signin").click();
-    await page.locator('#email-auth-panel [data-signin-form="magic-request"]').waitFor();
+    await openMagicSignin(page);
+    await page.locator('#auth-signin-ui [data-signin-form="magic-request"]').waitFor();
     await page.screenshot({ path: `test-results/signin-${label}-email.png`, fullPage: true });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
-    await page.locator("#email-auth-back").click();
-    assert.equal(await page.evaluate(() => document.activeElement.id), "email-signin");
+    await backToPasswordSignin(page);
+    assert.equal(await page.locator('#auth-signin-ui [name=email]').evaluate(node => node === document.activeElement), true);
     assert.equal(await page.locator(".topbar").isVisible(), false, "healthy signed-out entry has no utility-only navbar");
     await page.reload();
     await page.locator("#auth-panel").waitFor({ state: "visible" });

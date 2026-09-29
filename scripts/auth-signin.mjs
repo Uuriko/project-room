@@ -16,6 +16,9 @@ export async function signInFixture(page, accessKey, { returnTo = page.url() } =
     });
   }
   if (accountMode || response.status() === 401) {
+    // Startup may still be minting its anonymous cookie. Wait for that actual
+    // landing before restoring the fixture's browser slot.
+    await page.locator("#auth-panel:visible, #workspace-nav:visible, #main:visible").first().waitFor({ state: "visible" });
     const slotResponse = await page.context().request.get(`${origin}/api/account-session`, { maxRedirects: 0 });
     if (!slotResponse.ok()) throw new Error(`Fixture account slot failed (${slotResponse.status()})`);
     const slot = await slotResponse.json();

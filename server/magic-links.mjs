@@ -33,14 +33,20 @@ export function createMagicLinkMailer({ send = null, baseUrl = null } = {}) {
   const configured = typeof send === "function";
   return Object.freeze({
     isConfigured: () => configured,
-    sendMagicLink: async ({ to, code, expiresAt, returnTo } = {}) => {
+    sendPasswordResetNotice: async ({ to } = {}) => {
+      if (!configured) return { delivered: false, reason: "mail_not_configured" };
+      if (typeof to !== "string" || !to) throw new Error("A notification recipient is required");
+      await send({ to, purpose: "password-reset-complete", baseUrl });
+      return { delivered: true };
+    },
+    sendMagicLink: async ({ to, code, expiresAt, returnTo, purpose = "signin" } = {}) => {
       if (!configured) return { delivered: false, reason: "mail_not_configured" };
       if (typeof to !== "string" || to.length === 0 || typeof code !== "string" || code.length === 0) {
         throw new Error("sendMagicLink requires a recipient and a code");
       }
       if (returnTo !== undefined && validateMagicReturnTo(returnTo) === null) throw new Error("Invalid magic-link return target");
-      const link = buildMagicLinkUrl({ baseUrl, to, code, returnTo });
-      await send({ to, code, expiresAt, baseUrl, ...(link ? { link } : {}), ...(returnTo === undefined ? {} : { returnTo }) });
+      const link = buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose });
+      await send({ to, code, expiresAt, baseUrl, ...(purpose === "signin" ? {} : { purpose }), ...(link ? { link } : {}), ...(returnTo === undefined ? {} : { returnTo }) });
       return { delivered: true };
     }
   });
@@ -68,14 +74,15 @@ export function validateMagicReturnTo(value) {
   return value;
 }
 
-export function buildMagicLinkUrl({ baseUrl, to, code, returnTo } = {}) {
+export function buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose = "signin" } = {}) {
+  if (!["signin", "password-reset"].includes(purpose)) throw new Error("Invalid email link purpose");
   if (returnTo !== undefined && validateMagicReturnTo(returnTo) === null) throw new Error("Invalid magic-link return target");
   if (typeof baseUrl !== "string" || !baseUrl) return null;
   const target = new URL(returnTo ?? "/", "https://return.invalid");
   const trusted = new URL(`${baseUrl.replace(/\/+$/, "")}/`);
   trusted.search = target.search;
   trusted.hash = target.hash;
-  trusted.searchParams.set("magic", code);
+  trusted.searchParams.set(purpose === "password-reset" ? "reset" : "magic", code);
   trusted.searchParams.set("email", to);
   return trusted.href;
 }

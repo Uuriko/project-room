@@ -1,3 +1,4 @@
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Browser coverage for the account settings UI (slice 7, RC-2026-09-17-016):
 // the session menu opens Sign-in & security, the linked methods render with
@@ -95,11 +96,11 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
 test("email sign-in reports unconfigured delivery without pretending to send", { timeout: 30000 }, async t => {
   const { page, origin } = await setup(t);
   await page.goto(origin + "/?account=1");
-  await page.locator("#email-signin").click();
-  const form = page.locator('#email-auth-panel [data-signin-form="magic-request"]');
+  await openMagicSignin(page);
+  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
   await form.locator('[name="email"]').fill("magic-browser@example.invalid");
   await form.locator('button[type="submit"]').click();
-  await page.locator('#email-auth-panel [data-signin-status]').filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: /not configured|isn.t configured/i }).waitFor();
   assert.equal(await page.locator("#auth-panel").isVisible(), true);
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
 });
@@ -125,9 +126,9 @@ test("sign-in UI: email link returns to the existing account with a configured m
   f.store.accountLogins.linkMagicMethod(magicId, { email: "magic-browser@example.invalid" });
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
-  await magic.locator("#email-signin").click();
-  await magic.locator('#email-auth-panel [data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
-  await magic.locator('#email-auth-panel [data-signin-form="magic-request"] button[type="submit"]').click();
+  await openMagicSignin(magic);
+  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
+  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] button[type="submit"]').click();
   await magic.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
   assert.equal(sent.length, 1);
   assert.ok(typeof sent[0].code === "string" && sent[0].code.length > 0);

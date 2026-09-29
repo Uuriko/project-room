@@ -18,14 +18,12 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
-  await page.locator("#email-signin").click();
-  await page.locator('#email-auth-panel [data-email-method="password"]').click();
   return { ...f, page, origin };
 }
 
 test("contextual email creation signs in using the actual password signup API", { timeout: 25000 }, async t => {
   const { page, origin, store } = await setup(t), email = "new-email-password@example.invalid";
-  const form = page.locator('#email-auth-panel [data-signin-form="password"]');
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   assert.equal(await form.locator('[name="password"]').getAttribute("autocomplete"), "current-password");
   await form.locator('[data-password-mode="signup"]').click();
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
@@ -43,11 +41,11 @@ test("contextual email login reports a rejected password then signs into the exi
   const { page, origin, store } = await setup(t), email = "existing-email-password@example.invalid";
   store.createAccount("existing-password-account"); store.completeOnboarding("existing-password-account");
   store.accountLogins.linkPasswordMethod("existing-password-account", { email, verifier: hashPassword(password) });
-  const form = page.locator('#email-auth-panel [data-signin-form="password"]');
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill("wrong-synthetic-password");
   const rejected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
   await form.locator('button[type="submit"]').click(); assert.equal((await rejected).status(), 401);
-  await page.locator('#email-auth-panel [data-signin-status].error').waitFor();
+  await page.locator('#auth-signin-ui [data-signin-status].error').waitFor();
   assert.equal(await form.locator('[name="password"]').inputValue(), "", "failed password is never repainted");
   await form.locator('[name="password"]').fill(password);
   const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");

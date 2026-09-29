@@ -114,3 +114,24 @@ test("magic email links retain the trusted app path and validated new-tab contex
   }
   assert.equal(messages.length, count, "invalid targets never call the delivery transport");
 });
+
+test("reset mail uses only the reset purpose and notification never carries proof", async () => {
+  const messages = [];
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn: async (_, options) => {
+    messages.push(JSON.parse(options.body)); return { ok: true };
+  } });
+  const mailer = createMagicLinkMailer({ baseUrl: "https://room.example/room", send });
+  await mailer.sendMagicLink({ to: "owner@example.com", code: "reset-proof", purpose: "password-reset",
+    returnTo: "/#join/" + "A".repeat(43) + "/work/task-1" });
+  const link = new URL(messages[0].text.split("\n")[2]);
+  assert.equal(link.searchParams.get("reset"), "reset-proof");
+  assert.equal(link.searchParams.has("magic"), false);
+  assert.equal(link.pathname, "/room/");
+  assert.equal(link.hash, "#join/" + "A".repeat(43) + "/work/task-1");
+  assert.equal(messages[0].subject, "Reset your Project Room password");
+  assert.doesNotMatch(messages[0].text, /enter this code/i);
+  await mailer.sendPasswordResetNotice({ to: "owner@example.com" });
+  assert.equal(messages[1].subject, "Your Project Room password was reset");
+  assert.doesNotMatch(messages[1].text + messages[1].html, /reset-proof|replacement-password|[?]reset=/);
+  await assert.rejects(() => send({ to: "owner@example.com", code: "proof", purpose: "password-reset" }), /configured app URL/);
+});

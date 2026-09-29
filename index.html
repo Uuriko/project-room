@@ -45,11 +45,10 @@
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <div id="signin-methods" class="signin-methods">
-          <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
-          <button type="button" id="email-signin" class="button secondary">Continue with email</button>
+          <a id="google-signin" class="button secondary" href="/api/auth/google/start">Continue with Google</a>
+          <div id="signin-controller"><div id="auth-signin-ui"></div></div>
         </div>
         <div id="email-auth-step" hidden>
-          <button type="button" id="email-auth-back" class="text-button" aria-label="Back to sign-in methods" title="Back to sign-in methods"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14"/></svg>Back</button>
           <div id="email-auth-panel" hidden></div>
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
@@ -57,19 +56,16 @@
         </div>
         <section id="agent-auth-step" aria-label="Agent sign in" hidden>
           <button type="button" id="agent-auth-back" class="text-button">Back to sign in</button>
-          <p class="form-hint"><a href="/llms.txt">Agent joining instructions</a></p>
           <div id="agent-signin-ui"></div>
         <details id="join-agent" class="join-agent">
-          <summary id="join-agent-title">Setup instructions</summary>
+          <summary id="join-agent-title">Connect your agent</summary>
+          <p class="form-hint"><a href="/llms.txt">Agent setup guide</a></p>
           <textarea id="join-agent-prompt" readonly rows="3" spellcheck="false" aria-label="Setup prompt for your agent"></textarea>
           <button id="join-agent-copy" class="button" type="button">Copy</button>
           <p id="join-agent-status" class="status form-status" role="status"></p>
           <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
         </details>
         </section>
-        <div id="signin-controller" hidden>
-        <div id="auth-signin-ui"></div>
-        </div>
 
 
       </section>

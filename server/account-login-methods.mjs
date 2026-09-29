@@ -464,6 +464,64 @@ export class AccountLoginMethods {
     });
   }
 
+  // Reset challenges reuse the backed-up challenge table, but both lookup
+  // and proof hashes have their own purpose. Neither can become a login.
+  passwordResetAccount(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    return this.db.prepare(`SELECT m.account_id AS accountId,m.verifier,a.auth_epoch AS authEpoch
+      FROM account_login_methods m JOIN accounts a ON a.id=m.account_id
+      WHERE m.email_hash=? AND m.type='password' AND m.disabled=0 AND a.active=1 LIMIT 1`)
+      .get(emailLookupHash(normalized)) ?? null;
+  }
+  #resetBucket(email) { return sha256hex(`password-reset-email:v1\0${email}`); }
+  #resetDigest(account, code) {
+    return sha256hex(`password-reset-code:v1\0${account?.accountId ?? ""}\0${account?.authEpoch ?? ""}\0${sha256hex(account?.verifier ?? "")}\0${code}`);
+  }
+  issuePasswordResetCode({ email } = {}) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) fail(422, "invalid_email", "A valid email address is required");
+    return this.store.transaction(() => {
+      const now = this.#now(), account = this.passwordResetAccount(normalized);
+      const bucket = this.#resetBucket(normalized), code = base64url(this.random(24));
+      this.db.prepare("DELETE FROM account_magic_codes WHERE expires_at <= ? OR consumed_at IS NOT NULL").run(now);
+      this.db.prepare("DELETE FROM account_magic_codes WHERE email_hash=?").run(bucket);
+      this.db.prepare(`INSERT INTO account_magic_codes(code_hash,account_id,email,email_hash,expires_at,consumed_at,attempts,created_at)
+        VALUES(?,?,?,?,?,NULL,0,?)`).run(this.#resetDigest(account, code), account?.accountId ?? null, normalized, bucket, now + MAGIC_CODE_TTL_MS, now);
+      return { code, email: normalized, expiresAt: now + MAGIC_CODE_TTL_MS };
+    });
+  }
+  resetPassword({ email, code, verifier } = {}) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) fail(422, "invalid_email", "A valid email address is required");
+    if (!isNonEmptyString(verifier) || verifier.length > 512) fail(422, "invalid_login_method", "A password verifier is required");
+    const account = this.passwordResetAccount(normalized), now = this.#now(), bucket = this.#resetBucket(normalized);
+    const rows = this.db.prepare(`SELECT * FROM account_magic_codes WHERE email_hash=? AND consumed_at IS NULL
+      AND expires_at > ? ORDER BY created_at DESC LIMIT 20`).all(bucket, now);
+    const digest = this.#resetDigest(account, typeof code === "string" ? code : "");
+    const match = rows.find(row => constantTimeDigestEqual(row.code_hash, digest) && account && row.account_id === account.accountId);
+    if (!match) {
+      const newest = rows[0];
+      if (newest) {
+        if (newest.attempts + 1 >= MAGIC_CODE_MAX_ATTEMPTS) this.db.prepare("DELETE FROM account_magic_codes WHERE code_hash=?").run(newest.code_hash);
+        else this.db.prepare("UPDATE account_magic_codes SET attempts=attempts+1 WHERE code_hash=?").run(newest.code_hash);
+      }
+      fail(401, "invalid_password_reset", "This password reset link is not valid or has expired");
+    }
+    return this.store.transaction(() => {
+      const current = this.passwordResetAccount(normalized);
+      if (!current || !constantTimeDigestEqual(match.code_hash, this.#resetDigest(current, code))) {
+        fail(401, "invalid_password_reset", "This password reset link is not valid or has expired");
+      }
+      const changed = this.db.prepare("UPDATE account_magic_codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?")
+        .run(now, match.code_hash, now).changes;
+      if (changed !== 1) fail(401, "invalid_password_reset", "This password reset link is not valid or has expired");
+      this.setPasswordVerifier(current.accountId, verifier);
+      this.store.invalidateHumanAccountCredentials(current.accountId);
+      return { accountId: current.accountId, email: normalized };
+    });
+  }
+
   // --- Recovery codes (slice 6) ---
   //
   // A set of single-use codes shown once at generation. Stored as
