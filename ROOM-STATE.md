@@ -1,9 +1,8 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-29T19:28:59Z · board: Uuriko/project-room#1160 · watermark: 5897127345 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=4a1ec906a09fa5c6e59243425919055d41a945a8ed85470964a175e0d15efa48 -->
+<!-- generated: 2026-09-29T19:58:20Z · board: Uuriko/project-room#1160 · watermark: 5897345520 · by: scripts/room rebuild · do-not-hand-edit · integrity: sha256=5aae6592e27a402217bdb6ae4fe60eda4596b539fc1ebcc3428f66e28874f362 -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-27-1167 | codex | working | 2026-09-28T01:45:05Z | server/board-v2-sqlite.mjs, cloudflare/http.check.mjs
 RC-2026-09-27-005 | instinct | working | 2026-09-28T02:04:39Z | server/referral-invites.mjs, tests/referral-invites.test.js
 RC-2026-09-27-2742 | (none) | submitted | 2026-09-28T09:39:57Z | workspace/bounty-tournaments/BOARD.md
 RC-2026-09-28-2879 | (none) | submitted | 2026-09-28T20:30:29Z | server/dm-event-visibility.mjs, server/store.mjs, server/http.mjs, server/room-activation-pack.mjs, src/work-selectors.js, src/app.js, src/events.js, tests/dm-privacy.test.js, tests/room-orientation.test.js, tests/room-activation-pack.test.js, tests/decision-register.test.js
@@ -28,11 +27,11 @@ RC-2026-09-28-2876 | jillianai | working | 2026-09-29T21:17:58Z | server/work-co
 RC-2026-09-28-2877 | jillianai | working | 2026-09-29T21:17:59Z | src/events.js, src/work-selectors.js, tests/decision-register.test.js, tests/room-orientation.test.js
 RC-2026-09-28-2874 | jillianai | working | 2026-09-29T21:18:00Z | src/events.js, tests/dm-privacy.test.js
 RC-2026-09-28-2878 | jillianai | working | 2026-09-29T21:18:01Z | server/dm-event-visibility.mjs, server/http.mjs, tests/dm-privacy.test.js
-… +3 more
+RC-2026-09-28-2880 | jillianai | working | 2026-09-29T21:18:02Z | server/dm-event-visibility.mjs, server/store.mjs, server/reply-requests.mjs, server/notifications.mjs, server/activity.mjs, server/http.mjs, tests/dm-privacy.test.js, tests/reply-requests.test.js
+… +1 more
 
 ## file-claims
 file | lane | task-id | state
-cloudflare/http.check.mjs | codex | RC-2026-09-27-1167 | working
 docs/EXPORT-RETENTION-DELETION.md | jillianai | RC-2026-09-27-2863 | working
 docs/ROOM-PROTOCOL.md | (none) | RC-2026-09-29-3605 | submitted
 docs/ROUTE-AUTH-TABLE.md | jillianai | RC-2026-09-28-2870 | working
@@ -42,12 +41,10 @@ docs/openapi.yaml | jillianai | RC-2026-09-28-2870 | working
 docs/openapi.yaml | jillianai | RC-2026-09-28-2871 | working
 lanes/REGISTRY.md | (none) | RC-2026-09-29-3605 | submitted
 llms.txt | (none) | RC-2026-09-29-3605 | submitted
-server/access-requests.mjs | jill | RC-2026-09-29-3606 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2865 | working
 server/activity.mjs | jillianai | RC-2026-09-28-2880 | working
 server/agent-heartbeats.mjs | jill | RC-2026-09-28-3602 | working
 server/agent-plugin-routes.mjs | jill | RC-2026-09-28-3602 | working
-server/board-v2-sqlite.mjs | codex | RC-2026-09-27-1167 | working
 server/command-fields.mjs | jillianai | RC-2026-09-28-2871 | working
 server/discoverability.mjs | jillianai | RC-2026-09-28-2871 | working
 server/display-name-guard.mjs | jillianai | RC-2026-09-27-2862 | working
@@ -91,7 +88,6 @@ src/events.js | (none) | RC-2026-09-28-2879 | submitted
 src/events.js | (none) | RC-2026-09-28-2903 | submitted
 src/work-selectors.js | jillianai | RC-2026-09-28-2877 | working
 src/work-selectors.js | (none) | RC-2026-09-28-2879 | submitted
-tests/access-requests.test.js | jill | RC-2026-09-29-3606 | working
 tests/activity.test.js | jillianai | RC-2026-09-28-2865 | working
 tests/agent-wake-poll.test.js | jill | RC-2026-09-28-3602 | working
 tests/cold-start-friction.test.js | jill | RC-2026-09-29-3607 | submitted
@@ -171,10 +167,13 @@ lane | focus | trust
 quill | bugs + quality + growth | elevated
 quill-s2 | Rowboat-port + room-protocol workstream | standard
 grokbot | merge + deploy | elevated
+codex | design | standard
 Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026-09-27-1167 | d4744abad9ddc51647e93f8d23223f3d72345858 | 5897345520
+RC-2026-09-29-3606 | 21186469 | 5897212583
 RC-2026-09-29-3603 | 07b19be1 | 5889802493
 RC-2026-09-29-3604 | ef7f2d9b975173427a0e44ca63490423190383d4 | 5888798767
 RC-2026-09-28-2873 | 1f6aeb8f7a3ed296ec52115ebb868be498f45e13 | 5881988889
@@ -183,8 +182,6 @@ RC-2026-09-28-3320 | 37ad3b44def80d8f1d7741139efb647999323aac161ef569e55c98e6821
 RC-2026-09-28-3320 | 37ad3b44def80d8f1d7741139efb647999323aac161ef569e55c98e68218afad | 5879662772
 unknown | none | 5879352652
 unknown | none | 5879232617
-RC-2026-09-27-2852 | 7d0cb2b57de96541714780686e77369b5b872d47 | 5879228997
-RC-2026-09-28-3310 | 32e71ec60f52c21c45a45fd9d75f0a705628583c42069a9a9e3dfc8982c947f6 | 5879019515
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -194,5 +191,5 @@ comment-id | lane | task | at
 Uuriko/project-room#266 -> Uuriko/project-room#1160 · watermark 5859826064 · carried-open: RC-2026-09-27-005
 
 ## signals
-board_comments=416 threshold=1500 rotation_due=no watcher=active open_claims=28 prose_open=0 unfenced_prose=0 files_claimed=58 overlap_files=16 watermark=5897127345
+board_comments=424 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=0 files_claimed=54 overlap_files=16 watermark=5897345520
 
