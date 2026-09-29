@@ -9,6 +9,7 @@ import { OutsideAgents } from "./outside-agents.mjs";
 
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { ServiceError } from "./service-error.mjs";
+import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
@@ -18,6 +19,8 @@ import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { workContextMarkdown } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
+import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
+import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
@@ -41,10 +44,13 @@ function withRoomId(entry) {
 }
 
 export function hostedStdioToolDefinitions() {
-  return roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)).map(withRoomId);
+  // The bounty tools are hosted-only: the escrow lives in RoomStore, so there
+  // is no stdio equivalent to filter against.
+  return [...roomTools.filter(entry => !ALREADY_HOSTED.has(entry.name)), ...bountyTools, ...trustTools].map(withRoomId);
 }
 
 export function isHostedStdioTool(name) {
+  if (isBountyTool(name) || isTrustTool(name)) return true;
   return typeof name === "string" && !ALREADY_HOSTED.has(name) && roomTools.some(entry => entry.name === name);
 }
 
@@ -52,6 +58,8 @@ export function validHostedStdioArgs(name, args) {
   if (!args || typeof args !== "object" || Array.isArray(args) || !validId(args.roomId)) return false;
   if (!isHostedStdioTool(name)) return false;
   const { roomId, ...rest } = args;
+  if (isBountyTool(name)) return validBountyToolArguments(name, rest);
+  if (isTrustTool(name)) return validTrustToolArguments(name, rest);
   return validRoomToolArguments(name, rest);
 }
 
@@ -213,6 +221,8 @@ export async function callHostedStdioTool(store, secret, name, args) {
     return { value: { ...inbox, directMessages: stamp(inbox.directMessages), directMentions: stamp(inbox.directMentions), next: stamp(inbox.next) }, isError: false };
   }
   if (name === "room_read_messages") return { value: roomMessages(store, secret, roomId, rest, auth.member.id), isError: false };
+  if (isBountyTool(name)) return { value: callBountyTool(store, secret, roomId, auth, name, rest), isError: false };
+  if (isTrustTool(name)) return { value: callTrustTool(store, roomId, auth, name, rest), isError: false };
   if (name !== "room_post_draft") {
     const error = new Error(`Hosted room tool ${name} is listed but has no dispatcher`);
     error.status = 500;
@@ -229,4 +239,140 @@ export async function callHostedStdioTool(store, secret, name, args) {
     messageId: command.data.messageId, workStateChanged: false,
     message: "Draft posted for review. No work completion or approval was recorded."
   }, isError: false };
+}
+
+// Bounty dispatch. Every branch calls the same escrow method the HTTP route
+// calls, with the caller derived exactly as bounty-escrow-routes.mjs derives
+// it, so the two surfaces cannot drift on identity. Write tools are wrapped in
+// escrow.idemExecute with the same route names, statuses, and (caller, route,
+// bounty, payload) scoping the HTTP route uses: a retried MCP call carrying
+// the same idempotencyKey replays the stored receipt instead of duplicating
+// the credit movement. EscrowError propagates untouched: the transport maps
+// its code, and there is one error contract.
+function callBountyTool(store, secret, roomId, auth, name, rest) {
+  const escrow = store.bountyEscrow;
+  const caller = canonicalLane(auth.member.id);
+  const actor = normalizeActor(null, caller);
+  const bountyId = rest.bountyId;
+
+  // Route-equivalent idempotency: mirrors bounty-escrow-routes.mjs's idem()
+  // helper. MCP has no headers, so the key comes from the tool input's
+  // idempotencyKey; the payload hashed into the scope excludes it, exactly
+  // as the HTTP route does. A null key runs the thunk with no record,
+  // matching the HTTP route's behavior for keyless writes.
+  const idem = (route, status, thunk) => {
+    const key = typeof rest.idempotencyKey === "string" && rest.idempotencyKey.length > 0
+      ? rest.idempotencyKey : null;
+    const { idempotencyKey: _dropped, ...payload } = rest;
+    const result = escrow.idemExecute(roomId, key, route, status, thunk,
+      { callerLane: caller, bountyId: bountyId ?? null, payload });
+    return { ...result.body, idempotentReplay: result.replayed };
+  };
+
+  switch (name) {
+    case "bounty_list": {
+      const viewer = rest.viewer === undefined ? null : rest.viewer === "self" ? caller : rest.viewer;
+      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer }) };
+    }
+    case "bounty_read_balances":
+      return { roomId, balances: escrow.balances(roomId, caller) };
+    case "bounty_read_history":
+      return { roomId, receipts: escrow.history(roomId, caller,
+        { state: rest.state ?? null, since: rest.since ?? null }) };
+    case "bounty_post": {
+      return idem("bounty.post", 201, () => {
+        const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
+          criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
+          verifierId: rest.verifierId ?? null, rubric: rest.rubric ?? null, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
+    case "bounty_fund": {
+      return idem("bounty.fund", 200, () => {
+        const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
+    case "bounty_claim": {
+      return idem("bounty.claim", 200, () => {
+        const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
+    case "bounty_submit": {
+      return idem("bounty.submit", 200, () => {
+        const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
+          evidence: { evidenceUrl: rest.evidenceUrl, evidenceKind: rest.evidenceKind ?? null,
+            summary: rest.summary, checksClaimed: rest.checksClaimed ?? [],
+            producerId: rest.producerId ?? null } });
+        return { roomId, bounty, receipt };
+      });
+    }
+    case "bounty_accept": {
+      return idem("bounty.accept", 200, () => {
+        const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
+          { acceptor: caller, verifierAttestation: rest.verifierAttestation, actor });
+        return { roomId, bounty, approval, attribution, receipt };
+      });
+    }
+    case "bounty_dispute": {
+      return idem("bounty.dispute", 201, () => {
+        const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,
+          { challenger: caller, bond: rest.bond, grounds: rest.grounds, actor });
+        return { roomId, bounty, dispute, receipt };
+      });
+    }
+    case "bounty_watch":
+      return idem("bounty.watch", 200, () =>
+        ({ roomId, ...escrow.watchBounty(roomId, bountyId, { watcher: caller, actor }) }));
+    case "bounty_finalize": {
+      return idem("bounty.finalize", 200, () => {
+        const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
+        return { roomId, bounty, action, receipt };
+      });
+    }
+    case "bounty_transfer":
+      return idem("credit.transfer", 200, () =>
+        ({ roomId, ...escrow.transfer(roomId, { from: caller, to: rest.to, amount: rest.amount, actor }) }));
+    default: {
+      const error = new Error(`Bounty tool ${name} is listed but has no dispatcher`);
+      error.status = 500;
+      error.code = "internal";
+      throw error;
+    }
+  }
+}
+
+// Trust dispatch. Reads only, straight onto the same store methods the public
+// HTTP verification route calls, so the two surfaces cannot drift on what a
+// tier means. Attestation itself (verifyIdentity / unverifyIdentity) is a
+// room-owner seat and stays off this surface: a tier that a card publisher
+// could assert about itself would be a sybil vector, not a feature.
+function callTrustTool(store, roomId, auth, name, rest) {
+  if (name === "identity_read_verification") {
+    const identityId = rest.identityId ?? auth.identityId;
+    const self = identityId === auth.identityId;
+    if (!self && !store.identities.get(identityId)) {
+      const error = new Error("No such agent identity");
+      error.status = 404;
+      error.code = "identity_not_found";
+      throw error;
+    }
+    const attestation = store.agentPlugin.verificationAttestation(identityId);
+    // keyFingerprint is passed through when the attestation pins one. An
+    // attestation that vouches for an identity but not its key lets a silent
+    // key swap keep a verified tier, so a verifier that holds a fingerprint
+    // here can detect the swap offline. Null means the attestation predates
+    // key pinning: the tier still holds, the key binding does not.
+    return {
+      roomId, identityId, self,
+      level: attestation ? "verified" : "unverified",
+      attestation: attestation ?? null,
+      keyFingerprint: attestation?.keyFingerprint ?? null,
+      keyBinding: attestation?.keyFingerprint ? "pinned" : "unpinned",
+      attestable: "A room owner attests a tier; it can never be self-asserted."
+    };
+  }
+  const attestations = store.agentPlugin.verificationAttestations();
+  return { roomId, verified: attestations, count: attestations.length };
 }

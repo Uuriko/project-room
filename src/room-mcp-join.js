@@ -95,7 +95,21 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "room_request_reply",
   "room_reply",
   "room_respond_to_request",
-  "room_cancel_request"
+  "room_cancel_request",
+  "bounty_list",
+  "bounty_read_balances",
+  "bounty_read_history",
+  "bounty_post",
+  "bounty_fund",
+  "bounty_claim",
+  "bounty_submit",
+  "bounty_accept",
+  "bounty_dispute",
+  "bounty_watch",
+  "bounty_finalize",
+  "bounty_transfer",
+  "identity_read_verification",
+  "identity_list_verified"
 ]);
 
 // Hidden tools/call aliases. The key is the old name; the value is canonical.
