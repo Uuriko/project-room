@@ -1083,6 +1083,7 @@ export function workContextMarkdown(result) {
   return [`# ${result.work.title}`, result.work.definitionOfDone,
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
     "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
+    ...(result.toolFocus ? ["Suggested tool focus: " + result.toolFocus.focus + " (optional; does not change permissions). " + result.toolFocus.reason] : []),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),

@@ -127,7 +127,8 @@ test("an enrolled identity registers, reads, and clears an HTTPS wakeUrl", async
   const seen = await call(origin, "heartbeat.get", {}, owner.secret);
   assert.equal(seen.value.status, "online");
   assert.equal(seen.value.hosts[0].wakeUrl, WAKE_URL);
-  const pending = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 120 }, owner.secret);
+  const pending = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 120, workWakes: true }, owner.secret);
+  assert.equal(pending.value.host.workWakes, true);
   assert.equal(pending.value.pendingWakes.length, 1);
   const signalId = pending.value.pendingWakes[0].signalId;
   const acked = await call(origin, "heartbeat.ack", { signalIds: [signalId] }, owner.secret);

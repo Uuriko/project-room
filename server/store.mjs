@@ -77,6 +77,7 @@ import { boardV2Schema } from "./board-v2-sqlite.mjs"; // PR #1144: board-v2 dur
 import { EMISSARY_LURE_SCHEMA } from "./emissary-lure.mjs"; // Emissary Slice 2 (RC-2026-09-28-2873): lure-generation ledgers (additive, unfenced).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -776,6 +777,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.handoffEnvelopes = new HandoffEnvelopeJournal(this); // RC-2026-09-19-062: typed handoff envelope journal.
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
+    this.workWakes = new WorkWakes(this); // Opt-in pointer-only work delivery on heartbeat reads.
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
     this.landQueue = new LandQueue(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
@@ -824,6 +826,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.handoffEnvelopes.verifySchema({ allowAbsent: true }); // RC-2026-09-19-062: typed envelopes additive, read-only never migrates.
         this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
+        this.workWakes.verifySchema({ allowAbsent: true }); // Opt-in work delivery tables additive, read-only never migrates.
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
@@ -1017,6 +1020,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
       this.db.exec(agentHeartbeatSchema);
+      // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
+      this.db.exec(workWakeSchema);
+      this.workWakes.verifySchema();
       // Land queue: purely additive, no schema version bump, outside the
       // writer fence. The table is the source of truth; land.updated events
       // are thin wake receipts and do not copy the row into the projection.
@@ -3600,6 +3606,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       } finally {
         logSpan.end();
       }
+      this.workWakes.transition(roomId, room.state, state, incoming);
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
       if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {

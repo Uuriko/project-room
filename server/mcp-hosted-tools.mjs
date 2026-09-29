@@ -225,9 +225,10 @@ export const hostedWakeTools = [
   tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared because this body omits cadenceSeconds, matching that route. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
     hostId: hostIdField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, and pushNotification are optional. mode wakeable requires an HTTPS wakeUrl. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable requires an HTTPS wakeUrl. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     mode: modeField,
+    workWakes: { type: "boolean", description: "Opt this host into pointer-only work signals on heartbeat reads. Default false; omitted retains the setting. No outbound push or execution permission." },
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
     pushNotification: pushNotificationField

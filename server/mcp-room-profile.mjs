@@ -275,7 +275,8 @@ function validWakeArgs(name, args) {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
       && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
-      && (args.pushNotification === undefined || validPush(args.pushNotification));
+      && (args.pushNotification === undefined || validPush(args.pushNotification))
+      && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds);
   if (name === "wake_pause" || name === "wake_resume") {
@@ -580,7 +581,7 @@ async function callWakeTool(store, secret, identity, name, args) {
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
     const result = store.agentHeartbeats.heartbeat({
-      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification
+      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
     });
     return heartbeatReceipt(agentId, result);
   }

@@ -7,12 +7,14 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
 import { buildWakePing, WAKE_PING_EVENT } from "../server/outbound-webhooks.mjs";
+import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 const T0 = 1_750_000_000_000;
@@ -354,4 +356,104 @@ test("directory cards carry host-reported presence (additive field)", async t =>
   at += HEARTBEAT_STALE_AFTER_MS + 1000;
   doc = await (await get(origin, "/api/agents/directory/presence-agent")).json();
   assert.equal(doc.presence.status, "offline");
+});
+
+// Canonical HTTP delivery contract for server/work-wakes.mjs, including its
+// actual store transition producer and host consent/revision filters.
+test("opted-in work wakes survive retries and obey current pause, preferences, revision and membership", async t => {
+  const f = createAcceptanceFixture();
+  let at = Date.now(); f.store.now = () => at;
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("work-wake-agent");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, memberId: "workwake",
+    displayName: "Work wake", permissions: ["accept_work"] });
+  const heartbeat = async extra => {
+    const response = await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", ...extra }, identity.secret);
+    assert.equal(response.status, 200); return response.json();
+  };
+  const send = (token, type, data) => f.store.command(token, "commons", { id: randomUUID(), type, data });
+  const propose = id => ({ id: randomUUID(), type: "work.proposed", data: { workItemId: id, title: "Private synthetic assignment",
+    definitionOfDone: "Synthetic requirement", mode: "read", accountableMemberId: "workwake" } });
+  await heartbeat();
+  f.store.command(f.keys.owner, "commons", propose("before-opt-in"));
+  assert.deepEqual((await heartbeat()).pendingWakes, []);
+  assert.equal((await heartbeat({ workWakes: true })).host.workWakes, true);
+  const command = propose("wake-work");
+  f.store.command(f.keys.owner, "commons", command);
+  f.store.command(f.keys.owner, "commons", command);
+  const pending = (await heartbeat()).pendingWakes;
+  assert.equal(pending.length, 1);
+  assert.deepEqual(f.store.agentHeartbeats.pendingWakes(identity.identityId), [], "hostless legacy readers do not gain work signals");
+  const wake = pending[0];
+  assert.equal(wake.kind, "work"); assert.equal(wake.workItemId, "wake-work"); assert.equal(wake.workRevision, 0);
+  assert.equal(wake.action, "accept"); assert.equal(wake.completionEventId, null);
+  assert.equal(wake.nextRead.tool, "room_read_work");
+  const reopened = new RoomStore(`${f.directory}/room.sqlite`, { readOnly: true });
+  try { assert.deepEqual(reopened.agentHeartbeats.pendingWakes(identity.identityId, { hostId: "worker" }).map(w => w.signalId), [wake.signalId]); }
+  finally { reopened.close(); }
+  assert.deepEqual((await heartbeat({ hostId: "not-opted-in" })).pendingWakes, [], "another host must opt in independently");
+  assert.equal(JSON.stringify(wake).includes("Private synthetic assignment"), false);
+  assert.deepEqual((await heartbeat({ workWakes: false })).pendingWakes, []);
+  assert.deepEqual((await heartbeat({ workWakes: true })).pendingWakes.map(w => w.signalId), [wake.signalId]);
+  const pause = { requestId: randomUUID(), reason: "Pause test" };
+  f.store.wakeQueue.pause(identity.secret, "commons", pause);
+  assert.deepEqual((await heartbeat()).pendingWakes, []);
+  f.store.wakeQueue.resume(identity.secret, "commons", { requestId: randomUUID() });
+  send(identity.secret, "notifications.preferences_set", { preferences: { work_updates: "none" } });
+  assert.deepEqual((await heartbeat()).pendingWakes, []);
+  send(identity.secret, "notifications.preferences_set", { preferences: { work_updates: "all" } });
+  assert.equal((await heartbeat()).pendingWakes.length, 1);
+  const minute = Math.floor(at / 60000) % 1440;
+  f.store.attention.mutate(identity.secret, "commons", { requestId: randomUUID(), quietStart: minute, quietEnd: (minute + 2) % 1440, delivery: "immediate", digestHour: null });
+  assert.deepEqual((await heartbeat()).pendingWakes, []);
+  at += 3 * 60000;
+  assert.equal((await heartbeat()).pendingWakes.length, 1);
+  const other = f.store.identities.create("other-work-wake");
+  assert.deepEqual((await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [wake.signalId] }, other.secret)).json()).acknowledged, []);
+  send(identity.secret, "work.accepted", { workItemId: "wake-work", expectedRevision: 0 });
+  assert.deepEqual((await heartbeat()).pendingWakes, [], "old assignment must not survive a newer work revision");
+  const next = propose("second-wake"); f.store.command(f.keys.owner, "commons", next);
+  const second = (await heartbeat()).pendingWakes[0];
+  assert.equal(second.workItemId, "second-wake");
+  assert.deepEqual((await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [second.signalId] }, identity.secret)).json()).acknowledged, [second.signalId]);
+  f.store.command(f.keys.owner, "commons", next);
+  assert.deepEqual((await heartbeat()).pendingWakes, [], "command retry after ack must not redeliver");
+  const sign = makeTestSigner(f.store);
+  send(f.keys.owner, "work.proposed", { workItemId: "review-wake", title: "Review result", definitionOfDone: "Exact evidence",
+    mode: "read", accountableMemberId: "producer", verifierMemberId: "workwake", independentVerificationRequired: true });
+  send(f.keys.producer, "work.accepted", { workItemId: "review-wake", expectedRevision: 0 });
+  send(f.keys.producer, "work.started", { workItemId: "review-wake", expectedRevision: 1 });
+  send(f.keys.producer, "work.completed", { workItemId: "review-wake", expectedRevision: 2, summary: "Result",
+    evidenceUrl: "https://example.invalid/result", evidenceVersion: "version-one", producerId: "producer", nextAction: "Review", signedEvidence: sign() });
+  const review = (await heartbeat()).pendingWakes[0];
+  assert.equal(review.action, "verify"); assert.equal(review.evidenceVersion, "version-one");
+  const current = f.store.workContext(identity.secret, "commons", "review-wake");
+  assert.equal(review.workRevision, current.work.revision);
+  assert.equal(review.completionEventId, current.work.receipt.eventId);
+  // Notification does not grant verification permission or acknowledge the work.
+  assert.equal(current.suggestedActions.some(a => a.action === "verify"), false);
+  f.store.command(f.keys.owner, "commons", propose("revoked-wake"));
+  send(f.keys.owner, "member.access_changed", { memberId: "workwake", expectedMemberRevision: 0, active: false, permissions: [] });
+  assert.deepEqual((await heartbeat()).pendingWakes, [], "identity secret must not reveal work after room access ends");
+});
+
+test("pre-work-delivery stores open read-only without migration and upgrade without enabling hosts", t => {
+  const f = createAcceptanceFixture();
+  const path = `${f.directory}/room.sqlite`;
+  const identity = f.store.identities.create("legacy-heartbeat");
+  f.store.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "legacy", mode: "pull-only" });
+  f.store.db.exec("DROP TABLE agent_work_wakes; DROP TABLE agent_work_wake_hosts;");
+  f.store.close();
+  t.after(() => rmSync(f.directory, { recursive: true, force: true }));
+  const readOnly = new RoomStore(path, { readOnly: true });
+  try {
+    assert.deepEqual(readOnly.agentHeartbeats.pendingWakes(identity.identityId), []);
+    assert.equal(readOnly.db.prepare("SELECT name FROM sqlite_master WHERE name='agent_work_wakes'").get(), undefined);
+  } finally { readOnly.close(); }
+  const upgraded = new RoomStore(path);
+  try {
+    const before = upgraded.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "legacy", mode: "pull-only" });
+    assert.equal(before.host.workWakes, false);
+    assert.equal(upgraded.agentHeartbeats.heartbeat({ agentId: identity.identityId, hostId: "legacy", mode: "pull-only", workWakes: true }).host.workWakes, true);
+  } finally { upgraded.close(); }
 });

@@ -204,9 +204,10 @@ export class AgentHeartbeats {
   // counters, which re-arms a suspended subscription); a body without it
   // leaves the existing subscription untouched, so old heartbeat bodies
   // keep working unchanged.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null }) {
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null }) {
     checkAgentId(agentId);
     checkHostId(hostId);
+    check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
     check(MODES.includes(mode), 422, "invalid_heartbeat",
       `mode must be one of ${MODES.join(", ")}`);
     if (cadenceSeconds !== null && cadenceSeconds !== undefined) checkCadenceSeconds(cadenceSeconds);
@@ -242,6 +243,7 @@ export class AgentHeartbeats {
         WHERE agent_id=? AND host_id=?`)
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
+    if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
     const cadence = cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
@@ -260,7 +262,7 @@ export class AgentHeartbeats {
       reachableUntil,
     });
     return Object.freeze({
-      host, pendingWakes: this.pendingWakes(agentId),
+      host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false }, pendingWakes: this.pendingWakes(agentId, { hostId, roomId: workScopeRoomId }),
       pushConfigured, pushSuspended, reachability,
     });
   }
@@ -404,6 +406,7 @@ export class AgentHeartbeats {
     for (const signalId of signalIds) {
       if (stmt.run(at, agentId, signalId, roomId, roomId).changes > 0) acknowledged.push(signalId);
     }
+    acknowledged.push(...(this.store.workWakes?.ack(agentId, signalIds, roomId) ?? []));
     return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
   }
 
@@ -428,13 +431,15 @@ export class AgentHeartbeats {
   }
 
   // Undelivered wake signals, oldest first.
-  pendingWakes(agentId, { limit = MAX_PENDING_WAKES, roomId = null } = {}) {
+  pendingWakes(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
-    return Object.freeze(this.db.prepare(`SELECT * FROM agent_wake_signals
+    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, roomId, roomId, limit).map(signalView));
+      .all(agentId, roomId, roomId, limit).map(signalView);
+    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit }) ?? [];
+    return Object.freeze([...messages, ...work].sort((a, b) => a.createdAt - b.createdAt).slice(0, limit));
   }
 
   // Effective presence for an agent: online when any host was seen inside
