@@ -131,17 +131,17 @@ export async function runOutbound({ repo, doorIssue, token, client, roomId, self
 
 // Fill in what the owner didn't set: the door issue is the open issue labelled
 // "room-door", and the door's member id comes from its own identity's rooms.
-export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRooms = listAgentRooms } = {}) {
+export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRooms = listAgentRooms, needIssue = true } = {}) {
   const origin = env.ROOM_ORIGIN?.trim() || "https://room.trydemigod.com";
   const doorKey = env.ROOM_DOOR_SECRET?.trim(), repo = env.GITHUB_REPOSITORY;
   if (!doorKey || !repo) return { skipped: `door not configured: ${[!doorKey && "ROOM_DOOR_SECRET", !repo && "GITHUB_REPOSITORY"].filter(Boolean).join(", ")}` };
   let issue = env.ROOM_DOOR_ISSUE?.trim(), roomId = env.ROOM_DOOR_ROOM?.trim(), memberId = env.ROOM_DOOR_MEMBER?.trim();
-  if (!issue && env.GITHUB_TOKEN) {
+  if (!issue && needIssue && env.GITHUB_TOKEN) {
     const found = await gh(`/repos/${repo}/issues?labels=room-door&state=open&per_page=5`, { token: env.GITHUB_TOKEN, fetchImpl });
     const open = (found ?? []).filter(i => !i.pull_request).sort((a, b) => a.number - b.number);
     issue = open[0] ? String(open[0].number) : undefined;
   }
-  if (!issue) return { skipped: "no open issue labelled room-door" };
+  if (!issue && needIssue) return { skipped: "no open issue labelled room-door" };
   if ((!roomId || !memberId) && doorKey.startsWith("pri_")) {
     const rooms = (await listRooms(origin, doorKey))?.rooms?.filter(r => !r.archivedAt) ?? [];
     const pick = roomId ? rooms.find(r => r.roomId === roomId) : rooms.length === 1 ? rooms[0] : null;

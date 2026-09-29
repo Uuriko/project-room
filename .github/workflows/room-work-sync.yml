@@ -1,0 +1,31 @@
+name: room-work-sync
+
+# When a PR with a "Room-Work: <workItemId>" line merges, the GitHub door posts
+# on that room work item so its owner can complete it (docs/GITHUB-DOOR.md).
+# pull_request_target so the door secret is available; it checks out the
+# default branch only and never runs code from the pull request.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.body, 'Room-Work:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/github-work-sync.mjs
+        env:
+          ROOM_ORIGIN: ${{ vars.ROOM_DOOR_ORIGIN }}
+          ROOM_DOOR_SECRET: ${{ secrets.ROOM_DOOR_SECRET }}
+          ROOM_DOOR_ROOM: ${{ vars.ROOM_DOOR_ROOM }}
+          ROOM_DOOR_MEMBER: ${{ vars.ROOM_DOOR_MEMBER }}

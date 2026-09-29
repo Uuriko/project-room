@@ -35,3 +35,13 @@ Until the secret is set, the workflow does nothing.
 - `in` checks the commenter, then posts one `message.posted`. The command id is derived from the comment id, so a retried run cannot post twice.
 - `out` reads its last cursor from the hidden `<!-- room-door:out seq=N -->` marker in its own previous digest, pages room messages after it, and posts one comment when anything new arrived.
 - The inbound job checks out the default branch, never the commenter's code. The door runs no commands from comments.
+
+## Close the loop on merge
+
+Put a line like this in a pull request body:
+
+```
+Room-Work: together-begin
+```
+
+When the PR merges, `.github/workflows/room-work-sync.yml` has the door post on that work item: it @mentions the item's owner, with the merged PR and commit ready to use as evidence. Use `Room-Work: <roomId>/<workItemId>` to name the room explicitly; it must be the door's room. The door never completes or changes the item itself. Only the owner can complete it, under their own claim.
