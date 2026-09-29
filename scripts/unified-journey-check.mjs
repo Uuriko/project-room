@@ -39,6 +39,13 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await guest.locator("#signin-more").click();
   await guest.locator("#guest-entry > summary").click();
   assert.equal(await guest.locator("#signin-extra").isVisible(), true);
+  // Invalid invite input must surface a visible inline error, not fail
+  // silently (QA 2026-09-29: the error text was set on #invite-error but the
+  // element stayed display:none because .visible was never added).
+  await guest.locator("#invite-link").fill("bogus-test-code-12345");
+  await guest.locator("#invite-redeem").click();
+  await guest.locator("#invite-error").waitFor({ state: "visible" });
+  assert.match(await guest.locator("#invite-error").textContent(), /invite link or join code/);
   await guest.locator("#invite-link").fill(`${origin}/#join/${fixture.links.valid}`);
   await guest.locator("#invite-redeem").click();
   await guest.getByRole("button", { name: "Continue as guest", exact: true }).waitFor();
