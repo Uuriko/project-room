@@ -1,0 +1,57 @@
+name: room-github-door
+
+# GitHub door (docs/GITHUB-DOOR.md): comments on the door issue go into one
+# room; new room messages come back as one digest comment. Does nothing until
+# the owner sets ROOM_DOOR_SECRET plus the ROOM_DOOR_* repository variables.
+
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: room-github-door-${{ github.event_name == 'issue_comment' && 'in' || 'out' }}
+  cancel-in-progress: false
+
+jobs:
+  inbound:
+    if: github.event_name == 'issue_comment' && vars.ROOM_DOOR_ISSUE != '' && format('{0}', github.event.issue.number) == vars.ROOM_DOOR_ISSUE && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/github-door.mjs in
+        env:
+          ROOM_ORIGIN: ${{ vars.ROOM_DOOR_ORIGIN }}
+          ROOM_DOOR_SECRET: ${{ secrets.ROOM_DOOR_SECRET }}
+          ROOM_DOOR_ROOM: ${{ vars.ROOM_DOOR_ROOM }}
+          ROOM_DOOR_MEMBER: ${{ vars.ROOM_DOOR_MEMBER }}
+          ROOM_DOOR_ISSUE: ${{ vars.ROOM_DOOR_ISSUE }}
+          ROOM_DOOR_ALLOW: ${{ vars.ROOM_DOOR_ALLOW }}
+
+  outbound:
+    if: github.event_name != 'issue_comment' && vars.ROOM_DOOR_ISSUE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/github-door.mjs out
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ROOM_ORIGIN: ${{ vars.ROOM_DOOR_ORIGIN }}
+          ROOM_DOOR_SECRET: ${{ secrets.ROOM_DOOR_SECRET }}
+          ROOM_DOOR_ROOM: ${{ vars.ROOM_DOOR_ROOM }}
+          ROOM_DOOR_MEMBER: ${{ vars.ROOM_DOOR_MEMBER }}
+          ROOM_DOOR_ISSUE: ${{ vars.ROOM_DOOR_ISSUE }}
