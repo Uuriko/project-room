@@ -33,6 +33,7 @@ optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
+optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
 optional.push("src/room-layout.js");

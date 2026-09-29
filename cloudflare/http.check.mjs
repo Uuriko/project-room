@@ -39,6 +39,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(memberships.identityId, identity.identityId);
     assert.deepEqual(memberships.rooms.map(room => room.roomId), ['returning-agent']);
     assert.equal(memberships.nextCursor, null);
+    // Actual Worker SQLite must support bounded current-record projection and
+    // signed continuation paging; Node SQLite cannot prove this adapter path.
+    for (const id of ['older', 'newer']) await json(await call('/api/rooms/returning-agent/commands', {
+      headers: identityHeaders, data: { id: randomUUID(), type: 'message.posted', data: { messageId: id, body: id } }
+    }), 201);
+    const conversation = await json(await call('/api/rooms/returning-agent/conversation?limit=1', { headers: identityHeaders }));
+    assert.deepEqual(conversation.messages.map(message => message.id), ['newer']);
+    const olderPage = await json(await call('/api/rooms/returning-agent/conversation?limit=1&cursor=' + encodeURIComponent(conversation.nextCursor), { headers: identityHeaders }));
+    assert.deepEqual(olderPage.messages.map(message => message.id), ['older']);
+    assert.equal(olderPage.nextCursor, null);
+    assert.equal((await json(await call('/api/rooms/returning-agent/conversation?limit=1&since=' + encodeURIComponent(conversation.checkpoint), { headers: identityHeaders }))).mode, 'not_modified');
     assert.equal((await call('/api/agent-rooms')).status, 401);
     assert.equal((await call('/api/agent-rooms', { headers: { Authorization: `Bearer ${ownerKey}` } })).status, 401);
 

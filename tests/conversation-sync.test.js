@@ -1,0 +1,104 @@
+// Test gate: actual HTTP + SQLite protects viewer privacy, current-record
+// reconstruction and reset semantics. Existing full snapshot tests cannot
+// exercise signed bounded continuations. No production test seam.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { setTier } from '../server/autonomy-tiers.mjs';
+
+async function setup(t) {
+  const directory = mkdtempSync(join(tmpdir(), 'conversation-sync-'));
+  let store = new RoomStore(join(directory, 'room.sqlite'));
+  store.initialize(initialRoom('commons'));
+  const owner = store.issueAccessKey('commons', 'owner');
+  const command = (token, type, data) => store.command(token, 'commons', { id: randomUUID(), type, data });
+  for (const id of ['alice', 'bob']) {
+    command(owner, 'member.added', { memberId: id, displayName: id, kind: 'agent', permissions: ['steer', 'accept_work'] });
+    setTier(store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  }
+  const alice = store.issueAccessKey('commons', 'alice'), bob = store.issueAccessKey('commons', 'bob');
+  let server, origin;
+  const start = async () => { server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${server.address().port}`; };
+  const stop = async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); };
+  await start();
+  t.after(async () => { await stop(); rmSync(directory, { recursive: true, force: true }); });
+  return { owner, alice, bob, command,
+    post: (id, body, extra = {}, token = owner) => command(token, 'message.posted', { messageId: id, body, ...extra }),
+    get: async (query = {}, token = owner, path = '/conversation') => {
+      const response = await fetch(`${origin}/api/rooms/commons${path}?${new URLSearchParams(query)}`, { headers: { Authorization: `Bearer ${token}` } });
+      return { status: response.status, value: await response.json() };
+    },
+    restart: async () => { await stop(); store = new RoomStore(join(directory, 'room.sqlite')); await start(); }
+  };
+}
+
+test('bounded HTTP conversation filters before paging and resets instead of mixing stale current records', async t => {
+  const f = await setup(t);
+  for (let i = 0; i < 7; i++) f.post(`public-${i}`, `text ${i}`, i === 6 ? { replyToId: 'public-0' } : {});
+  for (let i = 0; i < 5; i++) f.post(`private-${i}`, `secret ${i}`, { toMemberId: 'bob' }, f.alice);
+  const first = await f.get({ limit: 3 });
+  assert.equal(first.status, 200, JSON.stringify(first.value));
+  assert.equal(first.value.mode, 'replace');
+  assert.deepEqual(first.value.messages.map(m => m.id), ['public-4', 'public-5', 'public-6']);
+  assert.equal(first.value.messages.at(-1).replyToId, 'public-0');
+  assert.equal(JSON.stringify(first.value).includes('secret'), false);
+  const next = await f.get({ limit: 3, cursor: first.value.nextCursor });
+  assert.deepEqual(next.value.messages.map(m => m.id), ['public-1', 'public-2', 'public-3']);
+  const last = await f.get({ limit: 3, cursor: next.value.nextCursor });
+  assert.deepEqual(last.value.messages.map(m => m.id), ['public-0']);
+  assert.equal(last.value.nextCursor, null);
+  const unchanged = await f.get({ limit: 3, since: first.value.checkpoint });
+  assert.equal(unchanged.value.mode, 'not_modified');
+  assert.equal(Object.hasOwn(unchanged.value, 'messages'), false);
+  assert.equal((await f.get({ messageId: 'public-0' })).value.messages[0].body, 'text 0');
+  assert.equal((await f.get({ messageId: 'private-0' })).status, 404);
+  assert.equal((await f.get({ messageId: 'private-0' }, f.bob)).value.messages[0].body, 'secret 0');
+  assert.equal((await f.get({ limit: 3, cursor: first.value.nextCursor }, f.bob)).value.mode, 'reset');
+  assert.equal((await f.get({ limit: 3, cursor: first.value.nextCursor + 'x' })).value.mode, 'reset');
+  assert.equal((await f.get({ limit: 2, since: first.value.checkpoint })).value.mode, 'reset');
+  f.command(f.owner, 'message.edited', { messageId: 'public-0', body: 'edited root', expectedMessageRevision: 0 });
+  const invalidated = await f.get({ limit: 3, since: first.value.checkpoint });
+  assert.equal(invalidated.value.mode, 'replace', 'an older loaded page changed; invalidate the whole cached history');
+  assert.equal((await f.get({ limit: 3, cursor: first.value.nextCursor })).value.mode, 'reset');
+  const edited = (await f.get({ messageId: 'public-0' })).value.messages[0];
+  assert.equal(edited.body, 'edited root');
+  assert.equal(Object.hasOwn(edited, 'editHistory'), false);
+  f.command(f.owner, 'message.deleted', { messageId: 'public-0', expectedMessageRevision: 1 });
+  assert.equal((await f.get({ messageId: 'public-0' })).value.messages[0].body, null);
+  const checkpoint = (await f.get({ limit: 3 })).value.checkpoint;
+  await f.restart();
+  assert.equal((await f.get({ limit: 3, since: checkpoint })).value.mode, 'reset');
+  assert.equal((await f.get({ messageId: 'public-0' })).value.messages[0].body, null);
+  const bobCheckpoint = (await f.get({}, f.bob)).value.checkpoint;
+  f.command(f.owner, 'member.access_changed', { memberId: 'bob', expectedMemberRevision: 0, active: false, permissions: ['steer', 'accept_work'] });
+  assert.equal((await f.get({ since: bobCheckpoint }, f.bob)).status, 401, 'conditional reads reauthorize revoked credentials');
+});
+
+test('conversation payload stays bounded and malformed selections cannot widen it', async t => {
+  const f = await setup(t);
+  for (let i = 0; i < 24; i++) f.post(`large-${i}`, 'x'.repeat(60000));
+  const full = await f.get({}, f.owner, '');
+  const page = await f.get({ limit: 100 });
+  assert.equal(page.status, 200, JSON.stringify(page.value));
+  assert.ok(page.value.messages.length < 24 && page.value.messages.length > 0);
+  assert.ok(page.value.messageBytes <= 512 * 1024);
+  assert.ok(JSON.stringify(page.value).length < JSON.stringify(full.value).length / 3);
+  const seen = [...page.value.messages.map(m => m.id)];
+  let cursor = page.value.nextCursor;
+  while (cursor) {
+    const older = await f.get({ limit: 100, cursor });
+    assert.equal(older.value.mode, 'replace');
+    seen.push(...older.value.messages.map(m => m.id)); cursor = older.value.nextCursor;
+  }
+  assert.equal(new Set(seen).size, 24);
+  assert.equal(seen.length, 24);
+  for (const query of [{ limit: 101 }, { limit: 0 }, { limit: 'NaN' }, { extra: 1 }, { cursor: 'x', since: 'x' }])
+    assert.equal((await f.get(query)).status, 422);
+  t.diagnostic(`full snapshot ${JSON.stringify(full.value).length} bytes; bounded response ${JSON.stringify(page.value).length} bytes`);
+});
