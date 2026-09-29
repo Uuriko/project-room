@@ -2,7 +2,8 @@ name: room-github-door
 
 # GitHub door (docs/GITHUB-DOOR.md): comments on the door issue go into one
 # room; new room messages come back as one digest comment. Does nothing until
-# the owner sets ROOM_DOOR_SECRET plus the ROOM_DOOR_* repository variables.
+# the owner sets the ROOM_DOOR_SECRET repository secret and opens an issue
+# labelled room-door. Everything else is optional (docs/GITHUB-DOOR.md).
 
 on:
   issue_comment:
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   inbound:
-    if: github.event_name == 'issue_comment' && vars.ROOM_DOOR_ISSUE != '' && format('{0}', github.event.issue.number) == vars.ROOM_DOOR_ISSUE && !github.event.issue.pull_request
+    if: github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.issue.labels.*.name, 'room-door') && github.event.comment.user.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,11 +37,11 @@ jobs:
           ROOM_DOOR_SECRET: ${{ secrets.ROOM_DOOR_SECRET }}
           ROOM_DOOR_ROOM: ${{ vars.ROOM_DOOR_ROOM }}
           ROOM_DOOR_MEMBER: ${{ vars.ROOM_DOOR_MEMBER }}
-          ROOM_DOOR_ISSUE: ${{ vars.ROOM_DOOR_ISSUE }}
+          ROOM_DOOR_ISSUE: ${{ github.event.issue.number }}
           ROOM_DOOR_ALLOW: ${{ vars.ROOM_DOOR_ALLOW }}
 
   outbound:
-    if: github.event_name != 'issue_comment' && vars.ROOM_DOOR_ISSUE != ''
+    if: github.event_name != 'issue_comment'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

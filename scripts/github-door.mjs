@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { RoomAgentClient } from "../client/room-agent.mjs";
+import { RoomAgentClient, listAgentRooms } from "../client/room-agent.mjs";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 export const OUT_MARKER = "<!-- room-door:out";
@@ -129,23 +129,44 @@ export async function runOutbound({ repo, doorIssue, token, client, roomId, self
   return { posted: true, cursor: digest.cursor, count: messages.length };
 }
 
+// Fill in what the owner didn't set: the door issue is the open issue labelled
+// "room-door", and the door's member id comes from its own identity's rooms.
+export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRooms = listAgentRooms } = {}) {
+  const origin = env.ROOM_ORIGIN?.trim() || "https://room.trydemigod.com";
+  const secret = env.ROOM_DOOR_SECRET?.trim(), repo = env.GITHUB_REPOSITORY;
+  if (!secret || !repo) return { skipped: `door not configured: ${[!secret && "ROOM_DOOR_SECRET", !repo && "GITHUB_REPOSITORY"].filter(Boolean).join(", ")}` };
+  let issue = env.ROOM_DOOR_ISSUE?.trim(), roomId = env.ROOM_DOOR_ROOM?.trim(), memberId = env.ROOM_DOOR_MEMBER?.trim();
+  if (!issue && env.GITHUB_TOKEN) {
+    const found = await gh(`/repos/${repo}/issues?labels=room-door&state=open&per_page=5`, { token: env.GITHUB_TOKEN, fetchImpl });
+    const open = (found ?? []).filter(i => !i.pull_request).sort((a, b) => a.number - b.number);
+    issue = open[0] ? String(open[0].number) : undefined;
+  }
+  if (!issue) return { skipped: "no open issue labelled room-door" };
+  if ((!roomId || !memberId) && secret.startsWith("pri_")) {
+    const rooms = (await listRooms(origin, secret))?.rooms?.filter(r => !r.archivedAt) ?? [];
+    const pick = roomId ? rooms.find(r => r.roomId === roomId) : rooms.length === 1 ? rooms[0] : null;
+    if (pick) { roomId = pick.roomId; memberId = memberId || pick.memberId; }
+  }
+  if (!roomId) return { skipped: "set ROOM_DOOR_ROOM: the door identity is in zero or several rooms" };
+  return { origin, secret, repo, issue, roomId, memberId };
+}
+
 export async function main(env = process.env, argv = process.argv) {
   const mode = argv[2];
-  const origin = env.ROOM_ORIGIN || "https://room.trydemigod.com";
-  const need = ["ROOM_DOOR_SECRET", "ROOM_DOOR_ROOM", "ROOM_DOOR_ISSUE", "GITHUB_REPOSITORY"];
-  const missing = need.filter(k => !env[k]?.trim());
-  if (missing.length) { console.log(JSON.stringify({ ok: false, skipped: `door not configured: ${missing.join(", ")}` })); return; }
-  const client = new RoomAgentClient({ origin, roomId: env.ROOM_DOOR_ROOM, token: env.ROOM_DOOR_SECRET.trim(),
-    ...(env.ROOM_DOOR_MEMBER ? { memberId: env.ROOM_DOOR_MEMBER } : {}) });
+  if (!["in", "out"].includes(mode)) throw new Error("usage: github-door.mjs in|out");
+  const config = await resolveConfig(env);
+  if (config.skipped) { console.log(JSON.stringify({ ok: false, skipped: config.skipped })); return; }
+  const client = new RoomAgentClient({ origin: config.origin, roomId: config.roomId, token: config.secret,
+    ...(config.memberId ? { memberId: config.memberId } : {}) });
   let result;
   if (mode === "in") {
     const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
-    result = await runInbound({ event, repo: env.GITHUB_REPOSITORY, client, allow: parseAllowlist(env.ROOM_DOOR_ALLOW), doorIssue: env.ROOM_DOOR_ISSUE });
-  } else if (mode === "out") {
-    if (!env.ROOM_DOOR_MEMBER?.trim()) throw new Error("ROOM_DOOR_MEMBER is required so the door never mirrors its own posts");
-    result = await runOutbound({ repo: env.GITHUB_REPOSITORY, doorIssue: env.ROOM_DOOR_ISSUE, token: env.GITHUB_TOKEN,
-      client, roomId: env.ROOM_DOOR_ROOM, selfMemberId: env.ROOM_DOOR_MEMBER });
-  } else throw new Error("usage: github-door.mjs in|out");
+    result = await runInbound({ event, repo: config.repo, client, allow: parseAllowlist(env.ROOM_DOOR_ALLOW), doorIssue: config.issue });
+  } else {
+    if (!config.memberId) throw new Error("Set ROOM_DOOR_MEMBER so the door never mirrors its own posts");
+    result = await runOutbound({ repo: config.repo, doorIssue: config.issue, token: env.GITHUB_TOKEN,
+      client, roomId: config.roomId, selfMemberId: config.memberId });
+  }
   console.log(JSON.stringify({ ok: true, mode, ...result }));
 }
 

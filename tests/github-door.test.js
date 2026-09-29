@@ -9,7 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { parseDoorComment, parseAllowlist, inboundCommand, commandIdFor, readCursor, outboundDigest,
-  runInbound, runOutbound, OUT_MARKER } from "../scripts/github-door.mjs";
+  runInbound, runOutbound, resolveConfig, OUT_MARKER } from "../scripts/github-door.mjs";
 
 const repo = "Uuriko/project-room";
 
@@ -94,4 +94,20 @@ test("real Room: a door comment posts once, and a digest mirrors others but not 
   const quiet = await runOutbound({ repo, doorIssue: 7, token: "gh-test", client: f.door, roomId: "commons", selfMemberId: "door", fetchImpl });
   assert.equal(quiet.posted, false); assert.equal(comments.length, 1);
   assert.ok(calls.every(([, url]) => url.startsWith("https://api.github.com/repos/Uuriko/project-room/issues/7/comments")));
+});
+
+test("setup needs only the secret and a labelled issue", async () => {
+  const secret = "pri_" + "a".repeat(43);
+  const fetchImpl = async url => {
+    assert.match(url, /issues\?labels=room-door&state=open/);
+    return new Response(JSON.stringify([{ number: 9 }, { number: 4, pull_request: {} }, { number: 12 }]), { status: 200 });
+  };
+  const listRooms = async () => ({ rooms: [{ roomId: "muse-room", memberId: "ai_door", archivedAt: null }] });
+  const env = { ROOM_DOOR_SECRET: secret, GITHUB_REPOSITORY: repo, GITHUB_TOKEN: "t" };
+  assert.deepEqual(await resolveConfig(env, { fetchImpl, listRooms }),
+    { origin: "https://room.trydemigod.com", secret, repo, issue: "9", roomId: "muse-room", memberId: "ai_door" });
+  assert.match((await resolveConfig({ GITHUB_REPOSITORY: repo })).skipped, /ROOM_DOOR_SECRET/);
+  const two = async () => ({ rooms: [{ roomId: "a", memberId: "x", archivedAt: null }, { roomId: "b", memberId: "y", archivedAt: null }] });
+  assert.match((await resolveConfig(env, { fetchImpl, listRooms: two })).skipped, /ROOM_DOOR_ROOM/);
+  assert.equal((await resolveConfig({ ...env, ROOM_DOOR_ROOM: "b" }, { fetchImpl, listRooms: two })).memberId, "y");
 });
